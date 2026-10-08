@@ -72,7 +72,7 @@ type RunStore interface {
 type Content interface {
 	TrustedVersion(ctx context.Context, org, corpusID, recordID, versionID string) (content.Version, error)
 	PluginSegmentationOf(ctx context.Context, org string, v content.Version, recipe string) (content.Segmentation, error)
-	LoadEmbedding(ctx context.Context, org, derivation string) (content.Embedding, []float32, error)
+	LoadEmbeddingData(context.Context, []content.Embedding) ([]content.EmbeddingData, error)
 }
 
 // Deriver derives vectors through the ingestion plugin of the plan the work
@@ -374,7 +374,7 @@ func (b Backfiller) prepare(ctx context.Context, org string, t Target, c Candida
 			reuse = append(reuse, e)
 		}
 	}
-	all, err := loadCoveredData(ctx, b.Content, org, reuse)
+	all, err := b.Content.LoadEmbeddingData(ctx, reuse)
 	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) || errors.Is(err, content.ErrConflict) {
 		return skip(SkipArtifactUnavailable)
 	}
@@ -407,23 +407,4 @@ func (b Backfiller) prepare(ctx context.Context, org string, t Target, c Candida
 	return func(ctx context.Context) error {
 		return b.Store.CoverBackfill(ctx, org, op.ID, g, c.VersionID, artifacts)
 	}, nil
-}
-
-// Batch-capable content reads each matrix once; legacy adapters keep their
-// single-artifact contract during the rolling upgrade.
-func loadCoveredData(ctx context.Context, reader Content, org string, artifacts []content.Embedding) ([]content.EmbeddingData, error) {
-	if batch, ok := reader.(interface {
-		LoadEmbeddingData(context.Context, []content.Embedding) ([]content.EmbeddingData, error)
-	}); ok {
-		return batch.LoadEmbeddingData(ctx, artifacts)
-	}
-	var data []content.EmbeddingData
-	for _, e := range artifacts {
-		_, v, err := reader.LoadEmbedding(ctx, org, e.DerivationID)
-		if err != nil {
-			return nil, err
-		}
-		data = append(data, content.EmbeddingData{Artifact: e, Vector: v})
-	}
-	return data, nil
 }

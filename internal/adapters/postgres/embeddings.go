@@ -11,62 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func (s EmbeddingStore) Embedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
-	var e content.Embedding
-	var b []byte
-	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM `+embeddingArtifactsRelation+` WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&b)
-	if err == nil {
-		err = json.Unmarshal(b, &e)
-	}
-	return e, notFound(err)
-}
-func (s EmbeddingStore) LegacyEmbedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
-	var e content.Embedding
-	var raw []byte
-	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&raw)
-	if err == nil {
-		err = json.Unmarshal(raw, &e)
-	}
-	return e, notFound(err)
-}
-func (s EmbeddingStore) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockProcessingVersion(ctx, tx, e.Organization, e.VersionID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO vector_spaces VALUES($1,$2) ON CONFLICT DO NOTHING`, space.ID, space.Manifest); err != nil {
-		return err
-	}
-	var same bool
-	if err = tx.QueryRow(ctx, `SELECT manifest=$2::jsonb FROM vector_spaces WHERE id=$1`, space.ID, space.Manifest).Scan(&same); err != nil {
-		return err
-	}
-	if !same {
-		return content.ErrConflict
-	}
-	var prior string
-	err = tx.QueryRow(ctx, `SELECT id FROM `+embeddingArtifactsRelation+` WHERE organization=$1 AND derivation_id=$2`, e.Organization, e.DerivationID).Scan(&prior)
-	if err == nil {
-		if prior != e.ID {
-			return content.ErrConflict
-		}
-		return tx.Commit(ctx)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	b, _ := json.Marshal(e)
-	_, err = tx.Exec(ctx, `INSERT INTO embedding_artifacts VALUES($1,$2,$3,$4,$5,$6)`, e.Organization, e.ID, e.DerivationID, e.SegmentID, e.SpaceID, b)
-	if err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // Only withdrawn work can settle without publishing its enrichment. The
 // quarantine guard preserves its terminal diagnostics.
 var settleWithdrawnEnrichmentSQL = `UPDATE record_versions v SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL

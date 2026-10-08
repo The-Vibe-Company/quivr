@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -47,8 +46,8 @@ ORDER BY sg.part_key,sg.start_offset,sg.id`, org, corpusID, versionID, generatio
 		if len(metadata) == 0 {
 			continue
 		}
-		var artifact content.Embedding
-		if err := json.Unmarshal(metadata, &artifact); err != nil {
+		artifact, err := decodeEmbedding(metadata)
+		if err != nil {
 			return generation, nil, 0, err
 		}
 		artifacts = append(artifacts, artifact)

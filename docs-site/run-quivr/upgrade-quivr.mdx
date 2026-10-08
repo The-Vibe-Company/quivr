@@ -9,207 +9,73 @@ Apply the new version's additive database changes while the previous API and wor
 
 You need operator access to the deployment, the new and previous binaries, and their configuration files. Keep the previous configuration and plugin versions available. Your platform must run overlapping instances and route traffic to ready instances; Quivr does not provide the rollout controller.
 
-Read the release notes for required backfills and contract migrations. Historical migrations classified as risks in the repository's `migrations/legacy.json` predate this rule; the rollback guarantee does not extend across those changes.
+Read the release notes for required backfills and contract migrations. Check that the release supports an in-place upgrade from your current version before starting. If it does not, reset the installation or export data with the old installation and re-import it into a fresh one.
 
-## Steps
+## Expand the database
 
-1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and required dependency setup, leaving tagged contracts untouched. Performance indexes are built concurrently by the API and worker after startup. They reuse matching valid indexes and retry interrupted builds in the background, allowing database writes to continue.
-2. Roll the workers first. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight. Confirm every previous worker has drained and stopped before rolling the API.
-3. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
-4. Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
-5. Once all previous instances and their work have drained, and you accept closing the rollback window, run the new binary's `quivr migrate --contract`. This applies every pending contract as well as expansions; review all deferred steps before running it. The current application must already work with and without those contracts.
+Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending additive migrations and required dependency setup, leaving tagged contracts untouched. Do not run the previous version's migrator during this rollout.
 
-Do not run the previous version's migrator during rollback. Rollback switches application binaries; there are no hand-written down migrations. After contracts remove old fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
+SQL migrations bound lock acquisition to two seconds and each statement to five seconds. A timeout rolls back the migration transaction. PostgreSQL also ends an unresponsive migrator after five idle seconds in a transaction. Rerun the command after the conflicting transaction finishes. When every migration is already applied, the migrator takes no migration lock. Performance indexes use a separate advisory lock and build concurrently after API or worker startup, without delaying readiness.
 
-Hot queue and journal tables disable vacuum truncation to keep vacuum from blocking writers. Autovacuum reuses their dead space; files may retain that space. Queue attempt renewals no longer update a timestamp index, and previous binaries can still read and write their leases. If the attempt primary key ever bloats, run `REINDEX INDEX CONCURRENTLY queue_document_attempts_pkey;` in an operator database session outside a transaction. This rebuild allows concurrent writes and needs temporary disk space for a second index.
+## Roll the workers
 
-Existing Corpora keep their keyword generation through an upgrade. Rebuild a
-Corpus to enable item keyword fields and range-indexed dates; a successful
-rebuild activates the new recipe. New Corpora use it immediately. Lexical and
-hybrid searches across both recipes combine their reciprocal ranks before
-applying the result limit, because their keyword scores use different populations.
-Drain every previous API and worker instance before creating new Corpora,
-writing content or starting rebuilds or retrieval configuration changes that
-target the new recipe. Previous binaries cannot populate item keyword anchors,
-even though they can continue serving historical generations.
-Use your platform's rollout status to confirm that every old API and worker
-process has stopped before enabling those writes.
+Start a new worker and wait for its `/readyz` to report ready. Then send SIGTERM to the previous worker and wait for it to exit after draining. Keep compatible plugin versions available to both versions while work is in flight. Confirm every previous worker has drained and stopped before rolling the API.
 
-The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
+## Roll the API
 
-Live and bulk workers group documents whose provider and external-storage work has finished, up to sixteen distinct documents in one organization. A partially filled group flushes two milliseconds after its first ready write. New inline-text documents handled by providers that return segments without vectors in a single response publish content and keyword readiness together. Keyword search becomes available at that commit; vectors remain a separate step. If preparation fails, the worker stores accepted content first, then follows the usual keyword retry or quarantine path. Change-feed cursors keep their synchronous, gap-free commit order. This batching needs no schema or cursor migration; upgrade the live and bulk workers to use it. A burst of direct submissions shares these groups as well.
+Start each new API instance and wait for `/readyz` to return HTTP 204 before routing traffic to it. Send SIGTERM to drain the previous instance after the new one is ready, then wait for it to exit. Keep at least one ready API serving throughout the rollout.
 
-## Connector pause and resume
+## Keep the rollback window
 
-The pause API requires workers that understand the durable paused state. Complete the worker-first rollout above before exposing or using pause and resume. Confirm that all previous live and bulk workers have drained and stopped using your platform's rollout status. Previous workers do not check the new `paused_at` field.
+Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
 
-Pause also fences the active run and defers its next run indefinitely; resume makes it due immediately, honouring any source `Retry-After`. This schedule guard prevents a previous worker's due-run query from acquiring a newly paused connector, but does not replace the worker-first rollout requirement. Before rolling workers back to a version without pause support, resume paused connectors and stop relying on pause. See [Pause and resume collection](/guides/connectors#pause-and-resume-collection) for the API calls and checkpoint behaviour.
+## Apply the contract
 
-## Compressed search indexes
+Once all previous instances and their work have drained, and you accept closing the rollback window, run the new binary's `quivr migrate --contract`. This applies every pending contract as well as expansions; review all deferred steps before running it. The current application must already work with and without those contracts.
 
-Every vector space is now stored compressed, with 8-bit rotational quantization by default (see [Search index compression](/reference/configuration#search-index-compression)). The first API, worker or `quivr migrate` start after the upgrade moves new Corpora to a default generation that records the setting. Existing Corpora keep their generation and their current, uncompressed vectors until you rebuild them. A rebuild writes the vectors to a new compressed index and reuses the stored embeddings, so it calls no embedding model. Until every Corpus is rebuilt, the search index holds both indexes. A search across rebuilt and not-yet-rebuilt Corpora combines them the way it combines keyword recipes: by reciprocal rank for lexical and hybrid searches, and by distance for semantic searches. Changing `vector_index` later works the same way: it applies to new Corpora and to existing ones once they are rebuilt.
+There are no down migrations. After a contract removes fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
 
-Previous API and worker versions do not read the setting and store a new Corpus's vectors under the uncompressed index. Drain every previous API and worker instance before creating Corpora, writing content or starting rebuilds. A rollback has the reverse effect: rebuild with the previous version every Corpus that was created or rebuilt after the upgrade, or its semantic and hybrid results miss documents. When you upgrade again, rebuild with the new version every Corpus that was created or written to while rolled back.
+## Check it worked
 
-## Compact import storage
-
-Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
-
-Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. The compatibility keys `indexed` and `vectors_reused` keep those respective counts. Replays count only newly added coverage, including individual passages within a compact file. Running operations initialize the new keys from their existing compatibility totals when coverage next commits.
-
-New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
+The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. Check the database readiness with:
 
 ```sh
 quivr storage status
 ```
 
-The JSON field `compact` identifies the write mode. Before closing the rollback window, you can prepack stored vectors without removing legacy rows:
+Packed files are the only embedding storage format. The command prints `{"compact":true}` after it confirms that the embedded PostgreSQL schema is ready. It uses only PostgreSQL and does not start plugins or access object storage.
 
-```sh
-quivr storage compact --id prepare-storage --batch 100
-quivr storage status --id prepare-storage
-```
-
-Repeat the same command to resume its saved checkpoint. `phase: "done"` means that operation finished its scan. Each batch processes at most the requested number of units; a vector unit packs one whole segmentation/space group. Object verification finishes before database locks. No search service, tokenizer or embedding credentials are needed. The compaction configuration needs [PostgreSQL and S3 settings](/reference/configuration). Compaction never calls an embedding provider. Each unit has a 30-second deadline; a timed-out unit keeps the previous checkpoint.
-
-Before retiring legacy vectors, let an API or worker finish background index setup. It manages `embedding_coverage_by_artifact` on `embedding_coverage (organization, artifact_id)`, which PostgreSQL needs to check references when an artifact is deleted. The build is concurrent and does not delay readiness. A matching index already created by an operator is reused. Check the index state as described below; the storage command itself does not run index maintenance.
-
-After all previous API, live-worker and bulk-worker processes have drained and stopped, explicitly activate compact writes:
-
-```sh
-quivr storage activate --writers-drained
-```
-
-Activation closes application rollback to previous binaries, even if no contract migration is pending. The flag acknowledges your platform's completed drain; Quivr cannot check those processes. Activation is durable and repeatable; it does not downgrade storage.
-
-Start a new operation after activation to retire redundant vector rows and convert their exact coverage subsets:
-
-```sh
-quivr storage compact --id compact-storage --batch 100
-```
-
-Repeat until its phase is `done`. A preactivation operation does not retire already-scanned rows; use a new identifier after the drain. On failure, the previous checkpoint remains. Restore missing/corrupt durable artifacts or fix storage access, then rerun the same operation. Conversion keeps public artifact IDs and canonical first-writer vectors, including partial files. Interrupted or concurrent attempts cannot overwrite a previously stored vector.
-
-Historical canonical requests and normalization audit detail remain captured by default. To retire that detail explicitly, use a separate operation:
-
-```sh
-quivr storage compact --id compact-import-detail --batch 100 --retire-audit-detail
-```
-
-Keep this flag on every resume of that operation. Required execution input, idempotency digests, normalization extensions and failure/conflict diagnostics remain. Future capture follows `retain_import_audit_detail`, which defaults to `false`; configure the API and workers consistently.
-
-All physical S3 objects remain after compaction. Old payload/manifest objects require a separately guarded deletion procedure. Deleted PostgreSQL rows become dead tuples; autovacuum makes their space reusable, while file size may stay unchanged. Do not run `VACUUM FULL` as part of a live import rollout. Compare matched imports with `python3 scripts/measure_storage.py --output <report.json>` using the same sample and count, including heap, TOAST and indexes. Coordinator or operator measurements establish throughput and search quality on the deployment.
-
-## Retire completed ingestion pages
-
-Paged ingestion keeps provider cuts and vectors in `ingestion_pages` until its canonical segmentation and every requested vector space are durable. New workers delete that exact organization/version/recipe/input namespace after saving vectors; a retry also repairs a crash between the vector commit and deletion. Interrupted derivations keep their pages.
-
-A concurrent provider request can save pages after another derivation deletes that namespace. If the late writer then stops, an outer retry may skip derivation because the Version is already searchable or enriched, leaving those pages behind. Cleanup does not persist a completion marker. Reclaim these retained pages with the bounded operation below after draining writers.
-
-For pages left by earlier workers, drain all ingestion, enrichment and rebuild writers before this one-off operation. Keep them stopped until cleanup finishes. Work on one exact namespace at a time; list candidates with a read-only, primary-key ordered query:
-
-```sql
-SET statement_timeout = '5s';
-SELECT DISTINCT organization, version_id, recipe, spaces_key
-FROM ingestion_pages
-ORDER BY organization, version_id, recipe, spaces_key
-LIMIT 100;
-```
-
-In `psql`, set these variables to the selected tuple. Set `spaces` to **every** space requested for that input, including evaluation spaces, using the saved pages' `Vectors` keys or the pinned ingestion configuration. Do not substitute only the currently served space. These are neutral placeholders:
-
-```text
-\set organization 'example-org'
-\set version 'version-id'
-\set recipe 'recipe-id'
-\set input_key 'input-hash'
-\set spaces '["example.space@1"]'
-```
-
-Run the statement below repeatedly for that tuple. Each statement deletes at most 1,000 rows and is independently committed; keep the five variable values to resume after a session failure. It requires the last provider page and canonical artifacts for every segment in every requested space, accepting both legacy and packed storage. It deletes pages in ascending order, so the last-page checkpoint remains until the final batch. A zero-row result can mean unfinished work; leave that namespace for workers to resume. Namespaces without requested vector spaces are conservatively retained.
-
-```sql
--- Retire one completed page namespace in a bounded batch.
-WITH candidates AS MATERIALIZED (
- SELECT organization,version_id,recipe,spaces_key,page_number
- FROM ingestion_pages
- WHERE organization=:'organization' AND version_id=:'version'
-  AND recipe=:'recipe' AND spaces_key=:'input_key'
- ORDER BY page_number LIMIT 1000
-), ready AS (
- SELECT st.organization,st.id
- FROM segmentations st
- WHERE st.organization=:'organization' AND st.version_id=:'version'
-  AND st.recipe=:'recipe'
-  AND jsonb_array_length(:'spaces'::jsonb)>0
-  AND EXISTS (SELECT 1 FROM ingestion_pages last_page
-   WHERE last_page.organization=st.organization AND last_page.version_id=st.version_id
-    AND last_page.recipe=st.recipe AND last_page.spaces_key=:'input_key'
-    AND (last_page.next_cursor IS NULL OR last_page.next_cursor='null'::jsonb))
-  AND EXISTS (SELECT 1 FROM segments sg
-   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id)
-  AND NOT EXISTS (
-   SELECT 1 FROM segments sg
-   CROSS JOIN jsonb_array_elements_text(:'spaces'::jsonb) requested(space_id)
-   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id
-    AND NOT EXISTS (SELECT 1 FROM embedding_artifacts a
-     WHERE a.organization=sg.organization AND a.segment_id=sg.id AND a.space_id=requested.space_id)
-    AND NOT EXISTS (
-     SELECT 1 FROM storage_organizations o
-     JOIN storage_segments k ON k.organization_id=o.id AND k.segment_id=sg.id
-     JOIN storage_spaces sp ON sp.space_id=requested.space_id
-     JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id)
-     JOIN embedding_files f ON f.id=e.file_id AND f.organization_id=o.id AND f.segmentation_id=st.id
-     WHERE o.organization=sg.organization)
-  )
-)
-DELETE FROM ingestion_pages p USING candidates c,ready r
-WHERE (p.organization,p.version_id,p.recipe,p.spaces_key,p.page_number)=
- (c.organization,c.version_id,c.recipe,c.spaces_key,c.page_number)
- AND p.organization=r.organization;
-```
-
-The last-page check conservatively retains an interrupted late writer's namespace if its final checkpoint is missing. To reclaim a **verified completed namespace** in that case, use a retained record of the successful derivation that identifies its exact `input_key` and every requested space. Quivr does not retain this completion record; it must come from your operational records. A searchable Version or the remaining pages' vector keys alone do not establish that the source Manifest and requested spaces match the completed derivation. Run the same bounded statement with only the `AND EXISTS (...)` check on `last_page` removed. Keep the canonical segmentation, all-vector checks and row limit. If you cannot verify the exact input namespace, retain its pages.
-
-Keep the session's five-second statement timeout; a timeout rolls back only its current batch. Reduce `LIMIT 1000` for a smaller batch if necessary. Resume writers afterward. Autovacuum makes the deleted heap and TOAST space reusable; database files may stay the same size. Avoid `VACUUM FULL` during live imports.
-
-## Check it worked
-
-The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.
-
-Inspect the `X-Quivr-Index-Setup` header on `/readyz` for that process's last index setup state: `pending`, `building`, `retrying` or `conflict` reports degraded performance until the process verifies the indexes; `ready` means it verified all expected indexes as valid. The header is cached: another process may finish setup before this one retries, and later external database changes are not reflected after `ready`. These states do not change readiness HTTP 204 when required dependencies are ready. Structured `quivr.postgres.index_setup` events report the state, attempt number and retry delay. Keep an API or worker running so setup can finish.
+Inspect the `X-Quivr-Index-Setup` header on `/readyz` for each process. `pending`, `building`, `retrying` or `conflict` reports degraded performance until the process verifies the indexes. `ready` means it verified all expected indexes as valid. The header is cached: another process may finish setup before this process retries, and later external changes are not reflected after `ready`. These states do not change readiness HTTP 204 when required dependencies are ready. Structured `quivr.postgres.index_setup` events report state, attempt number and retry delay. Keep an API or worker running so setup can finish.
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Migration times out, or `migration_busy` | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. `migration_busy` means another migrator held the migration lock for more than two seconds. Let conflicting transactions finish, then rerun. When every migration is already applied, `quivr migrate` takes no migration lock and succeeds. From this release, PostgreSQL ends a migrator that stops responding mid-transaction after five idle seconds and releases its lock. A migrator from an earlier release can keep the lock until PostgreSQL detects its lost connection; find its backend in `pg_locks` (advisory lock `642001`) and stop it with `pg_terminate_backend`. Index maintenance uses a separate advisory lock. An index build started by an older binary can still hold the migration lock until it finishes or is stopped. |
-| `index_setup_failed` or `index_setup_busy` in background events | Live processes retry with backoff from one second to one minute. Each attempt has a 30-minute budget and no separate lock timeout. Interrupted builds can leave invalid indexes; the next attempt repairs them. Required migrations and readiness proceed independently. |
+| Migration times out, or `migration_busy` | `migration_busy` means another migrator held the advisory lock for more than two seconds; SQL can also exceed its lock or statement bound. Let conflicting work finish, then rerun `quivr migrate`. Inspect `pg_locks` for advisory lock `642001` if its holder stopped responding. |
+| `index_setup_failed` or `index_setup_busy` in background events | Live processes retry with backoff from one second to one minute. Attempts have a 30-minute budget and no separate lock timeout. The next attempt repairs matching invalid indexes left by interrupted builds; readiness proceeds independently. |
 | `index_definition_conflict` | A performance index name belongs to an object with a different definition. Inspect the database catalog and rename the conflicting object. Quivr leaves it untouched and detects your repair on a later attempt. |
-| `compaction_unit_deadline` | A unit exceeded its 30-second budget. Check index setup and storage access, then rerun the same operation identifier; its previous checkpoint remains. |
-| `compaction_unit_canceled` | The unit was interrupted. Rerun the same operation identifier to resume. |
-| `compaction_vectors_failed`, `compaction_receipts_failed`, `compaction_normalizations_failed` | Inspect durable artifacts and storage access for the named phase, repair the cause, then resume. |
-| `compaction_start_failed`, `compaction_status_failed` | Check activation, the operation identifier, options and database access before retrying. |
-| Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
-| Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
+| Worker or API never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator, inspect startup logs, and verify that the required services are reachable. |
+| Previous binary fails after a contract | The contract step closed the rollback window. Deploy a forward fix or follow your deployment's data recovery procedure. |
+| `storage_status_failed` | The database could not be checked or the embedded schema is not ready. Run `quivr migrate`, inspect its result, and retry the status command. |
 
-Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and data backfills still need deployment-specific review.
+Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and any data backfills still need deployment-specific review.
 
 Storage failure codes omit raw database and object-storage errors.
 
-An interrupted index build restarts from scratch on the next attempt. If index setup consistently exceeds 30 minutes, stop automatic index maintenance by draining the API and worker instances, then build the indexes concurrently in an operator database session with a longer timeout. Use the same index names, columns and predicates; remove a matching invalid index before rebuilding it. Restart the instances afterward to verify and reuse the indexes.
+## Repair an interrupted index build
 
-Inspect the existing definitions first:
+Each retry starts an interrupted build from scratch. If setup consistently exceeds 30 minutes, drain and stop API and worker instances to stop automatic maintenance. Build the indexes concurrently in an operator PostgreSQL session with a longer timeout, then restart the instances to verify and reuse them.
+
+Inspect these definitions first:
 
 ```sql
 SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition
 FROM pg_index
 WHERE indexrelid IN (to_regclass('segments_by_segmentation'),
-                     to_regclass('records_by_current_version'),
-                     to_regclass('embedding_coverage_by_artifact'));
+                     to_regclass('records_by_current_version'));
 ```
 
-In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY` with that index's name. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
+Outside a transaction, use `DROP INDEX CONCURRENTLY` for a matching invalid index before rebuilding it. Preserve incompatible objects and follow the conflict guidance above. Keep the same names, columns and predicates. In that session, allow up to two hours per build; the builds run sequentially:
 
 ```sql
 SET lock_timeout = '0';
@@ -218,11 +84,13 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS segments_by_segmentation
   ON segments (organization, segmentation_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS records_by_current_version
   ON records (organization, corpus_id, current_version_id);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS embedding_coverage_by_artifact
-  ON embedding_coverage (organization, artifact_id);
 ```
 
-A valid matching index is reused; close this session afterward and restart the API and worker to finish index setup.
+A valid matching index is reused. Close the session afterward and restart API and worker instances to finish setup.
+
+## Maintain hot queue tables
+
+Hot queue and journal tables disable vacuum truncation to keep vacuum from blocking writers. Autovacuum reuses their dead space; files may retain that space. Queue attempt renewals do not update a timestamp index. If the attempt primary key bloats, run `REINDEX INDEX CONCURRENTLY queue_document_attempts_pkey;` in an operator database session outside a transaction. This rebuild allows concurrent writes and needs temporary disk space for a second index.
 
 ## Next
 

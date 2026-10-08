@@ -1,6 +1,8 @@
 # Add a migration that preserves application rollback
 
-Contributors keep the previous Quivr binary usable on the expanded schema.
+In-place upgrades from `2.0.0-alpha.6` and earlier are unsupported: reset, or
+export from the old installation and re-import into a fresh one. Within the
+supported window, keep the previous binary usable on the expanded schema.
 Operators apply expansions before rolling the API and worker, and apply
 contracts only after retiring the previous binary. There are no down migrations.
 
@@ -14,12 +16,10 @@ write successfully. Keep later expansions independent of any deferred contract.
 `make check` parses PostgreSQL SQL with the pinned `pglast` dependency in
 `contracts/http/v0/checks/requirements.txt`. Its conservative allowlist accepts
 permanent tables without foreign keys into existing tables, sequences, enum types,
-non-concurrent indexes on tables created in the same file, table reloption SETs,
-schema-qualified RESTRICT drops of declared nonunique performance indexes from
-earlier SQL, and added columns without new checks, uniqueness or references. Unknown or
-unique index drops remain rejected. Mixed ALTER commands are checked separately.
-Renames, type changes, constraints and index creation on existing tables need a contract.
-Backfills use resumable work. The lint is a guard, not a semantic proof.
+non-concurrent indexes on tables created earlier in the same file, table reloption SETs,
+schema-qualified RESTRICT drops of nonunique performance indexes declared in earlier SQL, and added columns without new checks, uniqueness or references.
+Unknown or unique index drops remain rejected. Mixed ALTER commands are checked separately.
+Renames, type changes, constraints and index creation on existing tables need a contract. Backfills use resumable work. The lint is a guard, not a semantic proof.
 
 For a rename, add the new field in release N, keep reading the old field and
 write both forms while older binaries run. Backfill with resumable application

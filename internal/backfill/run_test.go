@@ -104,8 +104,12 @@ func (runContent) TrustedVersion(_ context.Context, _, _ string, recordID, versi
 func (runContent) PluginSegmentationOf(_ context.Context, _ string, v content.Version, recipe string) (content.Segmentation, error) {
 	return content.Segmentation{ID: "seg_" + v.ID, VersionID: v.ID, Recipe: recipe, Segments: []content.Segment{{ID: "s_" + v.ID}}}, nil
 }
-func (runContent) LoadEmbedding(_ context.Context, _, derivation string) (content.Embedding, []float32, error) {
-	return content.Embedding{DerivationID: derivation}, []float32{1}, nil
+func (runContent) LoadEmbeddingData(_ context.Context, artifacts []content.Embedding) ([]content.EmbeddingData, error) {
+	data := make([]content.EmbeddingData, len(artifacts))
+	for i, e := range artifacts {
+		data[i] = content.EmbeddingData{Artifact: e, Vector: []float32{1}}
+	}
+	return data, nil
 }
 
 // runPlugin answers per Version: an error, or a vector in the target space.

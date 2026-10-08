@@ -140,9 +140,8 @@ Each changed configuration is a new immutable registration. For changes to
 vector or segmentation meaning, choose a new `plugin_version` (default `1.2.0`),
 regenerate and certify the package, then install it. The space id includes the model, dimensions and a hash of the wire
 format, metric, model revision, input templates and full-text context mode.
-Version `1.2.0` introduces separate title/context passages and declares a new
-space, so install it with a rebuild or evaluation cutover. Changing any of those
-creates a new space. Set `model_revision` when a deployment name starts serving
+Changing any of those creates a new space. Set `model_revision` when a
+deployment name starts serving
 new weights; the plugin cannot detect a provider changing weights behind a
 stable name. Changing batching or timeouts preserves the vector space. Existing
 Corpora need a rebuild or backfill before they carry a newly configured space.

@@ -136,10 +136,11 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		}
 		vector := make([]float32, space.Dimensions)
 		vector[0] = 1
-		artifact, err := contents.SaveEmbedding(ctx, content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], space, "fixture"), space, vector)
+		packed, err := contents.SaveEmbeddingGroup(ctx, seg, space, []content.EmbeddingData{{Artifact: content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], space, "fixture"), Vector: vector}})
 		if err != nil {
 			t.Fatal(err)
 		}
+		artifact := packed[0].Artifact
 		return v, seg, artifact
 	}
 	first := accept("first", "alpha beta gamma")
@@ -164,10 +165,11 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		}
 		vector := make([]float32, large.Dimensions)
 		vector[0] = 1
-		artifact, err := contents.SaveEmbedding(ctx, content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], large, "fixture"), large, vector)
+		packed, err := contents.SaveEmbeddingGroup(ctx, seg, large, []content.EmbeddingData{{Artifact: content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], large, "fixture"), Vector: vector}})
 		if err != nil {
 			t.Fatal(err)
 		}
+		artifact := packed[0].Artifact
 		return artifact
 	}
 	g, err = store.PrepareEvaluation(ctx, scope.Organization, c.ID, []string{"example.hash_embedder.large@1"})
@@ -208,9 +210,6 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		t.Fatalf("target fixture did not supply independent cuts: %+v", publication.segmentation)
 	}
 	// The target row alone is insufficient: every target cut needs its vector.
-	if _, err = pool.Exec(ctx, `DELETE FROM embedding_coverage WHERE organization=$1 AND segment_id=$2 AND space_id=$3`, scope.Organization, publication.segmentation.Segments[1].ID, "certified.ingestion-valid.small@1"); err != nil {
-		t.Fatal(err)
-	}
 	if _, err = pool.Exec(ctx, `UPDATE compact_embedding_coverage c SET covered=set_bit(c.covered,e.ordinal,0)
  FROM compact_embeddings e JOIN storage_organizations o ON o.id=e.organization_id
  JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id)

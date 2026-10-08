@@ -37,9 +37,6 @@ type EmbeddingFile struct {
 }
 
 type EmbeddingFileRepository interface {
-	CompactStorage(context.Context) (bool, error)
-	// False means compact mode activated during immutable-object preparation.
-	SaveLegacyEmbeddingGroup(context.Context, []Embedding, VectorSpace) (bool, error)
 	EmbeddingGroup(context.Context, string, string, string) (EmbeddingFile, []Embedding, error)
 	// expected is the prior descriptor digest; an empty digest means absent.
 	// False means another writer won. No external IO occurs in this transaction.
@@ -200,7 +197,7 @@ func (s Service) readVectorFileBytes(ctx context.Context, f EmbeddingFile) ([]by
 }
 
 // LoadEmbeddingData reads each referenced file once and verifies each vector's
-// content and original public artifact identity. Legacy artifacts remain readable.
+// content and original public artifact identity.
 func (s Service) LoadEmbeddingData(ctx context.Context, artifacts []Embedding) ([]EmbeddingData, error) {
 	type fileGroup struct {
 		descriptor EmbeddingFile
@@ -210,12 +207,7 @@ func (s Service) LoadEmbeddingData(ctx context.Context, artifacts []Embedding) (
 	result := make([]EmbeddingData, len(artifacts))
 	for i, e := range artifacts {
 		if e.File == nil {
-			a, v, err := s.loadEmbeddingArtifact(ctx, e)
-			if err != nil {
-				return nil, err
-			}
-			result[i] = EmbeddingData{a, v}
-			continue
+			return nil, ErrArtifactCorrupt
 		}
 		f := *e.File
 		group, ok := files[f.Blob.Key]
@@ -275,43 +267,30 @@ func (s Service) LoadEmbeddingGroup(ctx context.Context, inputs []Embedding) ([]
 	if len(inputs) == 0 {
 		return nil, false, ErrInvalid
 	}
-	if repo, ok := s.Embeddings.(EmbeddingFileRepository); ok {
-		_, artifacts, err := repo.EmbeddingGroup(ctx, inputs[0].Organization, inputs[0].SegmentationID, inputs[0].SpaceID)
-		if err == nil {
-			bySegment := map[string]Embedding{}
-			for _, e := range artifacts {
-				bySegment[e.SegmentID] = e
+	_, artifacts, err := s.Embeddings.EmbeddingGroup(ctx, inputs[0].Organization, inputs[0].SegmentationID, inputs[0].SpaceID)
+	if err == nil {
+		bySegment := map[string]Embedding{}
+		for _, e := range artifacts {
+			bySegment[e.SegmentID] = e
+		}
+		ordered := make([]Embedding, 0, len(inputs))
+		for _, input := range inputs {
+			e, ok := bySegment[input.SegmentID]
+			if !ok {
+				return nil, false, nil
 			}
-			ordered := make([]Embedding, 0, len(inputs))
-			for _, input := range inputs {
-				e, ok := bySegment[input.SegmentID]
-				if !ok {
-					return nil, false, nil
-				}
-				if e.DerivationID != input.DerivationID {
-					return nil, false, ErrConflict
-				}
-				ordered = append(ordered, e)
+			if e.DerivationID != input.DerivationID {
+				return nil, false, ErrConflict
 			}
-			data, err := s.LoadEmbeddingData(ctx, ordered)
-			return data, err == nil, err
+			ordered = append(ordered, e)
 		}
-		if !errors.Is(err, corpus.ErrNotFound) {
-			return nil, false, err
-		}
+		data, err := s.LoadEmbeddingData(ctx, ordered)
+		return data, err == nil, err
 	}
-	data := make([]EmbeddingData, 0, len(inputs))
-	for _, input := range inputs {
-		e, v, err := s.loadLegacyEmbedding(ctx, input.Organization, input.DerivationID)
-		if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, ErrArtifactMissing) {
-			return nil, false, nil
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		data = append(data, EmbeddingData{e, v})
+	if !errors.Is(err, corpus.ErrNotFound) {
+		return nil, false, err
 	}
-	return data, true, nil
+	return nil, false, nil
 }
 
 func virtualBlob(org string, raw []byte) Blob {
@@ -319,54 +298,10 @@ func virtualBlob(org string, raw []byte) Blob {
 	return Blob{Key: Hash([]byte(org)) + "/sha256/" + sha, SHA256: sha, Size: int64(len(raw))}
 }
 
-// SaveEmbeddingGroup stores/adopts one matrix for a space. Existing canonical
-// rows always win, including incomplete output left by a legacy writer.
+// SaveEmbeddingGroup stores one matrix for a space, adopting canonical partial
+// output when another writer has already stored it.
 func (s Service) SaveEmbeddingGroup(ctx context.Context, seg Segmentation, space VectorSpace, data []EmbeddingData) ([]EmbeddingData, error) {
-	repo, ok := s.Embeddings.(EmbeddingFileRepository)
-	compact := false
-	if ok {
-		var err error
-		compact, err = repo.CompactStorage(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if !compact && ok {
-		return s.saveLegacyEmbeddingGroup(ctx, repo, seg, space, data)
-	}
-	if !compact {
-		out := make([]EmbeddingData, 0, len(data))
-		for _, d := range data {
-			e, err := s.SaveEmbedding(ctx, d.Artifact, space, d.Vector)
-			vector := d.Vector
-			if errors.Is(err, ErrConflict) {
-				_, stored, loadErr := s.LoadEmbedding(ctx, d.Artifact.Organization, d.Artifact.DerivationID)
-				if loadErr == nil && len(stored) == len(vector) {
-					vector = stored
-					e, err = s.SaveEmbedding(ctx, d.Artifact, space, stored)
-				}
-			}
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, EmbeddingData{e, vector})
-		}
-		return out, nil
-	}
-	return s.packEmbeddingGroup(ctx, repo, seg, space, data)
-}
-
-// PackEmbeddingGroup converts legacy artifacts without activating compact-only
-// writes. The caller supplies verified canonical vectors; it never embeds.
-func (s Service) PackEmbeddingGroup(ctx context.Context, seg Segmentation, space VectorSpace, data []EmbeddingData) ([]EmbeddingData, error) {
-	repo, ok := s.Embeddings.(EmbeddingFileRepository)
-	if !ok {
-		return nil, ErrInvalid
-	}
-	return s.packEmbeddingGroup(ctx, repo, seg, space, data)
-}
-
-func (s Service) packEmbeddingGroup(ctx context.Context, repo EmbeddingFileRepository, seg Segmentation, space VectorSpace, data []EmbeddingData) ([]EmbeddingData, error) {
+	repo := s.Embeddings
 	if len(data) == 0 || len(seg.Segments) == 0 {
 		return nil, ErrInvalid
 	}
@@ -398,18 +333,6 @@ func (s Service) packEmbeddingGroup(ctx context.Context, repo EmbeddingFileRepos
 			}
 			if _, ok := bySegment[e.SegmentID]; ok {
 				continue
-			}
-			// The legacy repository's unique derivation key preserves partial winners.
-			a, v, err := s.loadLegacyEmbedding(ctx, e.Organization, e.DerivationID)
-			if err == nil {
-				if len(v) != len(d.Vector) {
-					return nil, ErrConflict
-				}
-				bySegment[e.SegmentID] = EmbeddingData{a, v}
-				continue
-			}
-			if !errors.Is(err, corpus.ErrNotFound) {
-				return nil, err
 			}
 			raw, err := VectorBytes(d.Vector)
 			if err != nil || space.Dimensions > 0 && len(d.Vector) != space.Dimensions {
@@ -466,47 +389,6 @@ func (s Service) packEmbeddingGroup(ctx context.Context, repo EmbeddingFileRepos
 			return nil, err
 		}
 		return s.LoadEmbeddingData(ctx, artifacts)
-	}
-	return nil, ErrConflict
-}
-
-// Compatibility writes arbitrate the entire group under one routing fence.
-// Immutable objects are prepared first; activation retries with the matrix path.
-func (s Service) saveLegacyEmbeddingGroup(ctx context.Context, repo EmbeddingFileRepository, seg Segmentation, space VectorSpace, data []EmbeddingData) ([]EmbeddingData, error) {
-	for attempt := 0; attempt < 8; attempt++ {
-		prepared := make([]EmbeddingData, 0, len(data))
-		artifacts := make([]Embedding, 0, len(data))
-		for _, d := range data {
-			e, v, err := s.loadLegacyEmbedding(ctx, d.Artifact.Organization, d.Artifact.DerivationID)
-			if err == nil {
-				if len(v) != len(d.Vector) || (space.Dimensions > 0 && len(v) != space.Dimensions) {
-					return nil, ErrConflict
-				}
-				d = EmbeddingData{e, v}
-			} else if !errors.Is(err, corpus.ErrNotFound) {
-				return nil, err
-			}
-			if err != nil {
-				e, err = s.prepareEmbedding(ctx, d.Artifact, space, d.Vector)
-				if err != nil {
-					return nil, err
-				}
-				d.Artifact = e
-			}
-			prepared = append(prepared, d)
-			artifacts = append(artifacts, d.Artifact)
-		}
-		saved, err := repo.SaveLegacyEmbeddingGroup(ctx, artifacts, space)
-		if errors.Is(err, ErrConflict) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !saved {
-			return s.packEmbeddingGroup(ctx, repo, seg, space, data)
-		}
-		return prepared, nil
 	}
 	return nil, ErrConflict
 }

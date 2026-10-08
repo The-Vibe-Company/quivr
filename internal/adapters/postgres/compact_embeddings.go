@@ -10,12 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s EmbeddingStore) CompactStorage(ctx context.Context) (bool, error) {
-	var compact bool
-	err := s.Pool.QueryRow(ctx, `SELECT coalesce((SELECT compact FROM storage_state WHERE singleton),false)`).Scan(&compact)
-	return compact, err
-}
-
 func (s EmbeddingStore) EmbeddingGroup(ctx context.Context, org, segmentation, space string) (content.EmbeddingFile, []content.Embedding, error) {
 	var f content.EmbeddingFile
 	var sha []byte
@@ -106,18 +100,6 @@ func (s EmbeddingStore) SaveEmbeddingGroup(ctx context.Context, f content.Embedd
 	if previous != expected {
 		return false, nil
 	}
-	// Recheck partial legacy winners under the same version fence used by their
-	// writer, after the candidate object's upload has completed.
-	for _, e := range artifacts {
-		var id string
-		err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, f.Organization, e.DerivationID).Scan(&id)
-		if err == nil && id != e.ID {
-			return false, nil
-		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return false, err
-		}
-	}
 	sha, err := hex.DecodeString(f.Blob.SHA256)
 	if err != nil || len(sha) != 32 {
 		return false, content.ErrInvalid
@@ -156,61 +138,3 @@ func (s EmbeddingStore) SaveEmbeddingGroup(ctx context.Context, f content.Embedd
 }
 
 var _ content.EmbeddingFileRepository = EmbeddingStore{}
-
-// SaveLegacyEmbeddingGroup keeps compatibility writes on the legacy side of
-// activation. It holds no organization journal lock and performs no object IO.
-func (s EmbeddingStore) SaveLegacyEmbeddingGroup(ctx context.Context, artifacts []content.Embedding, space content.VectorSpace) (bool, error) {
-	if len(artifacts) == 0 {
-		return false, content.ErrInvalid
-	}
-	first := artifacts[0]
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockProcessingVersion(ctx, tx, first.Organization, first.VersionID); err != nil {
-		return false, err
-	}
-	active, err := compactWrites(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	if active {
-		return false, nil
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO vector_spaces(id,manifest) VALUES($1,$2) ON CONFLICT DO NOTHING`, space.ID, space.Manifest); err != nil {
-		return false, err
-	}
-	var same bool
-	if err = tx.QueryRow(ctx, `SELECT manifest=$2::jsonb FROM vector_spaces WHERE id=$1`, space.ID, space.Manifest).Scan(&same); err != nil {
-		return false, err
-	}
-	if !same {
-		return false, content.ErrConflict
-	}
-	for _, e := range artifacts {
-		if e.Organization != first.Organization || e.VersionID != first.VersionID || e.SegmentationID != first.SegmentationID || e.SpaceID != space.ID || e.Producer != first.Producer {
-			return false, content.ErrInvalid
-		}
-		var prior string
-		err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, e.Organization, e.DerivationID).Scan(&prior)
-		if err == nil {
-			if prior != e.ID {
-				return false, content.ErrConflict
-			}
-			continue
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return false, err
-		}
-		raw, err := json.Marshal(e)
-		if err != nil {
-			return false, err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO embedding_artifacts VALUES($1,$2,$3,$4,$5,$6)`, e.Organization, e.ID, e.DerivationID, e.SegmentID, e.SpaceID, raw); err != nil {
-			return false, err
-		}
-	}
-	return true, tx.Commit(ctx)
-}

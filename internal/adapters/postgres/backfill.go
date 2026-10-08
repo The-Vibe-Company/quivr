@@ -540,7 +540,7 @@ WHERE ec.organization=$1 AND ec.generation_id=$2 AND ec.segment_id=ANY($3) ORDER
 		if err = rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal(raw, &e); err != nil {
+		if e, err = decodeEmbedding(raw); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

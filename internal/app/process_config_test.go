@@ -72,28 +72,6 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	slog.Info("provider metadata", "detail", "sentinel-plugin-secret")
 	slog.Info("signer metadata", "detail", signingSecret)
 	LogFailure(errors.New("sentinel-db-secret sentinel-env-secret"))
-	deadline, stopDeadline := context.WithDeadline(context.Background(), time.Unix(0, 0))
-	defer stopDeadline()
-	canceled, stopCanceled := context.WithCancel(context.Background())
-	stopCanceled()
-	for _, failure := range []struct {
-		ctx   context.Context
-		phase string
-		code  string
-	}{
-		{deadline, "vectors", "compaction_unit_deadline"},
-		{canceled, "vectors", "compaction_unit_canceled"},
-		{context.Background(), "vectors", "compaction_vectors_failed"},
-		{context.Background(), "receipts", "compaction_receipts_failed"},
-		{context.Background(), "normalizations", "compaction_normalizations_failed"},
-		{context.Background(), "sentinel-private-phase", "compaction_unit_failed"},
-	} {
-		err := compactionFailure(failure.ctx, failure.phase, errors.New("sentinel-raw-storage-diagnostic"))
-		if err.Error() != failure.code {
-			t.Fatalf("storage error: want %s, got %s", failure.code, err)
-		}
-		LogFailure(err)
-	}
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeInvalidConfiguration, Message: "sentinel-bearer-secret"}}})
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeNamespaceConflict, Message: "sentinel-bearer-secret"}}})
 	fileLog, err := os.ReadFile(filepath.Join(cfg.LogDirectory, "worker.log"))
@@ -114,14 +92,9 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	if start["event"] != "quivr.start" || start["version"] != "2.0.0-alpha.7" || start["revision"] != "0123456789abcdef0123456789abcdef01234567" || start["api_version"] != "v0" || start["plugin_engine_version"] != "0.2.0" {
 		t.Fatalf("startup build identity: %v", start)
 	}
-	for _, secret := range []string{signingSecret, "sentinel-cursor-secret", "sentinel-credential-secret", "sentinel-db-secret", "sentinel-bearer-secret", "sentinel-env-secret", "sentinel-plugin-secret", "sentinel-access-secret", "sentinel-storage-secret", "sentinel-raw-storage-diagnostic", "sentinel-private-phase"} {
+	for _, secret := range []string{signingSecret, "sentinel-cursor-secret", "sentinel-credential-secret", "sentinel-db-secret", "sentinel-bearer-secret", "sentinel-env-secret", "sentinel-plugin-secret", "sentinel-access-secret", "sentinel-storage-secret"} {
 		if bytes.Contains(fileLog, []byte(secret)) {
 			t.Fatalf("process log leaked %q", secret)
-		}
-	}
-	for _, code := range []string{"compaction_unit_deadline", "compaction_unit_canceled", "compaction_vectors_failed", "compaction_receipts_failed", "compaction_normalizations_failed", "compaction_unit_failed"} {
-		if !bytes.Contains(fileLog, []byte(`"error_code":"`+code+`"`)) {
-			t.Fatalf("safe storage failure code %s missing: %s", code, fileLog)
 		}
 	}
 	if !bytes.Contains(fileLog, []byte(`"error_code":"invalid_configuration"`)) || !bytes.Contains(fileLog, []byte(`"error_code":"namespace_conflict"`)) || !bytes.Contains(fileLog, []byte(`"shutdown_grace":60000000000`)) {

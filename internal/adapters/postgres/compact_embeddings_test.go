@@ -7,23 +7,57 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/migrations"
 )
 
 func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	pool := adapterPool(t, ctx)
-	if err := postgres.ActivateCompactStorage(ctx, pool); err != nil {
+	pool := scratchDatabase(t, ctx)
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
-	org := fmt.Sprintf("compact-vectors-%d", time.Now().UnixNano())
+	contract, err := migrations.Files.ReadFile("20261008T1035Z_compact_storage_only.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retiredTables []string
+	for _, line := range strings.Split(string(contract), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == "DROP" && fields[1] == "TABLE" {
+			retiredTables = append(retiredTables, strings.TrimSuffix(fields[2], ";"))
+		}
+	}
+	if len(retiredTables) != 4 {
+		t.Fatalf("contract retires %d tables, want 4", len(retiredTables))
+	}
+	countTables := func() int {
+		t.Helper()
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM unnest($1::text[]) AS t(name) WHERE to_regclass(t.name) IS NOT NULL`, retiredTables).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	if got := countTables(); got != 4 {
+		t.Fatalf("expand schema has %d contract targets, want 4", got)
+	}
+	if err := postgres.MigrateContracts(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if got := countTables(); got != 0 {
+		t.Fatalf("contract left %d retired tables", got)
+	}
+	org := fmt.Sprintf("compact-vectors-%d-<>&\u2028\u2029", time.Now().UnixNano())
 	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
 	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "files", Name: "Vector files"})
 	if err != nil {
@@ -33,9 +67,9 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 	stores := contentStores(pool)
 	service := content.Service{Submissions: stores, Materialization: stores, Versions: stores, RecordStore: stores, Receipts: stores, Baseline: stores, Embeddings: stores, Blobs: objects}
 	for _, scenario := range []struct {
-		name                      string
-		partial, race, activation bool
-	}{{name: "fresh"}, {name: "partial", partial: true}, {name: "concurrent", race: true}, {name: "activation", activation: true}} {
+		name          string
+		partial, race bool
+	}{{name: "fresh"}, {name: "partial", partial: true}, {name: "concurrent", race: true}} {
 		partial := scenario.partial
 		cmd := content.Command{Key: scenario.name, Source: content.Source{CorpusID: c.ID, Namespace: "example", RecordKey: scenario.name}, Content: content.Text{Kind: "text", Text: "First second"}}
 		receipt, err := service.Accept(ctx, scope, cmd)
@@ -70,11 +104,11 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		}
 		originalID := ""
 		if partial {
-			original, err := service.SaveEmbedding(ctx, data[0].Artifact, space, data[0].Vector)
+			original, err := service.SaveEmbeddingGroup(ctx, seg, space, data[:1])
 			if err != nil {
 				t.Fatal(err)
 			}
-			originalID = original.ID
+			originalID = original[0].Artifact.ID
 			data[0].Vector = []float32{9, 9}
 		}
 		before := len(objects.objects)
@@ -122,30 +156,17 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 			}
 			expectedObjects = 2 // The losing immutable upload is retained for guarded cleanup.
 		} else {
-			if scenario.activation {
-				if _, err = pool.Exec(ctx, `UPDATE storage_state SET compact=false`); err != nil {
-					t.Fatal(err)
-				}
-				service.Blobs = &activateOnPut{Blobs: objects, activate: func() error { return postgres.ActivateCompactStorage(ctx, pool) }}
-				expectedObjects = 5 // Abandoned legacy uploads precede the fenced retry.
-			}
 			packed, err = service.SaveEmbeddingGroup(ctx, seg, space, data)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 		service.Blobs = objects
-		if scenario.activation {
-			var legacy int
-			if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_artifacts WHERE organization=$1 AND segment_id=ANY($2::text[])`, org, []string{seg.Segments[0].ID, seg.Segments[1].ID}).Scan(&legacy); err != nil || legacy != 0 {
-				t.Fatalf("legacy writes crossed activation: count=%d %v", legacy, err)
-			}
-		}
 		var files int
 		if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_files f JOIN storage_organizations o ON o.id=f.organization_id WHERE o.organization=$1 AND f.segmentation_id=$2`, org, seg.ID).Scan(&files); err != nil {
 			t.Fatal(err)
 		}
-		if files != 1 || (!scenario.activation && len(objects.objects) != before+expectedObjects) || (scenario.activation && len(objects.objects) > before+expectedObjects) {
+		if files != 1 || len(objects.objects) != before+expectedObjects {
 			t.Fatalf("files=%d additional objects=%d; want one current descriptor and bounded candidate uploads", files, len(objects.objects)-before)
 		}
 		if len(packed) != 2 || !slices.Equal(packed[0].Vector, expectedVectors[0]) || !slices.Equal(packed[1].Vector, expectedVectors[1]) {
@@ -168,27 +189,6 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 			t.Fatalf("rebuild called disabled provider or changed vectors: %v %+v", err, reused)
 		}
 
-		for _, d := range packed {
-			loaded, vector, err := service.LoadEmbedding(ctx, org, d.Artifact.DerivationID)
-			if err != nil || loaded.ID != d.Artifact.ID || !slices.Equal(vector, d.Vector) {
-				t.Fatalf("mixed-format reader: %v %+v", err, loaded)
-			}
-		}
-		if partial {
-			// A historical derivation with another producer remains readable until
-			// explicitly retired, even beside the canonical compact tuple.
-			prior := data[0].Artifact
-			prior.Producer = "plugin:alternate@1.0.0"
-			prior.DerivationID = content.StableID("embedding-derivation", org, prior.SegmentID, space.ID, prior.InputSHA, prior.Producer)
-			legacy, err := service.SaveEmbedding(ctx, prior, space, []float32{9, 10})
-			if err != nil {
-				t.Fatal(err)
-			}
-			loaded, vector, err := service.LoadEmbedding(ctx, org, legacy.DerivationID)
-			if err != nil || loaded.ID != legacy.ID || !slices.Equal(vector, []float32{9, 10}) {
-				t.Fatalf("historical derivation hidden by compact tuple: %v %+v %v", err, loaded, vector)
-			}
-		}
 		if err = service.Promote(ctx, org, seg, g); err != nil {
 			t.Fatal(err)
 		}
@@ -201,6 +201,32 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		located, err := stores.Hydrate(ctx, scope, []content.Candidate{{SegmentID: seg.Segments[0].ID, GenerationID: g.ID}})
 		if err != nil || located[0].EmbeddingID != packed[0].Artifact.ID {
 			t.Fatalf("search hydration lost compact identity: %v %+v", err, located)
+		}
+
+		for _, reader := range []struct {
+			name string
+			load func() ([]content.Embedding, error)
+		}{
+			{"backfill", func() ([]content.Embedding, error) { return stores.CoveredEmbeddings(ctx, org, g.ID, seg) }},
+			{"subscriptions", func() ([]content.Embedding, error) {
+				_, artifacts, _, err := stores.SubscriptionEmbeddings(ctx, org, c.ID, v.ID)
+				return artifacts, err
+			}},
+		} {
+			artifacts, err := reader.load()
+			if err != nil || len(artifacts) != 2 {
+				t.Fatalf("%s metadata: %v %+v", reader.name, err, artifacts)
+			}
+			loaded, err := service.LoadEmbeddingData(ctx, artifacts)
+			if err != nil {
+				t.Fatalf("%s integrity: %v", reader.name, err)
+			}
+			for _, d := range loaded {
+				i := slices.IndexFunc(packed, func(want content.EmbeddingData) bool { return want.Artifact.ID == d.Artifact.ID })
+				if i < 0 || d.Artifact.DerivationID != packed[i].Artifact.DerivationID || !slices.Equal(d.Vector, packed[i].Vector) {
+					t.Fatalf("%s identity/vector: %+v", reader.name, d)
+				}
+			}
 		}
 
 		var covered []byte
@@ -270,22 +296,4 @@ func (b *concurrentVectorBlobs) Put(ctx context.Context, org string, raw []byte)
 		}
 	}
 	return blob, err
-}
-
-// Activation lands while immutable candidate objects are being uploaded, before
-// the database writer can acquire its routing fence. No timing waits are used.
-type activateOnPut struct {
-	content.Blobs
-	activate func() error
-	done     bool
-}
-
-func (b *activateOnPut) Put(ctx context.Context, org string, raw []byte) (content.Blob, error) {
-	if !b.done {
-		b.done = true
-		if err := b.activate(); err != nil {
-			return content.Blob{}, err
-		}
-	}
-	return b.Blobs.Put(ctx, org, raw)
 }

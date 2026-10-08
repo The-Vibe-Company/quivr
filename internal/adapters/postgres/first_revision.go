@@ -39,11 +39,7 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
 	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return false, err
 	}
-	compact, err := compactWrites(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	requestCopy, receiptCommand, execution := importRequestStorage(canonical, compact, retainDetail)
+	requestCopy, receiptCommand, execution := importRequestStorage(canonical, retainDetail)
 	requestDigest := sha256.Sum256(canonical)
 	batch := &pgx.Batch{}
 	batch.Queue("SELECT pg_advisory_xact_lock_shared($1)", projectionRoutingLock)

@@ -163,7 +163,7 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	var artifacts []content.Embedding
 	for _, passage := range x1.Segments {
 		artifact := content.Embedding{ID: "artifact-" + passage.ID, DerivationID: "derivation-" + passage.ID, Organization: org, CorpusID: a.ID, VersionID: x1.VersionID, SegmentID: passage.ID, SegmentationID: x1.ID, SpaceID: prior.SpaceID}
-		if err = store.SaveEmbedding(ctx, artifact, content.VectorSpace{ID: prior.SpaceID, Manifest: json.RawMessage(manifest)}); err != nil {
+		if err = saveFixtureEmbedding(ctx, store, &artifact, content.VectorSpace{ID: prior.SpaceID, Manifest: json.RawMessage(manifest)}); err != nil {
 			t.Fatal(err)
 		}
 		artifacts = append(artifacts, artifact)

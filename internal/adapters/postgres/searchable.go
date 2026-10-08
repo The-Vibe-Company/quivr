@@ -158,13 +158,9 @@ func insertSegmentation(ctx context.Context, tx pgx.Tx, org string, result conte
 }
 
 func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result content.Segmentation) (journalFinish, error) {
-	compact, err := compactWrites(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 	digest := content.SegmentationDigest(result)
 	var existing string
-	err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&existing)
+	err := tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&existing)
 	if err == nil {
 		if existing != digest {
 			return nil, content.ErrConflict
@@ -178,10 +174,7 @@ func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result cont
 		return nil, err
 	}
 	for _, p := range result.Segments {
-		metadata, err := json.Marshal(p.Derivation)
-		if compact {
-			metadata, err = compactSegmentDerivation(p.Derivation)
-		}
+		metadata, err := compactSegmentDerivation(p.Derivation)
 		if err != nil {
 			return nil, err
 		}
