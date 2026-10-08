@@ -138,6 +138,9 @@ func (m *memoryConnectors) RequestRun(ctx context.Context, org, id string, _ tim
 	if err == nil && !in.Enabled {
 		err = connectors.ErrDisabled
 	}
+	if err == nil && in.PausedAt != nil {
+		err = connectors.ErrPaused
+	}
 	return time.Date(2026, 9, 28, 10, 0, 30, 0, time.UTC), err
 }
 
