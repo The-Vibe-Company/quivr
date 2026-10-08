@@ -543,7 +543,7 @@ func Run(command string, args ...string) error {
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrIndexBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
@@ -551,7 +551,7 @@ func Run(command string, args ...string) error {
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
