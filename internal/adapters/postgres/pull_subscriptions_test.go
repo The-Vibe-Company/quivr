@@ -134,8 +134,13 @@ func TestSubscriptionsWithoutDestination(t *testing.T) {
 				CorpusID: f.corpusID, Namespace: "corrections", RecordKey: "r"}}); err != nil {
 				t.Fatal(err)
 			}
-			in := f.intent(sub, record, v2)
-			in.Kind = monitoring.IntentWithdrawal
+			f.drain()
+			in := monitoring.Intent{Kind: monitoring.IntentWithdrawal, Organization: f.org}
+			if err := f.pool.QueryRow(ctx, `SELECT subscription_id,subscription_version_id,sequence,corpus_id,record_id,record_version_id
+FROM evaluation_intents WHERE organization=$1 AND kind='withdrawal' AND subscription_id=$2`, f.org, subID).Scan(
+				&in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID); err != nil {
+				t.Fatal("pull-only withdrawal was not dispatched", err)
+			}
 			f.commit(monitoring.OutcomeWithdrawalNotified, func() (string, error) { return f.evaluation.CommitWithdrawal(ctx, in) })
 			f.commit(monitoring.OutcomeDuplicate, func() (string, error) { return f.evaluation.CommitWithdrawal(ctx, in) })
 			listed := call("GET", "/v0/matches?subscription_id="+subID, nil, 200)["items"].([]any)
