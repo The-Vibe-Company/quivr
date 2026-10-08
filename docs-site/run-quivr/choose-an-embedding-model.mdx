@@ -8,7 +8,7 @@ Choose an embedding model by measuring search quality on your documents, query l
 
 ## Choose where inference runs
 
-You need an ingestion plugin, its matching tokenizer and a reachable model server. A tokenizer counts the model's input tokens so passages and queries fit its input window.
+You need an ingestion plugin and a reachable model server. A matching tokenizer counts the model's input tokens so passages and queries fit its input window. `core.ingest` needs its tokenizer pin; `hosted.embed` can run without one using conservative UTF-8-byte counts, which underfill subword models. Configure a matching tokenizer for exact input budgets.
 
 | Deployment | When it fits |
 | --- | --- |
