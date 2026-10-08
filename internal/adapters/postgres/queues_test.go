@@ -2,8 +2,9 @@ package postgres_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -166,99 +167,125 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	}
 }
 
-// A second claimant can take an expired row without waiting for a clock tick;
-// the first claimant's release is then fenced by its old token.
-func TestQueueTrackerFencesExpiredAttempt(t *testing.T) {
+// Tracking is an observation, never a gate on the work it observes. A retry of
+// a tracked document runs, and an attempt whose renewal and release cannot
+// reach its row still reports the work's own result. The test's row lock is
+// the slow-renewal case seen on a busy database, made deterministic.
+func TestQueueTrackerNeverChangesTrackedWork(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := rebuildAdapterPool(t, ctx)
 	org := fmt.Sprintf("adapter-queue-lease-%d", time.Now().UnixNano())
-	tracker := postgres.QueueTracker{Pool: pool}
-	started, release := make(chan struct{}), make(chan struct{})
-	thirdStarted, thirdRelease := make(chan struct{}), make(chan struct{})
-	first := make(chan error, 1)
-	go func() {
-		first <- tracker.Track(ctx, org, "test", "receipt", "document", func(run context.Context) error {
-			close(started)
-			select {
-			case <-release:
-				return nil
-			case <-run.Done():
-				return run.Err()
-			}
-		})
-	}()
-	waitForTrackStart(t, ctx, started, first)
-	if _, err := pool.Exec(ctx, `UPDATE queue_document_attempts SET lease_until='-infinity' WHERE organization=$1 AND kind='test' AND work_id='receipt' AND document_id='document'`, org); err != nil {
+	tracker := postgres.QueueTracker{Pool: pool, Lease: 300 * time.Millisecond}
+	renewalFailed, releaseFailed := make(chan struct{}, 1), make(chan struct{}, 1)
+	logger := slog.Default()
+	slog.SetDefault(slog.New(trackingFailureHandler{Handler: slog.NewTextHandler(os.Stderr, nil), renewed: renewalFailed, released: releaseFailed}))
+	t.Cleanup(func() { slog.SetDefault(logger) })
+	track := func(started, finish chan struct{}) <-chan error {
+		result := make(chan error, 1)
+		go func() {
+			result <- tracker.Track(ctx, org, "test", "work", "document", func(run context.Context) error {
+				close(started)
+				select {
+				case <-finish:
+					return run.Err()
+				case <-run.Done():
+					return run.Err()
+				}
+			})
+		}()
+		waitForTrackStart(t, ctx, started, result)
+		return result
+	}
+
+	started, finish := make(chan struct{}), make(chan struct{})
+	first := track(started, finish)
+	retried := false
+	if err := tracker.Track(ctx, org, "test", "work", "document", func(context.Context) error { retried = true; return nil }); err != nil || !retried {
+		t.Fatalf("retry of a tracked document = %v (ran: %v), want it to run and succeed", err, retried)
+	}
+	close(finish)
+	if err := waitForTrackResult(t, ctx, first); err != nil {
+		t.Fatalf("attempt whose row a retry took = %v, want the work's own nil result", err)
+	}
+
+	select {
+	case <-releaseFailed:
+	default:
+	}
+	started, finish = make(chan struct{}), make(chan struct{})
+	slow := track(started, finish)
+	lock, err := pool.Begin(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.Track(ctx, org, "test", "receipt", "document", func(context.Context) error { return nil }); err != nil {
-		t.Fatalf("expired attempt was not reclaimed: %v", err)
-	}
-	third := make(chan error, 1)
-	go func() {
-		third <- tracker.Track(ctx, org, "test", "receipt", "document", func(run context.Context) error {
-			close(thirdStarted)
-			select {
-			case <-thirdRelease:
-				return nil
-			case <-run.Done():
-				return run.Err()
-			}
-		})
-	}()
-	waitForTrackStart(t, ctx, thirdStarted, third)
-	close(release)
-	if err := waitForTrackResult(t, ctx, first); !errors.Is(err, workqueue.ErrLeaseLost) {
-		t.Fatalf("stale claimant error = %v, want lease lost", err)
-	}
-	close(thirdRelease)
-	if err := waitForTrackResult(t, ctx, third); err != nil {
-		t.Fatalf("new claimant after stale release = %v", err)
-	}
-	var retained int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM queue_document_attempts WHERE organization=$1`, org).Scan(&retained); err != nil {
+	defer func() { _ = lock.Rollback(context.Background()) }()
+	var holder int
+	if err = lock.QueryRow(ctx, `SELECT pg_backend_pid() FROM queue_document_attempts WHERE organization=$1 FOR UPDATE`, org).Scan(&holder); err != nil {
 		t.Fatal(err)
 	}
-	if retained != 0 {
-		t.Fatalf("completed attempts retained = %d, want no execution history", retained)
+	var renewingPID int
+	for renewingPID == 0 {
+		if err = pool.QueryRow(ctx, `SELECT coalesce((SELECT pid FROM pg_stat_activity
+WHERE $1=ANY(pg_blocking_pids(pid)) AND query LIKE 'UPDATE queue_document_attempts%' LIMIT 1),0)`, holder).Scan(&renewingPID); err != nil {
+			t.Fatalf("renewal did not block behind the row lock: %v", err)
+		}
+	}
+	// Cancel only the blocked renewal, so it fails while real work is running.
+	var canceled bool
+	if err = pool.QueryRow(ctx, `SELECT pg_cancel_backend($1)`, renewingPID).Scan(&canceled); err != nil || !canceled {
+		t.Fatalf("cancel blocked renewal: canceled=%v err=%v", canceled, err)
+	}
+	select {
+	case <-renewalFailed:
+	case err = <-slow:
+		t.Fatalf("renewal failure ended tracked work: %v", err)
+	case <-ctx.Done():
+		t.Fatal("renewal failure was not observed")
+	}
+	close(finish)
+	if err = waitForTrackResult(t, ctx, slow); err != nil {
+		t.Fatalf("attempt whose renewal and release failed = %v, want the work's own nil result", err)
+	}
+	select {
+	case <-releaseFailed:
+	default:
+		t.Fatal("locked row did not make release fail")
+	}
+	if err = lock.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE queue_document_attempts SET lease_until='-infinity' WHERE organization=$1`, org); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestQueueTrackerCancelsRunContextAfterPanic(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	pool := rebuildAdapterPool(t, ctx)
-	org := fmt.Sprintf("adapter-queue-panic-%d", time.Now().UnixNano())
-	tracker := postgres.QueueTracker{Pool: pool}
-	var runCtx context.Context
-	var recovered any
-	func() {
-		defer func() { recovered = recover() }()
-		_ = tracker.Track(ctx, org, "panic", "work", "document", func(passed context.Context) error {
-			runCtx = passed
-			panic("tracked callback panic")
-		})
-	}()
-	if recovered == nil {
-		t.Fatal("tracked callback panic was not propagated")
-	}
-	if runCtx == nil {
-		t.Fatal("tracked callback did not receive a context")
-	}
-	if !errors.Is(runCtx.Err(), context.Canceled) {
-		t.Fatalf("panic callback context error = %v, want immediate cancellation", runCtx.Err())
-	}
-	var active bool
-	if err := pool.QueryRow(ctx, `SELECT lease_until>clock_timestamp() FROM queue_document_attempts WHERE organization=$1 AND kind='panic' AND work_id='work' AND document_id='document'`, org).Scan(&active); err != nil {
-		t.Fatal(err)
-	}
-	if !active {
-		t.Fatal("panic attempt was not observable before cleanup")
-	}
-	if _, err := pool.Exec(ctx, `UPDATE queue_document_attempts SET lease_until='-infinity' WHERE organization=$1 AND kind='panic' AND work_id='work' AND document_id='document'`, org); err != nil {
-		t.Fatal(err)
-	}
+// Observe the real adapter's warning to join the failed renewal without sleeps
+// or an injection hook in production. Other logs retain their usual handler.
+type trackingFailureHandler struct {
+	slog.Handler
+	renewed  chan<- struct{}
+	released chan<- struct{}
+}
+
+func (h trackingFailureHandler) Handle(ctx context.Context, record slog.Record) error {
+	record.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == "step" {
+			var failed chan<- struct{}
+			switch attr.Value.String() {
+			case "renew":
+				failed = h.renewed
+			case "release":
+				failed = h.released
+			}
+			select {
+			case failed <- struct{}{}:
+			default:
+			}
+		}
+		return true
+	})
+	return h.Handler.Handle(ctx, record)
 }
 
 func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
@@ -361,8 +388,8 @@ func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
 		t.Fatalf("expired rebuild lease backlog = %+v, want one new waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
 	}
 	close(release)
-	if err = waitForTrackResult(t, ctx, tracked); !errors.Is(err, workqueue.ErrLeaseLost) {
-		t.Fatalf("expired attempt error = %v, want lease lost", err)
+	if err = waitForTrackResult(t, ctx, tracked); err != nil {
+		t.Fatalf("expired attempt error = %v, want the work's own nil result", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE operations SET state='paused' WHERE organization=$1 AND id=$2`, org, op.ID); err != nil {
 		t.Fatal(err)
