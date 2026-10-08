@@ -120,6 +120,9 @@ contributions:
 	}
 }
 
+// A plugin that exits before becoming healthy is reported with its own last
+// output (THE-1059: a contract test printed only the report, which named the
+// exit status but not the plugin's error that its port was taken).
 func TestWaitHealthyFailsWhenTheProcessExits(t *testing.T) {
 	dir, _ := writePlugin(t)
 	var logs strings.Builder
@@ -132,8 +135,8 @@ func TestWaitHealthyFailsWhenTheProcessExits(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	err = p.WaitHealthy(ctx)
-	if err == nil || !strings.Contains(err.Error(), "exited") {
-		t.Fatalf("err %v", err)
+	if err == nil || !strings.Contains(err.Error(), "exited (exit status 3)") || !strings.Contains(err.Error(), "fake plugin: exiting on purpose") {
+		t.Fatalf("err %v, want the exit status and the plugin's last output", err)
 	}
 	if !strings.Contains(logs.String(), "exiting on purpose") {
 		t.Fatalf("plugin output not forwarded: %q", logs.String())
