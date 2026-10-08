@@ -387,6 +387,17 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var declared struct {
+		Configuration struct {
+			ExecutionKeys []string `json:"execution_keys"`
+		} `json:"configuration"`
+	}
+	if err := json.Unmarshal(manifest, &declared); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}; !slices.Equal(declared.Configuration.ExecutionKeys, want) {
+		t.Fatalf("execution-only configuration contract: got %v, want %v", declared.Configuration.ExecutionKeys, want)
+	}
 	path := t.TempDir() + "/quivr-plugin.yaml"
 	if err := os.WriteFile(path, manifest, 0600); err != nil {
 		t.Fatal(err)

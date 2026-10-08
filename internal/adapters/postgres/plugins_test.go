@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -22,6 +23,176 @@ import (
 const hashEmbedder = "../../../sdks/go/examples/hash-embedder/quivr-plugin.yaml"
 
 var hashSpaces = map[string]string{"example.hash_embedder.small": plugins.SpaceServed, "example.hash_embedder.large": plugins.SpaceEvaluation}
+
+// Persisted plans, not registrations, own recipe lineage through adoption,
+// delayed activation, reload and rollback. The rebuild lifecycle owns serving.
+func TestIngestionTuningPlanLineage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.PluginStore{Pool: pool}
+	raw, err := os.ReadFile(hashEmbedder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(concurrency int, declared bool) registry.Seed {
+		t.Helper()
+		declaration := ""
+		if declared {
+			declaration = "  execution_keys: [max_concurrent_requests]\n"
+		}
+		manifest := string(raw) + "\nconfiguration:\n" + declaration + "  schema: {type: object}\n"
+		configuration := json.RawMessage(`{"max_concurrent_requests":4}`)
+		if concurrency == 8 {
+			configuration = json.RawMessage(`{"max_concurrent_requests":8}`)
+		}
+		if concurrency == 16 {
+			configuration = json.RawMessage(`{"max_concurrent_requests":16}`)
+		}
+		pin, err := plugins.LoadPinManifest([]byte(manifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9960", Configuration: configuration, Spaces: hashSpaces})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pins, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return registry.FromPins(pins)
+	}
+	descriptor := func(id string) (string, string) {
+		t.Helper()
+		p, members, err := store.PlanMembers(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pins, _, err := registry.Resolve(p.Roles, members)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := (pluginhttp.Ingestor{Pin: pins.Ingestion()}).Descriptor()
+		return d.Recipe, string(d.Provenance)
+	}
+	l1, err := store.ApplyConfiguration(ctx, seed(4, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the NULL anchors written by the previous engine, then reload.
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_plan_roles SET ingestion_recipe=NULL,ingestion_provenance=NULL WHERE plan_id=$1`, l1.Plan); err != nil {
+		t.Fatal(err)
+	}
+	r1, p1 := descriptor(l1.Plan)
+	if same, err := store.ApplyConfiguration(ctx, seed(4, false)); err != nil || same.Changed || same.Plan != l1.Plan {
+		t.Fatalf("engine upgrade changed legacy plan: %+v %v", same, err)
+	}
+	l2, err := store.ApplyConfiguration(ctx, seed(8, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, p2 := descriptor(l2.Plan)
+	if r1 == r2 {
+		t.Fatal("undeclared legacy tuning must retain distinct original recipes")
+	}
+	candidate := seed(16, true).Registrations[0]
+	candidate.Origin = registry.OriginRegistration
+	candidate.State = registry.StateRegistered
+	registered, _, err := store.RegisterPlugin(ctx, candidate, "tuning-candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordCheck(ctx, registered.ID, registry.CheckReport{Certified: true}); err != nil {
+		t.Fatal(err)
+	}
+	// Change the active lineage after registration, before activating it.
+	if _, err := store.ApplyConfiguration(ctx, seed(4, false)); err != nil {
+		t.Fatal(err)
+	}
+	activate := func(id string) registry.Plan {
+		t.Helper()
+		p, err := store.Activate(ctx, id, func(active registry.Plan, members map[string]registry.Registration, target registry.Registration) (registry.Activation, error) {
+			return registry.PlanActivation(active, members, target, nil)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	d := activate(registered.ID)
+	if r, p := descriptor(d.ID); r != r1 || p != p1 {
+		t.Fatalf("delayed activation inherited stale recipe/provenance: %s %s", r, p)
+	}
+	rollback := func(target, key string) registry.Plan {
+		t.Helper()
+		p, err := store.Rollback(ctx, registry.RollbackRequest{Key: key, Plan: target}, func(active, target registry.Plan, members map[string]registry.Registration) (registry.Activation, error) {
+			return registry.PlanRollback(active, target, members, nil)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	back := rollback(l2.Plan, "tuning-return")
+	if r, p := descriptor(back.ID); r != r1 || p != p1 {
+		t.Fatalf("tuning rollback changed active lineage: %s %s", r, p)
+	}
+	d = activate(registered.ID)
+	if r, p := descriptor(d.ID); r != r1 || p != p1 {
+		t.Fatalf("reactivation changed active lineage: %s %s", r, p)
+	}
+	// A semantic change leaves the adopted lineage. Returning to the earlier
+	// declared plan must restore its inherited legacy anchor, not its native hash.
+	semanticPin, err := plugins.LoadPinManifest(candidate.Manifest, "embedder", plugins.PinConfig{
+		Endpoint: candidate.Endpoint, Spaces: hashSpaces,
+		Configuration: json.RawMessage(`{"max_concurrent_requests":16,"document_template":"prefix"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	semanticPins, err := plugins.NewPinSet([]*plugins.Pin{semanticPin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	semanticSeed := registry.FromPins(semanticPins)
+	changed, err := store.ApplyConfiguration(ctx, semanticSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semanticRecipe, semanticProvenance := descriptor(changed.Plan)
+	if semanticRecipe == r1 {
+		t.Fatal("semantic change retained the tuning recipe")
+	}
+	back = rollback(d.ID, "semantic-return")
+	if r, p := descriptor(back.ID); r != r1 || p != p1 {
+		t.Fatalf("semantic rollback lost the target's inherited legacy recipe/provenance: %s %s", r, p)
+	}
+	if r, p := descriptor(changed.Plan); r != semanticRecipe || p != semanticProvenance {
+		t.Fatalf("semantic rollback rewrote the abandoned plan: %s %s", r, p)
+	}
+	// Replay of the same registration can begin a new native lineage after
+	// semantic work. A named rollback with identical inputs keeps that active
+	// lineage, rather than blindly restoring the historical tuning anchor.
+	activate(semanticSeed.Registrations[0].ID)
+	native := activate(registered.ID)
+	nativeRecipe, nativeProvenance := descriptor(native.ID)
+	if nativeRecipe == r1 {
+		t.Fatal("semantic reactivation did not start its native lineage")
+	}
+	same := rollback(d.ID, "same-registration-return")
+	if r, p := descriptor(same.ID); same.ID != native.ID || r != nativeRecipe || p != nativeProvenance {
+		t.Fatalf("equivalent rollback replaced the active lineage: %s %s", r, p)
+	}
+	if r, p := descriptor(d.ID); r != r1 || p != p1 {
+		t.Fatalf("same-registration replay rewrote its historical anchor: %s %s", r, p)
+	}
+	if r, p := descriptor(l2.Plan); r != r2 || p != p2 {
+		t.Fatalf("historical recipe was rewritten: %s %s", r, p)
+	}
+	if r, p := descriptor(l1.Plan); r != r1 || p != p1 {
+		t.Fatalf("legacy recipe was rewritten: %s %s", r, p)
+	}
+}
 
 // configured is the seed of startup pins.
 func configured(t *testing.T, configs ...plugins.PinConfig) registry.Seed {

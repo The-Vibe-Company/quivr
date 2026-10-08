@@ -36,7 +36,18 @@ func Resolve(roles []Assignment, registrations map[string]Registration) (*plugin
 		members = append(members, r)
 	}
 	routing := ingestionRouting(roles, registrations)
-	return resolveMembers(members, &routing)
+	set, byPin, err := resolveMembers(members, &routing)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, pin := range set.Pins() {
+		for _, a := range canonicalRoles(roles, registrations) {
+			if a.RegistrationID == pin.Registration && a.Role == ingestionMembershipRole(pin.Manifest.ID) {
+				pin.IngestionDerivation = a.IngestionDerivation
+			}
+		}
+	}
+	return set, byPin, nil
 }
 
 // resolveMembers loads registrations and routes them with the startup rules.

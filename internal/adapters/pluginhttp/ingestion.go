@@ -40,10 +40,8 @@ func (i Ingestor) Descriptor() processing.IngestionDescriptor {
 	// Model and segment settings can change without a plugin version change.
 	// Keep both derivations immutable and reusable across projection generations;
 	// endpoints, registration ids and enabled roles do not affect the output.
-	configuration := registry.SettingsOf(i.Pin).Configuration
 	recipe := registry.IngestionRecipe(i.Pin)
-	provenance, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version,
-		"manifest_digest": i.Pin.ManifestDigest, "configuration_digest": content.Hash(configuration)})
+	provenance := registry.IngestionProvenance(i.Pin)
 	d := processing.IngestionDescriptor{PluginID: i.Pin.Manifest.ID, PluginVersion: i.Pin.Manifest.Version,
 		RegistrationID: i.Pin.Registration, Configuration: i.Pin.Configuration, InputPrices: map[string]*float64{},
 		Recipe: recipe, Producer: recipe, Provenance: provenance,

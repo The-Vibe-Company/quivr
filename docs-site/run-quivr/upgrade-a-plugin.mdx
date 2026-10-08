@@ -219,9 +219,34 @@ The earlier registration and plans stay exact. Work already started stays on its
 
 A saved rollback plan may name the replaced build, even as an evaluation member. Quivr refuses that rollback with `409 plugin_unreachable` until the exact build runs again at its recorded endpoint. To restore the previous ingestion owner while keeping the new build installed, activate that owner's current evaluation registration from `GET /v0/admin/plugins`: select its `plugin_id` with `state: active`, then use its `registration_id` in the activation call above. Its evaluated source formats become served again, subject to [complete coverage](/run-quivr/backfill-a-vector-space). For example, activating the current `core.ingest` registration reverses a promotion to another embedding owner. The newer owner remains available for evaluation.
 
+## Tune embedding throughput
+
+The hosted embedding plugin declares `max_concurrent_requests`, `batch_size`,
+`max_batch_tokens`, `request_timeout_ms`, `call_budget_ms`, `batch_wait_ms` and
+`max_retries` as execution-only settings. Change them while keeping the plugin
+id and version, regenerate and certify its manifest, then register and activate
+it using the steps above. Run it at a separate address until the previous
+registration becomes `inactive`; old pinned work still needs its exact manifest.
+
+Quivr keeps the active ingestion recipe and its derivation provenance, even on
+the first upgrade from a manifest without execution declarations. Existing
+vectors stay served and imports do not settle with `rebuild_required` for tuning
+changes. After activation, inspect `GET /v0/admin/documents/{version_id}/timeline`
+for existing and newly imported documents: their enrichment should settle
+without `rebuild_required`. Repeat a semantic search against existing documents
+to confirm their vectors still serve; check `GET /v0/admin/plugins` for the
+previous registration’s state before stopping its process.
+Model, templates, packing, tokenizer, tokens per chunk and plugin version
+changes still need the recipe-change procedure below.
+
+Plan rollback on the upgraded engine preserves the active recipe through tuning
+changes. A binary downgrade also requires legacy-compatible manifests and
+recipes that match that binary's computation; an old binary cannot read the new
+manifest declaration or honor plan anchors.
+
 ## Change a chunking or embedding recipe
 
-When settings or the embedding model change for the same ingestion plugin, [rebuild each affected Corpus](/plugins/write-an-ingestion-plugin) to switch its search data. Imports continue before and during the rebuild: new Versions remain searchable by text through the search index currently serving that Corpus. If the new plugin cannot produce vectors for the current model, enrichment stops once with `rebuild_required`; it does not retry the recipe mismatch. The rebuild catches up new Versions before switching the route, and the diagnostic disappears when the vectors in that serving index are complete.
+When settings that affect chunking or vectors change for the same ingestion plugin, [rebuild each affected Corpus](/plugins/write-an-ingestion-plugin) to switch its search data. Imports continue before and during the rebuild: new Versions remain searchable by text through the search index currently serving that Corpus. If the new plugin cannot produce vectors for the current model, enrichment stops once with `rebuild_required`; it does not retry the recipe mismatch. The rebuild catches up new Versions before switching the route, and the diagnostic disappears when the vectors in that serving index are complete.
 
 Receipts already pinned to the previous recipe keep that pin. If their results arrive after the route switches, Quivr automatically starts separate work pinned to the current plan to finish their serving segments and vectors. Keep the old build reachable until its pinned work drains. Versions quarantined by an operator remain quarantined; after the rebuild activates, [reprocess them](/run-quivr/reprocess-quarantined-versions) through the active plan, using their existing quarantine code.
 

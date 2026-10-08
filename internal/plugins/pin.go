@@ -91,9 +91,17 @@ type Pin struct {
 	// every invocation idempotency key; empty for a pin loaded from the
 	// configuration alone.
 	KeyIdentity string
-	apiOnce     sync.Once
-	api         API
-	routes      map[string]RouteConfig
+	// IngestionDerivation is the immutable plan's recipe/provenance anchor.
+	// Nil keeps the native identity of pins and plans written before anchors.
+	IngestionDerivation *IngestionDerivation
+	apiOnce             sync.Once
+	api                 API
+	routes              map[string]RouteConfig
+}
+
+type IngestionDerivation struct {
+	Recipe     string          `json:"recipe"`
+	Provenance json.RawMessage `json:"provenance"`
 }
 
 // PinError lists every actionable issue of a refused pin.

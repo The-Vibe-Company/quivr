@@ -87,6 +87,80 @@ func TestIngestionDerivationIdentity(t *testing.T) {
 	}
 }
 
+// Execution declarations must change provider pacing without changing cuts or
+// vectors. This descriptor boundary owns configuration/manifest recipe identity.
+func TestIngestionExecutionIdentity(t *testing.T) {
+	manifest := embedderManifest + `
+configuration:
+  execution_keys: [max_concurrent_requests, batch_size, max_batch_tokens, request_timeout_ms, call_budget_ms]
+  schema:
+    type: object
+    properties:
+      max_concurrent_requests: {const: 4}
+`
+	configuration := `{"model":"small","document_template":"prefix","packing":"none","max_tokens_per_segment":512,"max_concurrent_requests":4,"batch_size":16,"max_batch_tokens":8192,"request_timeout_ms":4000,"call_budget_ms":30000}`
+	load := func(manifest, configuration string) *plugins.Pin {
+		t.Helper()
+		pin, err := plugins.LoadPinManifest([]byte(manifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900", Configuration: json.RawMessage(configuration)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pin
+	}
+	before := (pluginhttp.Ingestor{Pin: load(manifest, configuration)}).Descriptor()
+	for _, tc := range []struct {
+		name, old, next string
+		same            bool
+	}{
+		{"concurrency and generated const", `"max_concurrent_requests":4`, `"max_concurrent_requests":16`, true},
+		{"batch size", `"batch_size":16`, `"batch_size":32`, true},
+		{"batch tokens", `"max_batch_tokens":8192`, `"max_batch_tokens":16384`, true},
+		{"request timeout", `"request_timeout_ms":4000`, `"request_timeout_ms":8000`, true},
+		{"call budget", `"call_budget_ms":30000`, `"call_budget_ms":60000`, true},
+		{"omitted tuning", `,"batch_size":16`, ``, true},
+		{"model", `"model":"small"`, `"model":"large"`, false},
+		{"template", `"document_template":"prefix"`, `"document_template":"gemma"`, false},
+		{"packing", `"packing":"none"`, `"packing":"paragraphs"`, false},
+		{"tokens per segment", `"max_tokens_per_segment":512`, `"max_tokens_per_segment":256`, false},
+		{"undeclared setting", `"packing":"none"`, `"packing":"none","runtime_note":1`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nextManifest := manifest
+			if tc.name == "concurrency and generated const" {
+				nextManifest = strings.Replace(manifest, "const: 4", "const: 16", 1)
+			}
+			after := (pluginhttp.Ingestor{Pin: load(nextManifest, strings.Replace(configuration, tc.old, tc.next, 1))}).Descriptor()
+			if (before.Recipe == after.Recipe) != tc.same {
+				t.Fatalf("recipe equal = %v, want %v: %s -> %s", before.Recipe == after.Recipe, tc.same, before.Recipe, after.Recipe)
+			}
+		})
+	}
+	for _, change := range []struct {
+		name, manifest string
+		same           bool
+	}{
+		{"declaration order", strings.Replace(manifest, "[max_concurrent_requests, batch_size, max_batch_tokens, request_timeout_ms, call_budget_ms]", "[call_budget_ms, request_timeout_ms, max_batch_tokens, batch_size, max_concurrent_requests]", 1), true},
+		{"declaration contract", strings.Replace(manifest, "batch_size, ", "", 1), false},
+		{"plugin version", strings.Replace(manifest, "version: 0.1.0", "version: 0.2.0", 1), false},
+		{"model declaration", strings.Replace(manifest, "model: acme/small", "model: acme/large", 1), false},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			after := (pluginhttp.Ingestor{Pin: load(change.manifest, configuration)}).Descriptor()
+			if (before.Recipe == after.Recipe) != change.same {
+				t.Fatalf("recipe equal = %v, want %v", before.Recipe == after.Recipe, change.same)
+			}
+		})
+	}
+	// Manifest admission accepts YAML-only object keys by normalizing them to
+	// JSON strings. Recipe hashing must retain those semantic schema constants.
+	yamlManifest := manifest + "      semantic: {enum: [{1: first}]}\n"
+	first := (pluginhttp.Ingestor{Pin: load(yamlManifest, configuration)}).Descriptor()
+	second := (pluginhttp.Ingestor{Pin: load(strings.Replace(yamlManifest, "1: first", "1: second", 1), configuration)}).Descriptor()
+	if first.Recipe == second.Recipe {
+		t.Fatal("different valid YAML schema constants shared a recipe")
+	}
+}
+
 // A plugin refuses a query terminally: query_too_long names its limit to the
 // caller, any other code is a refusal of the query without detail.
 func TestEncodeQueryPassesOnTheLimitAPluginNames(t *testing.T) {
