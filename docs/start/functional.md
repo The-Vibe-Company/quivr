@@ -14,7 +14,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 - [Deploy a search measurement store](../../deploy/mlflow/README.md): deploy an authenticated shared search measurement store
 - [Serve EmbeddingGemma 2 on Modal](../../deploy/modal/README.md): authenticated Modal embedding deployment, corpus rebuild and rollback
 - [Railway evaluation demo](../../deploy/railway/README.md): run a hosted single-node evaluation demo
-- [Scale bulk workers on Railway](../../deploy/railway/autoscaler/README.md): scale bulk workers from backlog with a standalone Go controller
+- [Scale bulk workers on Railway](../../deploy/railway/autoscaler/README.md): scale Railway bulk workers from queue backlog
 - [Switch hosted text embeddings with rollback](../../deploy/railway/hosted-embeddings.md): evaluate, fill and switch hosted text embeddings with rollback
 - [Quivr Search demo (THE-663)](../../quivr-search/README.md): the demo web app: search, sources, live feed and the admin view
 
