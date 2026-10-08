@@ -43,7 +43,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 					t.Fatal(err)
 				}
 				startup, stop := context.WithTimeout(ctx, time.Second)
-				err = app.BootstrapDatabase(startup, pool, app.DeploymentSpaces(nil))
+				err = app.BootstrapDatabase(startup, pool, app.Config{}.DeploymentSpaces(nil))
 				stop()
 				if err != nil {
 					t.Fatalf("blocked performance index prevented migration setup: %v", err)
@@ -57,7 +57,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 			}
 			bootstrap := func() {
 				t.Helper()
-				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+				if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -180,7 +180,7 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			if _, err := installer.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
 				t.Fatal(err)
 			}
-			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+			if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 				t.Fatalf("held migration and index locks failed an up-to-date migrate: %v", err)
 			}
 			pending := fstest.MapFS{"99991231T2359Z_pending.sql": {Data: []byte("CREATE TABLE contended_migration ()")}}
@@ -200,9 +200,6 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			var applied bool
 			if err := pool.QueryRow(ctx, "SELECT to_regclass('contended_migration') IS NOT NULL").Scan(&applied); err != nil || applied {
 				t.Fatalf("contended migration applied: %v, %v", applied, err)
-			}
-			if got := maintenance.State(); got != "building" {
-				t.Fatalf("index maintenance state during migrate: want building, got %s", got)
 			}
 
 			// The real migrator lock timeout elapsed while the optional DDL

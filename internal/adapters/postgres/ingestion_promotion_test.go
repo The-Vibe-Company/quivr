@@ -47,7 +47,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if err = pins.ConfigureIngestion(plugins.IngestionRouting{Default: "example.hash_embedder", Evaluation: map[string][]string{"text/plain": {"certified.ingestion-valid"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err = app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(pins)); err != nil {
+	if err = app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(pins)); err != nil {
 		t.Fatal(err)
 	}
 	pluginsStore := postgres.PluginStore{Pool: pool}
@@ -83,7 +83,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	operator := corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}
-	registryService := registry.Service{Store: pluginsStore, Spaces: app.DeploymentSpaces}
+	registryService := registry.Service{Store: pluginsStore, Spaces: app.Config{}.DeploymentSpaces}
 	a := original.IngestionFor("text/plain")
 	b := original.EvaluationFor("text/plain")[0]
 	pin := func(receipt content.Receipt) context.Context {
@@ -661,7 +661,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = store.RegisterSpaces(ctx, app.DeploymentSpaces(pins)); err != nil {
+	if err = store.RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(pins)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.AlignDefaultGeneration(ctx); err != nil {

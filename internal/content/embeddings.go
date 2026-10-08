@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 )
 
@@ -39,7 +41,50 @@ type RegisteredSpace struct {
 	Model, Metric                     string
 	Indexes, QueryModalities          []string
 	Role                              string
+	// Index is how the search index stores the space's vectors in
+	// generations built from now on; nil records no setting.
+	Index *VectorIndex
 }
+
+// Quantizations of a vector index: 8-bit or 1-bit rotational quantization,
+// or full-precision vectors only.
+const (
+	QuantizationRQ8  = "rq-8"
+	QuantizationRQ1  = "rq-1"
+	QuantizationNone = "none"
+)
+
+// VectorIndex is how the search index stores one space's vectors: an HNSW
+// graph over vectors compressed by Quantization. A compressed index keeps
+// the full-precision vectors on disk and rescores the best RescoreLimit
+// candidates with them; zero keeps the index's own default. A generation
+// records it with each space, so changing it builds a new index through a
+// rebuild instead of altering one in place.
+type VectorIndex struct {
+	Quantization string `json:"quantization"`
+	RescoreLimit int    `json:"rescore_limit,omitempty"`
+}
+
+// DefaultVectorIndex compresses vectors to 8 bits.
+var DefaultVectorIndex = VectorIndex{Quantization: QuantizationRQ8}
+
+// Validate refuses an unknown quantization, a negative rescore limit, and a
+// rescore limit without compression to rescore.
+func (x VectorIndex) Validate() error {
+	switch x.Quantization {
+	case QuantizationRQ8, QuantizationRQ1, QuantizationNone:
+	default:
+		return fmt.Errorf("quantization must be %s, %s or %s", QuantizationRQ8, QuantizationRQ1, QuantizationNone)
+	}
+	if x.RescoreLimit < 0 {
+		return errors.New("rescore_limit must not be negative")
+	}
+	if x.RescoreLimit > 0 && x.Quantization == QuantizationNone {
+		return errors.New("rescore_limit needs a quantization to rescore")
+	}
+	return nil
+}
+
 type Embedding struct {
 	ID             string         `json:"embedding_artifact_id"`
 	DerivationID   string         `json:"derivation_id"`

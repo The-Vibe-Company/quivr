@@ -162,7 +162,7 @@ func TestMigrationKeepsSpacesWhenRoutingIsInvalid(t *testing.T) {
 				{Manifest: "../../sdks/go/examples/hash-embedder/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1", Spaces: map[string]string{"example.hash_embedder.small": "served", "example.hash_embedder.large": "evaluation"}},
 			}, Ingestion: tc.ingestion, Retrieval: tc.retrieval}
 			owners := map[string]int{}
-			for _, space := range DeploymentSpaces(cfg.migrationPins()) {
+			for _, space := range cfg.DeploymentSpaces(cfg.migrationPins()) {
 				owners[space.OwnerPluginID]++
 			}
 			if !reflect.DeepEqual(owners, map[string]int{"core.ingest": 1, "example.hash_embedder": 2}) {
