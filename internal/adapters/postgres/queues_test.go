@@ -435,7 +435,7 @@ func readQueueStatus(t *testing.T, reader postgres.QueueSnapshots, ctx context.C
 	t.Helper()
 	// Force a refresh at the persisted state transition without waiting for
 	// the production polling interval. This exercises the production reader.
-	if _, err := reader.Pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at='-infinity'`); err != nil {
+	if _, err := reader.Pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at='-infinity',published_at='-infinity'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := reader.Refresh(ctx); err != nil {
@@ -506,7 +506,7 @@ func TestQueueSnapshotsReadWithoutDocumentScanAndRejectStaleData(t *testing.T) {
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at=clock_timestamp()-interval '2 minutes'`); err != nil {
+	if _, err = pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at=clock_timestamp()-interval '2 minutes',published_at=clock_timestamp()-interval '2 minutes'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = snapshots.QueueBacklog(ctx); err == nil {

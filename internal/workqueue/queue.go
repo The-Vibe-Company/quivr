@@ -68,7 +68,9 @@ func Class(ctx context.Context) string {
 	return Live
 }
 
-// Status counts distinct document work in a class, using durable admission time.
+// Status observes document work in a class. Document age uses durable admission
+// time; estimated operation age uses operation creation time.
+// Rebuild/backfill waiting terms estimate remaining scope from operation counters.
 type Status struct {
 	Queue            string  `json:"-"`
 	Waiting          int64   `json:"waiting"`

@@ -10,9 +10,9 @@ import (
 )
 
 // Queue refresh owns this work bound: superseded queued enrichment must not
-// require scanning history while one actual waiting document stays fixed. Unlike
-// the count owner, this test observes database work, without a timing assertion
-// or a forced planner setting.
+// require scanning history, and a pending rebuild must not enumerate its scope
+// on every observation. Unlike the count owner, this test observes database work,
+// without a timing assertion or a forced planner setting.
 func TestQueueBacklogWorkDoesNotGrowWithSupersededEnrichment(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -33,6 +33,9 @@ func TestQueueBacklogWorkDoesNotGrowWithSupersededEnrichment(t *testing.T) {
 VALUES('example','corpus','corpus','','Example','{}');
 INSERT INTO content_blobs(organization,blob_id,object_key,sha256,byte_length)
 VALUES('example','blob','example','example',1)`)
+	exec(`INSERT INTO projection_generations(id,collection,profile_version) VALUES('queue-target','queue-target','example');
+INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,counters)
+VALUES('example','rebuild','projection_rebuild','corpus','rebuild','','queue-target','{"versions_in_scope":1000}')`)
 	var firstBlocks, firstRepairBlocks int
 	for _, size := range []int{1000, 10000} {
 		low := 1
@@ -48,10 +51,11 @@ FROM generate_series($1::int,$2::int) i CROSS JOIN (VALUES('old'),('current')) k
 SELECT organization,record_id,slot,digest,id,acceptance_order,source_position,'{}',now() FROM record_versions
 WHERE record_id IN (SELECT 'record-'||i FROM generate_series($1::int,$2::int) i)`, low, size)
 		exec("ANALYZE")
+		exec(`UPDATE operations SET counters=jsonb_build_object('versions_in_scope',$1::bigint) WHERE organization='example' AND id='rebuild'`, size)
 		// Exercise refresh and allow bounded initialization to finish without
-		// waiting for the production one-second snapshot interval.
+		// waiting for the production snapshot interval.
 		for batch := 0; batch <= size/1000; batch++ {
-			exec("UPDATE queue_backlog_snapshots SET observed_at='-infinity'")
+			exec("UPDATE queue_backlog_snapshots SET observed_at='-infinity',published_at='-infinity'")
 			if err := (QueueSnapshots{Pool: pool}).Refresh(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +65,7 @@ WHERE record_id IN (SELECT 'record-'||i FROM generate_series($1::int,$2::int) i)
 			t.Fatal(err)
 		}
 		for _, status := range statuses {
-			expected := int64(0)
+			expected := int64(size)
 			if status.Queue == "live" {
 				expected = 1
 			}
@@ -107,11 +111,11 @@ WHERE record_id IN (SELECT 'record-'||i FROM generate_series($1::int,$2::int) i)
 			t.Fatal(err)
 		}
 		blocks := queueWorkBlocks(t, raw)
-		t.Logf("history=%d records: shared buffers=%d, waiting=1", size, blocks)
+		t.Logf("history=%d records: shared buffers=%d, live waiting=1, bulk waiting=%d", size, blocks, size)
 		if size == 1000 {
 			firstBlocks = blocks
 		} else if blocks > 2*firstBlocks+100 {
-			t.Fatalf("fixed one-document backlog work grew with superseded history: buffers %d -> %d (bound %d)", firstBlocks, blocks, 2*firstBlocks+100)
+			t.Fatalf("backlog query work grew with history/rebuild scope: buffers %d -> %d (bound %d)", firstBlocks, blocks, 2*firstBlocks+100)
 		}
 	}
 }
