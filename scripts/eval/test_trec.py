@@ -9,12 +9,12 @@ import zipfile
 import trec
 
 
-def write_set(directory, qrels='q1\td1\t2\nq1\td2\t0\nq2\td2\t1\n', header=True, corpus=None):
+def write_set(directory, qrels='q1\td1\t2\nq1\td2\t0\nq2\td2\t1\nq4\td1\t0\n', header=True, corpus=None):
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     rows = corpus or [{'_id': 'd1', 'title': 'Titre', 'text': 'premier'}, {'_id': 'd2', 'text': 'second'}, {'_id': 'd3', 'text': 'autre'}]
     (directory / 'corpus.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
-    (directory / 'queries.jsonl').write_text(''.join(json.dumps({'_id': q, 'text': 'question ' + q}) + '\n' for q in ['q1', 'q2', 'q3']))
+    (directory / 'queries.jsonl').write_text(''.join(json.dumps({'_id': q, 'text': 'question ' + q}) + '\n' for q in ['q1', 'q2', 'q3', 'q4']))
     (directory / 'qrels.tsv').write_text(('query-id\tcorpus-id\tscore\n' if header else '') + qrels)
     return directory
 
@@ -25,7 +25,7 @@ class Load(unittest.TestCase):
             s = trec.load(write_set(d))
         self.assertEqual(s['qrels'], {'q1': {'d1': 2, 'd2': 0}, 'q2': {'d2': 1}})
         self.assertEqual(sorted(s['queries']), ['q1', 'q2'])
-        self.assertEqual(s['dropped_queries'], ['q3'])  # no positive judgement: cannot be scored
+        self.assertEqual(s['dropped_queries'], ['q3', 'q4'])  # missing or all-zero judgments
         self.assertEqual(s['corpus']['d2'], {'title': '', 'text': 'second'})
 
     def test_trec_four_columns_without_header(self):
