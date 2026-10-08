@@ -18,9 +18,10 @@ flight; the step lets 0.1.0 run again, TestPluginActivationDrains sees that
 Record finish on 0.1.0 and 0.1.0 drain (THE-786); the step stops 0.1.0, and
 TestPluginActivationIngests ingests and searches through 0.2.0 alone. Finally (THE-782) 0.1.0 runs again
 and 0.2.0 stops: TestPinnedWorkStarts pins a Record to 0.2.0's plan and
-activates 0.1.0, the step restarts the worker, and TestPinnedWorkDrains checks
-that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
-drains. Last (THE-783), 0.2.0 runs again as a bad release: TestRollbackStarts
+activates 0.1.0, the step restarts the worker, and TestPinnedWorkRetries checks
+that the Record keeps retrying on 0.2.0. The step restores 0.2.0 and
+TestPinnedWorkDrains sees the original import finish and release its pin.
+Last (THE-783), 0.2.0 runs again as a bad release: TestRollbackStarts
 activates it and ingests through it, the step stops it, and TestRollback rolls
 back to 0.1.0 in one call, stopping the Record pinned to 0.2.0 and ingesting
 the next one through 0.1.0 alone. Then (THE-784) TestBackfillFillsWindowAndPromotesSpaces builds a
@@ -114,9 +115,7 @@ def verify(stack):
         # Work in flight finishes on the version it started on (THE-786):
         # 0.1.0 is frozen, so its calls hang instead of failing, while
         # TestPluginActivation starts a Record on it and activates 0.2.0;
-        # running again, it finishes that Record and drains. Keep the freeze
-        # short: two 10 s call deadlines (timeout_ms, pinned_plugin_attempts=2)
-        # would quarantine the Record instead.
+        # running again, it finishes that Record and drains.
         os.killpg(plugin.pid, signal.SIGSTOP)
         try:
             stack.tests('^TestPluginActivation$', activation)
@@ -129,19 +128,20 @@ def verify(stack):
         # Work finishes on the plan it started on (THE-782): 0.1.0 runs again
         # at its address and 0.2.0 stops. TestPinnedWorkStarts pins a Record
         # to 0.2.0's plan and activates 0.1.0; the worker restarts while 0.2.0
-        # drains, and TestPinnedWorkDrains sees the Record quarantined, never
-        # moved to 0.1.0, and 0.2.0 inactive.
+        # drains. The import keeps retrying on its original pin until that
+        # exact build returns; it never moves to 0.1.0.
         plugin = start_plugin(directory, binary, port, SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
         await_healthy(plugin, port, directory / 'plugin.log')
         stop_plugin(next_plugin)
         stack.tests('^TestPinnedWorkStarts$', activation)
         stack.stop_worker()
         stack.start_worker()
-        stack.tests('^TestPinnedWorkDrains$', activation)
-        # One-call rollback (THE-783): 0.2.0 runs again and is activated as a
-        # bad release, then stops; TestRollback rolls back to 0.1.0.
+        stack.tests('^TestPinnedWorkRetries$', activation)
         next_plugin = start_plugin(directory, binary, next_port, next_manifest, 'plugin-0.2.0.log')
         await_healthy(next_plugin, next_port, directory / 'plugin-0.2.0.log')
+        stack.tests('^TestPinnedWorkDrains$', activation)
+        # One-call rollback (THE-783): 0.2.0 is activated as a bad release,
+        # then stops; TestRollback rolls back to 0.1.0.
         stack.tests('^TestRollbackStarts$', activation)
         stop_plugin(next_plugin)
         stack.tests('^TestRollback$', activation)

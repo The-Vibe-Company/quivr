@@ -294,12 +294,10 @@ func boundedMessage(message string) string {
 	return message
 }
 
-// unavailable retries an unreachable normalizer without limit, unless the
-// work is pinned to a plan the normalizer has left: past the work's budget,
-// the failure is recorded with the plan, and publication quarantines the
-// Version rather than moving it to another normalizer (plugins.Unreachable).
+// unavailable keeps live imports retrying on their original normalizer even
+// after it leaves the active plan. Explicit stops and operation budgets remain.
 func (s Service) unavailable(ctx context.Context, inv invocation, pin *plugins.Pin, err error) error {
-	reason, countErr := plugins.Unreachable(ctx, pin, Contribution)
+	reason, countErr := plugins.Unavailable(ctx, pin, Contribution)
 	switch {
 	case countErr != nil:
 		return s.retry(ctx, inv.org, inv.receiptID, "normalization_store_unavailable", countErr)
