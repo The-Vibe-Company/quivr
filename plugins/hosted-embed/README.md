@@ -208,21 +208,26 @@ retry backoff supplies the shared delay. This cap and the engine's evaluation
 and backfill concurrency limits apply per process; tune all of them to your
 provider's allowance.
 
-Paged ingestion preserves every text Part in reading order, including titles and
-context. The engine sends source windows of at most 4096 Unicode code points;
-paragraph packing preserves complete paragraphs inside each window and splits
-larger paragraphs at model or window boundaries. Parts have separate passages.
-There is no overlap. A final passage below `tail_min_fraction` is rebalanced
+For items with several text Parts, at most 64 Parts and at most 256 KiB of text,
+the engine first asks for whole-item segmentation and embedding. Paragraph
+packing combines consecutive body Parts within `body_tokens`; the headline
+supplies the configured title context rather than its own passage. Oversized
+items and whole-item size refusals use durable paged ingestion without truncation.
+Single-text-Part items retain paged segmentation. Pages preserve every text Part,
+including titles and context, using windows of at most 4096 Unicode code points.
+Larger paragraphs split at model or window boundaries. Paged Parts have separate
+passages with no overlap. A final passage below `tail_min_fraction` is rebalanced
 with its predecessor by moving whole paragraphs, minimizing token imbalance;
 ties move the fewest paragraphs. Each source range remains an exact Unicode
 code-point slice of an immutable Part. Search responses expose `passage_text`
 and `source_excerpts`; the original `excerpt` remains the first source slice.
 
-For EmbeddingGemma, `auto` selects `title: none | text: {passage}`. Titles and
-context are independently embedded rather than repeated in every body input;
-this prevents a large headline from exceeding every provider request. Paged
-provenance records `context_mode: separate_passages`. The title configuration
-options remain available for legacy unpaged invocations. Queries keep their prefix.
+For EmbeddingGemma, `auto` selects `title: {title} | text: {passage}` for whole
+items, using the title configuration. Paged inputs use `title: none`, with
+titles and context embedded independently; a large headline cannot crowd body
+text out of every input. Paged provenance records `context_mode: separate_passages`.
+Queries keep their prefix. The host's whole-item packing policy changes the
+ingestion recipe identity; rebuild affected Corpora to replace earlier passages.
 
 Use `python3 scripts/prepare_tokenizer.py --hosted` to prepare the pinned Gemma
 tokenizer offline before startup. Configure the returned local tokenizer paths

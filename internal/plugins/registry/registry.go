@@ -121,7 +121,13 @@ func SettingsOf(pin *plugins.Pin) Settings {
 // manifest and configuration. Addresses, registrations and enabled roles do
 // not change the derivation.
 func IngestionRecipe(pin *plugins.Pin) string {
-	return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", pin.ManifestDigest, string(SettingsOf(pin).Configuration))
+	inputs := []string{pin.ManifestDigest, string(SettingsOf(pin).Configuration)}
+	if in := pin.Manifest.Contributions.Ingestion; in != nil && in.Paging {
+		// Host routing changes cuts even with an unchanged plugin package.
+		// Keep old per-Part paging artifacts outside the whole-item recipe.
+		inputs = append(inputs, "whole-item-first:v1")
+	}
+	return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", inputs...)
 }
 
 // Digest identifies the settings: sha256 over their canonical JSON.

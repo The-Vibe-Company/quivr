@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
@@ -137,6 +138,9 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	}, nil)
 	observe(i.Pin, org, OpSegmentAndEmbed, started, result, err)
 	if err != nil {
+		if i.Descriptor().Paged && wholeResponseTooLarge(result) {
+			return nil, errors.Join(i.refused("whole-item output exceeds a page work bound"), &plugins.PluginError{Code: "segmentation_limit"})
+		}
 		return nil, err
 	}
 	answer, err := plugins.DecodeSegmentAndEmbed(result.Body)
@@ -156,6 +160,23 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance, SourceRanges: ranges, SourceSeparator: s.SourceSeparator}, Vectors: vectors}
 	}
 	return out, nil
+}
+
+// SDK error envelopes predate typed work-limit codes. Accept their size-only
+// messages exactly; a combined size/vector/offset failure remains invalid.
+var sdkResponseLimit = regexp.MustCompile(`^(?:[0-9]+ segments exceed max_segments [0-9]+|the response is [0-9]+ bytes; max_response_bytes is [0-9]+|the response exceeds max_(?:segments|response_bytes))$`)
+
+func wholeResponseTooLarge(result *devhost.Result) bool {
+	if result == nil || result.Error != nil && result.Error.Retryable {
+		return false
+	}
+	sizeOnly := len(result.Issues) > 0
+	for _, issue := range result.Issues {
+		if issue.Code != plugins.CodeTooManySegments && issue.Code != plugins.CodeResponseTooLarge {
+			return false
+		}
+	}
+	return sizeOnly || result.Error != nil && (result.Error.Code == "response_too_large" || result.Error.Code == "invalid_response" && sdkResponseLimit.MatchString(result.Error.Message))
 }
 
 // Gone decides whether work pinned to the plugin's plan stops after cause:

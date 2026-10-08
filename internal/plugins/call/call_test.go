@@ -212,7 +212,7 @@ func TestInvocationClassifiesWireOutcomes(t *testing.T) {
 	}{
 		{name: "success", operation: call.EmbedQuery, status: 200, body: `{"vector":[1,0]}`},
 		{name: "retryable", operation: call.Normalize, status: 503, body: `{"code":"busy","message":"later","retryable":true}`, declared: true},
-		{name: "terminal", operation: call.SegmentAndEmbed, status: 422, body: `{"code":"bad_input","message":"refused","retryable":false}`, want: content.ErrIngestionRefused},
+		{name: "terminal", operation: call.SegmentAndEmbed, status: 422, body: `{"code":"bad_input","message":"refused","retryable":false}`, want: content.ErrIngestionRefused, declared: true},
 		{name: "query limit", operation: call.EmbedQuery, status: 422, body: `{"code":"query_too_long","message":"128 tokens","retryable":false}`, want: retrieval.ErrQueryTooLong},
 		{name: "query refused", operation: call.EmbedQuery, status: 422, body: `{"code":"unsupported","message":"refused","retryable":false}`, want: content.ErrInvalid},
 		{name: "search refused", operation: call.SearchRound, status: 422, body: `{"code":"unsupported","message":"refused","retryable":false}`, want: content.ErrInvalid},
