@@ -27,9 +27,6 @@ func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := postgres.InitializeStorage(ctx, pool); err != nil {
-		return fmt.Errorf("storage mode: %w", err)
-	}
 	// Optional performance indexes are maintained by the API and worker after
 	// startup. Required registry/default-generation work keeps its own budget.
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)

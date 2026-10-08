@@ -113,10 +113,11 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			}
 			vector := make([]float32, sp.Dimensions)
 			vector[0] = 1
-			artifact, err := contents.SaveEmbedding(ctx, content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], sp, "fixture"), sp, vector)
+			packed, err := contents.SaveEmbeddingGroup(ctx, seg, sp, []content.EmbeddingData{{Artifact: content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], sp, "fixture"), Vector: vector}})
 			if err != nil {
 				t.Fatal(err)
 			}
+			artifact := packed[0].Artifact
 			evaluationPin := pins.EvaluationFor("text/plain")[0]
 			live, err := plugins.NewLive(plan.Plan, pins)
 			if err != nil {

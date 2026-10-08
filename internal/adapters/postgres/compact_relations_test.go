@@ -62,15 +62,8 @@ CROSS JOIN storage_spaces sp WHERE sp.space_id='space' AND i<>2`, low, size)
 		exec(`INSERT INTO compact_embedding_coverage(organization_id,file_id,generation_id,covered)
 SELECT o.id,i,'served',CASE WHEN i=4 THEN decode('00','hex') ELSE decode('01','hex') END
 FROM storage_organizations o CROSS JOIN generate_series($1::int,$2::int) i WHERE o.organization='example' AND i<>2`, low, size)
-		// Populate both branches throughout the corpus, with one overlapping tuple
-		// whose legacy artifact must remain authoritative during conversion.
-		exec(`INSERT INTO embedding_artifacts(organization,id,derivation_id,segment_id,space_id,metadata)
-SELECT 'example','legacy-'||i,'legacy-'||i,'segment-'||i,'space','{}' FROM generate_series($1::int,$2::int) i WHERE i%2=0 OR i=3`, low, size)
-		exec(`INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id)
-SELECT 'example','segment-'||i,'served','legacy-'||i,'space' FROM generate_series($1::int,$2::int) i WHERE i%2=0 OR i=3`, low, size)
 		if size == 1000 {
-			exec(`DELETE FROM embedding_coverage WHERE segment_id='segment-4';
-INSERT INTO compact_embedding_coverage(organization_id,file_id,generation_id,covered)
+			exec(`INSERT INTO compact_embedding_coverage(organization_id,file_id,generation_id,covered)
 SELECT id,1,'target',decode('01','hex') FROM storage_organizations WHERE organization='example';
 INSERT INTO compact_embeddings(organization_id,segment_id,space_id,file_id,ordinal,vector_sha256,artifact_sha256)
 SELECT k.organization_id,k.id,sp.id,100001,0,sha256('vector'),sha256('other-space')
@@ -103,7 +96,7 @@ SELECT 'example','version-'||lpad(i::text,8,'0'),'target','segmentation-'||i FRO
 			relation, _ := node["Relation Name"].(string)
 			condition, _ := node["Index Cond"].(string)
 			switch relation {
-			case "embedding_coverage", "storage_segments":
+			case "storage_segments":
 				if strings.Contains(condition, "segment_id") && strings.Contains(condition, "sg.id") {
 					indexed[relation] = true
 				}
@@ -121,7 +114,7 @@ SELECT 'example','version-'||lpad(i::text,8,'0'),'target','segmentation-'||i FRO
 			}
 		}
 		visit(plans[0].Plan)
-		for _, relation := range []string{"embedding_coverage", "storage_segments", "compact_embedding_coverage"} {
+		for _, relation := range []string{"storage_segments", "compact_embedding_coverage"} {
 			if !indexed[relation] {
 				t.Fatalf("missing per-segment index lookup through %s: %s", relation, raw)
 			}
@@ -156,8 +149,8 @@ ORDER BY sg.id,ec.generation_id,ec.space_id,ec.artifact_id`)
 	want := "segment-1/served/other-space/f3e23ba78cef348461271539add8a2772b2119f60974ed33e80f157523b2580e\n" +
 		"segment-1/served/space/b4ef762527f9a70a7c60a237a5c316a29a45391d6326d74074a5a1fa5dd60be0\n" +
 		"segment-1/target/space/b4ef762527f9a70a7c60a237a5c316a29a45391d6326d74074a5a1fa5dd60be0\n" +
-		"segment-2/served/space/legacy-2\nsegment-3/served/space/legacy-3"
+		"segment-3/served/space/" + "c212991eb256ebdd9d1bcc9f15ae983221cfba7242b69742a8765cd6702064d9"
 	if strings.Join(got, "\n") != want {
-		t.Fatalf("mixed coverage changed precedence, bits, spaces, generations or organization: got %q, want %q", got, want)
+		t.Fatalf("compact coverage changed bits, spaces, generations or organization: got %q, want %q", got, want)
 	}
 }

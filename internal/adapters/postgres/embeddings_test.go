@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"slices"
 	"strconv"
@@ -93,36 +92,15 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], space, model.Producer())
-	artifact, err := service.SaveEmbedding(ctx, input, space, vector)
+	packed, err := service.SaveEmbeddingGroup(ctx, seg, space, []content.EmbeddingData{{Artifact: input, Vector: vector}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := service.SaveEmbedding(ctx, input, space, vector)
-	if err != nil || replay.ID != artifact.ID {
-		t.Fatal("artifact replay", err)
+	artifact := packed[0].Artifact
+	replayed, complete, err := service.LoadEmbeddingGroup(ctx, []content.Embedding{input})
+	if err != nil || !complete || len(replayed) != 1 || replayed[0].Artifact.ID != artifact.ID || !slices.Equal(replayed[0].Vector, vector) {
+		t.Fatalf("packed artifact replay: complete=%v err=%v data=%+v", complete, err, replayed)
 	}
-	loaded, recovered, err := service.LoadEmbedding(ctx, scope.Organization, input.DerivationID)
-	if err != nil || loaded.ID != artifact.ID {
-		t.Fatal("durable artifact", err)
-	}
-	original, _ := content.VectorBytes(vector)
-	recoveredBytes, _ := content.VectorBytes(recovered)
-	if string(original) != string(recoveredBytes) {
-		t.Fatal("float32 bytes changed")
-	}
-	// A changed but normalized output under the same derivation must conflict.
-	divergent := append([]float32(nil), vector...)
-	divergent[0] = -divergent[0]
-	if _, err = service.SaveEmbedding(ctx, input, space, divergent); !errors.Is(err, content.ErrConflict) {
-		t.Fatal("divergence accepted", err)
-	}
-	// The same owner verifies atomic publication after compact conversion,
-	// using real S3 bytes and the original public artifact identity.
-	packed, err := service.PackEmbeddingGroup(ctx, seg, space, []content.EmbeddingData{{Artifact: artifact, Vector: vector}})
-	if err != nil || len(packed) != 1 || packed[0].Artifact.ID != artifact.ID {
-		t.Fatalf("compact conversion %v %+v", err, packed)
-	}
-	artifact = packed[0].Artifact
 	if err = service.Promote(ctx, scope.Organization, seg, g); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +199,7 @@ func TestWithdrawnEnrichmentCompletionSettlesProgress(t *testing.T) {
 				t.Fatal(err)
 			}
 			artifact := content.Embedding{Organization: org, ID: content.StableID("embedding", v.ID), DerivationID: content.StableID("derivation", v.ID), SegmentID: seg.Segments[0].ID, SpaceID: space.ID}
-			if err = store.SaveEmbedding(ctx, artifact, space); err != nil {
+			if err = saveFixtureEmbedding(ctx, store, &artifact, space); err != nil {
 				t.Fatal(err)
 			}
 			if completion == "discard after cutover" {
@@ -282,7 +260,7 @@ SELECT $1,collection,profile_version,space_id,source_namespace_projected,spaces,
 				t.Fatalf("withdrawn Version %s after enrichment completion: %+v error=%v; want idle without phase, diagnostic or enrichment publication", v.ID, stored, err)
 			}
 			var coverage, events int
-			if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_coverage WHERE organization=$1`, org).Scan(&coverage); err != nil {
+			if err = pool.QueryRow(ctx, `SELECT count(*) FROM compact_embedding_coverage c JOIN storage_organizations o ON o.id=c.organization_id WHERE o.organization=$1`, org).Scan(&coverage); err != nil {
 				t.Fatal(err)
 			}
 			if err = pool.QueryRow(ctx, `SELECT count(*) FROM change_events WHERE organization=$1 AND event_type='record.enrichment_available'`, org).Scan(&events); err != nil || coverage != 0 || events != 0 {

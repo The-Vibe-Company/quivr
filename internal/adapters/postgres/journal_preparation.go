@@ -105,58 +105,5 @@ func insertPublicationVersion(ctx context.Context, tx pgx.Tx, w content.Work, p 
 // identities and insert coverage before the journal fence; eligibility,
 // routing, currentness and public events still belong behind that fence.
 func insertEmbeddingCoverage(ctx context.Context, tx pgx.Tx, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) (int64, error) {
-	var compact, legacy []content.Embedding
-	for _, e := range artifacts {
-		if e.File != nil {
-			compact = append(compact, e)
-		} else {
-			legacy = append(legacy, e)
-		}
-	}
-	var packedCount int64
-	if len(compact) > 0 {
-		var err error
-		packedCount, err = insertCompactCoverage(ctx, tx, org, seg, g, compact)
-		if err != nil {
-			return 0, err
-		}
-	}
-	artifacts = legacy
-	artifacts = slices.Clone(artifacts)
-	slices.SortFunc(artifacts, func(a, b content.Embedding) int {
-		if order := cmp.Compare(a.SegmentID, b.SegmentID); order != 0 {
-			return order
-		}
-		return cmp.Compare(a.SpaceID, b.SpaceID)
-	})
-	segments := map[string]bool{}
-	for _, p := range seg.Segments {
-		segments[p.ID] = true
-	}
-	batch := &pgx.Batch{}
-	for _, e := range artifacts {
-		if e.Organization != org || !segments[e.SegmentID] || !g.Carries(e.SpaceID) {
-			return 0, content.ErrInvalid
-		}
-		batch.Queue(`SELECT id FROM `+embeddingArtifactsRelation+` WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID)
-		batch.Queue(`INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID)
-	}
-	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
-	var inserted int64
-	for _, e := range artifacts {
-		var stored string
-		if err := results.QueryRow().Scan(&stored); err != nil {
-			return 0, err
-		}
-		if stored != e.ID {
-			return 0, content.ErrConflict
-		}
-		tag, err := results.Exec()
-		if err != nil {
-			return 0, err
-		}
-		inserted += tag.RowsAffected()
-	}
-	return inserted + packedCount, results.Close()
+	return insertCompactCoverage(ctx, tx, org, seg, g, artifacts)
 }

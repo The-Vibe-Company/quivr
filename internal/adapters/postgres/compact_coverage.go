@@ -23,18 +23,20 @@ func insertCompactCoverage(ctx context.Context, tx pgx.Tx, org string, seg conte
 		}
 		content.MarkPresent(mask, e.Ordinal)
 		byFile[e.File.ID] = mask
-		batch.Queue(`SELECT encode(e.artifact_sha256,'hex') FROM compact_embeddings e
+		batch.Queue(`SELECT encode(e.artifact_sha256,'hex'),f.producer,coalesce(sg.derivation->>'model_input_sha256','') FROM compact_embeddings e
  JOIN storage_organizations o ON o.id=e.organization_id JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id)
- JOIN storage_spaces sp ON sp.id=e.space_id WHERE e.file_id=$1 AND e.ordinal=$2 AND o.organization=$3 AND k.segment_id=$4 AND sp.space_id=$5`, e.File.ID, e.Ordinal, org, e.SegmentID, e.SpaceID)
+ JOIN storage_spaces sp ON sp.id=e.space_id
+ JOIN embedding_files f ON f.id=e.file_id
+ JOIN segments sg ON (sg.organization,sg.id)=(o.organization,k.segment_id) WHERE e.file_id=$1 AND e.ordinal=$2 AND o.organization=$3 AND k.segment_id=$4 AND sp.space_id=$5 AND f.version_id=$6 AND f.segmentation_id=$7`, e.File.ID, e.Ordinal, org, e.SegmentID, e.SpaceID, seg.VersionID, seg.ID)
 	}
 	result := tx.SendBatch(ctx, batch)
 	for _, e := range artifacts {
-		var id string
-		if err := result.QueryRow().Scan(&id); err != nil {
+		var id, producer, inputSHA string
+		if err := result.QueryRow().Scan(&id, &producer, &inputSHA); err != nil {
 			result.Close()
 			return 0, err
 		}
-		if id != e.ID {
+		if id != e.ID || producer != e.Producer || inputSHA != e.InputSHA || e.DerivationID != content.StableID("embedding-derivation", org, e.SegmentID, e.SpaceID, inputSHA, producer) {
 			result.Close()
 			return 0, content.ErrConflict
 		}

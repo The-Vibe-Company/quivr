@@ -31,7 +31,7 @@ func main() {
 	}
 	slog.SetDefault(bootstrapLogger())
 	contract := len(os.Args) == 3 && os.Args[1] == "migrate" && os.Args[2] == "--contract"
-	if (len(os.Args) == 2 && os.Args[1] == "storage") || (len(os.Args) != 2 && !contract && !(len(os.Args) >= 3 && os.Args[1] == "storage")) {
+	if (len(os.Args) == 2 && os.Args[1] == "storage") || (len(os.Args) != 2 && !contract && !(len(os.Args) == 3 && os.Args[1] == "storage")) {
 		slog.Error(usage())
 		os.Exit(2)
 	}

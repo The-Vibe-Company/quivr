@@ -1,9 +1,11 @@
 package processing_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -38,15 +40,32 @@ type memoryArtifacts struct {
 	blobs        map[string][]byte
 }
 
-func (m *memoryArtifacts) Embedding(_ context.Context, _, derivation string) (content.Embedding, error) {
-	if e, ok := m.byDerivation[derivation]; ok {
-		return e, nil
+func (m *memoryArtifacts) EmbeddingGroup(_ context.Context, org, segmentation, space string) (content.EmbeddingFile, []content.Embedding, error) {
+	var artifacts []content.Embedding
+	var file content.EmbeddingFile
+	for _, e := range m.byDerivation {
+		if e.Organization == org && e.SegmentationID == segmentation && e.SpaceID == space {
+			file = *e.File
+			artifacts = append(artifacts, e)
+		}
 	}
-	return content.Embedding{}, corpus.ErrNotFound
+	if len(artifacts) == 0 {
+		return file, nil, corpus.ErrNotFound
+	}
+	slices.SortFunc(artifacts, func(a, b content.Embedding) int { return cmp.Compare(a.Ordinal, b.Ordinal) })
+	return file, artifacts, nil
 }
-func (m *memoryArtifacts) SaveEmbedding(_ context.Context, e content.Embedding, _ content.VectorSpace) error {
-	m.byDerivation[e.DerivationID] = e
-	return nil
+func (m *memoryArtifacts) SaveEmbeddingGroup(ctx context.Context, f content.EmbeddingFile, _ content.VectorSpace, artifacts []content.Embedding, expected string) (bool, error) {
+	old, _, err := m.EmbeddingGroup(ctx, f.Organization, f.SegmentationID, f.SpaceID)
+	if err == nil && old.Blob.SHA256 != expected || errors.Is(err, corpus.ErrNotFound) && expected != "" {
+		return false, nil
+	}
+	f.ID = 1
+	for _, e := range artifacts {
+		e.File = &f
+		m.byDerivation[e.DerivationID] = e
+	}
+	return true, nil
 }
 func (m *memoryArtifacts) Put(_ context.Context, _ string, b []byte) (content.Blob, error) {
 	sha := content.Hash(b)
@@ -104,15 +123,12 @@ type firstWriterArtifacts struct {
 	spaces map[string]string
 }
 
-func (m firstWriterArtifacts) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
+func (m firstWriterArtifacts) SaveEmbeddingGroup(ctx context.Context, f content.EmbeddingFile, space content.VectorSpace, artifacts []content.Embedding, expected string) (bool, error) {
 	if old, ok := m.spaces[space.ID]; ok && old != string(space.Manifest) {
-		return content.ErrConflict
+		return false, content.ErrConflict
 	}
 	m.spaces[space.ID] = string(space.Manifest)
-	if old, ok := m.byDerivation[e.DerivationID]; ok && old.ID != e.ID {
-		return content.ErrConflict
-	}
-	return m.memoryArtifacts.SaveEmbedding(ctx, e, space)
+	return m.memoryArtifacts.SaveEmbeddingGroup(ctx, f, space, artifacts, expected)
 }
 
 // An ingestion running beside a rebuild can store a segment's vector first.
@@ -141,7 +157,7 @@ func TestFillAdoptsAVectorAnotherDerivationStoredFirst(t *testing.T) {
 		service := content.Service{Embeddings: store, Blobs: store}
 		space := plugin.Descriptor().VectorSpaces["p.large@1"]
 		// The concurrent ingestion stored only the first segment.
-		if _, err = service.SaveEmbedding(context.Background(), content.EmbeddingInput("org", "corpus", v, seg, seg.Segments[0], space, "plugin:p@2"), space, tc.stored); err != nil {
+		if _, err = service.SaveEmbeddingGroup(context.Background(), seg, space, []content.EmbeddingData{{Artifact: content.EmbeddingInput("org", "corpus", v, seg, seg.Segments[0], space, "plugin:p@2"), Vector: tc.stored}}); err != nil {
 			t.Fatal(err)
 		}
 		if tc.registered != "" {

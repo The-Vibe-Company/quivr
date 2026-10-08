@@ -198,10 +198,10 @@ func newBackfillFixtureForPlugin(t *testing.T, ctx context.Context, enriched, un
 func (f *backfillFixture) cover(t *testing.T, ctx context.Context, versionID, segmentID, space string) string {
 	t.Helper()
 	e := content.Embedding{ID: "artifact-" + segmentID + "-" + space, DerivationID: "derivation-" + segmentID + "-" + space, Organization: f.org, CorpusID: f.corpusID, VersionID: versionID, SegmentID: segmentID, SpaceID: space, Producer: f.segments[versionID].Recipe}
-	if err := f.store.SaveEmbedding(ctx, e, content.VectorSpace{ID: space, Manifest: []byte(`{}`)}); err != nil {
+	if err := saveFixtureEmbedding(ctx, f.store, &e, content.VectorSpace{ID: space, Manifest: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5)`, f.org, segmentID, f.generation.ID, e.ID, space); err != nil {
+	if err := coverFixtureEmbedding(ctx, f.store, e, f.generation); err != nil {
 		t.Fatal(err)
 	}
 	return e.ID
@@ -213,7 +213,7 @@ func (f *backfillFixture) fill(ctx context.Context, t *testing.T, opID string, g
 	var artifacts []content.Embedding
 	for _, p := range f.segments[versionID].Segments {
 		e := content.Embedding{ID: "artifact-" + p.ID + "-" + f.target, DerivationID: "derivation-" + p.ID + "-" + f.target, Organization: f.org, CorpusID: f.corpusID, VersionID: versionID, SegmentID: p.ID, SpaceID: f.target, Producer: "plugin:example.fill@0.2.0"}
-		if err := f.store.SaveEmbedding(ctx, e, content.VectorSpace{ID: f.target, Manifest: []byte(`{}`)}); err != nil {
+		if err := saveFixtureEmbedding(ctx, f.store, &e, content.VectorSpace{ID: f.target, Manifest: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		artifacts = append(artifacts, e)
@@ -503,7 +503,7 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 	}
 	// The window's first Version and the ones outside it hold no target vector.
 	var covered int
-	if err = f.pool.QueryRow(ctx, `SELECT count(*) FROM embedding_coverage WHERE organization=$1 AND generation_id=$2 AND space_id=$3`, f.org, g.ID, f.target).Scan(&covered); err != nil || covered != 4 {
+	if err = f.pool.QueryRow(ctx, `SELECT coalesce(sum(bit_count(c.covered)),0) FROM compact_embedding_coverage c JOIN storage_organizations o ON o.id=c.organization_id JOIN embedding_files f ON f.id=c.file_id JOIN storage_spaces sp ON sp.id=f.space_id WHERE o.organization=$1 AND c.generation_id=$2 AND sp.space_id=$3`, f.org, g.ID, f.target).Scan(&covered); err != nil || covered != 4 {
 		t.Fatalf("target coverage %d %v", covered, err)
 	}
 	if err = store.CompleteBackfill(ctx, f.org, op.ID, g.ID); err != nil {
@@ -685,7 +685,7 @@ VALUES($1,$2,$3,$4,'evaluation')`, f.org, existing.VersionID, f.generation.ID, e
 			SpaceID:        secondarySpace,
 			Producer:       "plugin:" + secondaryPlugin + "@0.1.0",
 		}
-		if err = store.SaveEmbedding(ctx, artifact, content.VectorSpace{ID: secondarySpace, Manifest: []byte(`{}`)}); err != nil {
+		if err = saveFixtureEmbedding(ctx, store, &artifact, content.VectorSpace{ID: secondarySpace, Manifest: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		artifacts = append(artifacts, artifact)
@@ -725,7 +725,7 @@ VALUES($1,$2,$3,$4,'evaluation')`, f.org, existing.VersionID, f.generation.ID, e
 		wrong.ID = "wrong-target-" + artifact.SegmentID
 		wrong.DerivationID = "wrong-target-derivation-" + artifact.SegmentID
 		wrong.SpaceID = wrongTarget
-		if err = store.SaveEmbedding(ctx, wrong, content.VectorSpace{ID: wrongTarget, Manifest: []byte(`{}`)}); err != nil {
+		if err = saveFixtureEmbedding(ctx, store, &wrong, content.VectorSpace{ID: wrongTarget, Manifest: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		wrongTargetArtifacts = append(wrongTargetArtifacts, wrong)
@@ -758,7 +758,7 @@ VALUES($1,$2,$3,$4,'evaluation')`, f.org, existing.VersionID, f.generation.ID, e
 		t.Fatalf("independent projection coverage %q %q %q", projectionPlugin, projectionRole, projectionSegmentation)
 	}
 	var embeddingCoverage, checkpoint string
-	if err = f.pool.QueryRow(ctx, `SELECT count(*)::text,(SELECT checkpoint FROM backfills WHERE organization=$1 AND operation_id=$2) FROM embedding_coverage WHERE organization=$1 AND generation_id=$3 AND segment_id=ANY($4)`, f.org, op.ID, g.ID, []string{independent.Segments[0].ID, independent.Segments[1].ID}).Scan(&embeddingCoverage, &checkpoint); err != nil {
+	if err = f.pool.QueryRow(ctx, `SELECT count(*)::text,(SELECT checkpoint FROM backfills WHERE organization=$1 AND operation_id=$2) FROM compact_embeddings e JOIN storage_organizations o ON o.id=e.organization_id JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id) JOIN compact_embedding_coverage c ON (c.organization_id,c.file_id)=(e.organization_id,e.file_id) WHERE o.organization=$1 AND c.generation_id=$3 AND k.segment_id=ANY($4) AND get_bit(c.covered,e.ordinal)=1`, f.org, op.ID, g.ID, []string{independent.Segments[0].ID, independent.Segments[1].ID}).Scan(&embeddingCoverage, &checkpoint); err != nil {
 		t.Fatal(err)
 	}
 	if embeddingCoverage != "2" || checkpoint != independent.VersionID {
