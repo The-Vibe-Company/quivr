@@ -60,7 +60,7 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			if err = pins.ConfigureIngestion(plugins.IngestionRouting{Default: "example.hash_embedder", Evaluation: map[string][]string{"text/plain": {"certified.ingestion-valid"}}}); err != nil {
 				t.Fatal(err)
 			}
-			if err = app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(pins)); err != nil {
+			if err = app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(pins)); err != nil {
 				t.Fatal(err)
 			}
 			plan, err := (postgres.PluginStore{Pool: pool}).ApplyConfiguration(ctx, registry.FromPins(pins))
@@ -143,7 +143,7 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			if _, err = (postgres.PluginStore{Pool: pool}).ApplyConfiguration(ctx, registry.FromPins(updatedPins)); err != nil {
 				t.Fatal(err)
 			}
-			if err = store.RegisterSpaces(ctx, app.DeploymentSpaces(updatedPins)); err != nil {
+			if err = store.RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(updatedPins)); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
