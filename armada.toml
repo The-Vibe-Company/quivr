@@ -27,7 +27,7 @@ silence_minutes = 15     # a worker with no report for longer than this shows as
 # How `armada brief` launches workers on Conductor. Every value is passed explicitly;
 # `conductor model` lists each agent's model ids and effort levels.
 [conductor]
-default_profile = "codex"   # backend work runs on Sol; tickets labelled Frontend run on Opus
+default_profile = "opus"    # every Conductor worker runs on Opus (Stan, 2026-10-08); codex stays available by --profile
 
 [conductor.profiles.opus]
 agent = "claude"
