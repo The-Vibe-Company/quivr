@@ -43,7 +43,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 					t.Fatal(err)
 				}
 				startup, stop := context.WithTimeout(ctx, time.Second)
-				err = app.BootstrapDatabase(startup, pool, app.DeploymentSpaces(nil))
+				err = app.BootstrapDatabase(startup, pool, app.Config{}.DeploymentSpaces(nil))
 				stop()
 				if err != nil {
 					t.Fatalf("blocked performance index prevented migration setup: %v", err)
@@ -57,7 +57,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 			}
 			bootstrap := func() {
 				t.Helper()
-				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+				if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -178,7 +178,7 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			if _, err := installer.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
 				t.Fatal(err)
 			}
-			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); !errors.Is(err, postgres.ErrIndexBusy) {
+			if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); !errors.Is(err, postgres.ErrIndexBusy) {
 				t.Fatalf("want retryable setup contention, got %v", err)
 			}
 			if err := installer.Rollback(ctx); err != nil {

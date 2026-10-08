@@ -51,7 +51,7 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	rows.Close()
 	t.Cleanup(func() {
 		if len(roles) == 0 {
-			if err := store.RegisterSpaces(context.Background(), app.DeploymentSpaces(nil)); err != nil {
+			if err := store.RegisterSpaces(context.Background(), app.Config{}.DeploymentSpaces(nil)); err != nil {
 				t.Errorf("restore the registry: %v", err)
 			}
 			return
