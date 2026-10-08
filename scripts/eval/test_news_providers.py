@@ -189,6 +189,44 @@ class ChatAdapters(unittest.TestCase):
         self.assertEqual(client.summary()['budgeted_output_tokens'], 2000)
         self.assertTrue(client.summary()['stopped'])
 
+    def test_parallel_stop_preserves_provider_failure_in_input_order(self):
+        for status in (401, 503):
+            with self.subTest(status=status):
+                self.opener.open.reset_mock()
+                entered = threading.Barrier(3)
+                failed, later_failed = threading.Event(), threading.Event()
+                client = live.Chat({**config(), 'max_retries': 0})
+                def answer(request, **kwargs):
+                    data = json.loads(json.loads(request.data)['messages'][1]['content'])
+                    entered.wait(3)
+                    if data['call'] == 'slow':
+                        self.assertTrue(later_failed.wait(3), 'provider failures did not finish')
+                        return response('{}')
+                    if data['call'] == 'later':
+                        self.assertTrue(failed.wait(3), 'first provider failure did not finish')
+                    raise urllib.error.HTTPError('private-url', 403 if data['call'] == 'later' else status, 'private-key', {},
+                        io.BytesIO(b'{"error":{"code":"private-key","message":"private-body"}}'))
+                self.opener.open.side_effect = answer
+                def call(i):
+                    if i == 0:
+                        client.complete('instruction', {'call': 'slow'})
+                        # This earlier task reaches admission after the later
+                        # task stops the adapter, so its error is read first.
+                        return client.complete('instruction', {'call': 'next'})
+                    try:
+                        return client.complete('instruction', {'call': 'auth' if i == 1 else 'later'})
+                    finally:
+                        (failed if i == 1 else later_failed).set()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    with self.assertRaises(news.BuildError) as caught:
+                        with news.build_phase('judging'):
+                            list(news.ordered_calls(executor, call, [0, 1, 2]))
+                self.assertEqual(caught.exception.diagnostic, {
+                    'exception': 'HTTPError', 'http_status': status,
+                    'reason': 'chat provider refused the request', 'phase': 'judging'})
+                self.assertEqual(self.opener.open.call_count, 3)
+                self.assertEqual(client.summary()['retries'], 0)
+
     def test_parallel_build_resumes_paid_calls_and_keeps_seeded_output(self):
         from jev_rerank.client import Result
         from test_news_set import articles, unavailable_scorer
