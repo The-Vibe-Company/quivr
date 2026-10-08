@@ -609,7 +609,8 @@ func TestRebuildSurvivesExecutionManifestUpdate(t *testing.T) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			if request.IdempotencyKey != interruptedKey.Load().(string) {
+			key, interrupted := interruptedKey.Load().(string)
+			if !interrupted || request.IdempotencyKey != key {
 				http.Error(w, "retry changed invocation identity", 400)
 				return
 			}

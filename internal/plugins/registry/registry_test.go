@@ -712,9 +712,9 @@ configuration:
 		return strings.Replace(manifest, "[max_concurrent_requests]", "[max_concurrent_requests, model_variant]", 1)
 	}
 	for _, tc := range []struct {
-		name, before, manifest, configuration string
-		enabled                               map[string]string
-		same                                  bool
+		name, before, beforeConfiguration, manifest, configuration string
+		enabled                                                    map[string]string
+		same                                                       bool
 	}{
 		{name: "new execution key", manifest: added, configuration: `{"max_concurrent_requests":16,"body_tokens":512,"tokenizer_processes":2}`, same: true},
 		{name: "semantic setting", manifest: source, configuration: `{"max_concurrent_requests":4,"body_tokens":256}`},
@@ -726,6 +726,10 @@ configuration:
 		{name: "reclassified composed schema", before: composed, manifest: reclassify(composed), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
 		{name: "reclassified referenced schema", before: referenced, manifest: reclassify(referenced), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
 		{name: "reclassified wildcard schema", before: patterned, manifest: reclassify(patterned), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy explicit direct setting", before: legacy(direct), beforeConfiguration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"one"}`, manifest: reclassify(legacy(direct)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy explicit composed setting", before: legacy(composed), beforeConfiguration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"one"}`, manifest: reclassify(legacy(composed)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy explicit referenced setting", before: legacy(referenced), beforeConfiguration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"one"}`, manifest: reclassify(legacy(referenced)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy explicit patterned setting", before: legacy(patterned), beforeConfiguration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"one"}`, manifest: reclassify(legacy(patterned)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
 		{name: "legacy implicit direct setting", before: legacy(direct), manifest: reclassify(legacy(direct)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
 		{name: "legacy implicit composed setting", before: legacy(composed), manifest: reclassify(legacy(composed)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
 		{name: "legacy implicit referenced setting", before: legacy(referenced), manifest: reclassify(legacy(referenced)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
@@ -748,7 +752,11 @@ configuration:
 			if beforeManifest == "" {
 				beforeManifest = source
 			}
-			before := load(beforeManifest, config, "before", nil)
+			beforeConfiguration := tc.beforeConfiguration
+			if beforeConfiguration == "" {
+				beforeConfiguration = config
+			}
+			before := load(beforeManifest, beforeConfiguration, "before", nil)
 			next := load(tc.manifest, tc.configuration, "next", tc.enabled)
 			replacement := registry.IngestionReplacement(before, next)
 			if (replacement.ManifestDigest == next.ManifestDigest && string(replacement.Configuration) == string(next.Configuration) && reflect.DeepEqual(replacement.Spaces, next.Spaces)) != tc.same {

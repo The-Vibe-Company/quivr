@@ -66,9 +66,9 @@ The `hosted.embed` manifest declares these execution-only settings:
 - `request_timeout_ms`, `call_budget_ms` and `batch_wait_ms`;
 - `max_retries` and `tokenizer_processes`.
 
-A manifest must already declare `tokenizer_processes` for pool tuning to preserve its recipe. Installing a manifest that first adds that execution key changes the recipe; follow the [first-registration caveat](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
+An added execution key such as `tokenizer_processes` preserves the ingestion recipe when the old registration did not describe that key as semantic. The plugin id, version, semantic settings and enabled spaces must stay unchanged. If the old schema uses composition, references or wildcard constraints, the engine may be unable to prove equivalence; see [Upgrade a plugin](/run-quivr/upgrade-a-plugin#tune-embedding-throughput).
 
-Keep the plugin id and version unchanged when changing only those settings. Regenerate the manifest from the exact configuration, certify it and install a new immutable registration. Run it at a separate endpoint and keep the old process and exact manifest reachable until its registration is `inactive`. Replacing a manifest at an old endpoint breaks discovery for work pinned to that registration.
+Regenerate the manifest from the exact configuration, certify it and install a new immutable registration. Proven-equivalent execution updates can replace the process at the same endpoint: pinned ingestion, rebuilds and queries use the active build while retaining their original recipe and work identity. For a semantic change, keep the old process and exact manifest reachable until its registration is `inactive`, or cancel its pinned work before retiring it.
 
 Endpoint and authentication changes are not in this execution-only list: they change the recipe and need a rebuild for existing Corpora, even if the vector-space id stays the same. Follow the [plugin configuration and upgrade procedure](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
 
