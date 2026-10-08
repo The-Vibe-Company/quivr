@@ -126,6 +126,7 @@ type Hit struct {
 type Result struct {
 	Hits            []Hit
 	ExcludedCorpora []corpus.CorpusExclusion
+	Degraded        []Degradation
 	// Profile is the resolved profile name.
 	Profile string
 	// ProfileVersion identifies what ranked: the retrieval plugin, its
@@ -133,6 +134,12 @@ type Result struct {
 	ProfileVersion string
 	// Usage is what the search spent.
 	Usage *Usage
+}
+
+// Degradation identifies the Corpora whose hybrid search used only keywords.
+type Degradation struct {
+	Reason    string
+	CorpusIDs []string
 }
 
 // Route pairs a Corpus with the logical generation PostgreSQL currently routes it to.
@@ -322,7 +329,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 			return out, ErrSourceFilterUnavailable
 		}
 		// One query ranks every Corpus in one space.
-		if q.EvaluationPlugin == "" && served != "" && g.SpaceID != served {
+		if q.Mode == "semantic" && q.EvaluationPlugin == "" && served != "" && g.SpaceID != served {
 			return out, ErrUnsupported
 		}
 		served = g.SpaceID

@@ -105,6 +105,83 @@ func (*identitySearch) Round(_ context.Context, q plugins.SearchRequest) ([]byte
 	return []byte(`{"ranking":{"hits":[]}}`), nil
 }
 
+type rebuildingSearch struct {
+	identitySearch
+	available bool
+}
+
+func (*rebuildingSearch) Generation(context.Context, string, string) (content.Generation, error) {
+	return content.Generation{ID: "generation", Collection: "Search", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space"}, nil
+}
+
+func (s *rebuildingSearch) VectorSpaces(context.Context, string, string) (content.Generation, []content.SpaceCoverage, int64, error) {
+	present := int64(0)
+	if s.available {
+		present = 1
+	}
+	space := content.SpaceCoverage{GenerationRole: content.SpaceServed, CoverageUnknown: true, ServingSegments: &present}
+	space.ID, space.Metric, space.QueryModalities = "space", "cosine", []string{"text"}
+	space.Dimensions = 1
+	return content.Generation{}, []content.SpaceCoverage{space}, 0, nil
+}
+
+// Search owns which Corpora degrade; this handler test independently owns the
+// stable wire keys, omission on ordinary/lexical responses, and semantic 422.
+func TestSearchDegradationWireContract(t *testing.T) {
+	s := &rebuildingSearch{}
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{Ranker: s, Routing: s, Projection: s, Registry: s}, uploads.Service{}, map[string]corpus.Scope{observer: {Organization: "org_a", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}}, catalogCursorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		mode      string
+		available bool
+		status    int
+		degraded  bool
+	}{
+		{"hybrid", false, 200, true},
+		{"hybrid", true, 200, false},
+		{"lexical", false, 200, false},
+		{"semantic", false, 422, false},
+	} {
+		s.available = tc.available
+		r := httptest.NewRequest(http.MethodPost, "/v0/search", strings.NewReader(`{"query":"harbour","corpus_ids":["corpus_a"],"mode":"`+tc.mode+`"}`))
+		r.Header.Set("Authorization", "Bearer "+observer)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		checkedAPI(t, handler).ServeHTTP(w, r)
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != tc.status {
+			t.Fatalf("%+v: %d %s", tc, w.Code, w.Body)
+		}
+		if tc.status == 422 {
+			if string(body["code"]) != `"unsupported_search"` {
+				t.Fatalf("semantic refusal: %s", w.Body)
+			}
+			continue
+		}
+		var profile map[string]json.RawMessage
+		if err := json.Unmarshal(body["retrieval_profile"], &profile); err != nil {
+			t.Fatal(err)
+		}
+		if tc.degraded {
+			var got any
+			if err := json.Unmarshal(profile["degraded"], &got); err != nil {
+				t.Fatalf("missing marker: %s (%v)", w.Body, err)
+			}
+			want := []any{map[string]any{"reason": "vectors_unavailable", "corpus_ids": []any{"corpus_a"}}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("keyword fallback marker missing or changed: %s", w.Body)
+			}
+		} else if _, present := profile["degraded"]; present {
+			t.Fatalf("unexpected degradation: %s", w.Body)
+		}
+	}
+}
+
 // Transport owns the literal external keys and their schema bounds. Adapter
 // tests own matching; this recorder does not implement filtering.
 func TestSearchIdentityFilterWireContract(t *testing.T) {

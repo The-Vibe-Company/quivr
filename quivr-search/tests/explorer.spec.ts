@@ -272,6 +272,57 @@ test("la recherche cherche dans le corpus choisi, et une liste vide propose d’
   await expect(rows(page)).toHaveCount(4);
 });
 
+for (const view of ["explorer", "feed"] as const) {
+  test(`${view} annonce le repli par mots-clés et efface l’avis après reprise`, async ({ page }, info) => {
+    const path = view === "explorer" ? "/demo/explore" : "/v0/search";
+    const seed = page.waitForResponse((r) => new URL(r.url()).pathname === path);
+    await page.goto(view === "explorer" ? "/?view=explorer&corpora=wires" : "/?corpora=demo,wires&q=port");
+    const data = await (await seed).json();
+    let degraded = true;
+    let empty = false;
+    let refused = false;
+    await page.route(view === "explorer" ? "**/demo/explore?**" : "**/v0/search", (route) =>
+      route.fulfill({
+        status: refused ? 422 : 200,
+        json: refused ? { code: "unsupported_search" } : {
+          ...data,
+          items: empty ? [] : data.items,
+          next_cursor: undefined,
+          retrieval_profile: {
+            name: "default", version: "v",
+            ...(degraded ? { degraded: [{ reason: "vectors_unavailable", corpus_ids: ["wires"] }] } : {}),
+          },
+        },
+      }),
+    );
+    const search = page.getByRole("searchbox", { name: view === "explorer" ? "Chercher dans les documents" : "Rechercher dans le fil" });
+    await search.fill("port encore");
+    const notice = page.getByRole("status").filter({ hasText: "Recherche par sens indisponible pendant la reconstruction, résultats par mots-clés" });
+    await expect(notice).toBeVisible();
+    const results = view === "explorer" ? rows(page) : page.getByRole("list", { name: "Derniers éléments" }).locator(".row");
+    await expect(results.filter({ hasText: "Port reopens after three-day closure" })).toHaveCount(1);
+    await page.screenshot({ path: info.outputPath(`${view}-fallback-desktop.png`), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(notice).toBeVisible();
+    await page.screenshot({ path: info.outputPath(`${view}-fallback-mobile.png`), fullPage: true });
+
+    empty = true;
+    await search.fill("introuvable");
+    await expect(page.getByRole("heading", { name: view === "explorer" ? "Aucun document pour ces critères." : "Aucun article ne parle de ça." })).toBeVisible();
+    await expect(notice).toBeVisible();
+    degraded = false;
+    empty = false;
+    await search.fill("reprise");
+    await expect(results.filter({ hasText: "Port reopens after three-day closure" })).toHaveCount(1);
+    await expect(notice).toHaveCount(0);
+    refused = true;
+    await search.fill("sens");
+    await expect(page.getByRole("alert")).toContainText("La recherche par sens est indisponible. Réessayez par mots-clés.");
+    await search.fill("");
+    await expect(notice).toHaveCount(0);
+  });
+}
+
 test("sur un écran étroit, l’Explorer tient en une colonne et une ligne ouvre son document", async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto("/?view=explorer&corpora=wires");

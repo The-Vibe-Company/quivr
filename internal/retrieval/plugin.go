@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -160,10 +161,14 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		return out, ErrUnsupported
 	}
 	phase := time.Now()
-	spaces, err := s.searchSpaces(ctx, scope.Organization, routes)
+	plan, err := s.searchSpaces(ctx, scope.Organization, routes, q.Mode == "hybrid" && q.EvaluationPlugin == "")
 	timing.Coverage += time.Since(phase)
 	if err != nil {
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
+	}
+	spaces := plan.spaces
+	if plan.empty && q.EvaluationPlugin == "" {
+		return out, nil
 	}
 	if q.EvaluationPlugin == "" {
 		servingOwners := map[string]bool{}
@@ -183,8 +188,23 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		spaces = []plugins.SearchSpace{spaces[selected]}
 		spaces[0].Role = content.SpaceServed
 	}
-	if s.Registry != nil && len(spaces) == 0 && q.EvaluationPlugin == "" {
-		return out, nil
+	// Unioning hybrid routes must still fit the existing Plugin API envelope.
+	if len(spaces) > 16 {
+		return out, ErrUnsupported
+	}
+	if q.Mode == "hybrid" && q.EvaluationPlugin == "" && len(plan.fallback) > 0 {
+		if chain.degraded == nil {
+			chain.degraded = map[string]bool{}
+		}
+		for _, route := range plan.fallback {
+			chain.degraded[route.CorpusID] = true
+		}
+		if !slices.ContainsFunc(spaces, func(sp plugins.SearchSpace) bool { return sp.Role == content.SpaceServed }) {
+			q.Mode = "lexical"
+		}
+	}
+	if q.Mode == "semantic" && s.Registry != nil && q.EvaluationPlugin == "" && (len(plan.fallback) > 0 || !slices.ContainsFunc(spaces, func(sp plugins.SearchSpace) bool { return sp.Role == content.SpaceServed })) {
+		return out, ErrUnsupported
 	}
 	session := plugins.NewRetrievalSession(m, plugins.SearchRequest{
 		InvocationID: invocationID(), OrganizationID: scope.Organization, Configuration: s.Ranker.Configuration(),
@@ -193,7 +213,7 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames}
 	for {
 		if ctx.Err() != nil {
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
@@ -236,6 +256,7 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if answer.Ranking != nil {
+			out.Degraded = chain.degradations()
 			for _, h := range answer.Ranking.Hits {
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
@@ -309,31 +330,60 @@ func (p *Phases) attrs() []any {
 	return append([]any{"slowest_phase", slowest.name}, out...)
 }
 
-// searchSpaces lists the vector spaces every routed generation carries, as
-// the registry describes them, with their coverage summed over the Corpora.
-func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) ([]plugins.SearchSpace, error) {
+// spacePlan retains per-Corpus routing alongside the plugin's aggregate space
+// descriptions. Unknown coverage does not disable a route. An absent served
+// projection or current coverage with no vectors uses keywords instead. A
+// background snapshot may predate ingestion and cannot disable a current route.
+type spacePlan struct {
+	spaces       []plugins.SearchSpace
+	bySpace      map[string][]Route
+	carried      map[string][]Route
+	fallback     []Route
+	empty        bool
+	emptyCorpora map[string]bool
+}
+
+func (s Service) searchSpaces(ctx context.Context, org string, routes []Route, hybrid bool) (spacePlan, error) {
+	plan := spacePlan{spaces: []plugins.SearchSpace{}, bySpace: map[string][]Route{}, carried: map[string][]Route{}, empty: len(routes) > 0, emptyCorpora: map[string]bool{}}
 	if s.Registry == nil {
-		return []plugins.SearchSpace{}, nil
+		plan.empty = false
+		return plan, nil
 	}
 	var out []plugins.SearchSpace
 	for i, r := range routes {
+		existing := len(out)
 		spaces, total, err := s.Coverage.spaces(ctx, s.Registry, org, r)
 		if err != nil {
-			return nil, err
+			return plan, err
 		}
 		byID := map[string]content.SpaceCoverage{}
+		corpusEmpty := len(spaces) > 0 && spaces[0].CorpusEmpty
+		plan.emptyCorpora[r.CorpusID] = corpusEmpty
+		plan.empty = plan.empty && corpusEmpty
+		served := false
 		for _, c := range spaces {
 			if r.Generation.Carries(c.ID) {
-				if c.ServingSegments != nil && *c.ServingSegments == 0 {
+				noProjection := c.ServingSegments != nil && *c.ServingSegments == 0
+				noVectors := !c.CoverageUnknown && c.CoverageAgeMS == nil && c.TotalSegments != nil && c.Segments == 0
+				if noProjection || noVectors {
 					c.GenerationRole = content.SpaceEvaluation
+				} else {
+					plan.carried[c.ID] = append(plan.carried[c.ID], r)
+					if c.GenerationRole == content.SpaceServed {
+						plan.bySpace[c.ID] = append(plan.bySpace[c.ID], r)
+						served = true
+					}
 				}
 				byID[c.ID] = c
 			}
 		}
-		if i == 0 {
+		if !served && !corpusEmpty {
+			plan.fallback = append(plan.fallback, r)
+		}
+		if i == 0 || hybrid {
 			for _, listed := range spaces {
 				c, ok := byID[listed.ID]
-				if !ok {
+				if !ok || slices.ContainsFunc(out, func(sp plugins.SearchSpace) bool { return sp.ID == c.ID }) {
 					continue
 				}
 				owner := plugins.SpaceOwner{Kind: "engine"}
@@ -343,14 +393,21 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 				out = append(out, plugins.SearchSpace{ID: c.ID, Owner: owner, Model: c.Model, Dimensions: c.VectorSpace.Dimensions, Metric: c.Metric,
 					Indexes: nonNil(c.Indexes), QueryModalities: nonNil(c.QueryModalities), Role: c.GenerationRole, Coverage: plugins.SpaceCoverage{Segments: c.Segments, Total: ownerTotal(c, total), Unknown: c.CoverageUnknown, AgeMS: c.CoverageAgeMS}})
 			}
-			continue
+			if i == 0 {
+				continue
+			}
 		}
-		// One query ranks every Corpus in one space: keep the spaces all carry.
-		out = slices.DeleteFunc(out, func(sp plugins.SearchSpace) bool {
-			_, ok := byID[sp.ID]
-			return !ok
-		})
+		// Explicit semantic/evaluation selections still require a common space.
+		if !hybrid {
+			out = slices.DeleteFunc(out, func(sp plugins.SearchSpace) bool {
+				_, ok := byID[sp.ID]
+				return !ok
+			})
+		}
 		for j := range out {
+			if hybrid && j >= existing {
+				continue // A newly offered space already includes this Corpus.
+			}
 			if c, ok := byID[out[j].ID]; ok {
 				if c.GenerationRole == content.SpaceServed {
 					out[j].Role = content.SpaceServed
@@ -367,7 +424,8 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 	if out == nil {
 		out = []plugins.SearchSpace{}
 	}
-	return out, nil
+	plan.spaces = out
+	return plan, nil
 }
 
 func nonNil(v []string) []string {
@@ -386,13 +444,17 @@ type server struct {
 	scope  corpus.Scope
 	routes []Route
 	spaces []plugins.SearchSpace
+	plan   spacePlan
 	// hydrated caches the segments hydrated earlier in the search.
 	hydrated map[string]content.Hydrated
 	// vectors caches query encodings by space and text.
 	vectors map[string][]float32
-	timing  *Phases
-	chain   *searchChain
-	frames  []*profileSpend
+	// keywordCandidates avoids querying the same fallback partition for every
+	// healthy space. Keys include the full effective lexical request.
+	keywordCandidates map[string][]content.Candidate
+	timing            *Phases
+	chain             *searchChain
+	frames            []*profileSpend
 }
 
 // serve runs one candidate request through the projection and hydrates what
@@ -428,7 +490,25 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		pq.Mode = "hybrid"
 		pq.Hybrid = &HybridOptions{Alpha: c.EffectiveAlpha(), Fusion: c.EffectiveFusion()}
 	}
-	if pq.Mode != "lexical" {
+	routes := sv.routes
+	var fallback []Route
+	if q.Mode == "hybrid" && q.EvaluationPlugin == "" && pq.Mode != "lexical" && sv.s.Registry != nil {
+		routes = sv.plan.bySpace[c.Space]
+		// A ranker may explicitly select an offered evaluation space of a
+		// serving owner. A globally served space uses only each Corpus's
+		// served routes, never another Corpus's evaluation vectors.
+		if slices.ContainsFunc(sv.spaces, func(sp plugins.SearchSpace) bool { return sp.ID == c.Space && sp.Role == content.SpaceEvaluation }) {
+			routes = sv.plan.carried[c.Space]
+		}
+		if pq.Mode == "hybrid" {
+			for _, route := range sv.routes {
+				if !sv.plan.emptyCorpora[route.CorpusID] && !slices.ContainsFunc(routes, func(vectorRoute Route) bool { return vectorRoute.CorpusID == route.CorpusID }) {
+					fallback = append(fallback, route)
+				}
+			}
+		}
+	}
+	if pq.Mode != "lexical" && len(routes) > 0 {
 		if c.Vector != nil {
 			pq.Vector = plugins.Float32s(c.Vector)
 		} else {
@@ -439,11 +519,59 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			pq.Vector = vector
 		}
 	}
-	phase := time.Now()
-	found, err := sv.s.Projection.Search(ctx, sv.routes, sv.scope, pq)
-	sv.timing.IndexQuery += time.Since(phase)
-	if err != nil {
-		return nil, ErrUnavailable
+	search := func(routes []Route, request Request) ([]content.Candidate, error) {
+		phase := time.Now()
+		defer func() { sv.timing.IndexQuery += time.Since(phase) }()
+		return sv.s.Projection.Search(ctx, routes, sv.scope, request)
+	}
+	found := []content.Candidate{}
+	if len(routes) > 0 {
+		var err error
+		found, err = search(routes, pq)
+		if err != nil {
+			return nil, ErrUnavailable
+		}
+		if q.EvaluationPlugin == "" && pq.Mode != "lexical" {
+			if sv.chain.vectors == nil {
+				sv.chain.vectors = map[string]bool{}
+			}
+			for _, route := range routes {
+				sv.chain.vectors[route.CorpusID] = true
+			}
+		}
+	}
+	if len(fallback) > 0 {
+		keywords := pq
+		keywords.Mode, keywords.Space, keywords.Vector, keywords.Hybrid = "lexical", "", nil, nil
+		keywords.CorpusIDs = nil
+		for _, route := range fallback {
+			keywords.CorpusIDs = append(keywords.CorpusIDs, route.CorpusID)
+		}
+		key, err := json.Marshal(keywords)
+		if err != nil {
+			return nil, ErrUnsupported
+		}
+		more, cached := sv.keywordCandidates[string(key)]
+		if !cached {
+			more, err = search(fallback, keywords)
+			if err != nil {
+				return nil, ErrUnavailable
+			}
+			if sv.keywordCandidates == nil {
+				sv.keywordCandidates = map[string][]content.Candidate{}
+			}
+			sv.keywordCandidates[string(key)] = more
+		}
+		found = append(NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)...)
+		if sv.chain.degraded == nil {
+			sv.chain.degraded = map[string]bool{}
+		}
+		for _, route := range fallback {
+			sv.chain.degraded[route.CorpusID] = true
+		}
+		slices.SortStableFunc(found, func(a, b content.Candidate) int {
+			return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.SegmentID, b.SegmentID))
+		})
 	}
 	routed := map[string]Route{}
 	for _, r := range sv.routes {

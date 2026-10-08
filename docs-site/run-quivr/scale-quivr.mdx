@@ -1,0 +1,248 @@
+---
+title: "Scale Quivr"
+description: "Find capacity limits, budget large imports and protect live traffic across workers, providers and storage."
+keywords: ["capacity planning", "bulk ingestion", "PostgreSQL", "Weaviate", "incident playbook"]
+---
+
+Scale Quivr by measuring the dependency that limits completed work, then increasing that capacity before adding workers. Separate live and bulk work, leave room for rebuilds, and check search latency while importing.
+
+This page explains the capacity model and operating lessons for Kubernetes, virtual machines, Docker Compose or a hosted platform. Use [Run a large import](../run-quivr/run-a-large-import.mdx) for the procedure and sample measurements. Numbers below are labelled observations or worksheet assumptions, not throughput or availability guarantees.
+
+## What scales
+
+The API serves requests; live workers collect feeds, process pushes and evaluate alerts; bulk workers run imports, rebuilds, backfills and quarantine reprocessing. API and worker commands use the same binary. Select worker lanes with `worker.queues`, and use separate processes to reserve live activity slots.
+
+Replicas keep no durable local work: PostgreSQL and Temporal hold claims, progress and retries. Replicas share the database, workflow namespace, storage and active plugin plan. An API process admits at most 64 concurrent searches; a search's time budget comes from its profile, commonly 2 seconds. More API replicas increase admission, but cannot make a slow provider or index faster.
+
+### Slots and replicas
+
+A worker slot runs one activity. An ingestion activity admits up to 16 documents concurrently, so its process ceiling is `worker.slots.<lane> × 16`. A rebuild step instead admits `rebuild.concurrency` Versions, with a ceiling of `worker.slots.bulk × rebuild.concurrency` when all bulk slots run rebuilds. A Version is one revision of a document; a passage is one cut of its text.
+
+These are admission ceilings, not processing rates. Rebuilds, imports and backfills compete for bulk slots. **Example observation:** separating lanes restored capacity after an import reduced a rebuild's rate by about four times. Queues reserve worker slots; the provider, database and vector index remain shared. Use the [worker](../reference/configuration.mdx#worker-queues) and [rebuild](../reference/configuration.mdx#rebuild) references for settings and bounds.
+
+### Read the autoscaler signal
+
+The scaling rule is `replicas = clamp(ceil(waiting / documents_per_replica), min, max)`: round up waiting work divided by the target, then bound it by the minimum and maximum. Scale-up has no stabilization window; scale-down retains the highest recent recommendation, typically over five minutes. The bundled scaler also spaces scale actions. Keep at least one bulk worker for admitted work.
+
+The signal `queues.bulk.waiting` includes estimated rebuild, backfill and quarantine work. Overlapping work can count twice. **Example observations:** 247,000 rebuild Versions kept a scaler at its maximum with no acquisition waiting; 87,000 waiting at 20,000 per replica recommended five replicas, despite an eight-replica cap. Read the observed count, not the cap.
+
+A missing observation or queue endpoint `503` means unknown work, never zero. Use a dedicated all-corpus `queues:read` key. Installation-wide metrics use `max` across replicas, not `sum`.
+
+[Scale workers on backlog](../run-quivr/deploy.mdx#scale-workers-on-backlog) owns the variables, queue fields, KEDA/Prometheus examples, bundled scaler backends and manual scaling procedure. Check platform-injected variables for collisions with your target configuration. When changing a Dockerfile path or service definition, update the platform's build settings too.
+
+**Recommendation:** diagnose before raising replicas. More workers once produced roughly 180 journal-lock waiters; another increase overloaded embedding. Both lengthened downstream queues without increasing completed work.
+
+## Capacity per dependency
+
+### Embedding provider
+
+Measure the provider's knee: the concurrency above which latency rises substantially while throughput barely improves. Sweep requests in flight using representative passage lengths and batches; record successful passages per second, p95 latency and HTTP errors. Include provider requests-per-minute and tokens-per-minute limits separately.
+
+**Example measurement:** two GPUs, batches of 32 passages of roughly 400 tokens:
+
+| Requests in flight | Passages/s | p95 latency |
+| --- | --- | --- |
+| 4 | 11 | Not recorded |
+| 16 | 133 | 4.0 s |
+| 32 | 141 | 7.4 s |
+
+For that workload, 16 was the knee. These batches and token lengths must also fit your provider's input limits and plugin token-cost estimate.
+
+Budget provider admission for `bulk plugin processes × max_concurrent_requests`, plus live ingestion and query encoding. A sidecar per worker makes plugin count follow worker replicas; a shared plugin service has its own process count. Set the autoscaler maximum and concurrency so the total offered requests stay below measured capacity, with live headroom.
+
+**Example incident:** eight bulk replicas at 16 requests per process offered about 128 requests to a two-GPU service. Provider `503`s became `embedding_incomplete`; documents retried for roughly 11 seconds per attempt and rebuild progress stopped. Increasing that service's GPU cap to four restored successful responses and about 16–21 Versions/s. This describes that service, not a four-GPU sizing rule.
+
+Batch across documents. **Example measurements:** tiny calls of roughly 80 tokens, one document per call and four calls in flight limited an archive to 3–4 documents/s. In a separate synthetic measurement, batches averaging about 11 documents raised searchable throughput from 8 to 55.5 documents/s. `hosted.embed` collects document inputs within each Organization and plugin process. Queries bypass the collection window but share remote admission; cooldown after `429` or `503` is process-local, with no fleet-wide coordination.
+
+[Tune execution](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model) and the [hosted embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#configuration) own the settings. Check endpoint request-size limits as well as token limits: a byte limit once rejected every input over 2 KB. Oversized text needs more passages, rather than truncation.
+
+### PostgreSQL
+
+**Connections:** usable server capacity must cover `sum(replicas × pool per process) + other clients + rolling-deploy headroom`. Subtract reserved server connections. Worker slots and pool connections are independent. **Example:** one API, one live worker and eight bulk workers with pools of 16 can use 160 connections; a stock 100-connection server previously refused a four-replica bulk deployment.
+
+Link engine pools to [PostgreSQL connections](../reference/configuration.mdx#postgresql-connections), and server settings to the [shared startup script](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/postgres/start.sh) and [connection, memory and WAL guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/README.md). Set an explicit memory budget or container limit. Stock `shared_buffers` of 128 MB on a 32 GB machine left much of its useful cache capacity unused. Leave memory for sort/hash operations, connections, autovacuum and OS cache; multiplying pools also multiplies potential memory use.
+
+**WAL and checkpoints:** write-ahead log (WAL) records changes for recovery. Frequent checkpoints can repeatedly write full-page images. Compare changes in `pg_stat_checkpointer.num_requested` and `num_timed` over the same period, alongside `WALInsert`/`WALWrite` waits. **Example incident:** 370 requested versus 111 timed checkpoints accompanied about 226 GB of WAL and 33.5 million full-page images in a day with a 1 GB WAL budget. A larger WAL budget, longer checkpoint interval and LZ4 compression removed that forced-checkpoint pattern.
+
+The linked startup guide owns the memory-relative settings and volume-relative WAL calculation. Larger WAL allowances consume disk and can lengthen crash recovery; compression costs CPU. `max_wal_size` is a soft limit: heavy writes, retained replication WAL or failed archiving can exceed it. Budget additional free space and verify effective settings after a planned restart.
+
+**Keep durability enabled.** `synchronous_commit`, `fsync` and `full_page_writes` protect acknowledged writes against crashes. **Example measurement:** asynchronous commit improved one lock-limited import only from 5.8 to 7.1 documents/s. Fix its bottleneck rather than making acknowledged data expendable.
+
+**Busy small tables:** inspect lock waits and table/index bloat, even when row counts are tiny. **Example incidents:** autovacuum truncation took an exclusive lock on the busy `organization_journals` row; `queue_document_attempts` had seven live rows but a 39 MB index and roughly 190 `BufferContent` waiters. Shipped migrations disable vacuum truncation on six busy tables and tune selected tables for frequent updates. Ensure those migrations are applied. If the attempt primary key bloats again, use the concurrent reindex procedure in [Upgrade Quivr](../run-quivr/upgrade-quivr.mdx). It needs temporary disk space; avoid `VACUUM FULL` during an import.
+
+**Queries and indexes:** examine expensive plans with `pg_stat_statements`. One backlog query spent 4.1 seconds of 8.2 seconds compiling JIT code; fixing the query removed that cost without globally disabling JIT. Missing indexes also caused full scans of 4.1 million text pieces and slow vector deletion. Managed performance indexes build concurrently after startup. Read `migration_busy`, `index_setup_busy` and the readiness header with the [upgrade diagnostics](../run-quivr/upgrade-quivr.mdx#check-it-worked); keep a live process running so background setup can finish.
+
+**Maintenance recommendations:** commit large deletes in bounded batches, for example 5,000 rows, adjusting from measured transaction time. Use a server-side job runner for long work, so a dropped remote shell does not abandon it. Cancel unwanted SQL with `pg_cancel_backend`, rather than killing a database server process and triggering crash recovery. Consider `pg_prewarm` for important indexes after a restart, within your cache budget.
+
+Measure database bytes per new Version on a matched sample, including heap, TOAST and indexes. **Example observation:** storage compaction and page cleanup reduced a comparable corpus from about 40 GB to 10 GB, roughly 51 KB per Version. Your audit retention, passage count and cleanup state change this figure; use [sample storage measurements](../run-quivr/run-a-large-import.mdx#2-measure-a-representative-sample).
+
+### Vector index
+
+Weaviate stores passages and a graph for approximate nearest-neighbor search (HNSW). A raw 768-dimensional float32 vector is `768 × 4 = 3,072` bytes, about 3 KB, before graph, metadata and runtime overhead. Compression reduces vector memory; it does not shrink every part of the service by the same factor.
+
+Quivr's `vector_index.quantization` applies per vector space, including spaces added later. Use [search index compression](../reference/configuration.mdx#search-index-compression) for configuration and existing-Corpus rebuild requirements. Weaviate reports up to fourfold vector compression and roughly 98–99% recall in its [RQ-8 tests](https://docs.weaviate.io/weaviate/configuration/compression/rq-compression); measure quality on your own queries. Full-precision vectors remain on disk for rescoring.
+
+Set `GOMEMLIMIT` at roughly 80–90% of the service's memory allocation as a starting soft runtime limit, following [Weaviate resource planning](https://docs.weaviate.io/weaviate/concepts/resources). It does not cap RSS or make an oversized index fit. Compare anonymous process memory with reclaimable page cache. **Example:** a container reporting 29 GB used held about 3.8 GB process memory and 23.6 GB page cache.
+
+**Watch disk I/O pressure, even with idle CPU.** Linux `io.pressure` reports time tasks stall on I/O. **Example incident:** 24–87% I/O pressure accompanied search timeouts with only 12 of 32 cores busy; pressure fell below 5% after writes slowed. One network volume delivered only about 1,600 read IOPS and 55 MB/s. Prefer local NVMe or adequately provisioned IOPS for large indexes, and verify sustained write/search performance on your actual disk.
+
+Old and replacement search generations coexist during a rebuild. Budget roughly twice steady objects, memory and disk when both are comparable; purging after cutover also uses I/O. Retained older generations can require more. **Example incident:** loading 3.2 million uncompressed vectors took over ten minutes and the node repeatedly failed startup. Plan compression and startup allowances before big jobs; schedule restarts and supported-version upgrades between them. Restarting a saturated index mid-rebuild can extend the outage.
+
+Compare `usage.phases.index_query_ms` with traces using [Diagnose slow searches during imports](../run-quivr/deploy.mdx#diagnose-slow-searches-during-imports). Fast individual keyword requests can still add up to a slow search. **Example observation:** during a 16 Versions/s import, index lexical p95 was 173–267 ms and semantic p95 was 11–30 ms. These are index timings, not whole-request targets.
+
+Quivr keeps durable vector artifacts in object storage independently of Weaviate. A supported Corpus rebuild can reuse those vectors when text and recipe match, reducing provider work. **Example recovery:** an index rebuild reused all stored vectors with zero provider calls. Preserve durable content, artifacts and metadata; an index wipe is not a routine scaling action.
+
+### Tokenizer helpers
+
+A tokenizer counts and cuts model inputs. A configured local tokenizer uses persistent helper processes; concurrent requests can queue behind too few helpers. **Example observations:** a serialized helper left short documents waiting 1.5–55 seconds; a pool cut a 16-request microbenchmark from 378 to 133 ms.
+
+Tune `tokenizer_processes` when cutting queues and CPU/memory have room. Auto uses `min(GOMAXPROCS, 4)`; each plugin process owns its pool. **Example memory measurement:** Python 3.12 and tokenizers 0.23.2 with a 768-dimensional model's vocabulary used roughly 440 MiB per loaded helper. Vocabulary and runtime, rather than vector dimensions alone, determine memory. Leave startup headroom and measure your tokenizer; the byte-count fallback starts no helpers. The [hosted embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#configuration) owns pool bounds and deadlines.
+
+### Object storage and disk guards
+
+Object storage grows with raw content, parts and vector files. Measure physical bytes, including retained object versions, separately from referenced files. **Example observations with an older recipe:** index disk grew 2.5–3.9 GB/h, PostgreSQL 1.9 GB/h and object storage 1.5–2.6 GB/h. These rates are workload-specific and are not estimates for a different recipe.
+
+Use a disk guard to pause connectors before a volume fills, for example at 85% used. This is an operator policy, not a built-in Quivr threshold. Leave room for already accepted work, WAL and cleanup. Check how every volume grows before importing; some platforms require a manual console operation.
+
+## Efficient ingestion
+
+Put archive-scale connectors on top-level `work_queue: "bulk"`; keep feeds and pushes live. Reuse HTTP connections, keep acquisition moving while work remains, and measure `batch_size` and `concurrency` with [Import archives](../guides/archive-import.mdx). **Example observation:** connection reuse reduced 482 connections for 512 sends to 32 and page acquisition from 2.6 seconds to 0.28 seconds. Connector checkpoints survive restarts; archive progress describes the share read, not a document count.
+
+Older revisions whose newer revision is already accepted can be quarantined as `normalization_superseded` before normalization. This avoids unnecessary work. **Example:** roughly 230,000 superseded Versions were misread as waiting work. An archive with 1.6 revisions per document does not necessarily need 1.6 searchable documents or all their vectors retained.
+
+Measure passages per Version before scaling. **Example observations:** per-paragraph cuts produced 13–15.5 passages per item; 512-token packing brought that near four, and another measured recipe near 2.5. A packing regression silently restored roughly 15 passages, multiplying embedding, graph and disk work. Long inputs still require additional passages; preserve their full text.
+
+Unchanged embedded text and recipe can reuse stored vectors on rebuild. Execution-only tuning preserves recipe identity under the [manifest conditions](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model). Packed vector files group vectors for a document's segmentation and space, reducing row and object overhead. Temporary ingestion pages hold work until canonical cuts and requested vectors are durable. Late writers can leave retained pages; follow [current storage and page-cleanup guidance](../run-quivr/upgrade-quivr.mdx) rather than assuming all leftovers disappear automatically.
+
+### The per-organization journal ceiling
+
+Database writes in an Organization serialize through one change-journal row. Adding worker replicas cannot remove this ceiling. Look for transaction/tuple lock waits involving `organization_journals`, then reduce competing writers or pause acquisition.
+
+**Example measurements:** earlier lock-heavy processing managed about 6–7 documents/s with 150–180 waiting transactions and waits up to 15 seconds. Taking the lock later and grouping publication improved one deployment to about 15–21 Versions/s. A local 64-writer measurement went from 114 to 592 documents/s on different hardware. Neither rate predicts your deployment; use your sample's completed-Version rate for sizing.
+
+Worker restarts resume durable work; a tracking lease is a short-lived record of an executing attempt. Document tracking leases expire about 15 seconds after renewal stops, while dependency failures can delay fresh observations. Tracking is best-effort and does not fail completed work. **Example incident:** slow lease renewals previously coincided with 18 rebuild-step failures in 30 minutes. Inspect actual Operation progress and errors, not just transient tracking counts.
+
+## Model changes and rebuilds
+
+Plan the model and packing recipe before importing. Replacing the served configuration's model identity or segmentation recipe requires rebuilding existing documents; compatible additional evaluation spaces can use backfill and promotion instead. [Choose an embedding model](../run-quivr/choose-an-embedding-model.mdx#know-which-changes-need-a-rebuild) owns that distinction.
+
+After a served-space replacement, new documents can be found by keyword while vector enrichment reports `rebuild_required`. Semantic or hybrid queries requiring an incompatible served space can return `422`, including a query across several Corpora when one is incompatible. Inspect the error and rebuild Operation; keyword availability does not prove vector readiness.
+
+Rebuilds check for new eligible Versions before cutover, so scope can grow during an import. **Example observation:** one operation grew from 249,000 to 402,000 Versions without a separate catch-up pass. Scope growth and new documents still awaiting vector enrichment make a fixed completion-time estimate unreliable.
+
+`rebuild.concurrency` keeps a sliding window of Versions in flight, refilling as each finishes. Increase it only within provider, connection, journal and disk budgets. Pausing an import can let its competing rebuild finish sooner. Stored first-writer vectors and coverage support retries; confirm the Operation completed and vector coverage is ready after activation. High retry rates during a recipe change merit inspecting the failing stage and pinned registrations, rather than adding workers.
+
+## Protect live traffic
+
+Separate worker queues protect live activity capacity, but remote embedding has no fleet-wide live/query priority or reserved capacity. Bulk embedding can occupy shared provider admission. **Example observations:** remote query encoding took 1.1–1.9 seconds under bulk load and returned `503`s; a matching CPU encoder experiment reduced whole-search latency to roughly 110–300 ms.
+
+Recommendations:
+
+- Reserve provider headroom by capping bulk concurrency below the measured knee.
+- Where routing permits, use separate plugin/provider pools for live work and queries. Verify the same model identity, templates and vector compatibility before serving queries.
+- Consider CPU query encoding only where your plugin/deployment supports it and parity, cold start and latency are measured. It is not a universal engine route or a commitment to retain the optional implementation.
+- Slow bulk writes or lower `rebuild.concurrency` when index I/O pressure rises and live search latency matters.
+- [Pause and resume connectors](../guides/connectors.mdx#pause-and-resume-collection) to stop acquisition while retaining the checkpoint. Already accepted work continues; a long schedule interval does not stop a running import.
+
+Treat shared-provider priority as an operating limitation. Plan explicit capacity isolation rather than relying on an unimplemented reservation mechanism.
+
+## Observe completed work
+
+Read queue counts with the dedicated `queues:read` key; inspect document state and Operations with the permissions of your operator tools. Database catalog access, private process `/metrics`, provider telemetry and host/container resource metrics require separate access. Restrict them to operators.
+
+| Signal | What it reveals |
+| --- | --- |
+| `/v0/admin/queues` waiting, in-progress and oldest age per lane | Admitted backlog, executing work and aging work; estimates can overlap. |
+| Admin document/stage view | Where a Version waits, retries or is quarantined. |
+| `pg_stat_activity` wait events | Journal locks, `WALInsert`/`WALWrite`, `BufferContent` or client waits. Correlate waits with the executing SQL. |
+| `pg_stat_checkpointer` and `pg_stat_statements` | Requested/timed checkpoints and expensive SQL. Compare interval deltas, not lifetime totals alone. |
+| Pool saturation in `/metrics` | Process connection pressure; compare acquired connections with pool maximum and acquisition waits. |
+| Index `io.pressure` and anonymous memory | I/O stalls and process memory, separated from page cache. |
+| Provider status codes, p95 and successful passages/s | Overload, throttling and useful embedding throughput. |
+| `embedding_incomplete` in plugin diagnostics | Embedding could not finish within the invocation; inspect provider errors and budgets. |
+| Rebuild `versions_covered`, `passages_covered`, `versions_quarantined` | Completed revision work, passage work and exclusions; units differ. |
+| Search `usage.phases.index_query_ms` | Time spent querying/decoding/selecting index results inside a successful search. |
+
+`baseline_unavailable` means retryable baseline processing failed, not necessarily embedding. The structured `processing outcome` log records `failure_step` (`route`, `derive` or `index`) and `failure_kind`. Plugin failures can also carry `plugin_code`, `plugin_http_status` and `plugin_retryable`. Use those safe diagnostics to distinguish registration, provider, database and indexing failures before changing capacity.
+
+### Read counters in their own units
+
+- A Record is a document identity; Versions are its revisions. An explorer showing 60,000 Records alongside 90,000 ingested Versions can be correct.
+- Archive members can be auxiliary files or rejected items; they are not necessarily documents.
+- Passages and vectors are not documents. A passage counter rate of 21/s can mean roughly one document/s with many passages.
+- `normalization_superseded` is avoided processing, not waiting work.
+- A maximum replica setting is not the observed replica count.
+- During a build, `is_current` and labels such as superseded describe visibility/state, not a definitive processing backlog. Compare stage state, Operation coverage and quarantine.
+- Zero waiting alone does not prove completion. Check in-progress work, failed/paused Operations, quarantine, vector coverage and representative searches.
+
+## Incident playbook
+
+Use these checks before increasing load. Each row gives a symptom, a check and an action; settings and maintenance procedures stay with their linked owner guides above.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| Provider `503`, `embedding_incomplete`, retrying documents, rebuild at zero | Provider status; diagnostic cause; total plugin concurrency against measured knee. | Scale provider first or lower bulk replica cap/concurrency; reserve live headroom. |
+| Import flat at a few documents/s with idle CPUs | Journal transaction/tuple lock waits and competing writers. | Reduce competing writers; pause acquisition. Extra workers cannot remove this per-organization ceiling. |
+| WAL waits and slow rebuild | Interval requested checkpoints greatly exceed timed; disk/WAL pressure. | Increase WAL allowance and checkpoint interval; enable compression within disk/CPU budgets. |
+| `too many clients`, deploy fails | Sum all pools, other clients and rollout headroom against usable server connections. | Resize pools/server connection capacity within memory limits. |
+| `storage_unavailable`, many `BufferContent` waits | Busy-table/index bloat and applied hot-table migrations. | Apply migration settings; concurrently reindex a bloated attempt primary key with temporary disk headroom. |
+| PostgreSQL `No space left on device` | Data/WAL disk and shared-memory allocation; identify which filled. | Grow/free the affected storage; use shipped mmap shared memory and bounded deletes for shared-memory exhaustion. |
+| Search `503` during import | Index I/O pressure and search traces; also provider/API admission. | Slow the measured bottleneck's bulk load; provision faster disk if I/O-bound. Avoid an unplanned restart. |
+| Index crash-loops during startup | Object count, compression, memory, loading duration and startup timeout. | Plan compression/rebuild recovery, memory and startup allowances; preserve durable artifacts and metadata. |
+| Semantic/hybrid `422` after model change | Error code, served-space compatibility and rebuild status. | Complete the applicable rebuild/cutover; use keyword search meanwhile if available. |
+| Rebuild crawling | Version counters, failures, provider capacity and competing imports. | Pause competing import; raise concurrency only with measured downstream headroom. |
+| Slow cutting | Tokenizer queue, CPU and helper memory. | Tune `tokenizer_processes` within memory and manifest constraints. |
+| Queue endpoint `503` | Observation age, refresh logs and database availability. | Hold scaling from that signal; repair observation. Unknown never means zero. |
+| Import does not stop | Connector paused state, continuing run and accepted backlog. | Use pause, not schedule interval; let accepted work drain. |
+| API startup reports busy setup | `migration_busy`, `index_setup_busy`, readiness header and lock holder. | Diagnose abandoned/conflicting transactions; rerun migration or allow background index retry as appropriate. |
+
+## Sizing worksheet
+
+Replace every assumption below with your [representative sample](../run-quivr/run-a-large-import.mdx#2-measure-a-representative-sample). Record document/revision mix, passage count, sustained completed Versions/s, provider knee, bytes per Version and physical storage growth. GB/KB below use decimal units; GiB/MiB use powers of 1,024.
+
+**Example workload assumptions:** 1,000,000 documents, 1.6 input revisions each, four passages per processed Version, one 768-dimensional space, RQ-8. Budget up to 1,600,000 processed Versions conservatively. If only one Version per document needs vectors, the low case is 1,000,000. Superseded revisions can reduce work; retained history or additional spaces increase it.
+
+### Work and elapsed time
+
+| Budget | Example calculation |
+| --- | --- |
+| Vectors | `processed Versions × passages`: 4–6.4 million. Count additional spaces separately. |
+| Provider work | `passages / measured successful passages/s`: 6.4M / 130 ≈ 13.7 hours for one measured 16-in-flight pool. |
+| Additional provider pools | Two independent identical pools suggest 6.8 hours of encoding only, if load balances and no shared limit intervenes. |
+| Journal floor | 1.6M / 15–20 completed Versions/s ≈ 22.2–29.6 hours in one Organization, using an illustrative measured ceiling. |
+
+The 130 passages/s figure was measured with all 16 requests available to encoding. Remeasure bulk passages/s after reserving live headroom; the 12-request bulk allocation below may take longer.
+
+Use the largest measured bottleneck time as a lower bound, then allow time for retries, acquisition, rebuilds and variability. Provider-only time is not import completion time. The example's journal floor exceeds its provider encoding time.
+
+### Workers and connections
+
+**Example admission assumptions:** a measured provider knee of 16 requests total; reserve four for live/query traffic; each bulk plugin sidecar allows four. Maximum bulk replicas are `floor((16 - 4) / 4) = 3`. Without that reservation, four would use the entire measured knee. For shared plugins, perform this calculation with plugin processes rather than workers.
+
+Start with one bulk slot per replica: at most 16 ingestion documents per process, 48 across three replicas. With `rebuild.concurrency = 8`, those same slots instead admit up to 24 rebuilding Versions. These are sample starting allocations; reduce them when the database or index saturates. Raise them only if provider admission is underused and completed throughput improves.
+
+**Example connection assumptions:** one API + one live + three maximum bulk = five processes, pool 16 each = 80. Allow 32 connections for two overlapping replacement processes and 16 for other clients: 128 usable connections needed, plus server-reserved connections. Memory must support that concurrency. Measure pool waits to decide whether 16 per process is useful; worker slots do not require one connection each for the full activity.
+
+### Disk, WAL and memory
+
+**Example storage assumptions:** a matched sample reports 51 KB database bytes per added Version, 10 KB index disk per vector, 2 GB/h physical object-store growth, and 2.4 GB total steady index process memory per million vectors. The memory coefficient includes graph/runtime overhead; it is a worksheet placeholder to replace with a sample, not a vendor guarantee for 768 dimensions. Weaviate's [RQ benchmark](https://weaviate.io/blog/8-bit-rotational-quantization) uses a different 1,536-dimensional dataset, so copying its totals would mis-size this example.
+
+| Budget | Example calculation |
+| --- | --- |
+| PostgreSQL base | 1.6M × 51 KB = 81.6 GB, before additional WAL and temporary work. |
+| Database volume | Illustrative reserve: another 81.6 GB for rebuild/maintenance + 32 GiB WAL + 40 GB free ≈ 237.6 GB; choose 256 GiB. |
+| WAL on that volume | Startup's 10% rule gives about 25.6 GiB, below its 32 GiB cap. Retained/excess WAL needs extra space. |
+| Index disk | 6.4M × 10 KB = 64 GB steady; 128 GB during a comparable rebuild, plus purge/temp/free-space headroom. |
+| Object storage | 2 GB/h × 29.6 h ≈ 59.2 GB growth, plus existing objects, versions, backups and delayed cleanup. |
+| Raw vector payload | 6.4M × 768 × 4 bytes = 19.66 GB; RQ-8 codes alone ≈ 4.92 GB before graph/runtime. |
+| Index memory | 6.4 × 2.4 GB = 15.36 GB steady; about 30.72 GB for two comparable generations, plus transient overhead. |
+| Index allocation | Illustrative 40 GiB service; `GOMEMLIMIT` at 85% = 34 GiB, provided measured startup/rebuild peaks fit. |
+| Tokenizer memory | Four helpers × 440 MiB ≈ 1.72 GiB per plugin process; five such processes ≈ 8.59 GiB, before startup/headroom. |
+
+The database reserve is a planning assumption, not a claim that every rebuild duplicates its whole database. Likewise, compressed vector RAM does not predict index disk, which retains full-precision data. Measure rebuild and cleanup peaks; older retained generations or a second space can exceed the two-generation allowance. Slowdowns extend object-storage growth time. Put a disk guard below your unsafe threshold and confirm volume expansion before starting.
+
+## Next
+
+- [Run a large import](../run-quivr/run-a-large-import.mdx).
+- [Scale workers on backlog](../run-quivr/deploy.mdx#scale-workers-on-backlog).
+- [Choose an embedding model](../run-quivr/choose-an-embedding-model.mdx).

@@ -107,6 +107,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name                              string
+		mode                              string
 		corpora                           []string
 		request                           map[string]any
 		noPlugin                          bool
@@ -131,7 +132,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		{name: "evaluation space", corpora: []string{"plugin"}, request: map[string]any{"primitive": "near_vector", "space": "example.large@1", "query_text": "lanterne", "k": 10}, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
 		{name: "corpora not rebuilt since the built-in space", corpora: []string{"builtin", "legacy"}, request: hybrid("space"), space: "space", builtin: 1},
 		{name: "a space the generation does not carry", corpora: []string{"builtin"}, request: hybrid("example.small@1"), wantErr: retrieval.ErrPluginInvalid},
-		{name: "corpora served by different spaces", corpora: []string{"plugin", "builtin"}, request: hybrid("space"), wantErr: retrieval.ErrUnsupported},
+		{name: "semantic corpora served by different spaces", mode: "semantic", corpora: []string{"plugin", "builtin"}, request: hybrid("space"), wantErr: retrieval.ErrUnsupported},
 		{name: "no owner pinned for a vector search", corpora: []string{"orphaned"}, request: hybrid("retired.space@2"), wantErr: retrieval.ErrUnsupported},
 		{name: "no owner needed for a keyword search", corpora: []string{"orphaned"}, request: map[string]any{"primitive": "bm25", "query_text": "lanterne", "k": 10}, space: ""},
 		{name: "ingestion plugin unpinned", corpora: []string{"plugin"}, request: hybrid("example.small@1"), noPlugin: true, wantErr: retrieval.ErrUnsupported},
@@ -166,7 +167,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 			if c.noPlugin {
 				s.Spaces = nil
 			}
-			_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: c.corpora, EvaluationPlugin: c.evaluationPlugin, Space: c.evaluationSpace})
+			_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: c.mode, CorpusIDs: c.corpora, EvaluationPlugin: c.evaluationPlugin, Space: c.evaluationSpace})
 			if !errors.Is(err, c.wantErr) {
 				t.Fatalf("error %v, want %v", err, c.wantErr)
 			}

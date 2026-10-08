@@ -13,9 +13,10 @@
 #
 # summary is optional: one line shown after the page title on its audience's
 # start page. Then run `make start-pages`: `make docs` fails with
-# `stale-start-page` until the start pages match this list. The public
-# documentation site is not listed here: its pages are the MDX files of
-# docs-site/ and its navigation is docs-site/docs.json (scripts/mintlify_site.py).
+# `stale-start-page` until the start pages match this list. Public site pages
+# normally stay outside this list; declare an MDX page here when it should
+# appear on a start page and receive repository link checks. Site navigation
+# stays in docs-site/docs.json (scripts/mintlify_site.py).
 #
 # audience: who reads it
 #   functional     integrators and non-developers learning what Quivr does
@@ -56,7 +57,7 @@ excluded = [
     "internal/reference/*/testdata/*",                     # reference generator test fixtures
     "third_party/*/NOTICE.md",                             # upstream notices
     "third_party/*/MODEL_CARD.md",                         # upstream model card
-    "docs-site/*",                                         # the documentation site (MDX; scripts/mintlify_site.py)
+    "docs-site/*.md",                                      # site Markdown; MDX navigation checked by scripts/mintlify_site.py
 ]
 
 [pages]
@@ -74,6 +75,7 @@ excluded = [
 "deploy/railway/autoscaler/README.md" = { audience = "functional", kind = "guide", summary = "scale Railway bulk workers from queue backlog" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
 "deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
+"docs-site/run-quivr/scale-quivr.mdx" = { audience = "functional", kind = "concept", summary = "capacity budgets, import lessons and incident checks for operators" }
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
 "docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }

@@ -2017,7 +2017,7 @@ The most frequent search queries of the key's Organization over the window, norm
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -10455,6 +10455,7 @@ Resolved retrieval profile identity. Name is the requested short or full name (d
 | --- | --- | --- | --- |
 | `name` | string | yes | Minimum length `1`. |
 | `version` | string | yes | Minimum length `1`. |
+| `degraded` | array of [`SearchDegradation`](#searchdegradation) |  | Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match. At least `1` items. At most `16` items. |
 
 <details>
 <summary>Full schema</summary>
@@ -10469,10 +10470,48 @@ properties:
   version:
     type: string
     minLength: 1
+  degraded:
+    type: array
+    minItems: 1
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/SearchDegradation'
+    description: Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
 required:
   - name
   - version
 description: Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+```
+
+</details>
+
+### `SearchDegradation`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `reason` | string | yes | No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes. One of `vectors_unavailable`. |
+| `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  reason:
+    type: string
+    enum: [vectors_unavailable]
+    description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+  corpus_ids:
+    type: array
+    minItems: 1
+    maxItems: 16
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+required: [reason, corpus_ids]
 ```
 
 </details>
@@ -10984,6 +11023,26 @@ Example `lexical_search_without_embedding`:
   "retrieval_profile": {
     "name": "default",
     "version": "quivr.text.fixture.v1"
+  }
+}
+```
+
+Example `hybrid_search_with_unavailable_vectors`:
+
+```json
+{
+  "items": [],
+  "retrieval_profile": {
+    "name": "default",
+    "version": "plugin:core.retrieve@1.0.0/default",
+    "degraded": [
+      {
+        "reason": "vectors_unavailable",
+        "corpus_ids": [
+          "corpus_1"
+        ]
+      }
+    ]
   }
 }
 ```

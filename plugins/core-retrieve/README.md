@@ -1,7 +1,6 @@
 # core.retrieve
 
-The first-party retrieval plugin, pinned by default beside the api.
-The engine ranks nothing itself and refuses to start without a retrieval plugin.
+The first-party retrieval plugin, pinned by default beside the api; the engine refuses to start without one.
 
 ## What it does
 
@@ -10,15 +9,16 @@ Up to two rounds of candidates, then the ranking:
 - **Round 1** asks for `k = candidate_count` (the search limit when unset) per request: `lexical` uses
   one `bm25` request with `group_by: record` on the title and body (`field: source`); `semantic` uses
   `near_vector` with `group_by: record` in every served space; `hybrid` uses `hybrid` with `group_by: record` in every served
-  space with the configured weight and fusion (defaults: alpha 0.5 and relative score), in batches of at most eight requests. A semantic or hybrid
-  search whose Corpora serve no vector space is refused (422
-  `unsupported_search`).
+  space with the configured weight and fusion (defaults: alpha 0.5 and relative score), in batches of at most eight requests.
+  Without a served space, hybrid asks for `bm25`; explicit semantic returns `422 unsupported_search`.
+  The engine keeps affected Corpora's keywords alongside hybrid candidates,
+  reporting their ids in `retrieval_profile.degraded` (`vectors_unavailable`).
 - **Ranking** merges candidates by descending index score and keeps each
   Record once across served spaces, with its best available passage and an explanation
   naming the primitive and space. Equal scores rank by segment id.
 
-It makes no model call: the engine encodes the query with the owner of the
-space: the ingestion plugin that declares it or, for a Corpus not rebuilt
+It makes no model call: the engine encodes the query with the space's owner:
+the ingestion plugin that declares it or, for a Corpus not rebuilt
 since THE-777, the engine's former E5 space. Configuration is optional.
 
 ## Configuration
@@ -31,8 +31,8 @@ Set these keys in the plugin pin's `configuration`; both core profiles use them.
 | `candidate_count` | Candidates per served space, or one lexical request, 1–100; default the search limit. A smaller value can return a shorter page. |
 | `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses reciprocal rank fusion with constant 60. |
 
-Weight and fusion affect hybrid mode only; final ranking remains capped by the
-search limit. Omitting settings preserves default request bytes. See
+Weight and fusion affect hybrid mode only; ranking remains capped by the search limit.
+Omitting settings preserves default request bytes. See
 [Search profiles](https://docs.quivr.thevibecompany.co/run-quivr/search-profiles#core-retrieval-settings)
 for a deployment example, trial mapping and Jev shortlist settings.
 

@@ -61,6 +61,7 @@
               "run-quivr/overview",
               "run-quivr/deploy",
               "run-quivr/run-a-large-import",
+              "run-quivr/scale-quivr",
               "run-quivr/upgrade-quivr",
               "run-quivr/security",
               "run-quivr/tls",

@@ -106,15 +106,20 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 	}
 }
 
-// Without a served space only a keyword search can be answered; the others
-// are refused for good (422 unsupported_search), as the engine refused them.
-func TestRefusesVectorSearchWithoutAServedSpace(t *testing.T) {
+// Hybrid retains its keyword half without a served space; explicit semantic
+// search keeps its terminal refusal.
+func TestSearchWithoutAServedSpace(t *testing.T) {
 	for _, mode := range []string{"semantic", "hybrid"} {
 		req := &quivrplugin.SearchRequest{Round: 1, Limit: 10, Spaces: []quivrplugin.SearchSpace{}}
 		req.Query.Text, req.Query.Mode = "grève", mode
 		var e *quivrplugin.SearchError
-		if _, err := (retriever{}).Search(t.Context(), req); !errors.As(err, &e) || e.Retryable {
-			t.Errorf("%s without a served space: %v, want a terminal refusal", mode, err)
+		answer, err := (retriever{}).Search(t.Context(), req)
+		if mode == "semantic" {
+			if !errors.As(err, &e) || e.Retryable {
+				t.Errorf("semantic without a served space: %v, want a terminal refusal", err)
+			}
+		} else if err != nil || len(answer.Requests) != 1 || answer.Requests[0].Primitive != quivrplugin.PrimitiveBM25 {
+			t.Fatalf("hybrid without a served space: %+v, %v; want keyword candidates", answer, err)
 		}
 	}
 }

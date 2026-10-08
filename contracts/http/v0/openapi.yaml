@@ -3827,7 +3827,10 @@ paths:
       operationId: searchRecords
       description: Resolve the requested profile, compile mandatory Corpus/Organization prefilters and
         any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records
-        remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection
+        remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches
+        use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded.
+        Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when
+        vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection
         does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks
         the engine for candidates in up to three rounds and returns its ranking, which may hold only
         candidates the engine served in this search, each already authorized and hydrated.
@@ -7952,12 +7955,37 @@ components:
         version:
           type: string
           minLength: 1
+        degraded:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/SearchDegradation'
+          description: Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora
+            whose vector half is unavailable and whose results use keywords. Present even when no documents match.
       required:
       - name
       - version
       description: Resolved retrieval profile identity. Name is the requested short or full name (default when
         the request named none). Version identifies what ranked as
         plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+    SearchDegradation:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [vectors_unavailable]
+          description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+        corpus_ids:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+      required: [reason, corpus_ids]
     SearchProfileList:
       type: object
       additionalProperties: false
