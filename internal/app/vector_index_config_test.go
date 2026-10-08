@@ -20,6 +20,7 @@ func TestVectorIndexConfiguration(t *testing.T) {
 		{`{"vector_index":{"quantization":"rq-1"}}`, content.VectorIndex{Quantization: "rq-1"}, true},
 		{`{"vector_index":{"quantization":"rq-1","rescore_limit":512,"spaces":{"quivr.e5_small":{"quantization":"rq-8"}}}}`, content.VectorIndex{Quantization: "rq-8", RescoreLimit: 512}, true},
 		{`{"vector_index":{"rescore_limit":64,"spaces":{"quivr.e5_small":{"quantization":"none"}}}}`, content.VectorIndex{Quantization: "none"}, true},
+		{`{"vector_index":{"rescore_limit":64,"spaces":{"quivr.e5_small":{"rescore_limit":0}}}}`, content.VectorIndex{Quantization: "rq-8"}, true},
 		{`{"vector_index":{"spaces":{"another.space":{"quantization":"rq-1"}}}}`, content.VectorIndex{Quantization: "rq-8"}, true},
 		{`{"vector_index":{"quantization":"rq-4"}}`, content.VectorIndex{}, false},
 		{`{"vector_index":{"quantization":"none","rescore_limit":20}}`, content.VectorIndex{}, false},

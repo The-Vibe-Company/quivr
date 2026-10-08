@@ -561,6 +561,10 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 	partitions := map[string]*partition{}
 	var keys []string
 	for _, r := range routes {
+		// Partitions are merged, so every route must share one collection.
+		if r.Generation.Collection != routes[0].Generation.Collection {
+			return nil, errors.New("invalid projection route")
+		}
 		item := r.Generation.ItemKeywordsProjected && q.Field != retrieval.FieldLexical
 		key := strconv.FormatBool(item)
 		if q.Mode != "lexical" {

@@ -9,10 +9,11 @@ import (
 
 // VectorIndexSetting is how the search index stores a space's vectors. An
 // omitted quantization or rescore limit takes the deployment's, except that
-// a space set to "none" has nothing to rescore.
+// a space set to "none" has nothing to rescore. A rescore limit of 0 keeps
+// the index's own default.
 type VectorIndexSetting struct {
 	Quantization string `json:"quantization,omitempty"`
-	RescoreLimit int    `json:"rescore_limit,omitempty"`
+	RescoreLimit *int   `json:"rescore_limit,omitempty"`
 }
 
 // VectorIndexConfig is the deployment's vector index setting, rq-8 when
@@ -32,11 +33,11 @@ func (c VectorIndexConfig) For(key, id string) content.VectorIndex {
 		if setting.Quantization != "" {
 			out.Quantization = setting.Quantization
 		}
-		if setting.RescoreLimit != 0 {
-			out.RescoreLimit = setting.RescoreLimit
+		if setting.RescoreLimit != nil {
+			out.RescoreLimit = *setting.RescoreLimit
 		}
 	}
-	if override.Quantization == content.QuantizationNone && override.RescoreLimit == 0 {
+	if override.Quantization == content.QuantizationNone && override.RescoreLimit == nil {
 		out.RescoreLimit = 0
 	}
 	return out

@@ -68,7 +68,8 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 		bits    int
 		rescore int
 	}{
-		{"recorded without a setting", before, space, true, 8, 0},
+		// RQ-8 without a limit keeps the database default the docs promise.
+		{"recorded without a setting", before, space, true, 8, 20},
 		{"rq-1 with a rescore limit", after, space, true, 1, 64},
 		{"none", after, large, false, 0, 0},
 	} {
@@ -78,7 +79,7 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 			t.Fatalf("%s: named vector %s missing from %v", want.name, vector, schema.VectorConfig)
 		}
 		rq := got.VectorIndexConfig.RQ
-		if got.VectorIndexType != "hnsw" || rq.Enabled != want.rq || (want.rq && rq.Bits != want.bits) || (want.rescore > 0 && rq.RescoreLimit != want.rescore) || got.VectorIndexConfig.SkipDefaultQuantization == want.rq {
+		if got.VectorIndexType != "hnsw" || rq.Enabled != want.rq || (want.rq && rq.Bits != want.bits) || (want.rq && rq.RescoreLimit != want.rescore) || got.VectorIndexConfig.SkipDefaultQuantization == want.rq {
 			t.Fatalf("%s: %s index %+v, want hnsw rq=%v bits=%d rescore=%d", want.name, vector, got, want.rq, want.bits, want.rescore)
 		}
 	}

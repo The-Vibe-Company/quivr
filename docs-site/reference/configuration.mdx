@@ -250,7 +250,7 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 
 ## Search index compression
 
-`vector_index` sets how Weaviate stores each vector space's vectors. Every space uses an HNSW index. `quantization` is `rq-8` (the default, 8-bit rotational quantization), `rq-1` (1-bit, the smallest) or `none` (full precision). A compressed index keeps the full-precision vectors on disk and rescores its best candidates with them. `rescore_limit` sets how many candidates are rescored; omitted, it keeps Weaviate's default (20 at 8 bits, 512 at 1 bit). `vector_index.spaces` overrides the setting for one space, by its declared id or its full `<id>@<version>` key. An omitted field of an override takes the deployment's value; an override to `none` drops the deployment's `rescore_limit`. An invalid value, or a `rescore_limit` with `none`, refuses startup.
+`vector_index` sets how Weaviate stores each vector space's vectors. Every space uses an HNSW index. `quantization` is `rq-8` (the default, 8-bit rotational quantization), `rq-1` (1-bit, the smallest) or `none` (full precision). A compressed index keeps the full-precision vectors on disk and rescores its best candidates with them. `rescore_limit` sets how many candidates are rescored; omitted or `0`, it keeps Weaviate's default (20 at 8 bits, 512 at 1 bit). `vector_index.spaces` overrides the setting for one space, by its declared id or its full `<id>@<version>` key. An omitted field of an override takes the deployment's value; an override to `none` drops the deployment's `rescore_limit`. An invalid value, or a `rescore_limit` with `none`, refuses startup.
 
 ```json
 {
