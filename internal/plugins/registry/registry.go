@@ -138,9 +138,12 @@ func ingestionRecipe(pin *plugins.Pin) string {
 	if pin.IngestionDerivation != nil {
 		return pin.IngestionDerivation.Recipe
 	}
+	return nativeIngestionRecipe(pin)
+}
+
+func nativeIngestionRecipe(pin *plugins.Pin) string {
 	if keys := executionKeys(pin); len(keys) > 0 {
-		contract, _ := json.Marshal(keys)
-		return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", string(semanticInputs(pin, keys)), string(contract))
+		return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", string(semanticInputs(pin, keys)))
 	}
 	return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", pin.ManifestDigest, string(SettingsOf(pin).Configuration))
 }

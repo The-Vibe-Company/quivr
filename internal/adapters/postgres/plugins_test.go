@@ -192,6 +192,40 @@ func TestIngestionTuningPlanLineage(t *testing.T) {
 	if r, p := descriptor(l1.Plan); r != r1 || p != p1 {
 		t.Fatalf("legacy recipe was rewritten: %s %s", r, p)
 	}
+	// A later release adds a new execution-only setting to an existing list.
+	// Historical plans and the currently served lineage must survive reloads.
+	extra := seed(16, true)
+	extra.Registrations[0].Manifest = []byte(strings.Replace(string(candidate.Manifest),
+		"execution_keys: [max_concurrent_requests]", "execution_keys: [max_concurrent_requests, tokenizer_processes]", 1))
+	extraPin, err := plugins.LoadPinManifest(extra.Registrations[0].Manifest, "embedder", plugins.PinConfig{
+		Endpoint: candidate.Endpoint, Spaces: hashSpaces,
+		Configuration: json.RawMessage(`{"max_concurrent_requests":16,"tokenizer_processes":2}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraPins, err := plugins.NewPinSet([]*plugins.Pin{extraPin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := store.ApplyConfiguration(ctx, registry.FromPins(extraPins))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, p := descriptor(added.Plan); r != nativeRecipe || p != nativeProvenance {
+		t.Fatalf("adding an execution key changed persisted recipe/provenance: %s %s, want %s %s", r, p, nativeRecipe, nativeProvenance)
+	}
+	back = rollback(native.ID, "added-execution-key-return")
+	if r, p := descriptor(back.ID); r != nativeRecipe || p != nativeProvenance {
+		t.Fatalf("execution-key rollback changed lineage: %s %s", r, p)
+	}
+	removed, err := store.ApplyConfiguration(ctx, seed(8, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := descriptor(removed.Plan); r == nativeRecipe {
+		t.Fatal("removing execution declarations concealed a changed semantic setting")
+	}
 }
 
 // configured is the seed of startup pins.

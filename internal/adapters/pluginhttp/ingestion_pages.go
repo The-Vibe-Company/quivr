@@ -30,6 +30,7 @@ type sourceCursor struct {
 }
 
 func (i Ingestor) SegmentAndEmbedPage(ctx context.Context, org, corpusID string, v content.Version, keys []string, cursor json.RawMessage) (processing.PluginPage, error) {
+	i = i.serving()
 	var pos sourceCursor
 	if len(cursor) > 0 {
 		if err := json.Unmarshal(cursor, &pos); err != nil {

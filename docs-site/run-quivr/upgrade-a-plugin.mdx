@@ -222,20 +222,31 @@ A saved rollback plan may name the replaced build, even as an evaluation member.
 ## Tune embedding throughput
 
 The hosted embedding plugin declares `max_concurrent_requests`, `batch_size`,
-`max_batch_tokens`, `request_timeout_ms`, `call_budget_ms`, `batch_wait_ms` and
-`max_retries` as execution-only settings. Change them while keeping the plugin
+`max_batch_tokens`, `request_timeout_ms`, `call_budget_ms`, `batch_wait_ms`,
+`max_retries` and `tokenizer_processes` as execution-only settings. Change them while keeping the plugin
 id and version, regenerate and certify its manifest, then register and activate
-it using the steps above. Run it at a separate address until the previous
-registration becomes `inactive`; old pinned work still needs its exact manifest.
+it using the steps above. With identical semantic settings, vector-space
+declarations and enabled spaces, pinned ingestion, rebuilds and queries can use
+the active equivalent registration at the same address. Discovery checks that
+registration's exact manifest, and requests use its installed execution settings.
+The original work plan, recipe, provenance and invocation keys stay unchanged;
+cancelling the original Operation or applying an explicit rollback stop still stops
+its requests through the replacement.
 
 Quivr keeps the active ingestion recipe and its derivation provenance, even on
-the first upgrade from a manifest without execution declarations. Existing
-vectors stay served and imports do not settle with `rebuild_required` for tuning
-changes. After activation, inspect `GET /v0/admin/documents/{version_id}/timeline`
+the first upgrade from a manifest without execution declarations and when a
+later manifest adds a new execution key. An added declaration cannot reclassify
+an existing semantic setting for serving replacement. For added keys, a historical
+schema with composition (`allOf`, `anyOf` or `oneOf`), references, wildcard constraints or other unsupported
+keywords cannot prove equivalence; keep its original build reachable. Adopting an
+explicitly configured legacy setting in the first declaration preserves the stored
+recipe, but does not qualify for automatic serving replacement. Keep that exact
+old process reachable until its pinned work drains. Existing vectors stay served
+and imports do not settle with `rebuild_required` for tuning changes. After activation, inspect `GET /v0/admin/documents/{version_id}/timeline`
 for existing and newly imported documents: their enrichment should settle
 without `rebuild_required`. Repeat a semantic search against existing documents
 to confirm their vectors still serve; check `GET /v0/admin/plugins` for the
-previous registration’s state before stopping its process.
+previous registration’s state before stopping a separately hosted process.
 Model, templates, packing, tokenizer, tokens per chunk and plugin version
 changes still need the recipe-change procedure below.
 
@@ -281,9 +292,9 @@ For another space of the same ingestion owner, [Fill a new vector space](/run-qu
 <Accordion title="Work finishes on the version it started with">
 The processing of a receipt, a connector run and a rebuild each record the plan that was active when they started. Their retries, their later steps and a worker restart keep calling that plan's plugins, so a document is never processed half by one version and half by the other. Keep the old version running until it is `inactive`.
 
-If the old version cannot be reached while it drains, live imports and normalization keep retrying with backoff on their original pin, even after `pinned_plugin_attempts` attempts. A manifest digest mismatch at the old address is also unavailability: the replacement cannot serve the old pin. Restore the exact registered build at its address so those imports can finish and release their pins. Quivr never silently moves them to the new version, and a permanently removed build cannot finish its pinned imports. An explicit rollback with `pinned_work: stop` still stops them.
+If the old version cannot be reached while it drains, imports, normalization and Operations keep retrying with backoff on their original pin, even after `pinned_plugin_attempts` attempts. A manifest digest mismatch is also unavailability. An execution-equivalent ingestion registration can serve that work; otherwise restore the exact registered build at its address so it can finish and release its pins. Quivr never substitutes different semantic settings, spaces or plugin versions. An explicit rollback with `pinned_work: stop` still stops the work.
 
-Operations retain the `pinned_plugin_attempts` budget (10 by default) for unavailable plugins of older plans. Incompatible ingestion owners and ingestion invocation deadlines also retain that budget. Interrupted bounded ingestion pages retry without consuming the legacy per-item deadline budget and keep completed pages committed, but still spend `pinned_plugin_attempts` once their plugin leaves the active plan. Exhausting it records `pinned_plugin_unavailable`, naming the plan and plugin: a Version waiting for text is quarantined, a searchable Version keeps its text while enrichment stops, and a rebuild fails. A plugin of the active plan may be unreachable for any time: its work keeps retrying. Each ingestion registration counts only its routed receipts and backfills. A rebuild shares enrichment's budget of three reached embedding deadlines per Version; outages do not consume it. Backfill keeps its skip-on-deadline policy. Do not terminate pinned work by hand in Temporal, since its count would never be released.
+Incompatible ingestion owners and reached ingestion invocation deadlines retain the `pinned_plugin_attempts` budget (10 by default). Interrupted bounded ingestion pages keep completed pages committed and still spend `pinned_plugin_attempts` after their owner leaves the active plan. Exhausting a deterministic incompatibility or deadline budget records `pinned_plugin_unavailable`, naming the plan and plugin. A Version waiting for text is quarantined, a searchable Version keeps its text while enrichment stops, and rebuild processing holds the affected Version. Discovery and transport outages never spend that budget. A rebuild shares enrichment's budget of three reached embedding deadlines per Version; outages do not consume it. Backfill keeps its skip-on-deadline policy. Do not terminate pinned work by hand in Temporal, since its count would never be released.
 </Accordion>
 
 ## Restarts during an upgrade
