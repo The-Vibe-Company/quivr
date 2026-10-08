@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // This owns the cross-Version transaction boundary. Single-Version refusal,
@@ -108,13 +111,50 @@ func TestMatchGroupSharesJournalAcrossRecordVersions(t *testing.T) {
 	r4, v4 := f.publish("canceled", "canceled", "Canceled group")
 	r5, v5 := f.publish("healthy", "healthy", "Healthy group")
 	member, stop := context.WithCancel(ctx)
+	defer stop()
 	group = []monitoring.MatchCommit{{Context: member, Intent: intent(r4, v4), Evidence: f.evidence(sub)}, {Intent: intent(r5, v5), Evidence: f.evidence(sub)}}
-	stop()
+	// The driver callback runs after the successful write packet, before
+	// CommitMatches can commit. Cancel only the member, keeping the caller live.
+	tracer := &cancelMatchWrites{cancel: stop}
+	cfg := f.pool.Config()
+	cfg.ConnConfig.Tracer = tracer
+	traced, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer traced.Close()
+	writer := postgres.EvaluationStore{Pool: traced}
 	before = head()
-	if _, err = evaluation.CommitMatches(ctx, group); !errors.Is(err, context.Canceled) || head() != before || f.count(`SELECT count(*) FROM matches WHERE organization=$1 AND record_version_id=ANY($2::text[])`, f.org, []string{v4, v5}) != 0 {
+	if _, err = writer.CommitMatches(ctx, group); !tracer.staged || !errors.Is(err, context.Canceled) || head() != before || f.count(`SELECT count(*) FROM matches WHERE organization=$1 AND record_version_id=ANY($2::text[])`, f.org, []string{v4, v5}) != 0 {
 		t.Fatalf("canceled member exposed a shared commit: %v head=%d", err, head())
 	}
 	if outcomes, err = evaluation.CommitMatches(ctx, group[1:]); err != nil || fmt.Sprint(outcomes) != "[matched]" {
 		t.Fatalf("healthy group could not commit independently: %v %v", outcomes, err)
+	}
+}
+
+type matchWritesKey struct{}
+type cancelMatchWrites struct {
+	cancel context.CancelFunc
+	staged bool
+}
+
+func (t *cancelMatchWrites) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (*cancelMatchWrites) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func (*cancelMatchWrites) TraceBatchStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceBatchStartData) context.Context {
+	for _, q := range d.Batch.QueuedQueries {
+		if strings.Contains(q.SQL, "INSERT INTO matches(") {
+			return context.WithValue(ctx, matchWritesKey{}, true)
+		}
+	}
+	return ctx
+}
+func (*cancelMatchWrites) TraceBatchQuery(context.Context, *pgx.Conn, pgx.TraceBatchQueryData) {}
+func (t *cancelMatchWrites) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceBatchEndData) {
+	if written, _ := ctx.Value(matchWritesKey{}).(bool); written && d.Err == nil {
+		t.staged = true
+		t.cancel()
 	}
 }
