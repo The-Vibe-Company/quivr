@@ -382,6 +382,7 @@ class ManifestContributions(Model):
 @dataclass(kw_only=True)
 class ManifestConfiguration(Model):
     schema: Any
+    execution_keys: list[str] | None = None
 
 
 @dataclass(kw_only=True)

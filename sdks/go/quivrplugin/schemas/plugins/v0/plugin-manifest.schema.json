@@ -78,6 +78,17 @@
             "boolean"
           ],
           "description": "JSON Schema 2020-12 for the plugin configuration the installer supplies."
+        },
+        "execution_keys": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": "Top-level installer configuration keys that affect execution pacing only, never segmentation or vector meaning. Changing their values preserves the ingestion recipe when all other manifest and configuration content is unchanged."
         }
       }
     },

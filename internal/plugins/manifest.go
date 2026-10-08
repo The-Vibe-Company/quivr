@@ -281,7 +281,8 @@ type Limits struct {
 }
 
 type Configuration struct {
-	Schema json.RawMessage `json:"schema"`
+	Schema        json.RawMessage `json:"schema"`
+	ExecutionKeys []string        `json:"execution_keys,omitempty"`
 }
 
 type Secret struct {
@@ -339,12 +340,7 @@ func Inspect(target string) Report {
 func Validate(raw []byte) Report {
 	sum := sha256.Sum256(raw)
 	report := Report{ManifestDigest: "sha256:" + hex.EncodeToString(sum[:])}
-	var parsed any
-	if err := yaml.Unmarshal(raw, &parsed); err != nil {
-		report.Errors = []Issue{{Code: CodeInvalidYAML, Message: err.Error()}}
-		return finish(report)
-	}
-	doc, err := toJSON(parsed)
+	doc, err := ManifestJSON(raw)
 	if err != nil {
 		report.Errors = []Issue{{Code: CodeInvalidYAML, Message: err.Error()}}
 		return finish(report)
@@ -654,6 +650,16 @@ func sortedKeys(m map[string]any) []string {
 
 func pointerToken(s string) string {
 	return strings.NewReplacer("~", "~0", "/", "~1").Replace(s)
+}
+
+// ManifestJSON returns the same normalized JSON document used for admission.
+// Recipe comparison must preserve YAML-only values exactly as validation does.
+func ManifestJSON(raw []byte) ([]byte, error) {
+	var parsed any
+	if err := yaml.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
+	}
+	return toJSON(parsed)
 }
 
 // toJSON converts a decoded YAML value into JSON bytes. YAML-only shapes that

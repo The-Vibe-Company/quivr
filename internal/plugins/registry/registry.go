@@ -121,6 +121,13 @@ func SettingsOf(pin *plugins.Pin) Settings {
 // manifest and configuration. Addresses, registrations and enabled roles do
 // not change the derivation.
 func IngestionRecipe(pin *plugins.Pin) string {
+	if pin.IngestionDerivation != nil {
+		return pin.IngestionDerivation.Recipe
+	}
+	if keys := executionKeys(pin); len(keys) > 0 {
+		contract, _ := json.Marshal(keys)
+		return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", string(semanticInputs(pin, keys)), string(contract))
+	}
 	return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", pin.ManifestDigest, string(SettingsOf(pin).Configuration))
 }
 
@@ -314,6 +321,8 @@ type Assignment struct {
 	// PluginID and Version name the registration for readers.
 	PluginID string
 	Version  string
+	// IngestionDerivation binds this owner's recipe for this immutable plan.
+	IngestionDerivation *plugins.IngestionDerivation
 }
 
 // Plan is an immutable Pipeline Plan: every role and the registration that
@@ -568,7 +577,9 @@ func planRoles(set *plugins.PinSet, byPin map[*plugins.Pin]Registration) []Assig
 		roles = append(roles, assign(connectorRole(pinned.Kind), byPin[pinned.Pin]))
 	}
 	for _, pin := range set.Ingestions() {
-		roles = append(roles, assign(ingestionMembershipRole(pin.Manifest.ID), byPin[pin]))
+		a := assign(ingestionMembershipRole(pin.Manifest.ID), byPin[pin])
+		a.IngestionDerivation = pin.IngestionDerivation
+		roles = append(roles, a)
 	}
 	if pin := set.Ingestion(); pin != nil {
 		roles = append(roles, assign(ingestionRole, byPin[pin]))

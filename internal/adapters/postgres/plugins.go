@@ -206,6 +206,30 @@ func (s PluginStore) ApplyConfiguration(ctx context.Context, seed registry.Seed)
 // recordPlan writes a new plan replacing previous ("" when none is active),
 // makes it active, and moves registrations in and out of the active state.
 func recordPlan(ctx context.Context, tx pgx.Tx, source, previous string, roles []registry.Assignment) (string, error) {
+	var prior registry.Plan
+	var err error
+	if previous != "" {
+		prior, err = pipelinePlan(ctx, tx, previous)
+		if err != nil {
+			return "", err
+		}
+	}
+	ids := []string{}
+	for _, a := range append(append([]registry.Assignment{}, roles...), prior.Roles...) {
+		ids = append(ids, a.RegistrationID)
+	}
+	list, err := registrations(ctx, tx, `WHERE id=ANY($1)`, ids)
+	if err != nil {
+		return "", err
+	}
+	registered := map[string]registry.Registration{}
+	for _, r := range list {
+		registered[r.ID] = r
+	}
+	roles, err = registry.BindIngestionRecipes(prior, registry.Plan{Source: source, Roles: roles}, registered)
+	if err != nil {
+		return "", err
+	}
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", err
@@ -216,7 +240,13 @@ func recordPlan(ctx context.Context, tx pgx.Tx, source, previous string, roles [
 	}
 	members := []string{}
 	for _, a := range roles {
-		if _, err := tx.Exec(ctx, "INSERT INTO pipeline_plan_roles(plan_id,role,registration_id) VALUES($1,$2,$3)", plan, a.Role, a.RegistrationID); err != nil {
+		var recipe *string
+		var provenance json.RawMessage
+		if a.IngestionDerivation != nil {
+			recipe = &a.IngestionDerivation.Recipe
+			provenance = a.IngestionDerivation.Provenance
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO pipeline_plan_roles(plan_id,role,registration_id,ingestion_recipe,ingestion_provenance) VALUES($1,$2,$3,$4,$5)", plan, a.Role, a.RegistrationID, recipe, provenance); err != nil {
 			return "", err
 		}
 		members = append(members, a.RegistrationID)
@@ -282,13 +312,18 @@ func pipelinePlan(ctx context.Context, q querier, id string) (registry.Plan, err
 	if err != nil {
 		return plan, err
 	}
-	rows, err := q.Query(ctx, `SELECT pr.role,pr.registration_id,r.plugin_id,r.version FROM pipeline_plan_roles pr JOIN plugin_registrations r ON r.id=pr.registration_id WHERE pr.plan_id=$1 ORDER BY pr.role`, plan.ID)
+	rows, err := q.Query(ctx, `SELECT pr.role,pr.registration_id,r.plugin_id,r.version,COALESCE(pr.ingestion_recipe,''),pr.ingestion_provenance FROM pipeline_plan_roles pr JOIN plugin_registrations r ON r.id=pr.registration_id WHERE pr.plan_id=$1 ORDER BY pr.role`, plan.ID)
 	if err != nil {
 		return plan, err
 	}
 	plan.Roles, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (registry.Assignment, error) {
 		var a registry.Assignment
-		err := row.Scan(&a.Role, &a.RegistrationID, &a.PluginID, &a.Version)
+		var recipe string
+		var provenance json.RawMessage
+		err := row.Scan(&a.Role, &a.RegistrationID, &a.PluginID, &a.Version, &recipe, &provenance)
+		if recipe != "" {
+			a.IngestionDerivation = &plugins.IngestionDerivation{Recipe: recipe, Provenance: provenance}
+		}
 		return a, err
 	})
 	return plan, err
