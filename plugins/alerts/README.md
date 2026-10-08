@@ -2,7 +2,7 @@
 
 Quivr's first-party alert rules, a `subscription` plugin built with the
 [Python Plugin SDK](../../sdks/python/README.md). A Subscription pinned to
-`{"plugin_id": "alerts", "version": "0.3.0"}` gets a Match when a new article
+`{"plugin_id": "alerts", "version": "0.4.0"}` gets a Match when a new article
 satisfies its Saved Query's expression. It requires Plugin API `>=0.10.0 <0.11.0`
 and offers these alert kinds:
 
@@ -124,7 +124,7 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 | `fields` | `{}` | Name → JSON Pointer, added to or replacing the built-in names. Names match `[a-z][a-z0-9_]*` |
 | `text_roles` | `["title", "body"]` | Part roles that terms search and Jev sees; vectors uses all supplied Part vectors |
 | `described.threshold` | `0.5` | Default Jev score threshold, 0.2 to 0.95 |
-| `vectors.threshold` | `0.8` | Default local cosine threshold, 0.2 to 0.95; independent of the Jev threshold |
+| `vectors.thresholds` | required for local checks without a Subscription override | Map of vector-space IDs to calibrated cosine thresholds, 0.2 to 0.95 |
 
 ```json
 {"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
@@ -137,7 +137,7 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `wait_for_enrichment` | `false` for keywords, `true` for meaning checks | Answer `not_ready` until enriched. A decisive mixed-mode keyword check bypasses this wait. The core asks again on `record.enrichment_available` |
-| `threshold` | `described.threshold` for Jev, `vectors.threshold` for vectors | Inclusive meaning-check threshold, 0.2 to 0.95. Keyword alerts ignore it |
+| `threshold` | `described.threshold` for Jev, `vectors.thresholds[vector_space_id]` for vectors | Inclusive meaning-check threshold, 0.2 to 0.95. Keyword alerts ignore it |
 
 Rules run when an article becomes searchable. Keyword alerts need no enrichment, so
 they decide at once by default. If a deployment never enriches articles, a Subscription
@@ -154,7 +154,7 @@ all kinds are accepted, but Jev still needs the key.
 
 **Secret:** `TYPESAFE_API_KEY`, read from the plugin's environment only and declared
 in the manifest with `required: false`. `TYPESAFE_API_URL` optionally replaces the
-System One endpoint, for example with the fake server in tests.
+System One endpoint. HTTPS is required except for numeric loopback test servers.
 
 ## Local meaning checks
 
@@ -193,12 +193,21 @@ A match names the winning Part in `evidence.part_keys`. Its details contain
 and `segment_id`. The unrounded cosine decides; evidence rounds it to six
 decimal places. A negative result explains the best similarity and threshold.
 
-The default **0.80** retains every labeled positive in the small bilingual E5
-calibration, including rephrased and translated articles. It also matches 11
-of 140 negative pairs: cosine measures proximity, not a factual yes/no judgement.
-See the [measured results and limitations](calibration/README.md), and tune
-`vectors.threshold` or each Subscription's `threshold` for your traffic. The
-core re-evaluates `not_ready` after enrichment and owns Match uniqueness; this
+Local checks have no implicit threshold. Set `vectors.thresholds` on the
+plugin pin, keyed by the exact vector-space ID supplied in the request, or set
+each Subscription's `threshold`. For example, not run:
+
+```json
+{"vectors": {"thresholds": {"<vector-space-id>": 0.65}}}
+```
+
+A ready comparison without either setting fails with `vector_threshold_required`.
+The [calibration notes](calibration/README.md) suggest 0.80 for the measured E5
+space and 0.65 for the measured 768-dimensional EmbeddingGemma 2 space. Both
+retain all 16 labeled positives in this small bilingual set, while matching
+11 and 6 of 140 negatives respectively. Tune the threshold on your own traffic;
+changing weights, dimensions, templates or segmentation requires recalibration.
+The core re-evaluates `not_ready` after enrichment and owns Match uniqueness; this
 plugin stores no delivery or deduplication state.
 
 ## Mixed keyword and meaning checks
@@ -289,8 +298,9 @@ question for that alert. Each batch is decided as follows.
    The question's instructions hold the description as data (`alert`) and ask
    whether the article is about what `alert` describes, in other words or another
    language. A request is split only when its body would exceed 120,000 bytes,
-   under TypeSafe's limit of about 128 KB. The parts are sent in parallel (at most
-   4 at once, 15 seconds each), within the declared `timeout_ms` of 20 seconds.
+   under TypeSafe's limit of about 128 KB. All batches and retries share a
+   15-second deadline, within the declared `timeout_ms` of 20 seconds. The
+   shared SDK client makes at most three attempts per batch, retrying 408, 429 and 5xx.
 4. **Decision.** `match` when the Noul, the probability of "yes", is at or above the
    threshold; otherwise `no_match`, whose explanation gives the score. TypeSafe's
    `confidence` field is never used. Noul answers do not carry it, and it has no

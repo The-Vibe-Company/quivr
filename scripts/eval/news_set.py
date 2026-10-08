@@ -1044,12 +1044,13 @@ class JevJudge:
         self.version = MODEL + '/' + RUBRIC_VERSION + '/probability-quartiles'
 
     def grade(self, question, candidates):
-        from jev_rerank.client import MAX_BYTES, MAX_TOKENS, payload
+        from jev_rerank.client import payload
+        from quivr_plugin.system_one import MAX_REQUEST_BYTES, MAX_TOKENS
         deadline, remaining, grades, batch = time.monotonic() + self.timeout, self.cost_limit, {}, {}
         def fits(passages):
             raw = json.dumps(payload(question.text, passages), ensure_ascii=False, separators=(',', ':')).encode()
             # One UTF-8 byte per input token is a conservative admission bound.
-            return len(raw) <= MAX_BYTES and len(raw) + 8 * (len(passages) + 1) <= MAX_TOKENS
+            return len(raw) <= MAX_REQUEST_BYTES and len(raw) + 8 * (len(passages) + 1) <= MAX_TOKENS
         def submit(passages, split=True):
             nonlocal remaining
             try:

@@ -59,8 +59,6 @@ cat > .scratch/hosted-embed/configuration.json <<'EOF'
   "max_batch_tokens": 32768
 }
 EOF
-.scratch/hosted-embed/hosted-embed configure .scratch/hosted-embed/configuration.json \
-  > .scratch/hosted-embed/package/quivr-plugin.yaml
 ```
 
 For Cohere’s own API, use `"base_url":"https://api.cohere.com/v2"` and `"auth":"bearer"` in both configuration copies instead.
@@ -70,17 +68,30 @@ generating the manifest:
 
 ```bash
 python3 scripts/prepare_tokenizer.py --hosted \
-  --repository <owner/model> --revision <full-commit-sha> --sha256 <tokenizer-sha256>
+  --repository <owner/model> --revision <full-commit-sha> --sha256 <tokenizer-sha256> \
+  > .scratch/hosted-embed/tokenizer-settings.json
+jq --slurpfile tokenizer .scratch/hosted-embed/tokenizer-settings.json \
+  '.tokenizer = $tokenizer[0]' .scratch/hosted-embed/configuration.json \
+  > .scratch/hosted-embed/configuration-with-tokenizer.json
+mv .scratch/hosted-embed/configuration-with-tokenizer.json .scratch/hosted-embed/configuration.json
 ```
 
-Paste the returned object as `tokenizer` in the plugin configuration. Preparation
-downloads only tokenizer files; startup stays offline. Without a tokenizer, the
+Preparation installs the hash-pinned tokenizers 0.23.2 runtime when absent and
+downloads the requested model's tokenizer file, requiring network access during
+setup. Startup stays offline. Without a tokenizer, the
 plugin counts UTF-8 bytes conservatively and underfills passages. The published
 hosted image includes tokenizers 0.23.2: mount the model file read-only and use
 `/opt/tokenizer/bin/python` plus its container model path. Follow the
 [tokenizer preparation and image instructions](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#prepare-a-matching-tokenizer)
 for E5 and Gemma pins, mounts and manifest generation. A tokenizer change creates
 a new recipe and requires a rebuild for existing Corpora.
+
+Generate the manifest after adding the tokenizer and any container path changes:
+
+```bash
+.scratch/hosted-embed/hosted-embed configure .scratch/hosted-embed/configuration.json \
+  > .scratch/hosted-embed/package/quivr-plugin.yaml
+```
 
 For archive imports, `hosted.embed` combines concurrent document inputs from
 the same Organization within each plugin process. The `batch_wait_ms` window
@@ -90,6 +101,19 @@ Batches respect `batch_size`, `max_batch_tokens` and the shared
 Queries bypass the collection window. See the plugin's
 [limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#limits-and-defaults)
 for cancellation, refusal isolation and batch usage logs.
+
+With a matching local tokenizer configured, document cutting uses a pool of
+persistent helpers. `tokenizer_processes: 0` (the default) uses up to four
+helpers, limited by the CPUs available to the plugin's Go runtime. Set it to
+1–32 to override the pool size. Each loaded helper holds its own runtime and
+tokenizer vocabulary. A local EmbeddingGemma 2 sample used about 440 MiB per
+loaded helper, or 1.7 GiB for four. Allow startup and request headroom; choose a
+smaller pool when memory is limited. Pool tuning preserves the ingestion recipe
+once the manifest declares the setting. An updated executable can use an older
+exact manifest for the auto pool without changing its recipe; first installing
+a regenerated manifest that declares the key requires a rebuild or cutover. Follow the plugin's
+[throughput registration steps](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding)
+to change it while earlier work drains.
 
 
 The generated manifest binds the model and settings to a distinct vector space, the coordinate system for its numeric vectors. Use that exact configuration when pinning or registering it. Copy the space name from `contributions.ingestion.spaces`; its API id is that name followed by `@` and the declared space `version`.
@@ -103,12 +127,18 @@ jq --slurpfile config .scratch/hosted-embed/configuration.json \
 quivr plugin test --fixture .scratch/hosted-embed/fixture.json .scratch/hosted-embed/package
 ```
 
-Check that the report says `CERTIFIED`. Start the plugin in a separate terminal, with the provider key injected from your secret manager. Choose a free port reachable by Quivr's API and workers:
+Check that the report says `CERTIFIED`. Start the plugin in a separate terminal,
+with the provider key and this plugin's signing key ring injected from your secret
+manager. Its `QUIVR_PLUGIN_SIGNING_KEYS` ring must match the plugin's entry in
+`QUIVR_ENGINE_PLUGIN_KEYS` on the API and workers; see
+[signed engine requests](/reference/plugin-protocol#signed-engine-requests).
+Choose a free port reachable by Quivr's API and workers:
 
 ```bash
 QUIVR_PLUGIN_MANIFEST="$PWD/.scratch/hosted-embed/package/quivr-plugin.yaml" \
 QUIVR_PLUGIN_HOST=0.0.0.0 QUIVR_PLUGIN_PORT=8087 \
 EMBED_API_KEY="${EMBED_API_KEY:?Set the provider key in this terminal}" \
+QUIVR_PLUGIN_SIGNING_KEYS="${QUIVR_PLUGIN_SIGNING_KEYS:?Set the plugin signing ring in this terminal}" \
   .scratch/hosted-embed/hosted-embed
 ```
 
@@ -152,6 +182,10 @@ For example, merge these settings into each API, worker and migrate configuratio
   }]
 }
 ```
+
+Replace the pin's entire `configuration` object above with the contents of
+`.scratch/hosted-embed/configuration.json`, including `tokenizer` when prepared.
+The engine pin and the generated manifest must carry the same settings and paths.
 
 Two settings use the same words. The `spaces` pin picks which of this plugin’s spaces it uses: `hosted.embed` has only one, so it is `served`. `ingestion.evaluation` decides whether its output reaches ordinary search: it does not until you activate it in step 5. [Apply the pin](/run-quivr/pin); for a runtime registration, follow [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 

@@ -153,11 +153,18 @@ Existing Corpora must carry the new space before you serve it.
 
 Keep `plugin_id` and `plugin_version` unchanged when changing only
 `max_concurrent_requests`, `batch_size`, `max_batch_tokens`, `request_timeout_ms`,
-`call_budget_ms`, `batch_wait_ms` or `max_retries`. Regenerate the manifest from
+`call_budget_ms`, `batch_wait_ms`, `max_retries` or `tokenizer_processes`. Regenerate the manifest from
 the new configuration, certify it and install the new registration. These keys
 are declared in `configuration.execution_keys`; Quivr keeps the active plan's
 exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
+
+A package whose manifest already declares `tokenizer_processes` preserves its
+recipe when you tune that setting. For an earlier package, deploying the updated
+executable with the existing exact manifest enables the auto pool without a new
+recipe. Generating and installing a manifest that first adds the execution key
+changes the recipe: use the usual rebuild or evaluation cutover for that first
+registration. Subsequent pool tuning preserves that recipe.
 
 Run the new manifest at a separate address while earlier pinned work drains.
 Keep the previous process and exact manifest reachable at its recorded address
@@ -187,6 +194,7 @@ change also creates a new recipe, even when only execution settings differ.
 | `document_template` | `{prefix}{text}` | Literal prompt with required `{text}`, optional `{title}` and `{prefix}` |
 | `query_template` | `{prefix}{query}` | Literal prompt with required `{query}` and optional `{prefix}` |
 | `tokenizer` | absent | Local `python`, `model` path and `sha256` for pinned tokenizers 0.23.2 |
+| `tokenizer_processes` | `0` (auto) | Persistent local tokenizer helpers per plugin process, 0–32; auto uses `min(GOMAXPROCS, 4)` |
 | `batch_size` | `16` | Most document inputs per provider request, across Versions, 1–32 |
 | `batch_wait_ms` | `25` | Document collection window, 0–100 ms and less than `call_budget_ms`; 0 disables cross-Version batching |
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
@@ -195,6 +203,26 @@ change also creates a new recipe, even when only execution settings differ.
 | `max_concurrent_requests` | `4` | Provider requests in flight per plugin process, shared by document and query calls, 1–32 |
 | `max_retries` | `2` | Retries after the first attempt on 429 or 5xx, 0–5 |
 | `usd_per_million_tokens` | absent | Optional operator-supplied price for backfill estimates |
+
+With a local `tokenizer`, independent tokenization requests run concurrently up
+to `tokenizer_processes`. Each helper starts and loads its tokenizer on first
+use, then stays loaded. A crashed, canceled or timed-out helper is reaped and
+replaced on its next request; other helpers continue. Calls waiting for a helper
+respect cancellation, and each call has a hard 10-second deadline including
+queueing and startup. The byte-count fallback starts no helpers.
+
+Each loaded helper holds its own Python runtime and tokenizer vocabulary;
+memory grows roughly with the number of loaded helpers. Budget for the runtime,
+the parsed vocabulary, the tokenizer JSON during loading and bounded request
+buffers per helper. Measure resident memory with your tokenizer under load;
+model vocabularies vary, so there is no fixed per-helper memory limit. A local
+Linux x86_64 sample with Python 3.12, tokenizers 0.23.2 and EmbeddingGemma 2 used
+about 440 MiB resident memory per loaded helper after cutting short articles
+(about 1.7 GiB for four); allow extra memory for startup and larger requests. Set
+`tokenizer_processes: 1` on memory-limited installations, or increase it when
+concurrent document cutting queues and CPU and memory have room. The auto value
+is resolved on the running plugin, so generating a manifest on another machine
+does not fix the pool to that machine's CPU count.
 
 Concurrent document calls in the same Organization and plugin process share a provider batch.
 Each batch respects `batch_size` and `max_batch_tokens`. A batch can keep
