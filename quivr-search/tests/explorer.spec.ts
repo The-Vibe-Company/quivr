@@ -60,6 +60,11 @@ const listed = (page: Page) =>
       { timeout: 10_000 },
     )
     .then((r) => new URL(r.url()).searchParams);
+// The address the next facets are read from. Start it before the action.
+const counted = (page: Page) =>
+  page
+    .waitForRequest((r) => new URL(r.url()).pathname === "/demo/explore/facets", { timeout: 10_000 })
+    .then((r) => new URL(r.url()).searchParams);
 
 test("l’Explorer passe d’un corpus à l’autre, filtre par facettes et dit quels corpus il exclut", async ({ page }) => {
   // A test page for now: no tab leads to it, its address opens it.
@@ -98,8 +103,14 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes et dit 
   // filter, the count is the dated documents the facade counted.
   answer(["rec_wcup", "rec_wport"], { ...WIRE_FACETS, total: 2 });
   next = listed(page);
+  let asked = counted(page);
   await facets(page, "Langue").getByRole("button", { name: /^anglais/ }).click();
   expect(JSON.parse((await next).get("metadata")!)).toEqual([{ field: "metadata.language", any_of: ["en"] }]);
+  const facetsAsked = await asked;
+  expect([facetsAsked.get("corpora"), JSON.parse(facetsAsked.get("metadata")!)]).toEqual([
+    "wires",
+    [{ field: "metadata.language", any_of: ["en"] }],
+  ]);
   await expect(headlines(page)).toHaveText(["Port reopens after three-day closure", "Cup final moved to Sunday"]);
   await expect(pills(page).getByRole("button", { name: /^Langue anglais/ })).toBeVisible();
   await expect(pills(page).getByRole("status")).toHaveText("2 documents datés");
@@ -162,10 +173,15 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   await expect(pills(page).getByRole("button", { name: /^Période/ })).toBeVisible();
   await expect(pills(page).getByRole("status")).toHaveText("3 documents");
 
-  // Zoomed in, the timeline shows the range alone; the overview widens it back.
+  // Zoomed in, the timeline asks for the range's span and shows it alone;
+  // the overview widens it back.
+  let asked = counted(page);
   await page.getByRole("button", { name: "Zoomer sur la période" }).click();
+  expect((await asked).get("window")).toBe(`${range.gte},${range.lte}`);
   await expect(bar).toHaveCount(2);
+  asked = counted(page);
   await page.getByRole("button", { name: "Vue d’ensemble" }).click();
+  expect((await asked).has("window")).toBe(false);
   await expect(bar).toHaveCount(3);
 
   // A value and a document picked: the address keeps them all.

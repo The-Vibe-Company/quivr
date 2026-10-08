@@ -4,7 +4,7 @@ React/TypeScript frontend adapted from [Quivr PR #3714](https://github.com/The-V
 
 ## Run locally
 
-Prerequisites: the repository's Linux/Docker/Go/Python setup, Node 22+ and npm (see root README). From the repository root:
+Prerequisites: the repository's Linux/Docker/Go/Python setup, Node 22.18+ (its tests load TypeScript directly) and npm (see root README). From the repository root:
 
 ```sh
 make demo

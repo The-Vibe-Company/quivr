@@ -338,7 +338,7 @@ func TestVectorSpaceCoverageCountingIsBoundedBySegments(t *testing.T) {
 }
 
 // Search p95 under one second on at least one million segments with cold
-// coverage, and the background count completing within its minute (THE-1231).
+// coverage, and the background count publishing real counts (THE-1231).
 // A measurement run on the owner's machine, never on a pull request:
 // QUIVR_MEASURE=1 make adapter-postgres args='-v -timeout 30m -run ^TestVectorSpaceCoverageSearchMeasurement$'
 func TestVectorSpaceCoverageSearchMeasurement(t *testing.T) {
