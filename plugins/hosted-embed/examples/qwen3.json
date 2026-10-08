@@ -9,6 +9,5 @@
   "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
   "document_prefix": "",
   "max_tokens_per_segment": 8192,
-  "overlap": 200,
   "batch_size": 16
 }

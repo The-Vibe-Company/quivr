@@ -294,7 +294,7 @@ def main(argv=None):
             "QUIVR_PLUGIN_HOST": "127.0.0.1",
             "QUIVR_PLUGIN_PORT": str(ports.allocate()),
             "QUIVR_PLUGIN_MANIFEST": str(manifest),
-            "AZURE_FOUNDRY_KEY": "fake-key",
+            "EMBED_API_KEY": "fake-key",
         }
         with plugin_log.open("w") as output:
             plugin = subprocess.Popen(

@@ -13,6 +13,9 @@ class PolicyTests(unittest.TestCase):
         cases = [
             ("CREATE TABLE items(id int PRIMARY KEY); CREATE INDEX by_id ON items(id);", True),
             ("ALTER TABLE items ADD COLUMN optional text;", True),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL;", True),
+            ("ALTER TABLE items ALTER COLUMN optional SET NOT NULL;", False),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL, DROP COLUMN title;", False),
             ("CREATE TABLE parent(id int PRIMARY KEY); CREATE TABLE child(id int REFERENCES parent(id));", True),
             ("CREATE TABLE self_ref(id int PRIMARY KEY, parent int REFERENCES self_ref(id));", True),
             ("CREATE TABLE child(id int REFERENCES old_parent(id));", False),
@@ -66,7 +69,7 @@ class PolicyTests(unittest.TestCase):
             git('config', 'user.name', 'test')
             (root / 'migrations').mkdir()
             baseline = root / 'migrations/20261001T0000Z_indexes.sql'
-            baseline.write_text('''CREATE TABLE items(id int PRIMARY KEY);
+            baseline.write_text('''CREATE TABLE items(id int PRIMARY KEY, title text NOT NULL);
 CREATE INDEX replaced ON items(id);
 DROP INDEX replaced;
 CREATE UNIQUE INDEX replaced ON items(id);
@@ -78,7 +81,8 @@ CREATE UNIQUE INDEX identity ON items(id);
 CREATE INDEX by_id ON items(id);
 CREATE SCHEMA other;
 CREATE TABLE other.items(id int);
-CREATE INDEX by_id ON other.items(id);''')
+CREATE INDEX by_id ON other.items(id);
+ALTER TABLE items ALTER COLUMN title DROP NOT NULL;''')
             (root / p.INVENTORY).write_text(json.dumps({baseline.name: {
                 'sha256': hashlib.sha256(baseline.read_bytes()).hexdigest(),
                 'classification': 'legacy-risk', 'risks': ['RenameStmt']}}))

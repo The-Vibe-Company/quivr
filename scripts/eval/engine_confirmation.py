@@ -70,11 +70,11 @@ def mapping(config, baseline, production, *, candidate=False):
     else:
         if cfg['model'] not in ('Cohere-Embed-V5-Pro', 'Cohere-Embed-V5-Fast'):
             raise Unmappable('model')
-        if (kind != 'hosted' or set(ingestion) != {'kind', 'max_tokens_per_segment', 'overlap'} | set(HOSTED_EXECUTION)
+        if (kind != 'hosted' or set(ingestion) != {'kind', 'max_tokens_per_segment', 'body_tokens'} | set(HOSTED_EXECUTION)
                 or type(ingestion['max_tokens_per_segment']) is not int
                 or not 8 <= ingestion['max_tokens_per_segment'] <= 32768
-                or type(ingestion['overlap']) is not int
-                or not 0 <= ingestion['overlap'] < ingestion['max_tokens_per_segment'] - 8):
+                or type(ingestion['body_tokens']) is not int
+                or not 8 <= ingestion['body_tokens'] <= 32768):
             raise Unmappable('hosted_ingestion')
         if (any(type(ingestion[k]) is not int or not low <= ingestion[k] <= high
                 for k, (low, high) in HOSTED_EXECUTION.items())

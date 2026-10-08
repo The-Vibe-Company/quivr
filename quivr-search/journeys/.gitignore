@@ -1,0 +1,3 @@
+node_modules/
+# Reports, screenshots, traces and the replay cache of e2e runs.
+.e2e/
