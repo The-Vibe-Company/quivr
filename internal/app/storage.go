@@ -67,7 +67,7 @@ func runStorage(cfg Config, args []string, out io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	poolConfig, err := postgres.PoolConfig(cfg.DatabaseURL, cfg.TLS.Postgres)
+	poolConfig, err := cfg.poolConfig()
 	if err != nil {
 		return &storageError{code: "storage_invalid_database_settings"}
 	}
