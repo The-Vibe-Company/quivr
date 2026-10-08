@@ -623,6 +623,7 @@ func Run(command string, args ...string) error {
 	indexes := &IndexMaintenance{Pool: pool}
 	loops.Go(indexes.Run)
 	queueSnapshots := postgres.QueueSnapshots{Pool: pool, RefreshInterval: queueRefreshInterval}
+	acquisition.Acquirer.Queues = queueSnapshots
 	loops.Go(func(ctx context.Context) {
 		delay := queueRefreshInterval
 		failed := false

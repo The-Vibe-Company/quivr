@@ -15,6 +15,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 // KeyPrefix reserves an idempotency-key family for connector-originated
@@ -27,6 +28,9 @@ func IsConnectorKey(key string) bool { return strings.HasPrefix(key, KeyPrefix) 
 // ConnectorVersion versions the built-in item mapping recorded in provenance:
 // producer is the Connector Instance, producer_version is "<kind>/<version>".
 const ConnectorVersion = "v1"
+
+// DefaultMaxBulkIngestionWaiting bounds prefetched ingestion work, not usage.
+const DefaultMaxBulkIngestionWaiting int64 = 1000
 
 // DefaultMaxPages bounds the pages one run may fetch.
 const DefaultMaxPages = 10
@@ -155,7 +159,9 @@ type Ingestor interface {
 
 // Acquirer executes one acquisition run of one instance.
 type Acquirer struct {
-	Store    RunStore
+	Store RunStore
+	// Queues supplies the ingestion-only prefetch backpressure observation.
+	Queues   workqueue.Reader
 	Registry *Registry
 	// Kinds, when set, resolves the kinds of the Pipeline Plan the run is
 	// pinned to (Spec 5), so a run never changes provider midway; nil uses
@@ -281,6 +287,14 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		}
 	}()
 	for i := 0; i < pages; i++ {
+		if reason := a.bulkDeferral(ctx, target.WorkQueue); reason != "" {
+			continueNext = false
+			slog.Info("connector run deferred", "connector_id", id, "run", run, "continuation_reason", reason)
+			if i == 0 {
+				return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
+			}
+			break
+		}
 		pageStarted := a.now()
 		release, active, err := a.beginPoll(ctx, org, id, run)
 		if err != nil {
@@ -366,12 +380,28 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			reason = "page_limit"
 		}
 		timing := activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
-		continuation := func() bool {
-			return canContinue && (reason == "page_limit" || reason == "soft_limit" || reason == "attachment_budget") &&
-				page.More && len(page.Items) > 0 && checkpointChanged(target.Checkpoint, page.Checkpoint) && checkpointChanged(checkpoint, page.Checkpoint) &&
-				notice == "" && page.Notice == "" && rejected == ""
+		continuation := func() string {
+			switch {
+			case !page.More:
+				return "source_drained"
+			case notice != "" || page.Notice != "":
+				return "source_notice"
+			case rejected != "":
+				return "item_rejected"
+			case reason == "":
+				return "run_in_progress"
+			case !canContinue:
+				return "store_unsupported"
+			case !checkpointChanged(checkpoint, page.Checkpoint):
+				return "checkpoint_stalled"
+			case !checkpointChanged(target.Checkpoint, page.Checkpoint):
+				return "checkpoint_cycled"
+			default:
+				return ""
+			}
 		}
-		timing["continuation"] = continuation()
+		timing["continuation_reason"] = continuation()
+		timing["continuation"] = continuation() == ""
 		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: acquisitionDiagnostics(page.Diagnostics, timing), Push: page.Push, Missed: missed})
 		if err != nil {
 			return err
@@ -386,7 +416,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			reason = "soft_limit"
 		}
 		timing = activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
-		continueNext = continuation()
+		continueNext = continuation() == ""
+		timing["continuation_reason"] = continuation()
 		timing["continuation"] = continueNext
 		logPageTiming(id, run, i, "committed", timing)
 		activeTiming = nil
@@ -411,6 +442,32 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		return continuationStore.ContinueRun(ctx, org, id, run)
 	}
 	return a.Store.FinishRun(ctx, org, id, run, nil)
+}
+
+// The snapshot is installation-wide and bounded to two rows. A missing split
+// is unavailable, not an empty queue (including during a rolling upgrade).
+func (a Acquirer) bulkDeferral(ctx context.Context, queue string) string {
+	if queue != workqueue.Bulk {
+		return ""
+	}
+	if a.Queues == nil {
+		return "queue_unavailable"
+	}
+	read, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	rows, err := a.Queues.QueueBacklog(read)
+	if err != nil {
+		return "queue_unavailable"
+	}
+	for _, row := range rows {
+		if row.Queue == workqueue.Bulk && row.IngestionWaiting != nil {
+			if *row.IngestionWaiting >= DefaultMaxBulkIngestionWaiting {
+				return "ingestion_backpressure"
+			}
+			return ""
+		}
+	}
+	return "queue_unavailable"
 }
 
 type submissionResult struct {
