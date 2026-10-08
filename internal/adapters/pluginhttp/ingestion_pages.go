@@ -100,7 +100,7 @@ func (i Ingestor) SegmentAndEmbedPage(ctx context.Context, org, corpusID string,
 					pos.PageStart = 0
 				}
 				if len(runes) <= 1 {
-					return processing.PluginPage{}, fmt.Errorf("%w: ingestion response budget cannot hold one source code point and its vectors", plugins.ErrUnavailable)
+					return processing.PluginPage{}, i.refused("ingestion response budget cannot hold one source code point and its vectors")
 				}
 				window = string(runes[:len(runes)/2])
 				continue

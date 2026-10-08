@@ -260,6 +260,74 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 // running, never calls its ingestion owner again. An outgoing source owner
 // can remain an active evaluation member: the call still fails without reaching
 // it, and the diagnostic names the stopped plan without spending the budget.
+// An upgraded sidecar may replace the manifest at the old endpoint. Live
+// imports retain the exact pin through that outage, beyond the operation budget.
+func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
+	var serving *plugins.Pin
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r, serving) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"segments":[{"part_key":"body","start":0,"end":11,"vectors":{"acme.embedder.small":[1,0]}}]}`)
+	}))
+	defer server.Close()
+	load := func(manifest, registration string) (*plugins.Pin, *plugins.PinSet) {
+		t.Helper()
+		pin, err := plugins.LoadPinManifest([]byte(manifest), "embedder", plugins.PinConfig{Endpoint: server.URL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin.Registration = registration
+		set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pin, set
+	}
+	a, planA := load(embedderManifest, "registration_a")
+	b, planB := load(strings.Replace(embedderManifest, "version: 0.1.0", "version: 0.2.0", 1), "registration_b")
+	live, err := plugins.NewLive("plan_a", planA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	count := func(context.Context) (int, error) { attempts++; return attempts, nil }
+	work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkIngestion, Plan: "plan_a"}, count, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = live.Store("plan_b", planB); err != nil {
+		t.Fatal(err)
+	}
+	serving = b
+	ingestor := pluginhttp.LiveIngestor{Live: live}.Ingestor(work, "text/plain")
+	v := content.Version{RecordID: "record", ID: "version", Manifest: content.Manifest{Kind: "document", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a paragraph"}}}}}
+	spaces := []string{"acme.embedder.small@1"}
+	for attempt := range 4 {
+		_, cause := ingestor.SegmentAndEmbed(work, "org", "corpus", v, spaces)
+		if !errors.Is(cause, pluginhttp.ErrUnavailable) {
+			t.Fatalf("attempt %d reached the replacement: %v", attempt+1, cause)
+		}
+		if reason, err := ingestor.(processing.Pinned).Gone(work, cause); err != nil || reason != nil {
+			t.Fatalf("attempt %d terminally stopped an import during an upgrade: %+v (%v)", attempt+1, reason, err)
+		}
+	}
+	serving = a
+	segments, err := ingestor.SegmentAndEmbed(work, "org", "corpus", v, spaces)
+	if err != nil || len(segments) != 1 || !slices.Equal(segments[0].Vectors[spaces[0]], []float32{1, 0}) {
+		t.Fatalf("restoring the exact old build did not resume the import: %+v (%v)", segments, err)
+	}
+	// An incompatible owner is still bounded, even for live imports.
+	var reason *content.Diagnostic
+	for range 2 {
+		reason, err = ingestor.(processing.Pinned).Gone(work, processing.ErrSpaceUnowned)
+	}
+	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPluginUnavailable {
+		t.Fatalf("incompatible owner must retain its budget: %+v (%v)", reason, err)
+	}
+}
+
 func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	calls := 0
 	var pin *plugins.Pin

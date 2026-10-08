@@ -2435,12 +2435,14 @@ unavailable (connection failure, 5xx without an error envelope, discovery that d
 pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
 Plan names it; the Receipt shows plugin_unavailable while it retries.
 
-- pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-  normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-  reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-  moved to the plugin that
-  replaced it: the Version is quarantined, or, when its text was already searchable, its
-  enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+- pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+  during an Operation, or its ingestion owner could no longer serve the work. Historical
+  Versions may also carry this reason after a live-import reachability outage. Live imports
+  and normalization now retain their pin and retry reachability outages until the exact build
+  returns; they never silently move to its replacement. A Version with this diagnostic is
+  quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+  plugin_version name the original plan and plugin. Quarantine reprocess explicitly uses the
+  active plan to recover quarantined Versions with this reason.
 - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
   work stopped instead of calling it, with the same outcome and fields as
@@ -2496,12 +2498,14 @@ description: |-
   pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
   Plan names it; the Receipt shows plugin_unavailable while it retries.
 
-  - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-    normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-    reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-    moved to the plugin that
-    replaced it: the Version is quarantined, or, when its text was already searchable, its
-    enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+  - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+    during an Operation, or its ingestion owner could no longer serve the work. Historical
+    Versions may also carry this reason after a live-import reachability outage. Live imports
+    and normalization now retain their pin and retry reachability outages until the exact build
+    returns; they never silently move to its replacement. A Version with this diagnostic is
+    quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+    plugin_version name the original plan and plugin. Quarantine reprocess explicitly uses the
+    active plan to recover quarantined Versions with this reason.
   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
     work stopped instead of calling it, with the same outcome and fields as

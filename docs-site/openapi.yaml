@@ -5371,11 +5371,13 @@ components:
         listed on a searchable Version published through the built-in text path. A plugin that is\nunavailable (connection\
         \ failure, 5xx without an error envelope, discovery that does not match the\npinned manifest) is retried with backoff\
         \ and produces no diagnostic while the active Pipeline\nPlan names it; the Receipt shows plugin_unavailable while\
-        \ it retries.\n\n- pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose\n  normalizer\
-        \ or ingestion plugin an operator has since replaced, and that plugin could not be\n  reached, or could no longer\
-        \ serve it, for the deployment's attempt budget. The work is never\n  moved to the plugin that\n  replaced it: the\
-        \ Version is quarantined, or, when its text was already searchable, its\n  enrichment stops. plan, plugin and plugin_version\
-        \ name the plan and the plugin version.\n- pinned_plan_stopped: the processing of this Version started on a Pipeline\
+        \ it retries.\n\n- pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget\n \
+        \ during an Operation, or its ingestion owner could no longer serve the work. Historical\n  Versions may also carry\
+        \ this reason after a live-import reachability outage. Live imports\n  and normalization now retain their pin and\
+        \ retry reachability outages until the exact build\n  returns; they never silently move to its replacement. A Version\
+        \ with this diagnostic is\n  quarantined, or keeps its searchable text while enrichment stops. plan, plugin and\n\
+        \  plugin_version name the original plan and plugin. Quarantine reprocess explicitly uses the\n  active plan to recover\
+        \ quarantined Versions with this reason.\n- pinned_plan_stopped: the processing of this Version started on a Pipeline\
         \ Plan that an operator\n  rolled back with pinned_work=stop. At its next call to a plugin that left the active plan,\
         \ the\n  work stopped instead of calling it, with the same outcome and fields as\n  pinned_plugin_unavailable.\n\n\
         Quarantined Versions keep their input reference and reason. An operator lists them and reprocesses\nthem with the\

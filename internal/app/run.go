@@ -117,10 +117,9 @@ type Config struct {
 	// ChangeStreamPoll is how often an open change stream reads the journal
 	// again (Go duration, default 250ms).
 	ChangeStreamPoll string `json:"change_stream_poll"`
-	// PinnedPluginAttempts is how many attempts work pinned to a Pipeline
-	// Plan gets once a plugin of that plan has left the active plan and cannot
-	// be reached, before the work stops with a pinned_plugin_unavailable
-	// diagnostic (worker only; default 10).
+	// PinnedPluginAttempts bounds unavailable plugins of older plans for
+	// operations, and incompatible owners for live imports. Live import
+	// reachability outages keep retrying (worker only; default 10).
 	PinnedPluginAttempts int `json:"pinned_plugin_attempts"`
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).

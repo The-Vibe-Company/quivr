@@ -179,15 +179,17 @@ func wholeResponseTooLarge(result *devhost.Result) bool {
 	return sizeOnly || result.Error != nil && (result.Error.Code == "response_too_large" || result.Error.Code == "invalid_response" && sdkResponseLimit.MatchString(result.Error.Message))
 }
 
-// Gone decides whether work pinned to the plugin's plan stops after cause:
-// only when the plugin was unreachable, or no longer owns the space the work
-// needs, and has left the active plan (plugins.Unreachable).
+// Gone keeps live imports retrying through reachability outages, but preserves
+// explicit stops and the budget for an owner that can no longer serve the work.
 func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
 	if !errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
 		return nil, nil
 	}
 	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
 		return nil, err
+	}
+	if errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
+		return plugins.Unavailable(ctx, i.Pin, "ingestion")
 	}
 	return plugins.Unreachable(ctx, i.Pin, "ingestion")
 }
