@@ -85,6 +85,9 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	if status[workqueue.Live].Waiting != before[workqueue.Live].Waiting+1 || status[workqueue.Live].InProgress != before[workqueue.Live].InProgress {
 		t.Fatalf("live backlog = %+v, want one new waiting document over %+v", status[workqueue.Live], before[workqueue.Live])
 	}
+	if status[workqueue.Bulk].IngestionWaiting == nil || before[workqueue.Bulk].IngestionWaiting == nil || *status[workqueue.Bulk].IngestionWaiting != *before[workqueue.Bulk].IngestionWaiting+1 {
+		t.Fatalf("pending receipt and pre-baseline version must count once: %+v over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
+	}
 	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting+1 || status[workqueue.Bulk].InProgress != before[workqueue.Bulk].InProgress {
 		t.Fatalf("bulk backlog = %+v, want one new distinct waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
 	}
@@ -106,6 +109,9 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	}()
 	waitForTrackStart(t, ctx, started, tracked)
 	status = readQueueStatus(t, reader, ctx)
+	if status[workqueue.Live].IngestionWaiting == nil || *status[workqueue.Live].IngestionWaiting != *before[workqueue.Live].IngestionWaiting {
+		t.Fatalf("active ingestion must not count as waiting: %+v", status[workqueue.Live])
+	}
 	if status[workqueue.Live].Waiting != before[workqueue.Live].Waiting || status[workqueue.Live].InProgress != before[workqueue.Live].InProgress+1 {
 		t.Fatalf("live active backlog = %+v, want one new in progress document over %+v", status[workqueue.Live], before[workqueue.Live])
 	}
@@ -148,6 +154,9 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting+1 {
 		t.Fatalf("current enrichment backlog = %+v, want one waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
+	}
+	if status[workqueue.Bulk].IngestionWaiting == nil || *status[workqueue.Bulk].IngestionWaiting != *before[workqueue.Bulk].IngestionWaiting {
+		t.Fatalf("post-baseline enrichment must not block acquisition: %+v", status[workqueue.Bulk])
 	}
 	correction, err := service.Accept(bulkCtx, scope, content.Command{Key: "bulk-correction", Source: bulk.Source, Content: content.Text{Kind: "text", Text: "corrected"}})
 	if err != nil {

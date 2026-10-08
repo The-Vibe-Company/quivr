@@ -1,0 +1,122 @@
+---
+title: "Run a large import"
+description: "Size the database and embedding provider, separate bulk work and monitor progress without starving live collection."
+keywords: ["bulk import", "worker replicas", "provider concurrency", "PostgreSQL WAL", "queue backlog"]
+---
+
+Run historical collection on the bulk queue, with separate live workers and enough database and embedding capacity. Start with a representative sample, then increase load while checking completed work and live search latency.
+
+## Prerequisites
+
+- A [ready Quivr deployment](/run-quivr/deploy), its ingestion and normalization plugins, and operator access to worker, database and model-server settings.
+- A collection of documents (Corpus) and a connector supported by your source. [Import archives](/guides/archive-import) covers immutable object-storage archives and source credentials.
+- A key with `connectors:write` and `connectors:read` on the Corpus. Rebuilds need `projections:rebuild`; reading their Operations needs `operations:read`.
+- A separate installation-wide queue key with only `queues:read` and `corpora: ["*"]`. Keep this key out of application clients.
+- For hosted inference, the provider's credentials in the plugin environment, its concurrency and rate allowances, and permission to send document text there.
+
+The configuration fragments below are examples, not deployment runs. Merge them into your installation's configuration; they omit addresses and secrets. API procedures are linked to their existing guides.
+
+## Steps
+
+### 1. Finish model changes before importing
+
+[Choose an embedding model](/run-quivr/choose-an-embedding-model) and pin its exact configuration first. Replacing a served `hosted.embed` configuration with a different vector-space identity requires a Corpus rebuild. Until the replacement activates, new documents can become searchable by keywords while their vector enrichment reports `rebuild_required`; their vectors serve after the rebuild and subsequent processing complete.
+
+For a plugin that adds a new evaluation space with compatible stored cuts, use [backfill and space promotion](/run-quivr/backfill-a-vector-space) instead. Complete the applicable [model-switch procedure](/run-quivr/switch-a-vector-model), wait for rebuild activation or backfill and promotion, and verify vector coverage and semantic search. Plan this before a large import: model preparation and importing together consume the same provider, storage and indexing capacity. Keep previous registrations reachable while their pinned work drains.
+
+### 2. Measure a representative sample
+
+Import a bounded sample with the same document lengths, revisions, media types and model as the full collection. Record accepted and searchable documents per second, passages per document, provider latency and peak memory. Acceptance means the source was durably submitted; it does not mean it is searchable.
+
+Measure storage before and after the sample with the read-only [storage helper](https://github.com/The-Vibe-Company/quivr/blob/main/scripts/measure_storage.py). It needs Python 3, `psql`, a protected Quivr configuration and database read access. For example, not run; use your deployment configuration and an existing private report directory:
+
+```sh
+python3 scripts/measure_storage.py --config /etc/quivr/config.json \
+  --output /private/reports/storage-after.json
+```
+
+The report includes table heap, TOAST and index bytes, database bytes, document and Version counts, and bytes per document. Use `public_table_bytes` from both reports for incremental table storage, or `database_bytes` from both for the whole database. Estimate bytes per new document as `(after_bytes - before_bytes) / (after_documents - before_documents)`, using the report's `documents` counts on an otherwise idle sample. For imports adding revisions, use the change in `versions` as the denominator instead. A zero denominator cannot produce this estimate. Physical allocation includes dead tuples, retained audit detail and empty tables; an aggregate average is not a fixed document cost.
+
+Measure object-storage and Weaviate disk growth separately using your platform's bucket-size and volume-usage metrics over the same sample interval. Count physical retained objects, including versions if bucket versioning is enabled. The helper's referenced-file counts do not measure all physical object bytes or search-index storage. Allow room for source blobs, vectors, retained generations, WAL, temporary rebuild data and backups. Keep the reports private and compare matched sample sizes when changing settings.
+
+### 3. Budget PostgreSQL and Weaviate
+
+Set `postgres.max_connections` for each engine process. The server's usable connection limit must cover the sum of pools across all replicas, other clients and rolling-deployment headroom. One API, one live worker and eight bulk workers with pools of 16 can use 160 connections. Activity slots do not set the pool size.
+
+Use the shipped [PostgreSQL connection, memory and WAL settings](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/README.md), shared by Compose and Railway. Set a container memory limit or an explicit memory budget; leave room for concurrent sort/hash operations, connections, autovacuum and the OS cache. Monitor each process's pool saturation and database I/O before adding workers.
+
+Watch changes in `pg_stat_checkpointer.num_requested` and `num_timed` over the same interval. Requested checkpoints far above timed ones, together with WAL pressure, can indicate a checkpoint storm. PostgreSQL's stock 1 GB `max_wal_size` can be too small for a sustained import: repeated checkpoints generate more full-page-image WAL. Raise `max_wal_size`, lengthen `checkpoint_timeout` and enable `wal_compression` rather than increasing worker load into that bottleneck.
+
+The shared startup settings budget maximum WAL at 10% of the data filesystem, capped at 32 GiB, with `checkpoint_timeout=15min` and `wal_compression=lz4`. Set `QUIVR_POSTGRES_VOLUME_MB` to the allocated quota in integer MiB if the mount reports host capacity. The linked guide lists size overrides and floors. `max_wal_size` is a soft limit; leave disk headroom. Larger WAL budgets can lengthen crash recovery; compression costs CPU. Keep `synchronous_commit`, `fsync` and `full_page_writes` on. See [PostgreSQL WAL configuration](https://www.postgresql.org/docs/17/wal-configuration.html).
+
+Restart PostgreSQL after changing the template's startup budgets, then verify the effective settings. Check WAL growth, checkpoint rates and write latency during the sample before increasing import load.
+
+For Weaviate, size by passage count, vector dimensions and the selected index compression, then measure RSS and disk under import and search load. Quivr defaults to `rq-8`; `rq-1` uses less vector memory and `none` uses full precision. Compressed indexes retain full-precision vectors on disk for rescoring. Evaluate search quality before changing compression; [index configuration](/reference/configuration#search-index-compression) applies to existing Corpora only after a rebuild.
+
+Set a container memory budget and leave runtime and OS headroom. For example, `GOMEMLIMIT=3GiB` on a 4 GiB service is a starting soft limit; it does not bound RSS or make an oversized index fit. Follow [Weaviate resource planning](https://docs.weaviate.io/weaviate/concepts/resources) and measure your sample. Give index loading enough startup time and watch disk free space, indexing throughput and search latency.
+
+### 4. Put collection on the bulk queue
+
+When [creating the Connector Instance](/guides/connectors#create-an-instance), set `work_queue: "bulk"` at the request's top level, alongside `kind`, `config` and `schedule`. It is an engine field, outside the connector's `config`. The queue follows each run and accepted document through processing. Rebuilds, backfills and quarantine reprocessing also use bulk; direct submissions and pushes use live.
+
+Run separate live and bulk worker processes against the same dependencies and plugin plan. For example, these fragments select one class per process:
+
+```json Live worker
+{"worker":{"queues":["live"],"slots":{"live":4}}}
+```
+
+```json Bulk worker
+{"worker":{"queues":["bulk"],"slots":{"bulk":2}},"rebuild":{"concurrency":8}}
+```
+
+A slot runs one activity; an ingestion activity processes up to 16 documents concurrently. Two bulk ingestion slots therefore admit up to 32 documents per worker, before downstream limits. Replicas multiply this process-local capacity. Rebuild concurrency is separate: the upper bound per worker is `worker.slots.bulk × rebuild.concurrency` Versions when every slot runs a rebuild. Backfills and other bulk work share those slots.
+
+Separate queues reserve worker capacity. Live and bulk still share databases, provider requests and search indexing. See [worker queues](/reference/configuration#worker-queues) and [rebuild settings](/reference/configuration#rebuild) for defaults and bounds.
+
+### 5. Scale the embedding provider before workers
+
+For a plugin sidecar per bulk worker, size provider admission for at least `bulk replicas × max_concurrent_requests`, plus live workers and query traffic. Eight bulk replicas at four provider requests per process can offer 32 concurrent requests before that additional load. If workers share one plugin service, use the number of plugin processes instead: its request cap is process-local.
+
+Above a server's capacity, it can answer `503`. Documents then repeat their baseline processing retries and rebuilds stall, even with idle worker slots. Scale the provider first, or lower plugin concurrency and bulk replicas. Check completed throughput before raising workers again. Concurrency does not enforce a provider's requests-per-minute or tokens-per-minute allowance.
+
+`hosted.embed` batches document inputs within each Organization and plugin process. `batch_size` limits inputs per request; `max_batch_tokens` limits the summed token-cost estimate, which can differ from the provider's actual or billed count. Queries bypass the collection window but share remote provider admission. A `429` or `503` shares `Retry-After` cooldown across that plugin process; other replicas still have their own limits and cooldowns. Follow the [execution-only tuning procedure](/run-quivr/choose-an-embedding-model#tune-execution-without-changing-the-model) when changing these controls.
+
+Lower `rebuild.concurrency` if provider, PostgreSQL or Weaviate pressure increases. Add replicas only after the sample shows spare downstream capacity. [Scale workers on backlog](/run-quivr/deploy#scale-workers-on-backlog) covers KEDA and `quivr-autoscaler` on Kubernetes or Railway. Set its maximum replicas within your provider and connection budgets; retain at least one bulk worker to finish in-flight work.
+
+### 6. Watch backlog and pause acquisition when needed
+
+Read `GET /v0/admin/queues` with the dedicated queue key. For each of `queues.bulk` and `queues.live`, watch:
+
+| Field | What to check |
+| --- | --- |
+| `waiting` | Is admitted work draining at the expected rate? |
+| `in_progress` | Is work executing, even when waiting reaches zero? |
+| `oldest_waiting_age_seconds` | Is old work moving, or is waiting time continually rising? |
+
+The bulk autoscaler counts rebuild work in its waiting signal, alongside import, backfill and quarantine work. Rebuild/backfill counts are estimates and overlapping operation work can count more than once. A larger backlog can therefore be a rebuild, not additional source documents.
+
+Observations refresh every 15 seconds by default. Missing, stale or unavailable observations return `503`; treat that as unknown capacity, not zero work. Replica metrics expose the same installation-wide snapshot: aggregate with `max`, not `sum`. See [queue observation rules](/reference/configuration#worker-queues).
+
+Compare queue progress with connector health, searchable-document counts, provider errors and database/index load. [Pause the connector](/guides/connectors#pause-and-resume-collection) to stop further acquisition when downstream work cannot keep up. Pause retains its last saved checkpoint; already accepted work keeps processing. A source request already running can finish but cannot advance the checkpoint after pause. Resume makes collection due immediately unless the source's `Retry-After` delays it. A longer schedule does not stop a continuing import.
+
+## Check it worked
+
+Confirm the connector reached source exhaustion, then let accepted work drain. Check both waiting and in-progress work, inspect quarantine and failed Operations, and verify vector coverage and representative lexical, semantic and hybrid searches. A zero waiting count alone does not prove completion; paused Operations and failures need separate inspection. Keep live search latency and source collection within your measured targets throughout.
+
+## Troubleshooting
+
+For the complete symptom/check/fix playbook, see [Scale Quivr](/run-quivr/scale-quivr#incident-playbook).
+
+| Symptom | Cause and action |
+| --- | --- |
+| Provider `503`, repeated document retries, stalled rebuild | Admission exceeds model-server capacity. Scale the provider or reduce process concurrency and replicas. |
+| Requested checkpoints grow much faster than timed ones | Inspect WAL pressure and disk headroom; apply the linked WAL sizing settings. |
+| Keyword hits but `rebuild_required` enrichment | The served generation has a different vector space. Finish the Corpus rebuild and verify vectors. |
+| Queue endpoint returns `503` | Observation is missing, stale or unavailable. Inspect database and refresh logs before scaling. |
+| Bulk waiting rises without new acquisition | Inspect rebuild/backfill Operations; they contribute to the autoscaling signal. |
+
+## Next
+
+- [Import archives](/guides/archive-import).
+- [Scale Quivr](/run-quivr/scale-quivr).
+- [Run local load tests](/run-quivr/run-local-load-tests).

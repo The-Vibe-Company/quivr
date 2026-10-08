@@ -930,6 +930,21 @@ func (e SavedQueryDefinitionTemporalPolicy) Valid() bool {
 	}
 }
 
+// Defines values for SearchDegradationReason.
+const (
+	VectorsUnavailable SearchDegradationReason = "vectors_unavailable"
+)
+
+// Valid indicates whether the value is a known member of the SearchDegradationReason enum.
+func (e SearchDegradationReason) Valid() bool {
+	switch e {
+	case VectorsUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SearchExcerptCoordinateSystem.
 const (
 	SearchExcerptCoordinateSystemUnicodeCodepoint SearchExcerptCoordinateSystem = "unicode_codepoint"
@@ -2996,6 +3011,17 @@ type ScheduleChange struct {
 	IntervalSeconds int `json:"interval_seconds"`
 }
 
+// SearchDegradation defines model for SearchDegradation.
+type SearchDegradation struct {
+	CorpusIds []string `json:"corpus_ids"`
+
+	// Reason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+	Reason SearchDegradationReason `json:"reason"`
+}
+
+// SearchDegradationReason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+type SearchDegradationReason string
+
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
 type SearchExcerpt struct {
 	CoordinateSystem SearchExcerptCoordinateSystem `json:"coordinate_system"`
@@ -3067,8 +3093,10 @@ type SearchPhases struct {
 
 // SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	// Degraded Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+	Degraded *[]SearchDegradation `json:"degraded,omitempty"`
+	Name     string               `json:"name"`
+	Version  string               `json:"version"`
 }
 
 // SearchProfileDescription defines model for SearchProfileDescription.

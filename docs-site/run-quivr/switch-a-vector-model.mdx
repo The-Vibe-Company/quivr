@@ -108,10 +108,10 @@ helpers, limited by the CPUs available to the plugin's Go runtime. Set it to
 1–32 to override the pool size. Each loaded helper holds its own runtime and
 tokenizer vocabulary. A local EmbeddingGemma 2 sample used about 440 MiB per
 loaded helper, or 1.7 GiB for four. Allow startup and request headroom; choose a
-smaller pool when memory is limited. Pool tuning preserves the ingestion recipe
-once the manifest declares the setting. An updated executable can use an older
-exact manifest for the auto pool without changing its recipe; first installing
-a regenerated manifest that declares the key requires a rebuild or cutover. Follow the plugin's
+smaller pool when memory is limited. Pool tuning and adding its execution-only
+declaration preserve the active ingestion recipe when semantic settings are
+unchanged. Pinned work can use the active equivalent registration after an
+in-place update. Follow the plugin's
 [throughput registration steps](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding)
 to change it while earlier work drains.
 

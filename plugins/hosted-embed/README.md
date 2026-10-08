@@ -159,21 +159,20 @@ are declared in `configuration.execution_keys`; Quivr keeps the active plan's
 exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
 
-A package whose manifest already declares `tokenizer_processes` preserves its
-recipe when you tune that setting. For an earlier package, deploying the updated
-executable with the existing exact manifest enables the auto pool without a new
-recipe. Generating and installing a manifest that first adds the execution key
-changes the recipe: use the usual rebuild or evaluation cutover for that first
-registration. Subsequent pool tuning preserves that recipe.
-
-Run the new manifest at a separate address while earlier pinned work drains.
-Keep the previous process and exact manifest reachable at its recorded address
-until the registration becomes `inactive`. Discovery still checks exact manifest
-bytes; replacing an endpoint in place makes old pinned calls fail.
+Adding a new execution-only key, such as `tokenizer_processes`, to an existing
+execution declaration list also preserves the active recipe when the remaining manifest and semantic settings are
+unchanged. Quivr can serve pinned imports, rebuilds and queries through the
+active equivalent registration, including an update at the same address.
+Requests use its exact manifest and installed execution settings, while the
+original work plan, recipe, provenance and invocation keys remain unchanged.
+Temporary discovery or transport failures retry with backoff rather than
+quarantining documents. An explicit rollback stop still stops that work.
 
 Changes to model, templates, packing, tokenizer or tokens per chunk still create
 a new recipe and need the usual rebuild or evaluation cutover. A plugin version
 change also creates a new recipe, even when only execution settings differ.
+For those changes, keep the previous process reachable at its registered address
+until its pinned work drains; Quivr cannot substitute a different output identity.
 
 ## Limits and defaults
 

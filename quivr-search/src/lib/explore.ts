@@ -6,7 +6,7 @@ import { request } from "./search.ts";
 import { diffWords } from "./diff.ts";
 import type { FeedItem } from "./feed";
 import type { Corpus, Exclusion, Field } from "./corpora";
-import type { Availability } from "../types";
+import type { Availability, SearchResponse } from "../types";
 
 export type Scalar = string | number | boolean;
 
@@ -21,6 +21,7 @@ export interface ExplorePage {
   items: ExploreItem[];
   next_cursor?: string;
   excluded_corpora?: Exclusion[];
+  retrieval_profile?: SearchResponse["retrieval_profile"];
   /** A search that reached its bound: more documents may match. */
   bounded?: boolean;
 }

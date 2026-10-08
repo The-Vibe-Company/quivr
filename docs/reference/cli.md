@@ -12,7 +12,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | --- | --- | --- |
 | [`quivr api`](#quivr-api) | a configuration file (`QUIVR_CONFIG`) | Serve the public HTTP API until interrupted. |
 | [`quivr worker`](#quivr-worker) | a configuration file (`QUIVR_CONFIG`) | Run the background work that processes content, pulls connectors and delivers events, until interrupted. |
-| [`quivr storage`](#quivr-storage) | a configuration file (`QUIVR_CONFIG`) | Inspect storage, activate compact writes, or resume bounded compaction without embedding. Activation is irreversible: drain and stop every older API, live and bulk writer first; previous binaries cannot be restored. |
+| [`quivr storage`](#quivr-storage) | a configuration file (`QUIVR_CONFIG`) | Check PostgreSQL schema readiness and report compact storage. |
 | [`quivr migrate`](#quivr-migrate) | a configuration file (`QUIVR_CONFIG`) | Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready. |
 | [`quivr --version`](#quivr---version) | nothing: works offline | Print build identity without configuration or a running server. |
 | [`quivr plugin dev`](#quivr-plugin-dev) | nothing: works offline | Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`. |
@@ -25,7 +25,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 
 ## Engine commands
 
-Engine commands run Quivr itself and read the JSON configuration file named by `QUIVR_CONFIG`; `api`, `worker` and `migrate` connect to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags. `storage` connects only to PostgreSQL and, for compaction, object storage.
+Engine commands run Quivr itself and read the JSON configuration file named by `QUIVR_CONFIG`; `api`, `worker` and `migrate` connect to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags. `storage status` connects only to PostgreSQL and checks schema readiness.
 
 | Environment variable | Meaning |
 | --- | --- |
@@ -55,10 +55,10 @@ quivr worker
 
 ### quivr storage
 
-Inspect storage, activate compact writes, or resume bounded compaction without embedding. Activation is irreversible: drain and stop every older API, live and bulk writer first; previous binaries cannot be restored.
+Check PostgreSQL schema readiness and report compact storage.
 
 ```text
-quivr storage status [--id <operation>] | activate --writers-drained | compact --id <operation> [--batch 100] [--retire-audit-detail]
+quivr storage status
 ```
 
 ### quivr migrate

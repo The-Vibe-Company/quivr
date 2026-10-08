@@ -193,7 +193,7 @@ func queueBacklogSQL() string {
 	// with other operations/stages is intentionally not deduplicated.
 	return `WITH enrichment_versions AS MATERIALIZED (
  SELECT organization,version_id FROM queue_enrichment_records WHERE pending
-), work AS (
+), ingestion_work AS MATERIALIZED (
  SELECT CASE WHEN rc.work_queue='bulk' THEN 'bulk' ELSE 'live' END AS queue,
         rc.organization,COALESCE(NULLIF(rc.version_id,''),ar.version_id,rc.id) AS document_id,
         COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at) AS admitted_at,false AS active
@@ -211,6 +211,8 @@ func queueBacklogSQL() string {
  LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
    AND NOT v.baseline_ready AND NOT v.quarantined AND v.processing IN ('queued','running','retrying')
+), work AS (
+ SELECT * FROM ingestion_work
  UNION ALL
  SELECT CASE WHEN rc.work_queue='bulk' THEN 'bulk' ELSE 'live' END,
         v.organization,v.id,COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at),false
@@ -262,7 +264,8 @@ func queueBacklogSQL() string {
           WHEN COALESCE(rc.work_queue,ie.work_queue,sp.work_queue)='bulk' THEN 'bulk'
           ELSE 'live'
         END AS queue,
-        a.organization,a.document_id,clock_timestamp() AS admitted_at,true AS active,op.id AS operation_id
+        a.organization,a.document_id,clock_timestamp() AS admitted_at,true AS active,op.id AS operation_id,
+        (a.kind='ingestion' AND op.id IS NULL AND (rc.state='pending' OR (NOT av.baseline_ready AND av.processing IN ('queued','running','retrying')))) AS ingestion_active
  FROM queue_document_attempts a
  LEFT JOIN ingestion_receipts rc ON a.organization=rc.organization AND a.work_id=rc.id
  LEFT JOIN ingestion_evaluations ie ON a.organization=ie.organization AND a.work_id=ie.id
@@ -309,7 +312,15 @@ SELECT q.queue,
        count(d.document_id) FILTER (WHERE COALESCE(d.active,false))::bigint,
        GREATEST(0,CASE WHEN q.queue='bulk' THEN COALESCE(EXTRACT(EPOCH FROM statement_timestamp()-ot.oldest),0) ELSE 0 END,
                 COALESCE(MAX(EXTRACT(EPOCH FROM statement_timestamp()-d.admitted_at))
-                    FILTER (WHERE NOT COALESCE(d.active,false)),0))::double precision
+                    FILTER (WHERE NOT COALESCE(d.active,false)),0))::double precision,
+       (SELECT count(*) FROM (
+          SELECT iw.organization,iw.document_id FROM ingestion_work iw
+          WHERE iw.queue=q.queue AND iw.document_id<>''
+            AND NOT EXISTS(SELECT 1 FROM active_attempts a
+              WHERE a.queue=iw.queue AND a.organization=iw.organization
+                AND a.document_id=iw.document_id AND a.ingestion_active)
+          GROUP BY iw.organization,iw.document_id
+        ) pending_ingestion)::bigint
 FROM queues q CROSS JOIN operation_totals ot
 LEFT JOIN documents d ON d.queue=q.queue
 GROUP BY q.queue,ot.waiting,ot.oldest

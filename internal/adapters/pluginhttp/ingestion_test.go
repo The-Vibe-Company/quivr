@@ -141,6 +141,7 @@ configuration:
 		same           bool
 	}{
 		{"declaration order", strings.Replace(manifest, "[max_concurrent_requests, batch_size, max_batch_tokens, request_timeout_ms, call_budget_ms]", "[call_budget_ms, request_timeout_ms, max_batch_tokens, batch_size, max_concurrent_requests]", 1), true},
+		{"added execution setting", strings.Replace(manifest, "execution_keys: [", "execution_keys: [tokenizer_processes, ", 1), true},
 		{"declaration contract", strings.Replace(manifest, "batch_size, ", "", 1), false},
 		{"plugin version", strings.Replace(manifest, "version: 0.1.0", "version: 0.2.0", 1), false},
 		{"model declaration", strings.Replace(manifest, "model: acme/small", "model: acme/large", 1), false},
@@ -258,8 +259,15 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 }
 
 // An upgraded sidecar may replace the manifest at the old endpoint. Live
-// imports retain the exact pin through that outage, beyond the operation budget.
+// imports and operations retain the exact pin through an incompatible redeploy's
+// outage, beyond the legacy attempt budget, and recover when it returns.
 func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
+	for _, kind := range []string{plugins.WorkIngestion, plugins.WorkOperation} {
+		t.Run(kind, func(t *testing.T) { testPinnedWorkRecoversWhenItsBuildReturns(t, kind) })
+	}
+}
+
+func testPinnedWorkRecoversWhenItsBuildReturns(t *testing.T, kind string) {
 	var serving *plugins.Pin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveDiscovery(w, r, serving) {
@@ -290,7 +298,7 @@ func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
 	}
 	attempts := 0
 	count := func(context.Context) (int, error) { attempts++; return attempts, nil }
-	work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkIngestion, Plan: "plan_a"}, count, 2)
+	work, err := live.Pin(context.Background(), plugins.Work{Kind: kind, Plan: "plan_a"}, count, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +315,7 @@ func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
 			t.Fatalf("attempt %d reached the replacement: %v", attempt+1, cause)
 		}
 		if reason, err := ingestor.(processing.Pinned).Gone(work, cause); err != nil || reason != nil {
-			t.Fatalf("attempt %d terminally stopped an import during an upgrade: %+v (%v)", attempt+1, reason, err)
+			t.Fatalf("attempt %d terminally stopped %s during an upgrade: %+v (%v)", attempt+1, kind, reason, err)
 		}
 	}
 	serving = a
@@ -586,4 +594,78 @@ func serveDiscovery(w http.ResponseWriter, r *http.Request, pin *plugins.Pin) bo
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
 	return true
+}
+
+// An active compatible build must not hide a rollback stop on the original
+// operation registration, even when the stop arrives inside an invocation.
+func TestExecutionReplacementHonorsOperationStops(t *testing.T) {
+	for _, moment := range []string{"before discovery", "during discovery", "during invocation"} {
+		t.Run(moment, func(t *testing.T) {
+			var marked atomic.Bool
+			var calls atomic.Int32
+			var next *plugins.Pin
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v0/discovery" {
+					if moment == "during discovery" {
+						marked.Store(true)
+					}
+					serveDiscovery(w, r, next)
+					return
+				}
+				calls.Add(1)
+				if moment == "during invocation" {
+					marked.Store(true)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"segments":[{"part_key":"body","start":0,"end":11,"vectors":{"acme.embedder.small":[1,0]}}]}`)
+			}))
+			defer server.Close()
+			load := func(keys, registration string) (*plugins.Pin, *plugins.PinSet) {
+				t.Helper()
+				source := embedderManifest + "\nconfiguration:\n  execution_keys: [" + keys + "]\n  schema: {type: object}\n"
+				pin, err := plugins.LoadPinManifest([]byte(source), "embedder", plugins.PinConfig{Endpoint: server.URL})
+				if err != nil {
+					t.Fatal(err)
+				}
+				pin.Registration = registration
+				set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return pin, set
+			}
+			before, oldSet := load("max_concurrent_requests", "old")
+			_, nextSet := load("max_concurrent_requests, tokenizer_processes", "new")
+			next = nextSet.Ingestion()
+			live, err := plugins.NewLive("old-plan", oldSet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempts := 0
+			work, err := live.Pin(t.Context(), plugins.Work{Kind: plugins.WorkOperation, Plan: "old-plan", StopMarked: func(context.Context) bool { return marked.Load() }}, func(context.Context) (int, error) { attempts++; return attempts, nil }, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = live.Store("new-plan", nextSet); err != nil {
+				t.Fatal(err)
+			}
+			if moment == "before discovery" {
+				marked.Store(true)
+			}
+			ingestor := pluginhttp.LiveIngestor{Live: live}.Ingestor(work, "text/plain")
+			version := content.Version{RecordID: "record", ID: "version", Manifest: content.Manifest{Kind: "document", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a paragraph"}}}}}
+			_, cause := ingestor.SegmentAndEmbed(work, "org", "corpus", version, []string{"acme.embedder.small@1"})
+			wantCalls := int32(0)
+			if moment == "during invocation" {
+				wantCalls = 1
+			}
+			if !errors.Is(cause, pluginhttp.ErrUnavailable) || calls.Load() != wantCalls {
+				t.Fatalf("stopped replacement accepted: err=%v calls=%d want=%d", cause, calls.Load(), wantCalls)
+			}
+			reason, err := ingestor.(processing.Pinned).Gone(work, cause)
+			if err != nil || reason == nil || reason.Code != plugins.CodePinnedPlanStopped || attempts != 0 || before.Registration != "old" {
+				t.Fatalf("original stop lost: reason=%+v attempts=%d err=%v", reason, attempts, err)
+			}
+		})
+	}
 }

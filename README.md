@@ -21,6 +21,7 @@ without forking the platform.
   Versions instead of overwriting history.
 - **Useful early, richer later.** Text is lexically searchable as soon as it is
   segmented; embeddings and other enrichments arrive afterwards without blocking it.
+  Hybrid search keeps keyword results while vectors are rebuilt and reports the affected Corpora.
 - **Rebuildable indexes.** PostgreSQL and S3 hold the canonical data; the search index
   is a projection that can be rebuilt from durable artifacts.
 - **Honest search.** Every hit is rehydrated from canonical storage and re-authorized.
@@ -85,6 +86,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 (see [`quivr-search/`](quivr-search/README.md)).
 
 ## What works today
+
+- [Choose an embedding model](https://docs.quivr.thevibecompany.co/run-quivr/choose-an-embedding-model) for local inference, your own model server or a hosted API, with rebuild requirements and execution-only tuning. [Run a large import](https://docs.quivr.thevibecompany.co/run-quivr/run-a-large-import) covers bulk workers, provider capacity, database sizing and queue monitoring.
 
 - Searches report query-model outages as retryable `503 model_unavailable`, separately from overload and other search dependency failures. See [Search errors](https://docs.quivr.thevibecompany.co/guides/search#when-a-search-fails).
 
@@ -203,7 +206,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
   deposited credentials and health, through the same ingestion path as pushed content.
   Archives import through `object_storage_archive`: immutable S3-compatible `.tar.gz` and ZIP sources,
-  bounded batches and concurrency, resumable member checkpoints, and configured numeric revision ordering
+  bounded batches and concurrency, resumable member checkpoints, immediate continuation while the cursor advances,
+  ingestion queue backpressure, and configured numeric revision ordering
   ([guide](https://docs.quivr.thevibecompany.co/guides/archive-import)).
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
   and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become

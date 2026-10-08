@@ -15,9 +15,9 @@ func TestQueueSnapshotRefreshReusesDefaultInterval(t *testing.T) {
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,observed_at,published_at)
-	 VALUES('live',123,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds'),
-	       ('bulk',456,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,observed_at,published_at,ingestion_waiting,ingestion_observed_at)
+	 VALUES('live',123,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds'),
+	       ('bulk',456,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds')`); err != nil {
 		t.Fatal(err)
 	}
 	snapshots := QueueSnapshots{Pool: pool}
@@ -80,6 +80,32 @@ func TestQueueSnapshotRefreshReusesDefaultInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertWaiting(0)
+	// An older writer can refresh totals without updating the new split. Its
+	// publication must not make an old ingestion count look current.
+	exec(`UPDATE queue_backlog_snapshots SET ingestion_observed_at=clock_timestamp()-interval '2 minutes'`)
+	statuses, err = snapshots.QueueBacklog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.IngestionWaiting != nil {
+			t.Fatalf("stale split presented as fresh: %+v", status)
+		}
+	}
+	// Fresh legacy totals cannot starve a new writer's missing/stale split.
+	exec(`UPDATE queue_backlog_snapshots SET published_at=clock_timestamp()`)
+	if err := snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = snapshots.QueueBacklog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.IngestionWaiting == nil || *status.IngestionWaiting != 0 {
+			t.Fatalf("legacy total publication starved split refresh: %+v", status)
+		}
+	}
 	// A competing refresher holds the actual installation election lock.
 	exec(`UPDATE queue_backlog_snapshots SET waiting=9,published_at='-infinity'`)
 	tx, err := pool.Begin(ctx)

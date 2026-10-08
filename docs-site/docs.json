@@ -60,6 +60,8 @@
             "pages": [
               "run-quivr/overview",
               "run-quivr/deploy",
+              "run-quivr/run-a-large-import",
+              "run-quivr/scale-quivr",
               "run-quivr/upgrade-quivr",
               "run-quivr/security",
               "run-quivr/tls",
@@ -83,6 +85,7 @@
                 "pages": [
                   "run-quivr/search-profiles",
                   "run-quivr/rerank-with-jev",
+                  "run-quivr/choose-an-embedding-model",
                   "run-quivr/switch-a-vector-model",
                   "run-quivr/backfill-a-vector-space"
                 ]

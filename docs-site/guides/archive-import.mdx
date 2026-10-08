@@ -63,7 +63,15 @@ Revisions of one Record are submitted on separate pages.
 ## Configure and start the source
 
 Use the [connector creation and credential workflow](/guides/connectors#create-an-instance)
-with kind `object_storage_archive`. Put these settings in its `config`.
+with kind `object_storage_archive`. Set `work_queue: "bulk"` at the creation
+request's top level, alongside `kind`, `config` and `schedule`, so this historical
+import uses bulk workers. For example, these are request fields, outside `config`:
+
+```json
+{"kind":"object_storage_archive","work_queue":"bulk"}
+```
+
+Put the storage settings below in `config`.
 This is an example for your own storage; replace the bucket, prefix and region:
 
 ```json
@@ -130,14 +138,31 @@ an intermediate page, or `source_drained`, `page_limit`, `soft_limit` or
 minutes before starting another page, and a 200 MiB attachment budget.
 
 `continuation: true` means the engine requests another durable leased run
-immediately after a successful bounded run. The final page must contain items,
-report `more: true`, and advance the checkpoint from both this page's input and the run's starting
+immediately after a successful bounded run. The final page must report `more: true` and advance the checkpoint from both this page's input and the run's starting
 value.
-Replayed items can advance this cursor without creating new versions. Empty
-pages, unchanged checkpoints, source exhaustion, errors, notices and permanent
+Replayed items and pages containing only filtered entries can advance this cursor
+without creating new versions. Unchanged checkpoints, source exhaustion, errors, notices and permanent
 item rejections keep the configured interval; `RetryAfter` and healthy push
 can make that wait longer. Each continuation has a new run sequence and remains
 in the same work queue. Dispatch and processing capacity still govern its pace.
+
+Before each bulk fetch, the engine checks the ingestion-only waiting count in
+the shared queue snapshot. At 1,000 waiting documents, acquisition defers to
+its interval until processing catches up. This count deduplicates pending
+receipts and documents awaiting baseline processing; active ingestion attempts,
+post-baseline enrichment, rebuilds and other operations do not contribute.
+Missing or stale observations also defer bulk acquisition. Live connectors
+continue polling independently. Snapshot refresh lag and concurrent pages can
+overshoot this watermark; it bounds prefetching rather than setting an import
+size limit.
+
+`acquisition.continuation_reason` explains a false continuation: `run_in_progress`,
+`source_drained`, `checkpoint_stalled`, `checkpoint_cycled`, `source_notice`,
+`item_rejected`, `store_unsupported` or `incomplete`. An empty value accompanies a requested
+continuation. A deferral before the next fetch logs `connector run deferred`
+with `continuation_reason: ingestion_backpressure` or `queue_unavailable`;
+it keeps the last committed page diagnostic and checkpoint. A run that defers
+before fetching its first page does not count as a successful source poll.
 
 `interval_ms` reports the configured wait used when continuation is false.
 For those runs, estimate scheduled idle share as
@@ -162,10 +187,13 @@ rejections reported as `item_rejected` in health. Accepted members can still
 be waiting for normalization or search publication; acceptance does not mean
 searchability.
 
-Use a [long schedule and a manual run](/guides/connectors#change-the-schedule-or-check-now)
-to leave collection idle between runs and continue later. A longer interval
-applies after the already scheduled run; it does not interrupt an active run.
-Disabling an instance is permanent. The checkpoint records the archive ETag and member
+Use [pause and resume](/guides/connectors#pause-and-resume-collection) to stop
+collection and continue from its last saved checkpoint. Pause also stops
+continuing imports. A source request already in progress may finish, but cannot
+save a later checkpoint after pause; already accepted documents keep processing.
+Resume makes collection due immediately unless the source's `Retry-After` delays it.
+A manual run while paused is refused; permanent disable cannot be resumed.
+The checkpoint records the archive ETag and member
 offset. After a worker or plugin restart, the connector scans the compressed
 tar stream to that offset and continues. ZIP uses ranged member reads.
 Escape-heavy archive identities retain compact refs to fit the 1,024-byte
@@ -214,4 +242,5 @@ receipts each, or 64 receipts per process. Each receipt keeps its pinned plan,
 stage deadlines and replay guards. Provider concurrency remains separately
 bounded by `max_concurrent_requests`. Add worker replicas only within your
 database and provider capacity.
-See [hosted embedding settings](/run-quivr/switch-a-vector-model).
+See [Run a large import](/run-quivr/run-a-large-import) for storage sizing,
+provider capacity and queue monitoring, and [hosted embedding settings](/run-quivr/switch-a-vector-model).

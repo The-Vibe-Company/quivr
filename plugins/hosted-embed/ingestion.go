@@ -34,7 +34,7 @@ func newIngester(c configuration, key string, log *slog.Logger) *ingester {
 	i := &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
 	i.tokenizer = byteCounter{}
 	if c.Tokenizer != nil {
-		i.tokenizer = newLocalTokenizer(*c.Tokenizer, c.TokenizerProcesses)
+		i.tokenizer = newLocalTokenizer(*c.Tokenizer, c.TokenizerProcesses, log)
 		i.provider.counter = i.tokenizer
 	}
 	i.documents = &documentBatcher{provider: i.provider, slots: make(chan struct{}, min(256, c.MaxConcurrentRequests*c.BatchSize)), pending: map[string]*documentBatch{}}

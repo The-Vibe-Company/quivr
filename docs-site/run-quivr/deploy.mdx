@@ -37,6 +37,8 @@ Quivr is at the evaluation stage: its API is `v0` and may change. Do not run it 
 
 The file holds the database URL, storage credentials and API keys, so keep it readable only by Quivr's processes. The [Configuration reference](/reference/configuration) lists every field, and [Pin a plugin](/run-quivr/pin) shows how to add one.
 
+[Choose an embedding model](/run-quivr/choose-an-embedding-model) before pinning inference. For historical collection, follow [Run a large import](/run-quivr/run-a-large-import) to budget PostgreSQL, Weaviate and provider capacity, select bulk workers and monitor backlog.
+
 A change to this file takes effect when the processes restart. Plugin changes made through the API, such as activating a new version, apply while Quivr runs; see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
 ## Pull and verify a release image
@@ -299,6 +301,8 @@ The process logs JSON lines: `autoscaler started` with its backend and queue, th
 ### Scale by hand
 
 On a platform without a replica API, or to size workers before automating, read `queues.bulk.waiting` or the `quivr_queue_waiting_documents` gauge, apply the rule above and set the worker count yourself.
+
+For the capacity model, dependency budgets and incident checks behind these scaling decisions, read [Scale Quivr](/run-quivr/scale-quivr).
 
 ## Example deployments
 

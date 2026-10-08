@@ -107,8 +107,7 @@ type Embedding struct {
 	Ordinal        int            `json:"vector_ordinal,omitempty"`
 }
 type EmbeddingRepository interface {
-	Embedding(context.Context, string, string) (Embedding, error)
-	SaveEmbedding(context.Context, Embedding, VectorSpace) error
+	EmbeddingFileRepository
 	EnrichmentProgress(context.Context, string, string, string, string) error
 	// CountEnrichmentTimeout records that an enrichment call for a Version
 	// ended at the plugin's deadline and returns how many have.
@@ -158,73 +157,6 @@ func ReadVector(raw []byte) ([]float32, error) {
 }
 func EmbeddingInput(org, corpusID string, v Version, seg Segmentation, p Segment, space VectorSpace, producer string) Embedding {
 	return Embedding{DerivationID: StableID("embedding-derivation", org, p.ID, space.ID, p.Derivation.ModelInputSHA256, producer), Organization: org, CorpusID: corpusID, VersionID: v.ID, SegmentID: p.ID, PartKey: p.PartKey, SegmentationID: seg.ID, Recipe: seg.Recipe, SourceSHA: p.Derivation.NormalizedSHA256, SliceSHA: Hash([]byte(p.Text)), InputSHA: p.Derivation.ModelInputSHA256, InputBytes: len(p.Derivation.ModelInput), SpaceID: space.ID, Producer: producer}
-}
-func (s Service) LoadEmbedding(ctx context.Context, org, derivation string) (Embedding, []float32, error) {
-	e, err := s.Embeddings.Embedding(ctx, org, derivation)
-	if err != nil {
-		return e, nil, err
-	}
-	return s.loadEmbeddingArtifact(ctx, e)
-}
-
-func (s Service) loadEmbeddingArtifact(ctx context.Context, e Embedding) (Embedding, []float32, error) {
-	if e.File != nil {
-		data, err := s.LoadEmbeddingData(ctx, []Embedding{e})
-		if err != nil {
-			return e, nil, err
-		}
-		return data[0].Artifact, data[0].Vector, nil
-	}
-	manifest, err := s.Blobs.Read(ctx, e.Manifest)
-	if err != nil {
-		return e, nil, err
-	}
-	expected := e
-	expected.Manifest = Blob{}
-	expected.ID = ""
-	b := embeddingManifest(expected)
-	if string(b) != string(manifest) {
-		return e, nil, ErrConflict
-	}
-	raw, err := s.Blobs.Read(ctx, e.Payload)
-	if err != nil {
-		return e, nil, err
-	}
-	if e.ID != Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), raw...)) {
-		return e, nil, ErrConflict
-	}
-	v, err := ReadVector(raw)
-	return e, v, err
-}
-func (s Service) SaveEmbedding(ctx context.Context, e Embedding, space VectorSpace, vector []float32) (Embedding, error) {
-	e, err := s.prepareEmbedding(ctx, e, space, vector)
-	if err != nil {
-		return e, err
-	}
-	return e, s.Embeddings.SaveEmbedding(ctx, e, space)
-}
-
-func (s Service) prepareEmbedding(ctx context.Context, e Embedding, space VectorSpace, vector []float32) (Embedding, error) {
-	raw, err := VectorBytes(vector)
-	if err != nil {
-		return e, err
-	}
-	if e.SpaceID != space.ID || e.DerivationID == "" || e.Producer == "" || (space.Dimensions > 0 && len(vector) != space.Dimensions) {
-		return e, ErrInvalid
-	}
-	e.Payload, err = s.Blobs.Put(ctx, e.Organization, raw)
-	if err != nil {
-		return e, err
-	}
-	e.ID = ""
-	e.Manifest = Blob{}
-	manifest := embeddingManifest(e)
-	e.ID = Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), raw...))
-	e.Manifest, err = s.Blobs.Put(ctx, e.Organization, manifest)
-	if err != nil {
-		return e, err
-	}
-	return e, nil
 }
 
 // All manifest values are bounded integers or ASCII identifiers. Sorting object
@@ -348,19 +280,4 @@ func (s Service) CommitEnrichment(ctx context.Context, org string, seg Segmentat
 		artifacts[i] = e
 	}
 	return s.Embeddings.CommitEnrichment(ctx, org, seg, g, artifacts)
-}
-
-// Legacy probes stay on the existing indexed derivation key. New grouped
-// writers must not scan compact vectors to prove that a legacy winner is absent.
-func (s Service) loadLegacyEmbedding(ctx context.Context, org, derivation string) (Embedding, []float32, error) {
-	if repo, ok := s.Embeddings.(interface {
-		LegacyEmbedding(context.Context, string, string) (Embedding, error)
-	}); ok {
-		e, err := repo.LegacyEmbedding(ctx, org, derivation)
-		if err != nil {
-			return e, nil, err
-		}
-		return s.loadEmbeddingArtifact(ctx, e)
-	}
-	return s.LoadEmbedding(ctx, org, derivation)
 }

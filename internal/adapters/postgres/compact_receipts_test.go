@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // This owns digest-only request arbitration and the optional full audit copy.
@@ -24,9 +21,6 @@ func TestCompactReceiptDigestAndOptionalAudit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool := adapterPool(t, ctx)
-	if err := postgres.ActivateCompactStorage(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
 	for _, detail := range []bool{false, true} {
 		t.Run(fmt.Sprint(detail), func(t *testing.T) {
 			org := fmt.Sprintf("compact-receipt-%d-%v", time.Now().UnixNano(), detail)
@@ -60,25 +54,7 @@ func TestCompactReceiptDigestAndOptionalAudit(t *testing.T) {
 			normalizer := postgres.NormalizationStore{Pool: pool, Blobs: objects, RetainImportAuditDetail: detail}
 			n := content.Normalized{Manifest: content.Blob{Key: "manifest", SHA256: "digest", Size: 1}, Provenance: content.Normalization{PluginID: "example.normalize", PluginVersion: "1.0.0", InvocationID: "call", IdempotencyKey: plugins.NormalizerKey("plan-1", "normalizer", org, work.VersionID, content.Hash([]byte("Durable input")))}, Extensions: content.Extensions{"example.normalize.metadata": {SchemaVersion: "1", Data: map[string]any{"heading": "Preserved"}}}}
 
-			var activation *activateAfterRoundtrip
-			if !detail {
-				if _, err = pool.Exec(ctx, `UPDATE storage_state SET compact=false`); err != nil {
-					t.Fatal(err)
-				}
-				activation = &activateAfterRoundtrip{activate: func() error { return postgres.ActivateCompactStorage(ctx, pool) }}
-				cfg := pool.Config()
-				cfg.ConnConfig.Tracer = activation
-				racedPool, err := pgxpool.NewWithConfig(ctx, cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer racedPool.Close()
-				normalizer.Pool = racedPool
-			}
 			stored, err := normalizer.SaveNormalized(ctx, org, work.VersionID, n)
-			if activation != nil && activation.err != nil {
-				t.Fatal(activation.err)
-			}
 			if err != nil || stored.Extensions["example.normalize.metadata"].Data["heading"] != "Preserved" {
 				t.Fatalf("normalization outcome %+v %v", stored, err)
 			}
@@ -138,22 +114,5 @@ func TestCompactReceiptDigestAndOptionalAudit(t *testing.T) {
 				t.Fatal("execution input retained audit request key")
 			}
 		})
-	}
-}
-
-// The external SQL driver completes one roundtrip before activation. The store
-// must fence and recheck its candidate format even when that first read is stale.
-type activateAfterRoundtrip struct {
-	once     sync.Once
-	activate func() error
-	err      error
-}
-
-func (a *activateAfterRoundtrip) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
-	return ctx
-}
-func (a *activateAfterRoundtrip) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
-	if data.Err == nil {
-		a.once.Do(func() { a.err = a.activate() })
 	}
 }

@@ -118,10 +118,24 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 - **Ingestion stage.** The ingestion plugin of the active plan segments and embeds the document again.
 - **As a first success.** A recovered document becomes its Record's current Version if the Record still wants it, is searchable, is evaluated by the alerts of its Corpus, and appears in the change feed with `record.retrieval_ready` and `record.enrichment_available`.
 - **Pace.** It runs on the backfill queue, at most `backfill.rate` Versions per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity. One reprocess of a Corpus runs at a time.
-- **Plan.** It is pinned to the plan active when it was accepted, like other work. A plugin of that plan that becomes unreachable quarantines the document again with `pinned_plugin_unavailable`.
+- **Plan.** It is pinned to the plan active when it was accepted, like other work. Temporary plugin unavailability retries with backoff; an execution-equivalent ingestion registration can serve it. Semantic changes require the original build or a new operation using the active plan.
 - **Interruptions.** A restart resumes the document it was processing. Canceling it puts a document it had started back in quarantine with its previous reason.
 
 ## Troubleshooting
+
+### Recover work stranded by an earlier plugin update
+
+Earlier engine versions could quarantine Versions with `pinned_plugin_unavailable`
+when an in-place plugin update changed its manifest digest. Upgrading prevents
+new transport or discovery outages from causing this quarantine, but does not
+release existing holds.
+
+For a stranded Corpus rebuild, cancel its Operation and wait for cancellation to
+finish. Start a new rebuild with `POST /v0/corpora/{corpus_id}/rebuilds` under the
+active plan, following [Switch a vector model](/run-quivr/switch-a-vector-model).
+Then follow the dry-run and reprocess steps above with the same Corpus id and
+`code: pinned_plugin_unavailable`. Use fresh idempotency keys and confirm that
+the rebuilt Corpus and recovered Versions are searchable.
 
 | Answer | Cause | Fix |
 | --- | --- | --- |

@@ -290,7 +290,7 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 			v := content.Version{ID: e.Work.VersionID, RecordID: e.Work.RecordID, Manifest: content.ManifestFor(e.Work.Command)}
 			artifact := content.EmbeddingInput(org, c.ID, v, e.Segmentation, e.Segmentation.Segments[0], space, "example")
 			artifact.ID = content.StableID("artifact", org, v.ID)
-			if err = stores.SaveEmbedding(ctx, artifact, space); err != nil {
+			if err = saveFixtureEmbedding(ctx, stores, &artifact, space); err != nil {
 				t.Fatal(err)
 			}
 			commits[i] = content.IngestionCommit{Context: ctx, Kind: content.CommitVectors, Organization: org, RecordID: v.RecordID, Segmentation: e.Segmentation, Generation: g, Artifacts: []content.Embedding{artifact}}

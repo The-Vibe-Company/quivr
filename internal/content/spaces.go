@@ -68,6 +68,9 @@ type SpaceCoverage struct {
 	VersionsCovered int64
 	// ServingSegments counts this owner's current served projection, when known.
 	ServingSegments *int64
+	// CorpusEmpty is true only when current canonical metadata confirms there
+	// are no eligible Versions. It is independent of asynchronous coverage.
+	CorpusEmpty bool
 	// CoverageUnknown means no background snapshot has completed yet. Counts
 	// are informational and must not gate candidate retrieval.
 	CoverageUnknown bool

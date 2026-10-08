@@ -190,7 +190,7 @@ type Command struct {
 var Commands = []Command{
 	{Name: "api", Summary: "Serve the public HTTP API until interrupted."},
 	{Name: "worker", Summary: "Run the background work that processes content, pulls connectors and delivers events, until interrupted."},
-	{Name: "storage", Summary: "Inspect storage, activate compact writes, or resume bounded compaction without embedding."},
+	{Name: "storage", Summary: "Check PostgreSQL schema readiness and report compact storage."},
 	{Name: "migrate", Summary: "Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready."},
 }
 
@@ -623,6 +623,7 @@ func Run(command string, args ...string) error {
 	indexes := &IndexMaintenance{Pool: pool}
 	loops.Go(indexes.Run)
 	queueSnapshots := postgres.QueueSnapshots{Pool: pool, RefreshInterval: queueRefreshInterval}
+	acquisition.Acquirer.Queues = queueSnapshots
 	loops.Go(func(ctx context.Context) {
 		delay := queueRefreshInterval
 		failed := false

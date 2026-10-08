@@ -23,11 +23,9 @@ const (
 	warmRetry = 100 * time.Millisecond
 )
 
-// warmQueries runs warm until the plugin answers or bound passes, in the
-// background, and returns a channel closed when it is over. warm fails only
-// when the plugin does not answer; an answer that reports an unavailable
-// embedding service still warmed it, so readiness never waits for that
-// service.
+// warmQueries retries until query encoding succeeds or bound passes, in the
+// background, and returns a channel closed when it is over. Error envelopes
+// are failures, including an unavailable embedding service.
 func warmQueries(ctx context.Context, warm func(context.Context) error, bound, retry time.Duration) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {

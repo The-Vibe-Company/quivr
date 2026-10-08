@@ -23,6 +23,21 @@ import (
 // is judged with the Contract Runner's checks before anything is stored.
 type Ingestor struct {
 	Pin *plugins.Pin
+	// Live supplies the current serving build for execution-equivalent updates.
+	// The descriptor and work binding remain those of Pin.
+	Live *plugins.Live
+}
+
+func (i Ingestor) serving() Ingestor {
+	if i.Live != nil {
+		for _, next := range i.Live.Set().Pins() {
+			if next.Manifest.ID == i.Pin.Manifest.ID {
+				i.Pin = registry.IngestionReplacement(i.Pin, next)
+				break
+			}
+		}
+	}
+	return i
 }
 
 var (
@@ -98,6 +113,7 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
 		return nil, err
 	}
+	i = i.serving()
 	ids := make([]string, 0, len(keys))
 	byID := map[string]string{}
 	for _, key := range keys {
@@ -204,6 +220,7 @@ const QueryTooLongCode = "query_too_long"
 // refusal (the plugin cannot encode this query) is content.ErrInvalid;
 // anything else is unavailability.
 func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]float32, error) {
+	i = i.serving()
 	id, _, ok := i.declared(key)
 	if !ok {
 		return nil, fmt.Errorf("%w: space %s is not declared by the pinned ingestion plugin", ErrUnavailable, key)
@@ -240,13 +257,12 @@ const WarmUpOrganization = "engine.warm-up"
 // Warm sends one embed_query to each space the pin enables, served first, so
 // that the plugin loads what it loads on first use (core.ingest starts its
 // tokenizer process) before a search waits for it, not within that search's
-// latency budget. Any answer, even an error envelope such as an unavailable
-// embedding service, means the plugin did that loading; only a plugin that
-// does not answer is an error (ErrUnavailable). The calls count for no
-// Organization, so they are not observed.
+// latency budget. An error answer is a failed warm-up, so callers can retry
+// rather than report successful loading. The calls count for no Organization,
+// so they are not observed.
 func (i Ingestor) Warm(ctx context.Context) error {
 	for _, space := range i.Pin.EnabledSpaces() {
-		if result, err := i.embedQuery(ctx, "warm-up-"+plugins.InvocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil && result == nil {
+		if _, err := i.embedQuery(ctx, "warm-up-"+plugins.InvocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil {
 			return fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 	}

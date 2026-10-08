@@ -39,8 +39,8 @@ func TestLiveServesTheNamespacesOfTheCurrentSet(t *testing.T) {
 // resolves plugins (Spec 5): under its context every lookup stays in its
 // plan after another plan becomes current, a restarted process resolves the
 // plan again, and an Operation whose plugin cannot be reached keeps the work
-// retrying while it serves the current plan, then stops it with a diagnostic
-// naming the plan and the plugin once it has left and the budget is spent.
+// retrying through outages. An incompatible retired owner stops with a
+// diagnostic naming the plan and plugin once its budget is spent.
 func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
 	load := func(registration string) *plugins.PinSet {
 		t.Helper()
@@ -74,10 +74,10 @@ func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
 	if !live.Routed(work, "text/markdown") || live.Routed(context.Background(), "text/markdown") {
 		t.Fatalf("after plan_b: pinned work routed %v, new work routed %v; want only the pinned work routed", live.Routed(work, "text/markdown"), live.Routed(context.Background(), "text/markdown"))
 	}
-	if reason, err := plugins.Unavailable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 1 {
+	if reason, err := plugins.Unreachable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 1 {
 		t.Fatalf("the first attempt after the plugin left the plan: %v (%v), %d attempts; want a counted retry", reason, err, attempts)
 	}
-	reason, err := plugins.Unavailable(work, pinA, "normalizer")
+	reason, err := plugins.Unreachable(work, pinA, "normalizer")
 	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPluginUnavailable || reason.Plan != "plan_a" || reason.Plugin != "certified.fake" || reason.PluginVersion != "0.1.0" || reason.Contribution != "normalizer" {
 		t.Fatalf("the budget spent: %+v (%v); want pinned_plugin_unavailable naming plan_a and certified.fake@0.1.0", reason, err)
 	}
