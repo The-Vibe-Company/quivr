@@ -49,7 +49,7 @@ func (t *pageTimings) diagnostic(now, runStarted time.Time, more bool, reason st
 		"page_ms":     milliseconds(max(time.Duration(0), now.Sub(t.started))),
 		"run_ms":      milliseconds(max(time.Duration(0), now.Sub(runStarted))),
 		"more":        more, "stop_reason": reason, "interval_ms": milliseconds(interval),
-		"continuation": false,
+		"continuation": false, "continuation_reason": reason,
 	}
 }
 

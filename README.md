@@ -206,7 +206,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
   deposited credentials and health, through the same ingestion path as pushed content.
   Archives import through `object_storage_archive`: immutable S3-compatible `.tar.gz` and ZIP sources,
-  bounded batches and concurrency, resumable member checkpoints, and configured numeric revision ordering
+  bounded batches and concurrency, resumable member checkpoints, immediate continuation while the cursor advances,
+  ingestion queue backpressure, and configured numeric revision ordering
   ([guide](https://docs.quivr.thevibecompany.co/guides/archive-import)).
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
   and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become

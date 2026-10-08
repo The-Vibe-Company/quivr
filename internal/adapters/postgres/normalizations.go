@@ -82,61 +82,38 @@ func (s NormalizationStore) SaveNormalized(ctx context.Context, org, versionID s
 	if n.Outcome == "" {
 		n.Outcome = content.OutcomeNormalized
 	}
-	// A one-way activation may land during candidate preparation. Recheck under
-	// the shared routing fence and retry preparation before taking any DB locks.
-	for attempt := 0; attempt < 2; attempt++ {
-		candidate := n
-		var blob content.Blob
-		compact := false
-		if s.Blobs != nil && !s.RetainImportAuditDetail {
-			var err error
-			compact, err = (EmbeddingStore{Pool: s.Pool}).CompactStorage(ctx)
-			if err != nil {
-				return content.Normalized{}, err
-			}
-			if compact {
-				candidate = compactNormalization(n)
-				raw, err := json.Marshal(candidate)
-				if err != nil {
-					return content.Normalized{}, err
-				}
-				blob, err = s.Blobs.Put(ctx, org, raw)
-				if err != nil {
-					return content.Normalized{}, err
-				}
-			}
-		}
-		written, err := s.saveNormalized(ctx, org, versionID, candidate, blob, compact)
+	candidate := n
+	var blob content.Blob
+	compact := s.Blobs != nil && !s.RetainImportAuditDetail
+	if compact {
+		candidate = compactNormalization(n)
+		raw, err := json.Marshal(candidate)
 		if err != nil {
 			return content.Normalized{}, err
 		}
-		if !written {
-			continue
+		blob, err = s.Blobs.Put(ctx, org, raw)
+		if err != nil {
+			return content.Normalized{}, err
 		}
-		stored, found, err := s.Normalized(ctx, org, versionID)
-		if err == nil && !found {
-			err = errors.New("normalization record missing after insert")
-		}
-		return stored, err
 	}
-	return content.Normalized{}, content.ErrConflict
+	if err := s.saveNormalized(ctx, org, versionID, candidate, blob, compact); err != nil {
+		return content.Normalized{}, err
+	}
+	stored, found, err := s.Normalized(ctx, org, versionID)
+	if err == nil && !found {
+		err = errors.New("normalization record missing after insert")
+	}
+	return stored, err
 }
 
-func (s NormalizationStore) saveNormalized(ctx context.Context, org, versionID string, n content.Normalized, blob content.Blob, compact bool) (bool, error) {
+func (s NormalizationStore) saveNormalized(ctx context.Context, org, versionID string, n content.Normalized, blob content.Blob, compact bool) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer tx.Rollback(ctx)
 	if err = lockProcessingVersion(ctx, tx, org, versionID); err != nil {
-		return false, err
-	}
-	active, err := compactWrites(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	if compact != (active && s.Blobs != nil && !s.RetainImportAuditDetail) {
-		return false, nil
+		return err
 	}
 
 	p := n.Provenance
@@ -159,14 +136,14 @@ func (s NormalizationStore) saveNormalized(ctx context.Context, org, versionID s
 	}
 	extensionsJSON, err := json.Marshal(extensions)
 	if err != nil {
-		return false, err
+		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO normalizations(organization,version_id,outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,manifest_key,manifest_sha256,manifest_size,failure_code,failure_message,failure_retryable,extensions,failure_plan,outcome_key,outcome_sha256,outcome_size) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,''),NULLIF($20,''),NULLIF($21,''),NULLIF($22,0)) ON CONFLICT DO NOTHING`,
 		org, versionID, outcome, p.IdempotencyKey, p.InvocationID, p.PluginID, p.PluginVersion, p.PluginAPI, p.Contribution, p.InputSHA256, n.InputBlobID, key, sha, size, failure.Code, failure.Message, failure.Retryable, extensionsJSON, failure.Plan, blob.Key, blob.SHA256, blob.Size)
 	if err != nil {
-		return false, err
+		return err
 	}
-	return true, tx.Commit(ctx)
+	return tx.Commit(ctx)
 }
 
 // RecordConflict records the first divergent output of a recorded

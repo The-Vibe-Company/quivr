@@ -89,11 +89,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return content.Receipt{}, err
 	}
-	compact, err := compactWrites(ctx, tx)
-	if err != nil {
-		return content.Receipt{}, err
-	}
-	requestCopy, receiptCommand, execution := importRequestStorage(canonical, compact, s.RetainImportAuditDetail)
+	requestCopy, receiptCommand, execution := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	requestDigest := sha256.Sum256(canonical)
 	var previous, previousDigest []byte
 	var replayID *string
@@ -213,11 +209,7 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return content.Receipt{}, err
 	}
-	compact, err := compactWrites(ctx, tx)
-	if err != nil {
-		return content.Receipt{}, err
-	}
-	requestCopy, receiptCommand, _ := importRequestStorage(canonical, compact, s.RetainImportAuditDetail)
+	requestCopy, receiptCommand, _ := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	requestDigest := sha256.Sum256(canonical)
 	if err = lockJournal(ctx, tx, scope.Organization); err != nil {
 		return content.Receipt{}, err

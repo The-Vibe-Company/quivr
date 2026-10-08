@@ -49,6 +49,9 @@ VALUES('example','backfill','registration','{}','{"versions":100}'),('example','
 			if status.Queue == workqueue.Bulk && (status.Waiting != waiting || status.InProgress != active) {
 				t.Fatalf("bulk=%+v, want waiting=%d active=%d", status, waiting, active)
 			}
+			if status.IngestionWaiting == nil || *status.IngestionWaiting != 0 {
+				t.Fatalf("operation scope must not block acquisition: %+v", status)
+			}
 			if status.Queue == workqueue.Bulk && waiting > 0 && status.OldestAgeSeconds < 25 {
 				t.Fatalf("operation admission age lost: %+v", status)
 			}

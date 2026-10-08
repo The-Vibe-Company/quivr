@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read aggregate PostgreSQL storage without exporting documents or credentials.
 
-Run on identical isolated samples before/after import or explicit compaction.
+Run on identical isolated samples before and after matched imports.
 Physical allocation includes retained historical audit rows and dead tuples.
 Object counts cover referenced files; this never enumerates or deletes S3 keys.
 """
@@ -36,10 +36,8 @@ SELECT json_build_object(
    LEFT JOIN pg_stat_user_tables st ON st.relid=c.oid
    WHERE n.nspname='public' AND c.relkind='r'
  ) x),
- 'legacy_vectors',(SELECT count(*) FROM embedding_artifacts),
  'vector_files',(SELECT count(*) FROM embedding_files),
  'compact_vectors',(SELECT count(*) FROM compact_embeddings),
- 'legacy_coverage_rows',(SELECT count(*) FROM embedding_coverage),
  'compact_coverage_rows',(SELECT count(*) FROM compact_embedding_coverage),
  'captured_request_copies',(SELECT count(*) FROM ingestion_receipts WHERE octet_length(canonical_request)>0),
  'normalization_outcome_objects',(SELECT count(*) FROM normalizations WHERE outcome_key IS NOT NULL),

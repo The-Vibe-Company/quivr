@@ -14,6 +14,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 type fakeRuns struct {
@@ -774,5 +775,75 @@ func TestSkippedRunsDoNotReportIncompletePages(t *testing.T) {
 				t.Fatalf("inactive=%v: intentional skip emitted a page diagnostic", inactive)
 			}
 		}
+	}
+}
+
+// Queue observations are an external dependency; the real acquirer decides
+// whether to pull, checkpoint and finish. Operations alone must never gate it.
+type acquisitionQueue struct {
+	reads         int
+	pressureAfter int
+	unavailable   bool
+	missing       bool
+}
+
+func (q *acquisitionQueue) QueueBacklog(context.Context) ([]workqueue.Status, error) {
+	q.reads++
+	if q.unavailable {
+		return nil, errors.New("snapshot unavailable")
+	}
+	if q.missing {
+		return []workqueue.Status{{Queue: workqueue.Bulk, Waiting: 200000}}, nil
+	}
+	waiting := int64(999)
+	if q.pressureAfter > 0 && q.reads >= q.pressureAfter {
+		waiting = 1000
+	}
+	return []workqueue.Status{{Queue: workqueue.Bulk, Waiting: 200000, IngestionWaiting: &waiting}}, nil
+}
+func TestBulkAcquisitionDefersBeforeFetchingWhenIngestionWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		queue     acquisitionQueue
+		live      bool
+		nilReader bool
+		wantPages int
+	}{
+		{name: "operation backlog does not block", wantPages: 2},
+		{name: "ingestion watermark", queue: acquisitionQueue{pressureAfter: 1}},
+		{name: "pressure after committed page", queue: acquisitionQueue{pressureAfter: 2}, wantPages: 1},
+		{name: "unavailable snapshot", queue: acquisitionQueue{unavailable: true}},
+		{name: "missing split", queue: acquisitionQueue{missing: true}},
+		{name: "missing reader", nilReader: true},
+		{name: "live source ignores bulk pressure", queue: acquisitionQueue{pressureAfter: 1}, live: true, wantPages: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &stubConnector{pages: []Page{
+				{Items: []Item{{RecordKey: "a", Content: content.Text{Kind: "text", Text: "Alpha"}}}, Checkpoint: json.RawMessage(`{"next":1}`), More: true},
+				{Checkpoint: json.RawMessage(`{"next":2}`)},
+			}}
+			a, runs := stubAcquirer(t, source, 0)
+			runs.target.WorkQueue = workqueue.Bulk
+			if tc.live {
+				runs.target.WorkQueue = workqueue.Live
+			}
+			a.Queues = &tc.queue
+			if tc.nilReader {
+				a.Queues = nil
+			}
+			if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+				t.Fatal(err)
+			}
+			if len(source.requests) != tc.wantPages || len(runs.checkpoints) != tc.wantPages || len(runs.finished) != 1 {
+				t.Fatalf("fetches=%d checkpoints=%v finishes=%d; want %d committed pages and an interval finish", len(source.requests), runs.checkpoints, len(runs.finished), tc.wantPages)
+			}
+			if tc.wantPages == 0 {
+				if runs.finished[0] == nil || !runs.finished[0].Skipped {
+					t.Fatal("an unpolled source must finish as skipped")
+				}
+			} else if runs.finished[0] != nil {
+				t.Fatalf("deferral after committed progress is not a source failure: %+v", runs.finished[0])
+			}
+		})
 	}
 }

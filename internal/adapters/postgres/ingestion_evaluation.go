@@ -82,11 +82,11 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 		if e.Organization != org || e.VersionID != seg.VersionID || e.SegmentationID != seg.ID || !segments[e.SegmentID] || !g.Carries(e.SpaceID) {
 			return content.ErrInvalid
 		}
-		var stored string
-		if err = tx.QueryRow(ctx, `SELECT a.id FROM `+embeddingArtifactsRelation+` a JOIN vector_spaces vs ON vs.id=a.space_id WHERE a.organization=$1 AND a.derivation_id=$2 AND a.segment_id=$3 AND a.space_id=$4 AND vs.owner_plugin_id=$5`, org, e.DerivationID, e.SegmentID, e.SpaceID, owner).Scan(&stored); err != nil {
+		var owned bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vector_spaces WHERE id=$1 AND owner_plugin_id=$2)`, e.SpaceID, owner).Scan(&owned); err != nil {
 			return err
 		}
-		if stored != e.ID {
+		if !owned {
 			return content.ErrConflict
 		}
 	}

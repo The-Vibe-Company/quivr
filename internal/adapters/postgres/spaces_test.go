@@ -154,7 +154,7 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 				continue
 			}
 			e := content.Embedding{ID: "artifact-" + space.Name + "-" + p.ID, DerivationID: "derivation-" + space.Name + "-" + p.ID, Organization: org, CorpusID: c.ID, VersionID: v.ID, SegmentID: p.ID, SegmentationID: seg.ID, SpaceID: space.ID}
-			if err = store.SaveEmbedding(ctx, e, space.VectorSpace); err != nil {
+			if err = saveFixtureEmbedding(ctx, store, &e, space.VectorSpace); err != nil {
 				t.Fatal(err)
 			}
 			artifacts = append(artifacts, e)
@@ -265,7 +265,7 @@ func newEvaluationCoverage(t *testing.T, ctx context.Context) evaluationCoverage
 	var artifacts []content.Embedding
 	for i, p := range evaluation.Segments {
 		e := content.Embedding{ID: fmt.Sprintf("eval-artifact-%s-%d", v.ID, i), DerivationID: fmt.Sprintf("eval-derivation-%s-%d", v.ID, i), Organization: org, VersionID: v.ID, SegmentID: p.ID, SegmentationID: evaluation.ID, SpaceID: space.ID}
-		if err = store.SaveEmbedding(ctx, e, space.VectorSpace); err != nil {
+		if err = saveFixtureEmbedding(ctx, store, &e, space.VectorSpace); err != nil {
 			t.Fatal(err)
 		}
 		artifacts = append(artifacts, e)
@@ -290,6 +290,37 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	for _, covered := range coverage {
 		if covered.OwnerPluginID == "example.evaluation" && (covered.ServingSegments == nil || *covered.ServingSegments != 0 || covered.TotalSegments == nil || *covered.TotalSegments != 2) {
 			t.Fatalf("evaluation-only owner coverage must expose two independent cuts and zero serving cuts: %+v", covered)
+		}
+	}
+	var eventsBefore int
+	if err = f.pool.QueryRow(ctx, `SELECT count(*) FROM change_events WHERE organization=$1`, f.org).Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"producer", "input", "derivation"} {
+		altered := append([]content.Embedding(nil), f.artifacts...)
+		switch field {
+		case "producer":
+			altered[0].Producer = "plugin:example.other@1.0.0"
+		case "input":
+			altered[0].InputSHA = content.Hash([]byte("other input"))
+		case "derivation":
+			altered[0].DerivationID = "other-derivation"
+		}
+		if err = f.store.CoverEvaluation(ctx, f.org, f.generation, f.evaluation, altered); !errors.Is(err, content.ErrConflict) {
+			t.Fatalf("altered %s published: %v", field, err)
+		}
+		_, coverage, _, err := f.store.VectorSpaces(ctx, f.org, f.corpusID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range coverage {
+			if row.ID == f.space.ID && row.Segments != 2 {
+				t.Fatalf("altered %s committed coverage: %+v", field, row)
+			}
+		}
+		var eventsAfter int
+		if err = f.pool.QueryRow(ctx, `SELECT count(*) FROM change_events WHERE organization=$1`, f.org).Scan(&eventsAfter); err != nil || eventsAfter != eventsBefore {
+			t.Fatalf("altered %s committed events: %d -> %d (%v)", field, eventsBefore, eventsAfter, err)
 		}
 	}
 	got, err := f.store.Hydrate(ctx, f.scope, f.candidates)
@@ -324,7 +355,7 @@ func TestVectorSpaceCoverageCountingIsBoundedBySegments(t *testing.T) {
 	// clone starts from them: on a nearly empty database, foreign-key checks
 	// planned from them scan a referenced table per inserted row, which the
 	// million-row measurement clone cannot afford.
-	if _, err := f.pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
+	if _, err := f.pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, storage_segments, compact_embeddings, compact_embedding_coverage`); err != nil {
 		t.Fatal(err)
 	}
 	const cuts, copies = 1, 2000
@@ -426,14 +457,45 @@ func (f evaluationCoverage) clone(t *testing.T, ctx context.Context, cuts, copie
 		{"segmentations", "jsonb_build_object('id',r.id||'-'||n,'version_id',r.version_id||'-'||n)", "r.version_id=$3"},
 		{"segments", "jsonb_build_object('id',r.id||'-'||n,'version_id',r.version_id||'-'||n,'segmentation_id',r.segmentation_id||'-'||n)", "r.version_id=$3"},
 		{"projection_coverage", "jsonb_build_object('version_id',r.version_id||'-'||n,'segmentation_id',r.segmentation_id||'-'||n)", "r.version_id=$3"},
-		{"embedding_artifacts", "jsonb_build_object('id',r.id||'-'||n,'segment_id',r.segment_id||'-'||n,'derivation_id',r.derivation_id||'-'||n)", "r.segment_id=ANY($4::text[])"},
-		{"embedding_coverage", "jsonb_build_object('segment_id',r.segment_id||'-'||n,'artifact_id',r.artifact_id||'-'||n)", "r.segment_id=ANY($4::text[])"},
 	} {
 		query := "INSERT INTO " + table.name + " SELECT (jsonb_populate_record(NULL::" + table.name + ",to_jsonb(r)||" + table.patch + ")).* FROM " + table.name + " r CROSS JOIN generate_series(1,$5::int) n WHERE r.organization=$1 AND " + table.filter
 		// Explicit casts keep all shared fixture parameters typed even when unused.
 		query += " AND $2::text IS NOT NULL AND $3::text IS NOT NULL AND $4::text[] IS NOT NULL"
 		if _, err := f.pool.Exec(ctx, query, f.org, f.version.RecordID, f.version.ID, []string{f.evaluation.Segments[0].ID, f.evaluation.Segments[1].ID}, copies); err != nil {
 			t.Fatal(table.name, err)
+		}
+	}
+	// Clone the packed tuples and their per-file coverage alongside the content.
+	for i, query := range []string{
+		`INSERT INTO storage_segments(organization_id,segment_id)
+ SELECT k.organization_id,k.segment_id||'-'||n FROM storage_segments k
+ JOIN storage_organizations o ON o.id=k.organization_id CROSS JOIN generate_series(1,$3::int) n
+ WHERE o.organization=$1 AND k.segment_id=ANY($2::text[])`,
+		`INSERT INTO embedding_files(organization_id,version_id,segmentation_id,space_id,corpus_id,recipe,producer,object_key,sha256,byte_length,dimensions,row_count,presence)
+ SELECT f.organization_id,f.version_id||'-'||n,f.segmentation_id||'-'||n,f.space_id,f.corpus_id,f.recipe,f.producer,f.object_key,f.sha256,f.byte_length,f.dimensions,f.row_count,f.presence
+ FROM embedding_files f JOIN storage_organizations o ON o.id=f.organization_id CROSS JOIN generate_series(1,$3::int) n
+ WHERE o.organization=$1 AND f.version_id=$2`,
+		`INSERT INTO compact_embeddings(organization_id,segment_id,space_id,file_id,ordinal,vector_sha256,artifact_sha256)
+ SELECT e.organization_id,cloned.id,e.space_id,cf.id,e.ordinal,e.vector_sha256,e.artifact_sha256
+ FROM compact_embeddings e JOIN storage_organizations o ON o.id=e.organization_id
+ JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id)
+ JOIN embedding_files f ON f.id=e.file_id CROSS JOIN generate_series(1,$3::int) n
+ JOIN storage_segments cloned ON cloned.organization_id=k.organization_id AND cloned.segment_id=k.segment_id||'-'||n
+ JOIN embedding_files cf ON (cf.organization_id,cf.segmentation_id,cf.space_id)=(f.organization_id,f.segmentation_id||'-'||n,f.space_id)
+ WHERE o.organization=$1 AND f.version_id=$2`,
+		`INSERT INTO compact_embedding_coverage(organization_id,file_id,generation_id,covered)
+ SELECT cc.organization_id,cf.id,cc.generation_id,cc.covered
+ FROM compact_embedding_coverage cc JOIN storage_organizations o ON o.id=cc.organization_id
+ JOIN embedding_files f ON f.id=cc.file_id CROSS JOIN generate_series(1,$3::int) n
+ JOIN embedding_files cf ON (cf.organization_id,cf.segmentation_id,cf.space_id)=(f.organization_id,f.segmentation_id||'-'||n,f.space_id)
+ WHERE o.organization=$1 AND f.version_id=$2`,
+	} {
+		var source any = f.version.ID
+		if i == 0 {
+			source = []string{f.evaluation.Segments[0].ID, f.evaluation.Segments[1].ID}
+		}
+		if _, err := f.pool.Exec(ctx, query, f.org, source, copies); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
