@@ -1,11 +1,23 @@
 """Scoring pins one nDCG convention and pairs systems per query (needs ranx; the lane installs it)."""
 import importlib.util
+import json
+import os
 import random
+import subprocess
+import sys
 import unittest
 
 import scoring
 
 HAS_RANX = importlib.util.find_spec('ranx') is not None
+ORACLE = """
+import json, sys
+from ranx import Qrels, Run, evaluate
+qrels, run = json.load(sys.stdin)
+run = Run(run)
+evaluate(Qrels(qrels), run, ['ndcg@10', 'recall@10', 'mrr@10'], threads=1)
+print(json.dumps({m: {q: float(v) for q, v in s.items()} for m, s in run.scores.items()}))
+"""
 
 
 @unittest.skipUnless(HAS_RANX, 'pip install -r scripts/eval/requirements.txt (the Search quality lane runs this)')
@@ -24,18 +36,23 @@ class Score(unittest.TestCase):
         self.assertAlmostEqual(s['mean']['mrr@10'], 1 / 3)
         # Independent oracle guards the fixed scorer's gain, cutoff, empty
         # results, unjudged hits and duplicate-document semantics.
-        from ranx import Qrels, Run, evaluate
         rng = random.Random(0)
         qrels.update({f'q{i:03}': {f'd{j}': rng.randrange(4) for j in range(25)} for i in range(200)})
         ranking.update({q: rng.choices([f'd{j}' for j in range(35)], k=rng.randrange(30))
                         for q in qrels if q not in ('q1', 'q2', 'q3')})
         qrels['q-zero'], ranking['q-zero'] = {'d0': 0}, ['d0']
-        run = Run({q: {d: 1 / (i + 1) for i, d in enumerate(ranking.get(q, []))} for q in qrels})
-        evaluate(Qrels(qrels), run, ['ndcg@10', 'recall@10', 'mrr@10'], threads=1)
+        run = {q: {d: 1 / (i + 1) for i, d in enumerate(ranking.get(q, []))} for q in qrels}
+        # ranx's own metric code runs interpreted: compiling its Numba kernels
+        # costs tens of seconds and adds nothing to these semantics.
+        oracle = subprocess.run([sys.executable, '-I', '-c', ORACLE], input=json.dumps([qrels, run]),
+                                capture_output=True, text=True, env={**os.environ, 'NUMBA_DISABLE_JIT': '1'})
+        self.assertEqual(oracle.returncode, 0, oracle.stderr[-2000:])
+        expected = json.loads(oracle.stdout)
         actual = scoring.score(qrels, ranking)
         for metric in ('ndcg@10', 'recall@10', 'mrr@10'):
             for query in qrels:
-                self.assertAlmostEqual(actual['per_query'][metric][query], run.scores[metric][query], places=12)
+                self.assertAlmostEqual(actual['per_query'][metric][query], expected[metric][query], places=12,
+                                       msg=f'{metric} {query}')
 
     def test_paired_t_test_over_common_queries(self):
         c = scoring.paired({'a': 0.5, 'b': 0.6, 'c': 0.9, 'only-here': 1.0}, {'a': 0.4, 'b': 0.4, 'c': 0.4})
