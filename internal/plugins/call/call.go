@@ -218,7 +218,7 @@ func judge(pin *plugins.Pin, operation string, result *devhost.Result, secrets [
 			return errors.Join(monitoring.ErrEvaluation, declared)
 		case SegmentAndEmbed:
 			if !e.Retryable {
-				return refused(pin, "%s@%s refused it (%s): %s", pin.Manifest.ID, pin.Manifest.Version, plugins.BoundedDiagnostic(e.Code, 256), plugins.BoundedDiagnostic(e.Message, 256))
+				return errors.Join(refused(pin, "%s@%s refused it (%s): %s", pin.Manifest.ID, pin.Manifest.Version, plugins.BoundedDiagnostic(e.Code, 256), plugins.BoundedDiagnostic(e.Message, 256)), declared)
 			}
 		case EmbedQuery:
 			if !e.Retryable {

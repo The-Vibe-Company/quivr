@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 func (d PluginDeriver) segmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, spaces []string) ([]PluginSegment, error) {
@@ -35,6 +36,26 @@ func (d PluginDeriver) segmentAndEmbed(ctx context.Context, org, corpusID string
 		return nil, err
 	}
 	inputKey := content.Hash(raw)
+	// Keep consecutive Parts together for the owner's normal packing recipe.
+	// A single text Part retains its existing paged segmentation. Size limits
+	// partition work only: oversized items and size refusals still page in full.
+	if wholeItemFits(v) {
+		_, committed, err := store.IngestionPage(ctx, org, v.ID, d.descriptor.Recipe, inputKey, 0)
+		if err != nil {
+			return nil, err
+		}
+		if !committed {
+			segments, err := d.Plugin.SegmentAndEmbed(ctx, org, corpusID, v, spaces)
+			if err == nil {
+				return segments, nil
+			}
+			var refusal *plugins.PluginError
+			if !errors.Is(err, content.ErrIngestionRefused) || !errors.As(err, &refusal) || refusal.Retryable ||
+				(refusal.Code != "segmentation_limit" && refusal.Code != "input_size") {
+				return nil, err
+			}
+		}
+	}
 	var out []PluginSegment
 	var cursor json.RawMessage
 	seen := map[string]bool{}
@@ -78,4 +99,28 @@ func (d PluginDeriver) segmentAndEmbed(ctx context.Context, org, corpusID string
 		}
 	}
 	return out, nil
+}
+
+func wholeItemFits(v content.Version) bool {
+	if len(v.Manifest.Parts) > 64 {
+		return false
+	}
+	textParts, bytes := 0, 0
+	for _, part := range v.Manifest.Parts {
+		if part.Content.Kind == "text" {
+			switch part.Role {
+			case "body", "title", "context":
+			default:
+				// Preserve full-text paging for roles outside the normal body
+				// packing recipe, rather than silently dropping their text.
+				return false
+			}
+			textParts++
+			bytes += len(part.Content.Text)
+			if bytes > 256<<10 {
+				return false
+			}
+		}
+	}
+	return textParts > 1
 }

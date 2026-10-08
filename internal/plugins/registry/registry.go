@@ -121,6 +121,20 @@ func SettingsOf(pin *plugins.Pin) Settings {
 // manifest and configuration. Addresses, registrations and enabled roles do
 // not change the derivation.
 func IngestionRecipe(pin *plugins.Pin) string {
+	recipe := ingestionRecipe(pin)
+	if in := pin.Manifest.Contributions.Ingestion; in != nil && in.Paging {
+		// Host routing changes cuts even with an unchanged plugin package or
+		// an older plan anchor. Apply it once so execution tuning and repeated
+		// plan binding keep the same recipe after this engine upgrade.
+		const policy = ":whole-item-first:v1"
+		if !strings.HasSuffix(recipe, policy) {
+			recipe += policy
+		}
+	}
+	return recipe
+}
+
+func ingestionRecipe(pin *plugins.Pin) string {
 	if pin.IngestionDerivation != nil {
 		return pin.IngestionDerivation.Recipe
 	}
