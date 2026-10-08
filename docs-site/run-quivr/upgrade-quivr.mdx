@@ -90,6 +90,79 @@ Keep this flag on every resume of that operation. Required execution input, idem
 
 All physical S3 objects remain after compaction. Old payload/manifest objects require a separately guarded deletion procedure. Deleted PostgreSQL rows become dead tuples; autovacuum makes their space reusable, while file size may stay unchanged. Do not run `VACUUM FULL` as part of a live import rollout. Compare matched imports with `python3 scripts/measure_storage.py --output <report.json>` using the same sample and count, including heap, TOAST and indexes. Coordinator or operator measurements establish throughput and search quality on the deployment.
 
+## Retire completed ingestion pages
+
+Paged ingestion keeps provider cuts and vectors in `ingestion_pages` until its canonical segmentation and every requested vector space are durable. New workers delete that exact organization/version/recipe/input namespace after saving vectors; a retry also repairs a crash between the vector commit and deletion. Interrupted derivations keep their pages.
+
+A concurrent provider request can save pages after another derivation deletes that namespace. If the late writer then stops, an outer retry may skip derivation because the Version is already searchable or enriched, leaving those pages behind. Cleanup does not persist a completion marker. Reclaim these retained pages with the bounded operation below after draining writers.
+
+For pages left by earlier workers, drain all ingestion, enrichment and rebuild writers before this one-off operation. Keep them stopped until cleanup finishes. Work on one exact namespace at a time; list candidates with a read-only, primary-key ordered query:
+
+```sql
+SET statement_timeout = '5s';
+SELECT DISTINCT organization, version_id, recipe, spaces_key
+FROM ingestion_pages
+ORDER BY organization, version_id, recipe, spaces_key
+LIMIT 100;
+```
+
+In `psql`, set these variables to the selected tuple. Set `spaces` to **every** space requested for that input, including evaluation spaces, using the saved pages' `Vectors` keys or the pinned ingestion configuration. Do not substitute only the currently served space. These are neutral placeholders:
+
+```text
+\set organization 'example-org'
+\set version 'version-id'
+\set recipe 'recipe-id'
+\set input_key 'input-hash'
+\set spaces '["example.space@1"]'
+```
+
+Run the statement below repeatedly for that tuple. Each statement deletes at most 1,000 rows and is independently committed; keep the five variable values to resume after a session failure. It requires the last provider page and canonical artifacts for every segment in every requested space, accepting both legacy and packed storage. It deletes pages in ascending order, so the last-page checkpoint remains until the final batch. A zero-row result can mean unfinished work; leave that namespace for workers to resume. Namespaces without requested vector spaces are conservatively retained.
+
+```sql
+-- Retire one completed page namespace in a bounded batch.
+WITH candidates AS MATERIALIZED (
+ SELECT organization,version_id,recipe,spaces_key,page_number
+ FROM ingestion_pages
+ WHERE organization=:'organization' AND version_id=:'version'
+  AND recipe=:'recipe' AND spaces_key=:'input_key'
+ ORDER BY page_number LIMIT 1000
+), ready AS (
+ SELECT st.organization,st.id
+ FROM segmentations st
+ WHERE st.organization=:'organization' AND st.version_id=:'version'
+  AND st.recipe=:'recipe'
+  AND jsonb_array_length(:'spaces'::jsonb)>0
+  AND EXISTS (SELECT 1 FROM ingestion_pages last_page
+   WHERE last_page.organization=st.organization AND last_page.version_id=st.version_id
+    AND last_page.recipe=st.recipe AND last_page.spaces_key=:'input_key'
+    AND (last_page.next_cursor IS NULL OR last_page.next_cursor='null'::jsonb))
+  AND EXISTS (SELECT 1 FROM segments sg
+   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id)
+  AND NOT EXISTS (
+   SELECT 1 FROM segments sg
+   CROSS JOIN jsonb_array_elements_text(:'spaces'::jsonb) requested(space_id)
+   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id
+    AND NOT EXISTS (SELECT 1 FROM embedding_artifacts a
+     WHERE a.organization=sg.organization AND a.segment_id=sg.id AND a.space_id=requested.space_id)
+    AND NOT EXISTS (
+     SELECT 1 FROM storage_organizations o
+     JOIN storage_segments k ON k.organization_id=o.id AND k.segment_id=sg.id
+     JOIN storage_spaces sp ON sp.space_id=requested.space_id
+     JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id)
+     JOIN embedding_files f ON f.id=e.file_id AND f.organization_id=o.id AND f.segmentation_id=st.id
+     WHERE o.organization=sg.organization)
+  )
+)
+DELETE FROM ingestion_pages p USING candidates c,ready r
+WHERE (p.organization,p.version_id,p.recipe,p.spaces_key,p.page_number)=
+ (c.organization,c.version_id,c.recipe,c.spaces_key,c.page_number)
+ AND p.organization=r.organization;
+```
+
+The last-page check conservatively retains an interrupted late writer's namespace if its final checkpoint is missing. To reclaim a **verified completed namespace** in that case, use a retained record of the successful derivation that identifies its exact `input_key` and every requested space. Quivr does not retain this completion record; it must come from your operational records. A searchable Version or the remaining pages' vector keys alone do not establish that the source Manifest and requested spaces match the completed derivation. Run the same bounded statement with only the `AND EXISTS (...)` check on `last_page` removed. Keep the canonical segmentation, all-vector checks and row limit. If you cannot verify the exact input namespace, retain its pages.
+
+Keep the session's five-second statement timeout; a timeout rolls back only its current batch. Reduce `LIMIT 1000` for a smaller batch if necessary. Resume writers afterward. Autovacuum makes the deleted heap and TOAST space reusable; database files may stay the same size. Avoid `VACUUM FULL` during live imports.
+
 ## Check it worked
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.

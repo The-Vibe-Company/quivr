@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,12 @@ func (p *pageIngestor) SegmentAndEmbedPage(_ context.Context, _, _ string, v con
 // The real store owns restart durability: negotiated passages are never
 // recalculated and completeness is published only after the last page.
 func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
+	for _, mode := range []string{"legacy", "packed"} {
+		t.Run(mode, func(t *testing.T) { testPagedIngestionResumesCommittedPassages(t, mode) })
+	}
+}
+
+func testPagedIngestionResumesCommittedPassages(t *testing.T, mode string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
@@ -73,6 +80,11 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 	}
 	if err = app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
+	}
+	if mode == "legacy" {
+		if _, err := pool.Exec(ctx, `UPDATE storage_state SET compact=false`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	descriptor := (pluginhttp.Ingestor{Pin: pin}).Descriptor()
 	descriptor.Paged = true
@@ -104,6 +116,29 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 	if _, _, err = (processing.PluginDeriver{Content: contents, Plugin: first}).Derive(ctx, scope.Organization, c.ID, v, g); err == nil {
 		t.Fatal("outage did not interrupt the unfinished item")
 	}
+	var inputKey string
+	if err = pool.QueryRow(ctx, `SELECT spaces_key FROM ingestion_pages WHERE organization=$1 AND version_id=$2`, scope.Organization, v.ID).Scan(&inputKey); err != nil {
+		t.Fatal(err)
+	}
+	pages := func(key string, want int) {
+		t.Helper()
+		var got int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4`, scope.Organization, v.ID, descriptor.Recipe, key).Scan(&got); err != nil || got != want {
+			t.Fatalf("saved pages for input %s: got=%d want=%d err=%v", key, got, want, err)
+		}
+	}
+	pages(inputKey, 1)
+	doc, err := os.ReadFile("../../../docs-site/run-quivr/upgrade-quivr.mdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sql, found := strings.Cut(string(doc), "-- Retire one completed page namespace in a bounded batch.\n")
+	if !found {
+		t.Fatal("orphan cleanup operation missing from upgrade guide")
+	}
+	sql, _, _ = strings.Cut(sql, "```")
+	sql = strings.NewReplacer(":'organization'", "$1", ":'version'", "$2", ":'recipe'", "$3", ":'input_key'", "$4", ":'spaces'", "$5", "LIMIT 1000", "LIMIT 2").Replace(sql)
+	requested, _ := json.Marshal([]string{space})
 	// Normalization can replace the source Manifest before complete segments
 	// exist while retaining the accepted Version ID. A new source must negotiate
 	// its own page zero; identical text with a different Part key is also new.
@@ -122,21 +157,86 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 			t.Fatalf("replacement source reused old page: calls=%v", renegotiated.calls)
 		}
 	}
+	// Refuse the first artifact write after segmentation commits. A restart
+	// must retain every negotiated page until vectors are durable too.
+	if _, err = pool.Exec(ctx, `CREATE FUNCTION refuse_page_vectors() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'vector write interrupted'; END $$;
+CREATE TRIGGER refuse_page_vectors BEFORE INSERT ON embedding_artifacts FOR EACH ROW EXECUTE FUNCTION refuse_page_vectors();
+CREATE TRIGGER refuse_page_vectors BEFORE INSERT ON embedding_files FOR EACH ROW EXECUTE FUNCTION refuse_page_vectors()`); err != nil {
+		t.Fatal(err)
+	}
+	vectorInterrupted := &pageIngestor{descriptor: descriptor, failAt: -1}
+	if _, _, err = (processing.PluginDeriver{Content: contents, Plugin: vectorInterrupted}).Derive(ctx, scope.Organization, c.ID, v, g); err == nil {
+		t.Fatal("vector interruption unexpectedly succeeded")
+	}
+	if _, err = store.StoredSegmentation(ctx, scope.Organization, v.ID, descriptor.Recipe); err != nil {
+		t.Fatalf("segmentation was not durable before vector interruption: %v", err)
+	}
+	pages(inputKey, 5)
+	if _, err = pool.Exec(ctx, sql, scope.Organization, v.ID, descriptor.Recipe, inputKey, requested); err != nil {
+		t.Fatal(err)
+	}
+	pages(inputKey, 5)
+	if len(vectorInterrupted.calls) != 4 || vectorInterrupted.calls[0] != 2 {
+		t.Fatalf("committed provider cut was called again: %v", vectorInterrupted.calls)
+	}
+	if _, err = pool.Exec(ctx, `DROP TRIGGER refuse_page_vectors ON embedding_artifacts; DROP TRIGGER refuse_page_vectors ON embedding_files; DROP FUNCTION refuse_page_vectors()`); err != nil {
+		t.Fatal(err)
+	}
+	// A crash after the vector commit but before page deletion must be healed
+	// by the cached-complete path, without renegotiating provider output.
+	if _, err = pool.Exec(ctx, `CREATE FUNCTION refuse_page_cleanup() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'cleanup interrupted'; END $$;
+CREATE TRIGGER refuse_page_cleanup BEFORE DELETE ON ingestion_pages FOR EACH ROW EXECUTE FUNCTION refuse_page_cleanup()`); err != nil {
+		t.Fatal(err)
+	}
 	restarted := &pageIngestor{descriptor: descriptor, failAt: -1}
 	seg, data, err := (processing.PluginDeriver{Content: contents, Plugin: restarted}).Derive(ctx, scope.Organization, c.ID, v, g)
-	if err != nil {
+	if err == nil {
+		t.Fatal("cleanup interruption unexpectedly succeeded")
+	}
+	pages(inputKey, 5)
+	if _, err = pool.Exec(ctx, `CREATE TABLE orphan_pages AS SELECT * FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND spaces_key=$3`, scope.Organization, v.ID, inputKey); err != nil {
 		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `DROP TRIGGER refuse_page_cleanup ON ingestion_pages; DROP FUNCTION refuse_page_cleanup()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = (processing.PluginDeriver{Content: contents, Plugin: restarted}).Segment(ctx, scope.Organization, c.ID, v, g); err != nil {
+		t.Fatalf("cached baseline did not retry cleanup: %v", err)
 	}
 	if len(seg.Segments) != 5 || len(data) != 5 || seg.Segments[4].Start != 8 || seg.Segments[4].End != 10 {
 		t.Fatalf("incomplete coverage: segments=%+v vectors=%d", seg.Segments, len(data))
 	}
-	if len(restarted.calls) != 4 || restarted.calls[0] != 2 {
+	if len(restarted.calls) != 0 {
 		t.Fatalf("committed provider cut was called again: %v", restarted.calls)
+	}
+	pages(inputKey, 0)
+	var unrelated int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND spaces_key!=$3`, scope.Organization, v.ID, inputKey).Scan(&unrelated); err != nil || unrelated != 2 {
+		t.Fatalf("cleanup touched interrupted replacement sources: pages=%d err=%v", unrelated, err)
 	}
 	third := &pageIngestor{descriptor: descriptor, failAt: 0}
 	if _, again, err := (processing.PluginDeriver{Content: contents, Plugin: third}).Derive(ctx, scope.Organization, c.ID, v, g); err != nil || len(again) != 5 || len(third.calls) != 0 {
 		t.Fatalf("stored derivation not reused: vectors=%d calls=%v err=%v", len(again), third.calls, err)
 	}
+	// Execute the documented bounded SQL against orphaned pages, including
+	// multiple batches. Other interrupted input namespaces remain untouched.
+	if _, err = pool.Exec(ctx, `INSERT INTO ingestion_pages SELECT * FROM orphan_pages`); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []int{3, 1, 0, 0} {
+		if _, err = pool.Exec(ctx, sql, scope.Organization, v.ID, descriptor.Recipe, inputKey, requested); err != nil {
+			t.Fatal(err)
+		}
+		pages(inputKey, want)
+	}
+	var replacementKey string
+	if err = pool.QueryRow(ctx, `SELECT spaces_key FROM ingestion_pages WHERE organization=$1 AND version_id=$2 ORDER BY spaces_key LIMIT 1`, scope.Organization, v.ID).Scan(&replacementKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, sql, scope.Organization, v.ID, descriptor.Recipe, replacementKey, requested); err != nil {
+		t.Fatal(err)
+	}
+	pages(replacementKey, 1)
 	// Publish through the real processing/retrieval lifecycle, then hold this
 	// formerly searchable and enriched Version during a generation rebuild.
 	projection := &rebuildPublication{}
