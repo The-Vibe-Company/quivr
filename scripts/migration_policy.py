@@ -144,8 +144,9 @@ def expand_risks(sql, nonunique_indexes=frozenset()):
         elif kind == 'DropStmt' and stmt['removeType']['name'] == 'OBJECT_INDEX':
             dropped = {index_name(parts) for parts in stmt['objects']}
             if (stmt['concurrent'] or stmt['behavior']['name'] != 'DROP_RESTRICT'
+                    or any(len(parts) != 2 for parts in stmt['objects'])
                     or dropped - nonunique_indexes):
-                risks.append('index drop is not a proven nonunique performance index with RESTRICT')
+                risks.append('index drop is not a schema-qualified proven nonunique performance index with RESTRICT')
             nonunique_indexes.difference_update(dropped)
         else:
             risks.append(kind)

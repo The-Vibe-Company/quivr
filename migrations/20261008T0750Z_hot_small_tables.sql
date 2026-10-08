@@ -19,4 +19,4 @@ ALTER TABLE operations SET (vacuum_truncate = false);
 -- Lease renewal changes no primary-key field. Without a timestamp index it
 -- can use HOT updates instead of adding entries to a monotonic index.
 -- Previous binaries can still run their ordered expired-attempt cleanup.
-DROP INDEX queue_document_attempts_active;
+DROP INDEX public.queue_document_attempts_active;
