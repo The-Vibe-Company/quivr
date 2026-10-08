@@ -165,6 +165,9 @@ func (s Service) PreparePublication(ctx context.Context, org, receiptID string) 
 			return PublicationCommit{}, Version{}, false, err
 		}
 	}
+	if err = s.Materialization.Progress(ctx, org, receiptID, "running", ""); err != nil {
+		return PublicationCommit{}, Version{}, false, err
+	}
 	manifest := ManifestFor(w.Command)
 	p, err := s.objects(ctx, org, manifest)
 	if err != nil {

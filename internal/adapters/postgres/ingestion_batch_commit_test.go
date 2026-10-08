@@ -35,9 +35,7 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := make([]content.PublicationCommit, 4)
-	for i := range entries {
-		key := fmt.Sprintf("document-%d", i)
+	prepare := func(key string) content.PublicationCommit {
 		cmd := content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "groups", RecordKey: key}, Content: content.Text{Kind: "text", Text: key}}
 		r, err := stores.Accept(ctx, corpus.Scope{Organization: org}, cmd)
 		if err != nil {
@@ -52,8 +50,13 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		entries[i] = content.PublicationCommit{Work: w, Publication: publication(content.Blob{Key: key, SHA256: key, Size: int64(len(key))}, content.Blob{Key: key + "/manifest", SHA256: key + "/manifest", Size: 2}), Segmentation: seg, Generation: g}
+		return content.PublicationCommit{Work: w, Publication: publication(content.Blob{Key: key, SHA256: key, Size: int64(len(key))}, content.Blob{Key: key + "/manifest", SHA256: key + "/manifest", Size: 2}), Segmentation: seg, Generation: g}
 	}
+	entries := make([]content.PublicationCommit, 4)
+	for i := range entries {
+		entries[i] = prepare(fmt.Sprintf("document-%d", i))
+	}
+
 	head, err := stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -132,25 +135,79 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 			t.Fatalf("commit order at %d: got %+v want %s", i, event, want)
 		}
 	}
-	t.Run("failed event insertion rolls back the whole group and isolates poison", func(t *testing.T) {
-		extra := make([]content.PublicationCommit, 2)
-		for i := range extra {
-			key := fmt.Sprintf("rollback-%d", i)
-			cmd := content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "groups", RecordKey: key}, Content: content.Text{Kind: "text", Text: key}}
-			r, err := stores.Accept(ctx, corpus.Scope{Organization: org}, cmd)
-			if err != nil {
-				t.Fatal(err)
-			}
-			w, _, err := stores.Work(ctx, org, r.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			seg, err := wholeParts(org, content.Version{ID: w.VersionID, RecordID: w.RecordID, Manifest: content.ManifestFor(cmd)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			extra[i] = content.PublicationCommit{Work: w, Publication: publication(content.Blob{Key: key, SHA256: key, Size: int64(len(key))}, content.Blob{Key: key + "/manifest", SHA256: key + "/manifest", Size: 2}), Segmentation: seg, Generation: g}
+	t.Run("cancellation before commit isolates the healthy member", func(t *testing.T) {
+		extra := []content.PublicationCommit{prepare("cancelled"), prepare("healthy-sibling")}
+		before, err := stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
+		if err != nil {
+			t.Fatal(err)
 		}
+		barrier, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer barrier.Rollback(context.WithoutCancel(ctx))
+		// Block the final event append, after immutable preparation and
+		// canonical guards. Member cancellation must abort this transaction
+		// even when the caller's group context has not been cancelled.
+		if _, err = barrier.Exec(ctx, `LOCK TABLE change_events IN SHARE MODE`); err != nil {
+			t.Fatal(err)
+		}
+		cfg := pool.Config()
+		cfg.ConnConfig.RuntimeParams["application_name"] = org + "/cancel"
+		blocked, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer blocked.Close()
+		defer barrier.Rollback(context.WithoutCancel(ctx))
+		member, cancelMember := context.WithCancel(ctx)
+		defer cancelMember()
+		commits := make([]content.IngestionCommit, 2)
+		for i, e := range extra {
+			commits[i] = content.IngestionCommit{Context: ctx, Kind: content.CommitPublication, Organization: org, RecordID: e.Work.RecordID, Publication: e}
+		}
+		commits[0].Context = member
+		done := make(chan []error, 1)
+		go func() { done <- (postgres.MaterializationStore{Pool: blocked}).CommitIngestion(ctx, commits) }()
+		for {
+			var waiting bool
+			if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock')`, org+"/cancel").Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			if waiting {
+				break
+			}
+			select {
+			case got := <-done:
+				t.Fatalf("group escaped append barrier: %v", got)
+			default:
+			}
+		}
+		cancelMember()
+		if err = barrier.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		outcomes := <-done
+		if !errors.Is(outcomes[0], context.Canceled) || outcomes[1] != nil {
+			t.Fatalf("cancellation isolation: %v", outcomes)
+		}
+		window, err := stores.ReadChanges(ctx, org, c.ID, before.Head, 100, 24*time.Hour)
+		if err != nil || len(window.Events) != 3 {
+			t.Fatalf("cancelled member became visible: %+v %v", window, err)
+		}
+		for i, event := range window.Events {
+			if event.Position != before.Head+int64(i+1) {
+				t.Fatalf("cancellation consumed positions: %+v", window)
+			}
+		}
+		receipt, err := stores.Receipt(ctx, org, extra[0].Work.ReceiptID)
+		if err != nil || receipt.State != "pending" {
+			t.Fatalf("cancelled member resolved: %+v %v", receipt, err)
+		}
+	})
+
+	t.Run("failed event insertion rolls back the whole group and isolates poison", func(t *testing.T) {
+		extra := []content.PublicationCommit{prepare("rollback-0"), prepare("rollback-1")}
 		before, err := stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
 		if err != nil {
 			t.Fatal(err)
@@ -295,10 +352,10 @@ func TestBulkPreparedPublicationKeepsMaterializationFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if before.State != "pending" {
+		if before.State != "pending" || before.Processing.State != "running" || before.Processing.Phase != "materialization" {
 			close(provider.release)
 			<-done
-			t.Fatalf("receipt became visible before prepared baseline: %+v", before)
+			t.Fatalf("preparing receipt must remain pending with running materialization: %+v", before)
 		}
 		if scenario.race {
 			// A legacy or replayed worker may materialize this Version while

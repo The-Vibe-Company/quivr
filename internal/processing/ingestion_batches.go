@@ -50,7 +50,13 @@ func (s Service) runPrepared(ctx context.Context, org, receiptID string) (bool, 
 	}
 	entry.Segmentation, entry.Generation = seg, g
 	handled, err := content.EnqueueIngestion(ctx, content.IngestionCommit{Kind: content.CommitPublication, Organization: org, RecordID: v.RecordID, Publication: entry})
-	if !handled || err != nil {
+	if !handled {
+		return false, nil
+	}
+	if err != nil {
+		// The ordinary path remains responsible for durable materialization.
+		// Correlate fallback without exposing provider or SQL error contents.
+		s.outcome(ctx, org, "baseline", "retrying", receiptID, v, started, "prepared_publication_unavailable")
 		return false, nil
 	}
 	s.outcome(ctx, org, "baseline", "succeeded", receiptID, v, started, "")

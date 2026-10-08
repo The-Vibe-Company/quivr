@@ -88,11 +88,13 @@ func (s MaterializationStore) commitIngestionGroup(ctx context.Context, entries 
 	org := entries[0].Organization
 	seen := map[string]bool{}
 	preparations := make([]journalPreparation, len(entries))
+	members := make([]context.Context, len(entries))
 	for i, e := range entries {
 		if e.Organization != org || e.RecordID == "" || seen[e.RecordID] || e.Context == nil {
 			return content.ErrInvalid
 		}
 		seen[e.RecordID] = true
+		members[i] = e.Context
 		preparations[i] = func(groupCtx context.Context, tx pgx.Tx) (journalFinish, error) {
 			member := context.WithValue(ingestionMemberContext{groupCtx, e.Context}, journalGroupKey{}, journalGroupOf(groupCtx))
 			switch e.Kind {
@@ -138,11 +140,22 @@ func (s MaterializationStore) commitIngestionGroup(ctx context.Context, entries 
 			}
 		}
 	}
-	return commitJournalGroup(ctx, s.Pool, org, preparations)
+	return commitJournalGroup(ctx, s.Pool, org, preparations, members)
 }
 
-func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, preparations []journalPreparation) error {
+func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, preparations []journalPreparation, members []context.Context) error {
+	memberError := func() error {
+		for _, member := range members {
+			if err := member.Err(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	return retryJournalWrite(ctx, "ingestion group", func(ctx context.Context) error {
+		if err := memberError(); err != nil {
+			return err
+		}
 		tx, err := database(ctx, pool).Begin(ctx)
 		if err != nil {
 			return err
@@ -166,6 +179,9 @@ func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, pre
 		if len(finishes) == 0 {
 			return nil
 		}
+		if err = memberError(); err != nil {
+			return err
+		}
 		if err = lockJournal(ctx, tx, org); err != nil {
 			return err
 		}
@@ -181,6 +197,11 @@ func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, pre
 			}
 		}
 		if err = group.append(ctx, tx); err != nil {
+			return err
+		}
+		// AfterFunc links cancellation during I/O, but its callback may lag.
+		// Recheck members synchronously at the durable commit boundary.
+		if err = memberError(); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
