@@ -56,11 +56,13 @@ package keywords
 import (
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // frenchLight folds text, removes French stopwords and lightly stems each word.
 func frenchLight(text string) string {
-	words := fold(text)
+	words := fold(text, norm.NFD)
 	out := words[:0]
 	for _, word := range words {
 		if !frenchStopwords[word] {

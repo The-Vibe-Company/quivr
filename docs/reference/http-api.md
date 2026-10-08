@@ -4416,7 +4416,7 @@ v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$
 | `source_pointer` | string |  | Minimum length `1`. |
 | `type` | string | yes | One of `string`, `number`, `boolean`, `datetime`, `string_array`. |
 | `boost` | integer |  | Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2. Default `1`. Minimum `1`. Maximum `100`. |
-| `analyzer` | string |  | Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged. One of `folded`, `french_light`. |
+| `analyzer` | string |  | Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged. One of `folded`, `french_light`. |
 | `part_role` | string |  | Collect canonical text Parts of this role instead of source_pointer. Requires the search role. One of `title`, `body`, `caption`, `transcript`. |
 | `part_key_prefix` | string |  | Optional key prefix to narrow part_role, for example slugline-. Maximum length `200`. |
 | `value_pointer` | string |  | For a string_array source, select this JSON Pointer from each array entry and flatten its string or string-array values. Minimum length `1`. |
@@ -4452,7 +4452,7 @@ properties:
   analyzer:
     type: string
     enum: [folded, french_light]
-    description: Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
+    description: Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
   part_role:
     type: string
     enum: [title, body, caption, transcript]

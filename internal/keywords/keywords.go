@@ -22,9 +22,10 @@ type Analyzer struct {
 // Analyze returns the space-separated terms the analyzer indexes for text.
 func (a Analyzer) Analyze(text string) string { return a.analyze(text) }
 
-// Folded is language-neutral: lowercase, accent-folded words, nothing removed
-// or stemmed. Passage selection uses it for fields that name no analyzer.
-var Folded = Analyzer{Name: "folded", Property: "folded", analyze: func(text string) string { return strings.Join(fold(text), " ") }}
+// Folded is language-neutral: lowercase words with accents, ligatures and
+// compatibility forms (ﬁ, full-width letters) folded, nothing removed or
+// stemmed. Passage selection uses it for fields that name no analyzer.
+var Folded = Analyzer{Name: "folded", Property: "folded", analyze: func(text string) string { return strings.Join(fold(text, norm.NFKD), " ") }}
 
 var analyzers = []Analyzer{
 	Folded,
@@ -43,15 +44,15 @@ func Lookup(name string) (Analyzer, bool) {
 
 var ligatures = strings.NewReplacer("œ", "oe", "æ", "ae")
 
-// fold lowercases, expands ligatures, strips combining marks and splits text
-// into letter and digit words.
-func fold(text string) []string {
+// fold lowercases, expands ligatures, decomposes with form, strips combining
+// marks and splits text into letter and digit words.
+func fold(text string, form norm.Form) []string {
 	text = ligatures.Replace(strings.ToLower(text))
 	folded := strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Mn, r) {
 			return -1
 		}
 		return r
-	}, norm.NFD.String(text))
+	}, form.String(text))
 	return strings.FieldsFunc(folded, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 }

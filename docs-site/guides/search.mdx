@@ -133,7 +133,7 @@ text. Omit it to index the field only as written. Quivr ships two analyzers:
 
 | Analyzer | What it does | Use it for |
 | --- | --- | --- |
-| `folded` | Lowercases and folds accents and ligatures, so `cafe` finds `Café`. It removes no words and stems nothing. | Any language |
+| `folded` | Lowercases and folds accents, ligatures and compatibility characters such as `ﬁ`, so `cafe` finds `Café`. It removes no words and stems nothing. | Any language |
 | `french_light` | Folds the same way, then removes French stopwords and lightly stems, so `election` finds `élections`. | French text |
 
 Exact and analyzed matches contribute one keyword score; hybrid search combines it

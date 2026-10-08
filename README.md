@@ -125,8 +125,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   rechecks on every hit, with common metadata and typed Corpus filters across sources,
   optionally within chosen Source Namespaces (filtered before
   ranking). New or rebuilt indexes support configurable item-field boosts, a
-  language-neutral or French keyword copy, range-indexed dates and identity filters; the default retrieval
-  plugin returns each Record once with its best passage.
+  language-neutral or French keyword copy, range-indexed dates and identity
+  filters; the default retrieval plugin returns each Record once with its best
+  passage.
 - **Metadata facets**: exact document counts across Corpora, bounded top values
   and UTC day, month or year histograms, under the same metadata filters.
 - **Change feed** through polling and resumable SSE, plus **catalog resync** after
