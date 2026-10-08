@@ -1,6 +1,24 @@
 package app
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestImportAuditDetailConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{{`{}`, false}, {`{"retain_import_audit_detail":false}`, false}, {`{"retain_import_audit_detail":true}`, true}} {
+		var cfg Config
+		if err := json.Unmarshal([]byte(tc.raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RetainImportAuditDetail != tc.want {
+			t.Fatalf("%s: import audit detail=%v, want %v", tc.raw, cfg.RetainImportAuditDetail, tc.want)
+		}
+	}
+}
 
 func TestAuditRetentionCalendarMonths(t *testing.T) {
 	for _, tc := range []struct {

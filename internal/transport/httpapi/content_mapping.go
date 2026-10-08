@@ -289,7 +289,7 @@ func versionToTransport(v content.Version) (transport.Version, error) {
 
 func normalizationToTransport(n map[string]any) *transport.NormalizationProvenance {
 	text := func(key string) string { value, _ := n[key].(string); return value }
-	out := &transport.NormalizationProvenance{PluginId: text("plugin_id"), PluginVersion: text("plugin_version"), PluginApi: text("plugin_api"), Contribution: transport.NormalizationProvenanceContribution(text("contribution")), InvocationId: text("invocation_id"), IdempotencyKey: text("idempotency_key"), InputSha256: text("input_sha256")}
+	out := &transport.NormalizationProvenance{PluginId: text("plugin_id"), PluginVersion: text("plugin_version"), PluginApi: text("plugin_api"), Contribution: transport.NormalizationProvenanceContribution(text("contribution")), InvocationId: optionalString(text("invocation_id")), IdempotencyKey: text("idempotency_key"), InputSha256: text("input_sha256")}
 	if f, ok := n["fallback"].(map[string]any); ok {
 		code, _ := f["code"].(string)
 		message, _ := f["message"].(string)

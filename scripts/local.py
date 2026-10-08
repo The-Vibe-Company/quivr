@@ -125,6 +125,7 @@ class Stack:
             plugin_plan_poll='200ms',
             # Verification exercises snapshots promptly; dev keeps deployment pacing.
             retrieval=dict(coverage_refresh='100ms' if self.verifying else '10s'),
+            queue_observation=dict(refresh_interval='1s' if self.verifying else '15s'),
             change_stream_poll=CHANGE_STREAM_POLL,
             # Work pinned to a plan whose plugin left it and cannot be reached stops after two attempts (THE-782).
             pinned_plugin_attempts=2,

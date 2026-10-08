@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s ProjectionStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID, versionID string) (content.Generation, []string, int, error) {
+func (s ProjectionStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID, versionID string) (content.Generation, []content.Embedding, int, error) {
 	generation, err := s.Generation(ctx, org, corpusID)
 	if err != nil {
 		return generation, nil, 0, err
@@ -28,15 +28,15 @@ FROM projection_coverage pc
 JOIN records r ON r.organization=pc.organization AND r.corpus_id=$2
 JOIN record_versions v ON v.organization=r.organization AND v.record_id=r.id AND v.id=pc.version_id
 JOIN segments sg ON (sg.organization,sg.segmentation_id)=(pc.organization,pc.segmentation_id)
-LEFT JOIN embedding_coverage ec ON ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=pc.generation_id AND ec.space_id=$5
-LEFT JOIN embedding_artifacts ea ON ea.organization=ec.organization AND ea.id=ec.artifact_id
+LEFT JOIN `+embeddingCoverageRelation+` ec ON ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=pc.generation_id AND ec.space_id=$5
+LEFT JOIN `+embeddingArtifactsRelation+` ea ON ea.organization=ec.organization AND ea.segment_id=ec.segment_id AND ea.space_id=ec.space_id AND ea.id=ec.artifact_id
 WHERE pc.organization=$1 AND pc.version_id=$3 AND pc.generation_id=$4 AND pc.role='served'
 ORDER BY sg.part_key,sg.start_offset,sg.id`, org, corpusID, versionID, generation.ID, generation.SpaceID)
 	if err != nil {
 		return generation, nil, 0, err
 	}
 	defer rows.Close()
-	var derivations []string
+	var artifacts []content.Embedding
 	total := 0
 	for rows.Next() {
 		var metadata []byte
@@ -51,7 +51,7 @@ ORDER BY sg.part_key,sg.start_offset,sg.id`, org, corpusID, versionID, generatio
 		if err := json.Unmarshal(metadata, &artifact); err != nil {
 			return generation, nil, 0, err
 		}
-		derivations = append(derivations, artifact.DerivationID)
+		artifacts = append(artifacts, artifact)
 	}
-	return generation, derivations, total, rows.Err()
+	return generation, artifacts, total, rows.Err()
 }

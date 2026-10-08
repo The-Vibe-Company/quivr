@@ -49,27 +49,29 @@ import (
 )
 
 type Config struct {
-	Worker    workqueue.Config `json:"worker"`
-	TLS       TLSConfig        `json:"tls"`
-	Telemetry telemetry.Config `json:"telemetry"`
+	Worker           workqueue.Config            `json:"worker"`
+	QueueObservation workqueue.ObservationConfig `json:"queue_observation"`
+	TLS              TLSConfig                   `json:"tls"`
+	Telemetry        telemetry.Config            `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
-	TEIURL               string                  `json:"tei_url"`
-	WeaviateURL          string                  `json:"weaviate_url"`
-	TemporalAddress      string                  `json:"temporal_address"`
-	S3                   s3store.Config          `json:"s3"`
-	LogLevel             string                  `json:"log_level"`
-	Instance             string                  `json:"instance"`
-	Environment          string                  `json:"environment"`
-	ShutdownGrace        string                  `json:"shutdown_grace"`
-	LogDirectory         string                  `json:"log_directory"`
-	DatabaseURL          string                  `json:"database_url"`
-	Listen               string                  `json:"listen"`
-	ProbeListen          string                  `json:"probe_listen"`
-	CursorKey            string                  `json:"cursor_key"`
-	AuditRetentionMonths int                     `json:"audit_retention_months"`
-	ChangeRetention      string                  `json:"change_retention"`
-	Keys                 map[string]corpus.Scope `json:"keys"`
+	TEIURL                  string                  `json:"tei_url"`
+	WeaviateURL             string                  `json:"weaviate_url"`
+	TemporalAddress         string                  `json:"temporal_address"`
+	S3                      s3store.Config          `json:"s3"`
+	LogLevel                string                  `json:"log_level"`
+	Instance                string                  `json:"instance"`
+	Environment             string                  `json:"environment"`
+	ShutdownGrace           string                  `json:"shutdown_grace"`
+	LogDirectory            string                  `json:"log_directory"`
+	DatabaseURL             string                  `json:"database_url"`
+	Listen                  string                  `json:"listen"`
+	ProbeListen             string                  `json:"probe_listen"`
+	CursorKey               string                  `json:"cursor_key"`
+	RetainImportAuditDetail bool                    `json:"retain_import_audit_detail"`
+	AuditRetentionMonths    int                     `json:"audit_retention_months"`
+	ChangeRetention         string                  `json:"change_retention"`
+	Keys                    map[string]corpus.Scope `json:"keys"`
 	// Destinations are deployment-configured webhook receivers. Real
 	// deployments reference their signing secret through secret_env.
 	Destinations map[string]monitoring.Destination `json:"destinations"`
@@ -186,6 +188,7 @@ type Command struct {
 var Commands = []Command{
 	{Name: "api", Summary: "Serve the public HTTP API until interrupted."},
 	{Name: "worker", Summary: "Run the background work that processes content, pulls connectors and delivers events, until interrupted."},
+	{Name: "storage", Summary: "Inspect storage, activate compact writes, or resume bounded compaction without embedding."},
 	{Name: "migrate", Summary: "Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready."},
 }
 
@@ -209,7 +212,7 @@ func isCommand(name string) bool {
 
 func Run(command string, args ...string) error {
 	contract := command == "migrate" && len(args) == 1 && args[0] == "--contract"
-	if len(args) != 0 && !contract {
+	if len(args) != 0 && !contract && command != "storage" {
 		return errors.New(engineUsage())
 	}
 	if !isCommand(command) {
@@ -237,6 +240,9 @@ func Run(command string, args ...string) error {
 	}
 	if err = decoder.Decode(new(any)); err != io.EOF {
 		return badConfig(configInvalid, ConfigEnv, "invalid configuration JSON: expected a single object")
+	}
+	if command == "storage" {
+		return runStorage(cfg, args, os.Stdout)
 	}
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
 		return badConfig(configInvalid, "m365", "m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
@@ -276,6 +282,10 @@ func Run(command string, args ...string) error {
 	workerSettings, err := cfg.Worker.Resolve()
 	if err != nil {
 		return invalidConfig("worker", "invalid worker queues or slots", err)
+	}
+	queueRefreshInterval, err := cfg.QueueObservation.Resolve()
+	if err != nil {
+		return invalidConfig("queue_observation", "invalid queue refresh interval", err)
 	}
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
@@ -489,7 +499,7 @@ func Run(command string, args ...string) error {
 	}
 	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}
-	normalizations := postgres.NormalizationStore{Pool: pool}
+	normalizations := postgres.NormalizationStore{Pool: pool, Blobs: blobs, RetainImportAuditDetail: cfg.RetainImportAuditDetail}
 	baseline := postgres.ProjectionStore{Pool: pool}
 	embeddings := postgres.EmbeddingStore{Pool: pool}
 	spaces := postgres.SpaceStore{Pool: pool}
@@ -511,7 +521,7 @@ func Run(command string, args ...string) error {
 	rollups := postgres.ObservabilityStore{Pool: pool}
 	recorder := observability.NewRecorder(rollups, cfg.Observability, command == "worker")
 	// Normalizer routes and extension namespaces follow the plan.
-	submissions := postgres.SubmissionStore{Pool: pool}
+	submissions := postgres.SubmissionStore{Pool: pool, RetainImportAuditDetail: cfg.RetainImportAuditDetail}
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
@@ -607,9 +617,9 @@ func Run(command string, args ...string) error {
 	}
 	indexes := &IndexMaintenance{Pool: pool}
 	loops.Go(indexes.Run)
-	queueSnapshots := postgres.QueueSnapshots{Pool: pool}
+	queueSnapshots := postgres.QueueSnapshots{Pool: pool, RefreshInterval: queueRefreshInterval}
 	loops.Go(func(ctx context.Context) {
-		delay := time.Second
+		delay := queueRefreshInterval
 		failed := false
 		for {
 			refresh, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -620,10 +630,10 @@ func Run(command string, args ...string) error {
 					slog.Warn("queue backlog refresh unavailable")
 				}
 				failed = true
-				delay = min(delay*2, 15*time.Second)
+				delay = min(delay*2, max(queueRefreshInterval, 15*time.Second))
 			} else {
 				failed = false
-				delay = time.Second
+				delay = queueRefreshInterval
 			}
 			timer := time.NewTimer(delay)
 			select {

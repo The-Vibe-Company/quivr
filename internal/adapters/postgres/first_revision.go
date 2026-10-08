@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
@@ -16,17 +17,17 @@ import (
 // take the general revision path after this batch closes, including reverts and
 // source-position arbitration under their existing READ COMMITTED fence.
 // Every ID is still computed by the domain's canonical hash function.
-func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string) (bool, error) {
+func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
 	var result0 bool
 	err := retryJournalWrite(ctx, "acceptFirstRevision", func(ctx context.Context) error {
 		var err error
-		result0, err = acceptFirstRevisionAttempt(ctx, pool, org, c, canonical, recordID, receiptID, slot, digest)
+		result0, err = acceptFirstRevisionAttempt(ctx, pool, org, c, canonical, recordID, receiptID, slot, digest, retainDetail)
 		return err
 	})
 	return result0, err
 }
 
-func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string) (bool, error) {
+func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
 	versionID := content.StableID("version", org, recordID, slot)
 	pending := eventInput{Organization: org, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}
 	accepted := eventInput{Organization: org, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID}
@@ -35,6 +36,15 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return false, err
+	}
+	compact, err := compactWrites(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	requestCopy, receiptCommand, execution := importRequestStorage(canonical, compact, retainDetail)
+	requestDigest := sha256.Sum256(canonical)
 	batch := &pgx.Batch{}
 	batch.Queue("SELECT pg_advisory_xact_lock_shared($1)", projectionRoutingLock)
 	batch.Queue(`WITH record AS (
@@ -45,18 +55,18 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
  ON CONFLICT DO NOTHING RETURNING id
 ), revision AS (
  INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,command,accepted_at,title,source_media_type)
- SELECT $1,id,$9,$10,$8,1,$7,convert_from($11::bytea,'UTF8')::jsonb,now(),nullif($12,''),coalesce(nullif($13,''),'text/plain') FROM record
+ SELECT $1,id,$9,$10,$8,1,$7,$19::jsonb,now(),nullif($12,''),coalesce(nullif($13,''),'text/plain') FROM record
  RETURNING record_id
 ), receipt AS (
- INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue)
- SELECT $1,$3,$14,$11::bytea,convert_from($11::bytea,'UTF8')::jsonb,$4,record_id,1,$9,$10,$16 FROM revision ON CONFLICT DO NOTHING RETURNING id
+ INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue,request_digest)
+ SELECT $1,$3,$14,$11::bytea,$17::jsonb,$4,record_id,1,$9,$10,$16,$18::bytea FROM revision ON CONFLICT DO NOTHING RETURNING id
 ), outbox AS (
  INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
  SELECT $1,id,false,'infinity'::timestamptz,$15,$16 FROM receipt WHERE $16<>'bulk' RETURNING receipt_id
 ), bulk_outbox AS (
  INSERT INTO bulk_ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
  SELECT $1,id,false,'infinity'::timestamptz,$15,$16 FROM receipt WHERE $16='bulk' RETURNING receipt_id
-) SELECT EXISTS(SELECT 1 FROM receipt)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx))
+) SELECT EXISTS(SELECT 1 FROM receipt)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx), receiptCommand, requestDigest[:], execution)
 	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 	for range batch.Len() - 1 {

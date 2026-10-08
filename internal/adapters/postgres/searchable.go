@@ -139,6 +139,10 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 	if err = lockProcessingVersion(ctx, tx, org, result.VersionID); err != nil {
 		return err
 	}
+	compact, err := compactWrites(ctx, tx)
+	if err != nil {
+		return err
+	}
 	digest := content.SegmentationDigest(result)
 	var existing string
 	err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&existing)
@@ -160,6 +164,9 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 	}
 	for _, p := range result.Segments {
 		metadata, err := json.Marshal(p.Derivation)
+		if compact {
+			metadata, err = compactSegmentDerivation(p.Derivation)
+		}
 		if err != nil {
 			return err
 		}
@@ -184,7 +191,7 @@ func (s ProjectionStore) StoredSegmentation(ctx context.Context, org, versionID,
 	if string(out.Provenance) == "{}" {
 		out.Provenance = nil
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,part_key,start_offset,end_offset,derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 ORDER BY (derivation->>'ordinal')::integer`, org, out.ID)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,part_key,start_offset,end_offset,derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 ORDER BY coalesce((derivation->>'ordinal')::integer,0)`, org, out.ID)
 	if err != nil {
 		return out, err
 	}
@@ -393,8 +400,8 @@ CROSS JOIN LATERAL (SELECT r.* FROM records r WHERE r.organization=c.organizatio
 CROSS JOIN LATERAL (SELECT p.blob_id FROM version_parts p WHERE p.organization=c.organization AND p.version_id=sg.version_id AND p.part_key=sg.part_key OFFSET 0) p
 CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blobs b WHERE b.organization=c.organization AND b.blob_id=p.blob_id OFFSET 0) b
 CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND pc.role='served') OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
-LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND (g.space_id=a.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',a.space_id,'role','served')))) OR (c.evaluation_plugin<>'' AND a.space_id=c.evaluation_space))
-  WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
+LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageRelation + ` ec JOIN projection_generations g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND (g.space_id=ec.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',ec.space_id,'role','served')))) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
+  WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
 WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=r.organization AND cp.id=r.corpus_id AND cp.archived)`
 
 // Hydrate looks a batch of candidates up in one query (hydrateSQL). A
@@ -489,3 +496,22 @@ ORDER BY sg.id,r.ordinality`, scope.Organization, ids)
 
 // ProjectionStore persists baseline projection artifacts and Corpus routing.
 type ProjectionStore struct{ Pool *pgxpool.Pool }
+
+// Storage omits empty derivation values without changing the domain encoding
+// used by segment/segmentation identity or the packed source-range contract.
+func compactSegmentDerivation(d content.SegmentDerivation) ([]byte, error) {
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	for key, value := range fields {
+		if key != "provenance" && (string(value) == "0" || string(value) == "false" || string(value) == `""` || string(value) == "null") {
+			delete(fields, key)
+		}
+	}
+	return json.Marshal(fields)
+}

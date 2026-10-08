@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
@@ -193,34 +192,12 @@ func (s Store) Track(ctx context.Context, org, kind, workID, documentID string, 
 	return (QueueTracker{Pool: s.Pool}).Track(ctx, org, kind, workID, documentID, run)
 }
 
-func backlogRebuildPredicate() string {
-	return strings.NewReplacer(
-		"$3", "o.target_generation_id",
-		"$2", "o.corpus_id",
-		"$1", "o.organization",
-	).Replace(rebuildGapSQL)
-}
-
-func backlogBackfillScope() string {
-	return strings.NewReplacer(
-		"$11", "b.checkpoint",
-		"$10", "false",
-		"$9", "b.plan_id",
-		"$8", "b.registration_id",
-		"$7", "b.spaces",
-		"$6", "g.space_id",
-		"$5", "b.accepted_before",
-		"$4", "b.accepted_after",
-		"$3", "o.target_generation_id",
-		"$2", "o.corpus_id",
-		"$1", "o.organization",
-	).Replace(backfillScopeSQL("AND v.id>$11"))
-}
-
 func queueBacklogSQL() string {
 	// The empty queue value is the rolling-upgrade representation of live work.
 	// Operations have no source queue because administrative work is always
 	// bulk. Version class comes from its receipt rather than a Version column.
+	// Rebuild/backfill scope is estimated from durable operation counters; overlap
+	// with other operations/stages is intentionally not deduplicated.
 	return `WITH enrichment_versions AS MATERIALIZED (
  SELECT q.organization,q.version_id FROM queue_enrichment_records q
  WHERE q.pending AND (SELECT initialized AND NOT EXISTS(SELECT FROM organization_journals j
@@ -290,27 +267,6 @@ func queueBacklogSQL() string {
  WHERE i.kind='evaluation' AND i.state='pending' AND i.available_at<=statement_timestamp()
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
- SELECT 'bulk',o.organization,v.id,o.created_at,false
- FROM operations o
- JOIN records r ON (r.organization,r.corpus_id)=(o.organization,o.corpus_id)
- JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
- WHERE o.kind IN ('projection_rebuild','retrieval_configuration')
-   AND o.state IN ('queued','running')
-   AND ` + backlogRebuildPredicate() + `
- UNION ALL
- SELECT 'bulk',o.organization,candidate.version_id,o.created_at,false
- FROM operations o
- JOIN backfills b ON (b.organization,b.operation_id)=(o.organization,o.id)
- JOIN projection_generations g ON g.id=o.target_generation_id
- JOIN LATERAL (
-   SELECT scope.version_id
-   FROM ` + backlogBackfillScope() + ` scope
-   WHERE scope.version_id>b.checkpoint
- ) candidate ON true
- LEFT JOIN record_versions v ON (v.organization,v.id)=(o.organization,candidate.version_id)
- LEFT JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- WHERE o.kind='backfill' AND o.state IN ('queued','running')
- UNION ALL
  SELECT 'bulk',o.organization,qi.version_id,o.created_at,false
  FROM operations o
  JOIN quarantine_reprocess_items qi ON (qi.organization,qi.operation_id)=(o.organization,o.id)
@@ -326,7 +282,7 @@ func queueBacklogSQL() string {
           WHEN COALESCE(NULLIF(rc.work_queue,''),NULLIF(ie.work_queue,''),NULLIF(sp.work_queue,''),'live')='bulk' THEN 'bulk'
           ELSE 'live'
         END AS queue,
-        a.organization,a.document_id,clock_timestamp() AS admitted_at,true AS active
+        a.organization,a.document_id,clock_timestamp() AS admitted_at,true AS active,op.id AS operation_id
  FROM queue_document_attempts a
  LEFT JOIN ingestion_receipts rc ON a.organization=rc.organization AND a.work_id=rc.id
  LEFT JOIN ingestion_evaluations ie ON a.organization=ie.organization AND a.work_id=ie.id
@@ -347,17 +303,35 @@ func queueBacklogSQL() string {
    AND (dr.id IS NULL OR (NOT dr.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones dt WHERE dt.organization=dr.organization AND dt.record_id=dr.id)))
 ), documents AS (
  SELECT queue,organization,document_id,min(admitted_at) AS admitted_at,bool_or(active) AS active
- FROM (SELECT * FROM work UNION ALL SELECT * FROM active_attempts) all_work
+ FROM (SELECT * FROM work UNION ALL SELECT queue,organization,document_id,admitted_at,active FROM active_attempts) all_work
  WHERE document_id<>''
  GROUP BY queue,organization,document_id
+), operation_work AS (
+ SELECT o.created_at,
+ GREATEST(0,COALESCE((o.counters->>'versions_in_scope')::bigint,(b.estimate->>'versions')::bigint,0)
+   - CASE WHEN o.kind='backfill' THEN COALESCE((o.counters->>'versions_done')::bigint,0)+COALESCE((o.counters->>'versions_skipped')::bigint,0)
+          ELSE COALESCE((o.counters->>'indexed')::bigint,0)+COALESCE((o.counters->>'versions_quarantined')::bigint,0) END
+   - COALESCE(a.active,0)) AS waiting
+ FROM operations o
+ LEFT JOIN backfills b ON (b.organization,b.operation_id)=(o.organization,o.id)
+ LEFT JOIN (
+  SELECT organization,operation_id,count(DISTINCT document_id) AS active FROM active_attempts
+  WHERE queue='bulk' AND operation_id IS NOT NULL GROUP BY organization,operation_id
+ ) a ON (a.organization,a.operation_id)=(o.organization,o.id)
+ WHERE o.kind IN ('projection_rebuild','retrieval_configuration','backfill') AND o.state IN ('queued','running')
+), operation_totals AS (
+ SELECT COALESCE(sum(waiting),0)::bigint AS waiting,min(created_at) FILTER (WHERE waiting>0) AS oldest
+ FROM operation_work
 ), queues(queue) AS (VALUES ('live'::text),('bulk'::text))
 SELECT q.queue,
-       count(d.document_id) FILTER (WHERE NOT COALESCE(d.active,false))::bigint,
+       (count(d.document_id) FILTER (WHERE NOT COALESCE(d.active,false))
+        + CASE WHEN q.queue='bulk' THEN ot.waiting ELSE 0 END)::bigint,
        count(d.document_id) FILTER (WHERE COALESCE(d.active,false))::bigint,
-       GREATEST(0,COALESCE(MAX(EXTRACT(EPOCH FROM statement_timestamp()-d.admitted_at))
+       GREATEST(0,CASE WHEN q.queue='bulk' THEN COALESCE(EXTRACT(EPOCH FROM statement_timestamp()-ot.oldest),0) ELSE 0 END,
+                COALESCE(MAX(EXTRACT(EPOCH FROM statement_timestamp()-d.admitted_at))
                     FILTER (WHERE NOT COALESCE(d.active,false)),0))::double precision
-FROM queues q
+FROM queues q CROSS JOIN operation_totals ot
 LEFT JOIN documents d ON d.queue=q.queue
-GROUP BY q.queue
+GROUP BY q.queue,ot.waiting,ot.oldest
 ORDER BY CASE q.queue WHEN 'live' THEN 0 ELSE 1 END`
 }

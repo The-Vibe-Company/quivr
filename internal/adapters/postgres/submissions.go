@@ -1,8 +1,8 @@
 package postgres
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -16,7 +16,10 @@ import (
 )
 
 // SubmissionStore owns durable acceptance and absorbing withdrawal commands.
-type SubmissionStore struct{ Pool *pgxpool.Pool }
+type SubmissionStore struct {
+	Pool                    *pgxpool.Pool
+	RetainImportAuditDetail bool
+}
 
 var _ content.SubmissionStore = SubmissionStore{}
 
@@ -70,7 +73,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	// The implicit batch owns its transaction. Audited commands must instead
 	// stay inside their request transaction, including any refusal rollback.
 	if db == s.Pool {
-		created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest)
+		created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest, s.RetainImportAuditDetail)
 		if err != nil {
 			return content.Receipt{}, err
 		}
@@ -83,19 +86,28 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		return content.Receipt{}, err
 	}
 	defer tx.Rollback(ctx)
-	var previous []byte
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return content.Receipt{}, err
+	}
+	compact, err := compactWrites(ctx, tx)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	requestCopy, receiptCommand, execution := importRequestStorage(canonical, compact, s.RetainImportAuditDetail)
+	requestDigest := sha256.Sum256(canonical)
+	var previous, previousDigest []byte
 	var replayID *string
 	var exists bool
-	err = readJournal(ctx, tx, scope.Organization, `SELECT previous.id,previous.canonical_request,
+	err = readJournal(ctx, tx, scope.Organization, `SELECT previous.id,previous.canonical_request,previous.request_digest,
  EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$3)
  FROM (VALUES(1)) seed(n) LEFT JOIN ingestion_receipts previous
  ON previous.organization=$1 AND previous.route_family='ingestion' AND previous.request_key=$2`,
-		[]any{scope.Organization, c.Key, c.Source.CorpusID}, &replayID, &previous, &exists)
+		[]any{scope.Organization, c.Key, c.Source.CorpusID}, &replayID, &previous, &previousDigest, &exists)
 	if err != nil {
 		return content.Receipt{}, err
 	}
 	if replayID != nil {
-		if !bytes.Equal(previous, canonical) {
+		if !requestMatches(previous, previousDigest, canonical) {
 			return content.Receipt{}, content.ErrConflict
 		}
 		if err = tx.Commit(ctx); err != nil {
@@ -133,7 +145,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return content.Receipt{}, err
 	}
-	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,''),COALESCE(NULLIF($11,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, canonical, content.Title(c), c.SourceMediaType)
+	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,''),COALESCE(NULLIF($11,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, execution, content.Title(c), c.SourceMediaType)
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -143,7 +155,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 			return content.Receipt{}, err
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, scope.Organization, receiptID, c.Key, canonical, canonical, c.Source.CorpusID, recordID, order, slot, digest, workqueue.Class(ctx))
+	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue,request_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, scope.Organization, receiptID, c.Key, requestCopy, receiptCommand, c.Source.CorpusID, recordID, order, slot, digest, workqueue.Class(ctx), requestDigest[:])
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -198,14 +210,23 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 		return content.Receipt{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return content.Receipt{}, err
+	}
+	compact, err := compactWrites(ctx, tx)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	requestCopy, receiptCommand, _ := importRequestStorage(canonical, compact, s.RetainImportAuditDetail)
+	requestDigest := sha256.Sum256(canonical)
 	if err = lockJournal(ctx, tx, scope.Organization); err != nil {
 		return content.Receipt{}, err
 	}
-	var previous []byte
+	var previous, previousDigest []byte
 	var receiptID string
-	err = tx.QueryRow(ctx, "SELECT id,canonical_request FROM ingestion_receipts WHERE organization=$1 AND route_family='withdrawal' AND request_key=$2", scope.Organization, w.Key).Scan(&receiptID, &previous)
+	err = tx.QueryRow(ctx, "SELECT id,canonical_request,request_digest FROM ingestion_receipts WHERE organization=$1 AND route_family='withdrawal' AND request_key=$2", scope.Organization, w.Key).Scan(&receiptID, &previous, &previousDigest)
 	if err == nil {
-		if !bytes.Equal(previous, canonical) {
+		if !requestMatches(previous, previousDigest, canonical) {
 			return content.Receipt{}, content.ErrConflict
 		}
 		if err = tx.Commit(ctx); err != nil {
@@ -240,7 +261,7 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 	}
 	digest := content.Hash(canonical)
 	receiptID = content.StableID("receipt", scope.Organization, "withdrawal", w.Key)
-	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,route_family,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,state,outcome,processing,error_code) VALUES($1,$2,'withdrawal',$3,$4,$5,$6,$7,$8,$9,$10,'resolved','withdrawal_applied','idle','')`, scope.Organization, receiptID, w.Key, canonical, canonical, w.Source.CorpusID, recordID, order, "withdrawal:"+w.Key, digest)
+	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,route_family,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,state,outcome,processing,error_code,request_digest) VALUES($1,$2,'withdrawal',$3,$4,$5,$6,$7,$8,$9,$10,'resolved','withdrawal_applied','idle','',$11)`, scope.Organization, receiptID, w.Key, requestCopy, receiptCommand, w.Source.CorpusID, recordID, order, "withdrawal:"+w.Key, digest, requestDigest[:])
 	if err != nil {
 		return content.Receipt{}, err
 	}
