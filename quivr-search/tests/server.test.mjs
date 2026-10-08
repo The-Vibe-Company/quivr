@@ -1663,10 +1663,13 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   assert.equal((await get("/demo/session")).corpus_id, "demo-1");
   assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-1", "archive-1"]);
   // A browser follows the demo corpus's feed and its Admin tab.
-  const followed = [
-    (await fetch(base + "/demo/feed/stream")).body.getReader(),
-    (await fetch(base + "/demo/admin/stream")).body.getReader(),
-  ];
+  const follow = async (path) => {
+    const response = await fetch(base + path);
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type"), /^text\/event-stream/, path);
+    return response.body.getReader();
+  };
+  const followed = [await follow("/demo/feed/stream"), await follow("/demo/admin/stream")];
   await until("the demo corpus's change stream", () => streams.has("demo-1"));
 
   // The databases are wiped while the demo runs; the page reloads. The demo
