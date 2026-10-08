@@ -156,7 +156,7 @@ class Readiness(unittest.TestCase):
         previous = http.server.HTTPServer(('127.0.0.1', 0), type('Ready', (http.server.BaseHTTPRequestHandler,), {
             'do_GET': lambda self: (self.send_response(204), self.end_headers()), 'log_message': lambda *_: None}))
         self.addCleanup(previous.server_close)
-        threading.Thread(target=previous.serve_forever, daemon=True).start()
+        threading.Thread(target=previous.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True).start()
         self.addCleanup(previous.shutdown)
         stack.state['worker_probe_port'] = previous.server_address[1]
         for config, port in [('worker.json', stack.state['worker_probe_port']), ('queue-bulk.json', local.port())]:
