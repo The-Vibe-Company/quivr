@@ -1,0 +1,25 @@
+cmd/quivr-autoscaler/main.go
+  s_54b80c92daa9cb::t_640de59317a1e7 74,84
+docs-site/run-quivr/deploy.mdx
+  s_54b80c92daa9cb::t_eae71d4f35a98c 282
+cmd/quivr-autoscaler/main_test.go
+  s_54b80c92daa9cb::t_640de59317a1e7 8,10,20-21
+deploy/railway/autoscaler/README.md
+  s_54b80c92daa9cb::t_eae71d4f35a98c 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e34f86b7bfe093ff6891316f3a479ed598dc9129",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
