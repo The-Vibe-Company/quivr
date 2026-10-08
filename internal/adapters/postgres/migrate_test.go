@@ -82,8 +82,25 @@ FROM pg_index i WHERE i.indexrelid=to_regclass($1)`, name).Scan(&oid, &valid, &d
 				return index("records_by_current_version", "CREATE INDEX records_by_current_version ON public.records USING btree (organization, corpus_id, current_version_id)")
 			}
 			bootstrap()
+			if upgraded {
+				// Adopt an index already installed by an operator, without rebuilding it.
+				if _, err := pool.Exec(ctx, "CREATE INDEX embedding_coverage_by_artifact ON embedding_coverage(organization,artifact_id)"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			coverageIndex := func() uint32 {
+				return index("embedding_coverage_by_artifact", "CREATE INDEX embedding_coverage_by_artifact ON public.embedding_coverage USING btree (organization, artifact_id)")
+			}
+			var installedOID uint32
+			if upgraded {
+				installedOID = coverageIndex()
+			}
 			if err := postgres.EnsureIndexes(ctx, pool); err != nil {
 				t.Fatal(err)
+			}
+			coverageOID := coverageIndex()
+			if upgraded && coverageOID != installedOID {
+				t.Fatalf("operator index rebuilt: OID %d became %d", installedOID, coverageOID)
 			}
 			oid, rebuildOID := segmentIndex(), rebuildIndex()
 			bootstrap()
@@ -95,6 +112,9 @@ FROM pg_index i WHERE i.indexrelid=to_regclass($1)`, name).Scan(&oid, &valid, &d
 			}
 			if got := rebuildIndex(); got != rebuildOID {
 				t.Fatalf("rerun rebuilt current-version index: OID %d became %d", rebuildOID, got)
+			}
+			if got := coverageIndex(); got != coverageOID {
+				t.Fatalf("rerun rebuilt coverage index: OID %d became %d", coverageOID, got)
 			}
 			if !upgraded {
 				return

@@ -16,4 +16,7 @@ type IngestionPageStore interface {
 	IngestionPage(context.Context, string, string, string, string, int) (IngestionPage, bool, error)
 	// SaveIngestionPage returns the first committed result if calls raced.
 	SaveIngestionPage(context.Context, string, string, string, string, int, IngestionPage) (IngestionPage, error)
+	// DeleteIngestionPages retires one exact input namespace after its cuts and
+	// all requested vectors are durable. Repeating a completed deletion is safe.
+	DeleteIngestionPages(context.Context, string, string, string, string) error
 }

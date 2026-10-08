@@ -82,6 +82,11 @@ func (s *itemDerivationStore) SaveIngestionPage(_ context.Context, _, _, _, _ st
 	return p, nil
 }
 
+func (s *itemDerivationStore) DeleteIngestionPages(context.Context, string, string, string, string) error {
+	clear(s.pages)
+	return nil
+}
+
 func TestDerivePacksBoundedItemsAndPagesSizeRefusals(t *testing.T) {
 	v := content.Version{ID: "item", RecordID: "record", Manifest: content.Manifest{Parts: []content.Part{
 		{Key: "slug", Role: "context", Content: content.Text{Kind: "text", Text: "update"}},

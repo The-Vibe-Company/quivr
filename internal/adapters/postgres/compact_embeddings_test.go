@@ -210,6 +210,27 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		if !content.Present(covered, 0) || !content.Present(covered, 1) {
 			t.Fatalf("coverage %v", covered)
 		}
+		if scenario.name == "fresh" {
+			// Bitmap coverage counts passages, even though there is one file and
+			// one Version. Replaying it must not count the file's bits twice.
+			op, err := stores.AcceptRebuild(ctx, org, c.ID, "packed-rebuild", []byte(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = stores.BeginRebuild(ctx, org, op.ID); err != nil {
+				t.Fatal(err)
+			}
+			artifacts := []content.Embedding{packed[0].Artifact, packed[1].Artifact}
+			for range 2 {
+				if _, err = stores.CoverRebuild(ctx, org, op.ID, seg, artifacts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			progress, err := stores.Operation(ctx, org, op.ID)
+			if err != nil || progress.Counters["versions_covered"] != 1 || progress.Counters["passages_covered"] != 2 || progress.Counters["indexed"] != 1 || progress.Counters["vectors_reused"] != 2 {
+				t.Fatalf("compact rebuild counters: %+v %v", progress.Counters, err)
+			}
+		}
 
 	}
 }

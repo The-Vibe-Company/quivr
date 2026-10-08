@@ -19,6 +19,10 @@ func LogFailure(err error) {
 		return
 	}
 	code := "process_failed"
+	var storage *storageError
+	if errors.As(err, &storage) {
+		code = storage.code
+	}
 	switch {
 	case errors.Is(err, postgres.ErrIndexConflict):
 		code = "index_definition_conflict"

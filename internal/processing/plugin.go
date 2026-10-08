@@ -211,7 +211,7 @@ func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v cont
 		return seg, ErrSpaceUnowned
 	}
 	seg, err = d.Content.PluginSegmentationOf(ctx, org, v, d.descriptor.Recipe)
-	if !errors.Is(err, corpus.ErrNotFound) {
+	if !errors.Is(err, corpus.ErrNotFound) && (err != nil || !d.descriptor.Paged) {
 		return seg, err
 	}
 	if !d.descriptor.SegmentsOnly || d.descriptor.Paged {
@@ -266,8 +266,11 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 	switch {
 	case err == nil:
 		data, complete, err := d.stored(ctx, org, corpusID, v, seg, spaces)
-		if err != nil || complete {
+		if err != nil {
 			return seg, data, err
+		}
+		if complete {
+			return seg, data, d.completePages(ctx, org, v, spaces)
 		}
 	case !errors.Is(err, corpus.ErrNotFound):
 		return seg, nil, err
@@ -283,6 +286,9 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 	data, err := d.saveVectors(ctx, org, corpusID, v, seg, spaces, segments)
 	if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
 		return seg, nil, content.Refused("the ingestion plugin answered a vector that differs from the stored artifact")
+	}
+	if err == nil {
+		err = d.completePages(ctx, org, v, spaces)
 	}
 	return seg, data, err
 }
@@ -329,8 +335,11 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 		}
 	}
 	data, complete, err := d.stored(ctx, org, corpusID, v, seg, spaces)
-	if err != nil || complete {
+	if err != nil {
 		return data, err
+	}
+	if complete {
+		return data, d.completePages(ctx, org, v, spaces)
 	}
 	segments, err := d.segmentAndEmbed(ctx, org, corpusID, v, spaces)
 	if err != nil {
@@ -347,6 +356,9 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 	data, err = d.saveVectors(ctx, org, corpusID, v, seg, spaces, segments)
 	if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
 		return nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
+	}
+	if err == nil {
+		err = d.completePages(ctx, org, v, spaces)
 	}
 	return data, err
 }

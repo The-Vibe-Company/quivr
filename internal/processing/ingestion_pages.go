@@ -22,20 +22,10 @@ func (d PluginDeriver) segmentAndEmbed(ctx context.Context, org, corpusID string
 	if !ok {
 		return nil, errors.New("durable ingestion page storage unavailable")
 	}
-	keys := slices.Clone(spaces)
-	slices.Sort(keys)
-	// A normalization restart can replace Parts under the same Version ID
-	// before a complete segmentation exists. Bind the durable namespace to
-	// the exact source Manifest as well as spaces, so old in-flight calls and
-	// committed pages cannot supply vectors for replacement content.
-	raw, err := json.Marshal(struct {
-		Spaces []string         `json:"spaces"`
-		Source content.Manifest `json:"source"`
-	}{keys, v.Manifest})
+	inputKey, err := ingestionPageInputKey(v, spaces)
 	if err != nil {
 		return nil, err
 	}
-	inputKey := content.Hash(raw)
 	// Keep consecutive Parts together for the owner's normal packing recipe.
 	// A single text Part retains its existing paged segmentation. Size limits
 	// partition work only: oversized items and size refusals still page in full.
@@ -123,4 +113,38 @@ func wholeItemFits(v content.Version) bool {
 		}
 	}
 	return textParts > 1
+}
+
+// completePages runs only after canonical segmentation and every requested
+// vector are durable, including retries that reuse already saved artifacts.
+func (d PluginDeriver) completePages(ctx context.Context, org string, v content.Version, spaces []string) error {
+	if !d.descriptor.Paged {
+		return nil
+	}
+	store, ok := d.Content.Baseline.(content.IngestionPageStore)
+	if !ok {
+		return errors.New("durable ingestion page storage unavailable")
+	}
+	key, err := ingestionPageInputKey(v, spaces)
+	if err != nil {
+		return err
+	}
+	return store.DeleteIngestionPages(ctx, org, v.ID, d.descriptor.Recipe, key)
+}
+
+func ingestionPageInputKey(v content.Version, spaces []string) (string, error) {
+	keys := slices.Clone(spaces)
+	slices.Sort(keys)
+	// A normalization restart can replace Parts under the same Version ID
+	// before a complete segmentation exists. Bind the durable namespace to
+	// the exact source Manifest as well as spaces, so old in-flight calls and
+	// committed pages cannot supply vectors for replacement content.
+	raw, err := json.Marshal(struct {
+		Spaces []string         `json:"spaces"`
+		Source content.Manifest `json:"source"`
+	}{keys, v.Manifest})
+	if err != nil {
+		return "", err
+	}
+	return content.Hash(raw), nil
 }

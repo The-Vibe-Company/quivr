@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Conversion can stop after upload, resume, and retire only explicitly selected
@@ -109,6 +113,112 @@ func TestStorageCompactionResumesAcrossActivation(t *testing.T) {
 	}
 	if err = postgres.ActivateCompactStorage(ctx, pool); err != nil {
 		t.Fatal(err)
+	}
+	// Thousands of unrelated passage coverages make a missing artifact lookup
+	// index visible without timing assertions or disabling sequential scans.
+	for _, sql := range []string{
+		`INSERT INTO segmentations(organization,id,version_id,recipe,digest) VALUES($1,'zz-plan-seed',$2,'plan-seed','fixture')`,
+		`INSERT INTO segments(organization,id,segmentation_id,version_id,part_key,start_offset,end_offset,text_sha256)
+ SELECT $1,'zz-plan-'||n,'zz-plan-seed',$2,'body',0,1,'fixture' FROM generate_series(1,4096) n`,
+	} {
+		if _, err = pool.Exec(ctx, sql, org, v.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO embedding_artifacts(organization,id,derivation_id,segment_id,space_id,metadata)
+ SELECT organization,id,id,id,$2,'{}' FROM segments WHERE organization=$1 AND segmentation_id='zz-plan-seed'`, org, space.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id)
+ SELECT organization,id,$2,id,$3 FROM segments WHERE organization=$1 AND segmentation_id='zz-plan-seed'`, org, g.ID, space.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `ANALYZE embedding_coverage; ANALYZE embedding_artifacts`); err != nil {
+		t.Fatal(err)
+	}
+	if err = postgres.EnsureIndexes(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	// Top-level EXPLAIN does not expose the DELETE's FK trigger queries.
+	// Observe their actual plans on the compaction connection instead.
+	type planNode struct {
+		Type     string     `json:"Node Type"`
+		Relation string     `json:"Relation Name"`
+		Index    string     `json:"Index Name"`
+		Plans    []planNode `json:"Plans"`
+	}
+	var rawPlan []byte
+	if err = pool.QueryRow(ctx, `EXPLAIN (FORMAT JSON) DELETE FROM embedding_artifacts WHERE organization=$1 AND id=ANY($2::text[])`, org, []string{artifact.ID}).Scan(&rawPlan); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("retirement DELETE plan (FK probe shown separately): %s", rawPlan)
+	if _, err = runner.Start(ctx, "retire-vectors", false); err != nil {
+		t.Fatal(err)
+	}
+	cfg := pool.Config().Copy()
+	cfg.MaxConns = 1
+	var notices []string
+	cfg.ConnConfig.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { notices = append(notices, n.Message) }
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `LOAD 'auto_explain'; SET auto_explain.log_min_duration=0; SET auto_explain.log_analyze=on; SET auto_explain.log_nested_statements=on; SET auto_explain.log_format=json; SET auto_explain.log_level=notice`)
+		return err
+	}
+	explained, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explained.Close()
+	unit, cancelUnit := context.WithTimeout(ctx, 5*time.Second)
+	retired, err := (postgres.StorageCompaction{Pool: explained, Blobs: objects}).Step(unit, "retire-vectors")
+	cancelUnit()
+	if err != nil || retired.GroupsDone != 1 || retired.Checkpoint == "" {
+		t.Fatalf("seeded retirement unit: %+v %v", retired, err)
+	}
+	probes := 0
+	for _, notice := range notices {
+		start := strings.Index(notice, "{")
+		if start < 0 {
+			continue
+		}
+		var plan struct {
+			Query string `json:"Query Text"`
+			Plan  planNode
+		}
+		if err = json.Unmarshal([]byte(notice[start:]), &plan); err != nil {
+			t.Fatalf("decode actual compaction plan: %s %v", notice, err)
+		}
+		if !strings.Contains(plan.Query, "embedding_coverage") || !strings.Contains(plan.Query, "FOR KEY SHARE") {
+			continue
+		}
+		probes++
+		indexed, sequential := false, false
+		var inspect func(planNode)
+		inspect = func(node planNode) {
+			indexed = indexed || node.Index == "embedding_coverage_by_artifact"
+			sequential = sequential || node.Relation == "embedding_coverage" && node.Type == "Seq Scan"
+			for _, child := range node.Plans {
+				inspect(child)
+			}
+		}
+		inspect(plan.Plan)
+		if !indexed || sequential {
+			t.Fatalf("FK probe must use artifact lookup without a sequential coverage scan: %s", notice)
+		}
+		t.Logf("actual retirement foreign-key plan: %s", notice)
+	}
+	if probes != 2 {
+		t.Fatalf("want both retired artifacts' FK probes, observed %d", probes)
+	}
+	// Remove the plan seed before the lifecycle test scans subsequent groups.
+	for _, sql := range []string{
+		`DELETE FROM embedding_coverage WHERE organization=$1 AND artifact_id LIKE 'zz-plan-%'`,
+		`DELETE FROM embedding_artifacts WHERE organization=$1 AND id LIKE 'zz-plan-%'`,
+		`DELETE FROM segments WHERE organization=$1 AND segmentation_id='zz-plan-seed'`,
+		`DELETE FROM segmentations WHERE organization=$1 AND id='zz-plan-seed'`,
+	} {
+		if _, err = pool.Exec(ctx, sql, org); err != nil {
+			t.Fatal(err)
+		}
 	}
 	finish := func(id string, retire bool) {
 		t.Helper()

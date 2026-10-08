@@ -235,7 +235,14 @@ func (s RebuildStore) coverRebuildAttempt(ctx context.Context, org, id string, s
 	if !prepared {
 		return false, ErrGenerationChanged
 	}
-	if _, err = tx.Exec(ctx, `UPDATE operations SET counters=counters || jsonb_build_object('indexed',coalesce((counters->>'indexed')::bigint,0)+$3,'vectors_reused',coalesce((counters->>'vectors_reused')::bigint,0)+$4),updated_at=now() WHERE organization=$1 AND id=$2`, org, id, indexed, reused); err != nil {
+	// Coverage insert deltas count Versions and passage/space entries separately.
+	// Seed the explicit units from compatibility totals on an older operation.
+	if _, err = tx.Exec(ctx, `UPDATE operations SET counters=counters || jsonb_build_object(
+ 'indexed',coalesce((counters->>'indexed')::bigint,0)+$3,
+ 'vectors_reused',coalesce((counters->>'vectors_reused')::bigint,0)+$4,
+ 'versions_covered',coalesce((counters->>'versions_covered')::bigint,(counters->>'indexed')::bigint,0)+$3,
+ 'passages_covered',coalesce((counters->>'passages_covered')::bigint,(counters->>'vectors_reused')::bigint,0)+$4),
+ updated_at=now() WHERE organization=$1 AND id=$2`, org, id, indexed, reused); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)

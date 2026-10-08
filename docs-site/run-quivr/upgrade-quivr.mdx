@@ -45,6 +45,8 @@ Pause also fences the active run and defers its next run indefinitely; resume ma
 
 Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
 
+Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. The compatibility keys `indexed` and `vectors_reused` keep those respective counts. Replays count only newly added coverage, including individual passages within a compact file. Running operations initialize the new keys from their existing compatibility totals when coverage next commits.
+
 New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
 
 ```sh
@@ -59,6 +61,8 @@ quivr storage status --id prepare-storage
 ```
 
 Repeat the same command to resume its saved checkpoint. `phase: "done"` means that operation finished its scan. Each batch processes at most the requested number of units; a vector unit packs one whole segmentation/space group. Object verification finishes before database locks. No search service, tokenizer or embedding credentials are needed. The compaction configuration needs [PostgreSQL and S3 settings](/reference/configuration). Compaction never calls an embedding provider. Each unit has a 30-second deadline; a timed-out unit keeps the previous checkpoint.
+
+Before retiring legacy vectors, let an API or worker finish background index setup. It manages `embedding_coverage_by_artifact` on `embedding_coverage (organization, artifact_id)`, which PostgreSQL needs to check references when an artifact is deleted. The build is concurrent and does not delay readiness. A matching index already created by an operator is reused. Check the index state as described below; the storage command itself does not run index maintenance.
 
 After all previous API, live-worker and bulk-worker processes have drained and stopped, explicitly activate compact writes:
 
@@ -86,6 +90,79 @@ Keep this flag on every resume of that operation. Required execution input, idem
 
 All physical S3 objects remain after compaction. Old payload/manifest objects require a separately guarded deletion procedure. Deleted PostgreSQL rows become dead tuples; autovacuum makes their space reusable, while file size may stay unchanged. Do not run `VACUUM FULL` as part of a live import rollout. Compare matched imports with `python3 scripts/measure_storage.py --output <report.json>` using the same sample and count, including heap, TOAST and indexes. Coordinator or operator measurements establish throughput and search quality on the deployment.
 
+## Retire completed ingestion pages
+
+Paged ingestion keeps provider cuts and vectors in `ingestion_pages` until its canonical segmentation and every requested vector space are durable. New workers delete that exact organization/version/recipe/input namespace after saving vectors; a retry also repairs a crash between the vector commit and deletion. Interrupted derivations keep their pages.
+
+A concurrent provider request can save pages after another derivation deletes that namespace. If the late writer then stops, an outer retry may skip derivation because the Version is already searchable or enriched, leaving those pages behind. Cleanup does not persist a completion marker. Reclaim these retained pages with the bounded operation below after draining writers.
+
+For pages left by earlier workers, drain all ingestion, enrichment and rebuild writers before this one-off operation. Keep them stopped until cleanup finishes. Work on one exact namespace at a time; list candidates with a read-only, primary-key ordered query:
+
+```sql
+SET statement_timeout = '5s';
+SELECT DISTINCT organization, version_id, recipe, spaces_key
+FROM ingestion_pages
+ORDER BY organization, version_id, recipe, spaces_key
+LIMIT 100;
+```
+
+In `psql`, set these variables to the selected tuple. Set `spaces` to **every** space requested for that input, including evaluation spaces, using the saved pages' `Vectors` keys or the pinned ingestion configuration. Do not substitute only the currently served space. These are neutral placeholders:
+
+```text
+\set organization 'example-org'
+\set version 'version-id'
+\set recipe 'recipe-id'
+\set input_key 'input-hash'
+\set spaces '["example.space@1"]'
+```
+
+Run the statement below repeatedly for that tuple. Each statement deletes at most 1,000 rows and is independently committed; keep the five variable values to resume after a session failure. It requires the last provider page and canonical artifacts for every segment in every requested space, accepting both legacy and packed storage. It deletes pages in ascending order, so the last-page checkpoint remains until the final batch. A zero-row result can mean unfinished work; leave that namespace for workers to resume. Namespaces without requested vector spaces are conservatively retained.
+
+```sql
+-- Retire one completed page namespace in a bounded batch.
+WITH candidates AS MATERIALIZED (
+ SELECT organization,version_id,recipe,spaces_key,page_number
+ FROM ingestion_pages
+ WHERE organization=:'organization' AND version_id=:'version'
+  AND recipe=:'recipe' AND spaces_key=:'input_key'
+ ORDER BY page_number LIMIT 1000
+), ready AS (
+ SELECT st.organization,st.id
+ FROM segmentations st
+ WHERE st.organization=:'organization' AND st.version_id=:'version'
+  AND st.recipe=:'recipe'
+  AND jsonb_array_length(:'spaces'::jsonb)>0
+  AND EXISTS (SELECT 1 FROM ingestion_pages last_page
+   WHERE last_page.organization=st.organization AND last_page.version_id=st.version_id
+    AND last_page.recipe=st.recipe AND last_page.spaces_key=:'input_key'
+    AND (last_page.next_cursor IS NULL OR last_page.next_cursor='null'::jsonb))
+  AND EXISTS (SELECT 1 FROM segments sg
+   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id)
+  AND NOT EXISTS (
+   SELECT 1 FROM segments sg
+   CROSS JOIN jsonb_array_elements_text(:'spaces'::jsonb) requested(space_id)
+   WHERE sg.organization=st.organization AND sg.segmentation_id=st.id
+    AND NOT EXISTS (SELECT 1 FROM embedding_artifacts a
+     WHERE a.organization=sg.organization AND a.segment_id=sg.id AND a.space_id=requested.space_id)
+    AND NOT EXISTS (
+     SELECT 1 FROM storage_organizations o
+     JOIN storage_segments k ON k.organization_id=o.id AND k.segment_id=sg.id
+     JOIN storage_spaces sp ON sp.space_id=requested.space_id
+     JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id)
+     JOIN embedding_files f ON f.id=e.file_id AND f.organization_id=o.id AND f.segmentation_id=st.id
+     WHERE o.organization=sg.organization)
+  )
+)
+DELETE FROM ingestion_pages p USING candidates c,ready r
+WHERE (p.organization,p.version_id,p.recipe,p.spaces_key,p.page_number)=
+ (c.organization,c.version_id,c.recipe,c.spaces_key,c.page_number)
+ AND p.organization=r.organization;
+```
+
+The last-page check conservatively retains an interrupted late writer's namespace if its final checkpoint is missing. To reclaim a **verified completed namespace** in that case, use a retained record of the successful derivation that identifies its exact `input_key` and every requested space. Quivr does not retain this completion record; it must come from your operational records. A searchable Version or the remaining pages' vector keys alone do not establish that the source Manifest and requested spaces match the completed derivation. Run the same bounded statement with only the `AND EXISTS (...)` check on `last_page` removed. Keep the canonical segmentation, all-vector checks and row limit. If you cannot verify the exact input namespace, retain its pages.
+
+Keep the session's five-second statement timeout; a timeout rolls back only its current batch. Reduce `LIMIT 1000` for a smaller batch if necessary. Resume writers afterward. Autovacuum makes the deleted heap and TOAST space reusable; database files may stay the same size. Avoid `VACUUM FULL` during live imports.
+
 ## Check it worked
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.
@@ -99,23 +176,30 @@ Inspect the `X-Quivr-Index-Setup` header on `/readyz` for that process's last in
 | Migration times out | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. Let conflicting transactions finish, then rerun. Index maintenance uses a separate advisory lock. An index build started by an older binary can still hold the migration lock until it finishes or is stopped. |
 | `index_setup_failed` or `index_setup_busy` in background events | Live processes retry with backoff from one second to one minute. Each attempt has a 30-minute budget and no separate lock timeout. Interrupted builds can leave invalid indexes; the next attempt repairs them. Required migrations and readiness proceed independently. |
 | `index_definition_conflict` | A performance index name belongs to an object with a different definition. Inspect the database catalog and rename the conflicting object. Quivr leaves it untouched and detects your repair on a later attempt. |
+| `compaction_unit_deadline` | A unit exceeded its 30-second budget. Check index setup and storage access, then rerun the same operation identifier; its previous checkpoint remains. |
+| `compaction_unit_canceled` | The unit was interrupted. Rerun the same operation identifier to resume. |
+| `compaction_vectors_failed`, `compaction_receipts_failed`, `compaction_normalizations_failed` | Inspect durable artifacts and storage access for the named phase, repair the cause, then resume. |
+| `compaction_start_failed`, `compaction_status_failed` | Check activation, the operation identifier, options and database access before retrying. |
 | Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
 | Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
 
 Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and data backfills still need deployment-specific review.
 
+Storage failure codes omit raw database and object-storage errors.
+
 An interrupted index build restarts from scratch on the next attempt. If index setup consistently exceeds 30 minutes, stop automatic index maintenance by draining the API and worker instances, then build the indexes concurrently in an operator database session with a longer timeout. Use the same index names, columns and predicates; remove a matching invalid index before rebuilding it. Restart the instances afterward to verify and reuse the indexes.
 
-Inspect both existing definitions first:
+Inspect the existing definitions first:
 
 ```sql
 SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition
 FROM pg_index
 WHERE indexrelid IN (to_regclass('segments_by_segmentation'),
-                     to_regclass('records_by_current_version'));
+                     to_regclass('records_by_current_version'),
+                     to_regclass('embedding_coverage_by_artifact'));
 ```
 
-In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY segments_by_segmentation` or `DROP INDEX CONCURRENTLY records_by_current_version`. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
+In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY` with that index's name. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
 
 ```sql
 SET lock_timeout = '0';
@@ -124,6 +208,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS segments_by_segmentation
   ON segments (organization, segmentation_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS records_by_current_version
   ON records (organization, corpus_id, current_version_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS embedding_coverage_by_artifact
+  ON embedding_coverage (organization, artifact_id);
 ```
 
 A valid matching index is reused; close this session afterward and restart the API and worker to finish index setup.
