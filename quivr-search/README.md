@@ -109,8 +109,7 @@ The runner posts the password itself, so neither the model nor the page sees it.
 | `DEMO_SECURE_COOKIE` | Set `true` behind HTTPS; cookie is always HttpOnly and SameSite=Strict |
 | `DEMO_FEED_SUGGESTIONS` | Optional one-click feeds on the Sources tab: a JSON array of `{"title", "url"}` (at most 12; invalid entries are skipped with a warning). Empty by default |
 | `DEMO_STATE_FILE` | Optional file keeping removed sources, source names, paused alerts and alert creation dates across restarts. `make demo` keeps it in the stack directory |
-| `QUIVR_DEMO_DESTINATION_ID` | Webhook destination of the demo's Organization; enables the Alertes tab with the `monitoring:read` and `monitoring:write` permissions |
-| `QUIVR_DEMO_ALERTS_EVALUATOR` | Alerts evaluator, `plugin@version`; default `alerts@0.2.0` |
+| `QUIVR_DEMO_ALERTS_EVALUATOR` | Alerts evaluator, `plugin@version`; default `alerts@0.2.0`. The Alertes tab needs `monitoring:read` and `monitoring:write`; it reads Matches through the API without a webhook destination |
 | `DEMO_DESCRIBED_ALERTS` | `true` offers described alerts in the Alertes tab. Set it only where the core's `alerts` pin accepts the `described` kind (a classifier key is configured); otherwise the core refuses them at creation |
 | `DEMO_FEED_PRIVATE_ORIGINS` | Tests only: comma-separated exact origins (`http://127.0.0.1:8080`) exempt from the private-address refusal, for a local test feed server. Never set it in production |
 

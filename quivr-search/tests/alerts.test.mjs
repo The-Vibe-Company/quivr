@@ -18,7 +18,6 @@ test("a preview upstream deadline is a retryable timeout", async () => {
   const route = alertRoutes({
     upstream: async () => { throw new DOMException("deadline exceeded", "TimeoutError"); },
     jsonBody: async () => ({ expression: { kind: "keywords", match: { term: "orage" } } }),
-    destination: "demo-webhook",
     evaluator: "alerts@0.3.0",
   });
   const result = await route({ method: "POST" }, "/demo/alerts/preview", "demo");
@@ -224,7 +223,6 @@ async function start(t, env = {}) {
       DEMO_PASSWORD: "",
       QUIVR_API_URL: `http://127.0.0.1:${core.server.address().port}`,
       QUIVR_API_KEY: KEY,
-      QUIVR_DEMO_DESTINATION_ID: "demo-destination",
       QUIVR_DEMO_ALERTS_EVALUATOR: "alerts@9.9.9",
       DEMO_STATE_FILE: join(dir, "state.json"),
       ...env,
@@ -267,7 +265,7 @@ async function start(t, env = {}) {
 
 const idem = () => `k-${Math.random().toString(36).slice(2, 12)}`;
 
-test("an alert is created in the demo corpus with the deployment's evaluator, destination and owner; paused, it stays listed", async (t) => {
+test("an alert is created without a destination in the demo corpus with its evaluator and owner; paused, it stays listed", async (t) => {
   const { core, call } = await start(t);
   const created = await call("/demo/alerts", {
     idempotency_key: idem(),
@@ -286,7 +284,7 @@ test("an alert is created in the demo corpus with the deployment's evaluator, de
     version: "9.9.9",
     configuration: {},
   });
-  assert.equal(sub.body.destination_id, "demo-destination");
+  assert.ok(!Object.hasOwn(sub.body, "destination_id"));
   assert.equal(sub.body.owner, OWNER);
   assert.equal(sub.auth, `Bearer ${KEY}`);
 
@@ -359,6 +357,8 @@ test("renaming an alert renames its Subscription and Saved Query without a new V
   assert.equal(edited.status, 200);
   assert.deepEqual(edited.data.expression.match, { term: "grêle" });
   assert.ok(posts().slice(after).every((url) => url.endsWith("/versions")));
+  const versionPost = core.seen.find((r) => r.method === "POST" && r.url === `/v0/subscriptions/${id}/versions`);
+  assert.ok(!Object.hasOwn(versionPost.body, "destination_id"));
 
   const empty = await call(`/demo/alerts/${id}/edit`, {
     idempotency_key: idem(),
@@ -482,7 +482,7 @@ test("a query the evaluator refuses is explained and leaves no saved search behi
   assert.deepEqual((await call("/demo/alerts")).data.items, []);
 });
 
-test("without monitoring rights or a destination, the page learns that alerts are not enabled", async (t) => {
+test("without monitoring rights, the page learns that alerts are not enabled", async (t) => {
   const forbidden = await start(t);
   forbidden.core.forbid();
   assert.deepEqual((await forbidden.call("/demo/alerts")).data, {
@@ -491,15 +491,6 @@ test("without monitoring rights or a destination, the page learns that alerts ar
     items: [],
     matched: {},
   });
-  const unconfigured = await start(t, { QUIVR_DEMO_DESTINATION_ID: "" });
-  assert.equal((await unconfigured.call("/demo/alerts")).data.available, false);
-  const create = await unconfigured.call("/demo/alerts", {
-    idempotency_key: idem(),
-    name: "x",
-    expression: { kind: "keywords", match: { term: "x" } },
-  });
-  assert.equal(create.status, 404);
-  assert.equal(unconfigured.core.seen.length, 0);
 });
 
 test("a described alert reaches the core only where the deployment offers it, and its page shows the classifier's score", async (t) => {

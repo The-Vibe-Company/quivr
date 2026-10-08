@@ -33,7 +33,7 @@ WITH head AS (
   FROM head
 )
 SELECT b.h, b.upper, b.expired, b.archived, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
-  n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, n.delivery_id, coalesce(n.previous_match_id,''), coalesce(s.owner,'')
+  n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, coalesce(n.delivery_id,''), coalesce(n.previous_match_id,''), coalesce(s.owner,'')
 FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at

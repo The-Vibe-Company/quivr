@@ -42,7 +42,7 @@ class Mapping(unittest.TestCase):
         baseline = search_trial.configuration({'model': 'Cohere-Embed-V5-Pro',
             'revision': '2026-10-03', 'dimensions': 1024})
         production = {'ingestion': {'kind': 'hosted', 'max_tokens_per_segment': 512,
-                                   'overlap': 48, 'batch_size': 16, 'max_batch_tokens': 8192,
+                                   'body_tokens': 512, 'batch_size': 16, 'max_batch_tokens': 8192,
                                    'request_timeout_ms': 4000, 'call_budget_ms': 30000,
                                    'max_concurrent_requests': 4, 'max_retries': 2}, 'hybrid_fusion': 'relative_score'}
         candidate = {**baseline, 'dense_weight': .3, 'candidate_count': 100,
@@ -51,9 +51,14 @@ class Mapping(unittest.TestCase):
         self.assertEqual(mapped['retrieve'], {'dense_weight': .3, 'candidate_count': 100,
                                              'hybrid_fusion': 'ranked'})
         self.assertEqual(mapped['ingestion']['max_tokens_per_segment'], 512)
+        self.assertEqual(mapped['ingestion']['body_tokens'], 512)
         self.assertEqual(mapped['ingestion']['model'], 'Cohere-Embed-V5-Fast')
         for field in confirmation.HOSTED_EXECUTION:
             self.assertEqual(mapped['ingestion'][field], production['ingestion'][field])
+        for change in ({'body_tokens': 7}, {'body_tokens': 32769}, {'body_tokens': True}, {'overlap': 48}):
+            with self.subTest(ingestion=change), self.assertRaisesRegex(confirmation.Unmappable, 'hosted_ingestion'):
+                confirmation.mapping(candidate, baseline,
+                    {**production, 'ingestion': {**production['ingestion'], **change}}, candidate=True)
         self.assertEqual(mapped['mode'], 'hybrid')
         self.assertEqual(confirmation.mapping(baseline, baseline, production)['retrieve']['hybrid_fusion'], 'relative_score')
         for change, reason in [({'window_chars': 2400}, 'character_segmentation'),
@@ -244,7 +249,7 @@ class Replay(unittest.TestCase):
                  'sets': {'scifact': {'version': '1', 'split': 'heldout', 'private': False,
                              'digest': 'd' * 64, 'fingerprint': 'e' * 64}}},
                 {'scifact': {'fingerprint': 'c' * 64, 'split_fingerprint': 'f' * 64}}, {'scifact': evidence},
-                {'production': {'ingestion': {'kind': 'hosted', 'max_tokens_per_segment': 512, 'overlap': 48, 'batch_size': 16, 'max_batch_tokens': 8192,
+                {'production': {'ingestion': {'kind': 'hosted', 'max_tokens_per_segment': 512, 'body_tokens': 512, 'batch_size': 16, 'max_batch_tokens': 8192,
                                    'request_timeout_ms': 4000, 'call_budget_ms': 30000,
                                    'max_concurrent_requests': 4, 'max_retries': 2},
                                 'hybrid_fusion': 'relative_score'}, 'resources': {'experiment': policy['experiment'],
