@@ -7,6 +7,7 @@ import json
 import os
 import threading
 import unittest
+from unittest.mock import patch
 
 from alerts import described, jev, rule
 from alerts.fake_system_one import FakeSystemOne
@@ -179,7 +180,7 @@ class Errors(FakeServer):
     def test_rate_limits_and_server_errors_are_retryable(self):
         for status in (408, 429, 500, 503, 529):
             with self.subTest(status=status):
-                with unittest.mock.patch("quivr_plugin.system_one.time.sleep"):
+                with patch("quivr_plugin.system_one.time.sleep"):
                     self.assertEqual(self.fail(status), (503, "classifier_unavailable", True))
 
     def test_a_refused_request_is_terminal(self):

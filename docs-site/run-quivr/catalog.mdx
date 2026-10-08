@@ -117,7 +117,7 @@ It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep
 
 ## jev-rerank
 
-The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in one batch with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) for configuration and settings, and [Search profiles](/run-quivr/search-profiles) for how it builds on `core.retrieve/default`.
+The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in bounded batches with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) for configuration and settings, and [Search profiles](/run-quivr/search-profiles) for how it builds on `core.retrieve/default`.
 
 ## rss
 

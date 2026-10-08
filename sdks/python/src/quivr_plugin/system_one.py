@@ -4,9 +4,12 @@ from __future__ import annotations
 import datetime
 import email.utils
 import http.client
+import ipaddress
 import json
 import math
 import socket
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -68,6 +71,64 @@ def retry_after(value: str | None) -> float:
             return math.inf
 
 
+# Isolate libc DNS in a cancellable process: socket timeouts do not bound getaddrinfo.
+# Resolver stdin carries only the hostname and port, never credentials or request text.
+_DNS = "import json,socket,sys; h,p=json.load(sys.stdin); print(json.dumps(socket.getaddrinfo(h,p,type=socket.SOCK_STREAM)))"
+
+
+def connect_socket(address: tuple, deadline: float, connected: list, source_address=None):
+    host, port = address
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            answer = subprocess.run([sys.executable, "-I", "-c", _DNS], input=json.dumps([host, port]),
+                                    capture_output=True, text=True, check=True, timeout=remaining)
+            addresses = json.loads(answer.stdout)
+        except subprocess.TimeoutExpired:
+            raise TimeoutError from None  # subprocess.run kills and reaps the resolver.
+        except (subprocess.CalledProcessError, ValueError):
+            raise OSError("DNS resolution failed") from None
+    else:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST)
+    error = OSError("DNS returned no addresses")
+    for family, kind, protocol, _, destination in addresses:
+        transport = socket.socket(family, kind, protocol)
+        connected[:] = [transport]
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            transport.settimeout(remaining)
+            if source_address:
+                transport.bind(source_address)
+            transport.connect(tuple(destination))
+            # HTTPSConnection uses this timeout for its TLS handshake as well.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            transport.settimeout(remaining)
+            return transport
+        except OSError as failed:
+            transport.close()
+            error = failed
+    raise error
+
+
+def _allowed_endpoint(url) -> bool:
+    try:
+        if not url.hostname or url.username or url.password or url.fragment or url.port == 0:
+            return False
+        if url.scheme == "https":
+            return True
+        return url.scheme == "http" and ipaddress.ip_address(url.hostname).is_loopback
+    except ValueError:
+        return False
+
+
 class SystemOne:
     slots = threading.BoundedSemaphore(8)
 
@@ -76,6 +137,8 @@ class SystemOne:
         self.url = urllib.parse.urlsplit(url)
 
     def judge(self, state: dict, questions: dict, deadline: float, cost_limit: float | None = None) -> Result:
+        if not _allowed_endpoint(self.url):
+            return Result(reason="invalid endpoint")
         if time.monotonic() >= deadline:
             return Result(reason="deadline", retryable=True)
         if not self.slots.acquire(blocking=False):
@@ -130,6 +193,10 @@ class SystemOne:
             connection = connection_type(self.url.hostname, self.url.port, timeout=remaining)
 
             connected_socket = []
+            # Preserve HTTP Host and TLS SNI/certificate checks on the original hostname.
+            connection._create_connection = lambda address, timeout, source_address=None: connect_socket(
+                address, deadline, connected_socket, source_address)
+
 
             def expire(current=connection, connected=connected_socket) -> None:
                 transport = connected[0] if connected else current.sock
@@ -149,7 +216,7 @@ class SystemOne:
                     result.reason = "deadline"
                     result.retryable = True
                     return
-                connected_socket.append(connection.sock)
+                connected_socket[:] = [connection.sock]
                 path = self.url.path or "/"
                 if self.url.query:
                     path += "?" + self.url.query
@@ -220,6 +287,10 @@ class SystemOne:
                     except (ValueError, KeyError, TypeError, AttributeError):
                         result.reason = "invalid answer"
                         return
+            except TimeoutError:
+                result.reason = "deadline"
+                result.retryable = True
+                return
             except (OSError, http.client.HTTPException, ValueError):
                 result.reason = "deadline" if time.monotonic() >= deadline else "transport failure"
                 result.retryable = True

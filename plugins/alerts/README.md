@@ -154,7 +154,7 @@ all kinds are accepted, but Jev still needs the key.
 
 **Secret:** `TYPESAFE_API_KEY`, read from the plugin's environment only and declared
 in the manifest with `required: false`. `TYPESAFE_API_URL` optionally replaces the
-System One endpoint, for example with the fake server in tests.
+System One endpoint. HTTPS is required except for numeric loopback test servers.
 
 ## Local meaning checks
 
@@ -300,7 +300,7 @@ question for that alert. Each batch is decided as follows.
    language. A request is split only when its body would exceed 120,000 bytes,
    under TypeSafe's limit of about 128 KB. All batches and retries share a
    15-second deadline, within the declared `timeout_ms` of 20 seconds. The
-   shared SDK client retries 408, 429 and 5xx at most three times per batch.
+   shared SDK client makes at most three attempts per batch, retrying 408, 429 and 5xx.
 4. **Decision.** `match` when the Noul, the probability of "yes", is at or above the
    threshold; otherwise `no_match`, whose explanation gives the score. TypeSafe's
    `confidence` field is never used. Noul answers do not carry it, and it has no

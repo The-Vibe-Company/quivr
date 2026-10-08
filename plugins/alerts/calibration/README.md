@@ -127,7 +127,7 @@ To reproduce the bounded CPU run from `plugins/alerts`, in Python 3.12+:
 ```bash
 pip install torch==2.8.0+cpu torchvision==0.23.0+cpu \
   --index-url https://download.pytorch.org/whl/cpu
-pip install sentence-transformers==6.1.0 transformers==5.19.0 pillow==12.3.0
+pip install sentence-transformers==6.1.0 transformers==5.19.0 tokenizers==0.23.2 pillow==12.3.0
 python3 calibration/calibrate_vectors.py --model gemma --threads 2 \
   --output /tmp/alerts-vectors-gemma-results.json
 ```

@@ -15,6 +15,7 @@ import os
 import pathlib
 import tempfile
 import threading
+import types
 import unittest
 import urllib.error
 import uuid
@@ -116,6 +117,56 @@ class Reranker(unittest.TestCase):
             response['answers']['b']['noul'] = float('nan')
             with self.assertRaisesRegex(RuntimeError, '^reranker attempt failed'):
                 search_trial.rerank('question', {'a': 'first', 'b': 'second'}, budget, 'fixture-key', .042)
+            requests = []
+            def batch_response(request, **kwargs):
+                self.assertLessEqual(len(request.data), 120_000)
+                names = json.loads(request.data)['questions']
+                requests.append(list(names))
+                return io.BytesIO(json.dumps({'model': 'jev-1.13.0', 'usage': {'input_tokens': 20},
+                    'answers': {name: {'noul': {'a': .1, 'b': .9}[name]} for name in names}}).encode())
+            opener.open.side_effect = batch_response
+            split_budget = embeddings.Budget(200000, 1)
+            ranked = search_trial.rerank('question', {'a': 'é' * 40000, 'b': 'é' * 40000},
+                                        split_budget, 'fixture-key', .042)
+            self.assertEqual(ranked, ['b', 'a'])
+            self.assertEqual(requests, [['a'], ['b']])
+            self.assertEqual(split_budget.summary()['confirmed_input_tokens'], 40)
+            for slow in ('body', 'ledger'):
+                with self.subTest(slow=slow):
+                    clock = [0.]
+                    usage = embeddings.Budget(100000, 1)
+                    settle = usage.settle
+                    encoded = json.dumps({'model': 'jev-1.13.0', 'usage': {'input_tokens': 20},
+                                          'answers': {'a': {'noul': .9}}}).encode()
+                    class Body(io.BytesIO):
+                        def read(self, size=-1):
+                            if slow == 'body':
+                                clock[0] = 61.
+                            return super().read(size)
+                        def read1(self, size=-1):
+                            return self.read(size)
+                    wire = Body(encoded)
+                    wire.fp = types.SimpleNamespace(raw=types.SimpleNamespace(_sock=mock.Mock()))
+                    def headers(*args, **kwargs):
+                        if slow == 'body':
+                            clock[0] = 59.
+                        return wire
+                    def ledger(*args):
+                        settle(*args)
+                        if slow == 'ledger':
+                            clock[0] = 61.
+                    opener.open.side_effect = headers
+                    with mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]), \
+                         mock.patch.object(usage, 'settle', side_effect=ledger):
+                        with self.assertRaisesRegex(RuntimeError, '^reranker attempt failed'):
+                            search_trial.rerank('question', {'a': 'first'}, usage, 'fixture-key', .042)
+                    if slow == 'body':
+                        wire.fp.raw._sock.settimeout.assert_called_once_with(1.)
+                        self.assertEqual(usage.summary()['confirmed_input_tokens'], 0)
+                        self.assertEqual(usage.summary()['reserved_input_tokens'], 65536)
+                    else:
+                        self.assertEqual(usage.summary()['confirmed_input_tokens'], 20)
+                        self.assertEqual(usage.summary()['reserved_input_tokens'], 0)
 
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
