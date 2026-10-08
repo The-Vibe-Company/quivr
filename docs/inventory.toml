@@ -13,9 +13,10 @@
 #
 # summary is optional: one line shown after the page title on its audience's
 # start page. Then run `make start-pages`: `make docs` fails with
-# `stale-start-page` until the start pages match this list. The public
-# documentation site is not listed here: its pages are the MDX files of
-# docs-site/ and its navigation is docs-site/docs.json (scripts/mintlify_site.py).
+# `stale-start-page` until the start pages match this list. Public site pages
+# normally stay outside this list; declare an MDX page here when it should
+# appear on a start page and receive repository link checks. Site navigation
+# stays in docs-site/docs.json (scripts/mintlify_site.py).
 #
 # audience: who reads it
 #   functional     integrators and non-developers learning what Quivr does
