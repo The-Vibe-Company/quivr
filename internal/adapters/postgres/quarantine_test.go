@@ -314,31 +314,6 @@ func TestQuarantineReprocess(t *testing.T) {
 	if got := w.list(quarantine.Filter{}); len(got) != 1 || got[refused].VersionID == "" {
 		t.Fatalf("still stuck %+v", got)
 	}
-
-	// Quarantines recorded before live-import outages became indefinite retries
-	// are selected by their historical code and explicitly re-pinned by reprocess.
-	historical := w.text("old-plugin-pin", "The ferry returned to the harbour.")
-	original := w.read(historical)
-	reason := content.Diagnostic{Code: "pinned_plugin_unavailable", Message: "old build unavailable", Plan: "plan-old", Plugin: "example.plugin", PluginVersion: "0.1.0", Contribution: "ingestion", Retryable: true}
-	if err := w.store.QuarantineVersion(ctx, w.org, historical, reason); err != nil {
-		t.Fatal(err)
-	}
-	f := quarantine.Filter{CorpusID: w.corpusID, Code: reason.Code}
-	if entries := w.list(f); len(entries) != 1 || entries[historical].Reason != reason {
-		t.Fatalf("historical plugin quarantine not selected: %+v", entries)
-	}
-	done = w.reprocess("old-plugin-pin", f)
-	var active string
-	if err := w.pool.QueryRow(ctx, `SELECT plan_id FROM active_pipeline_plan`).Scan(&active); err != nil {
-		t.Fatal(err)
-	}
-	recovered = w.read(historical)
-	if done.Reprocess.PlanID != active || done.Counters["versions_recovered"] != 1 || recovered.ID != original.ID || recovered.RecordID != original.RecordID || recovered.Availability.State != "retrieval_ready" || len(recovered.Diagnostics) != 0 {
-		t.Fatalf("historical quarantine did not recover under the active plan: operation %+v, Version %+v", done, recovered)
-	}
-	if entries := w.list(f); len(entries) != 0 {
-		t.Fatalf("recovered historical quarantine still listed: %+v", entries)
-	}
 }
 
 // TestCanceledReprocessQuarantinesAgain cancels a reprocess while a Version

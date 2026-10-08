@@ -4131,13 +4131,11 @@ components:
 
         - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
           during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
-          longer serve the work. Historical Versions may also carry this reason after a live-import
-          reachability outage. Live imports
+          longer serve the work. Live imports
           and normalization now retain their pin and retry reachability outages until the exact build
           returns; they never silently move to its replacement. A Version with this diagnostic is
           quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
-          plugin_version name the original plan and plugin. Quarantine reprocess explicitly uses the
-          active plan to recover quarantined Versions with this reason.
+          plugin_version name the original plan and plugin.
         - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
           rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
           work stopped instead of calling it, with the same outcome and fields as

@@ -121,8 +121,6 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 - **Plan.** It is pinned to the plan active when it was accepted, like other work. A plugin of that plan that becomes unreachable quarantines the document again with `pinned_plugin_unavailable`.
 - **Interruptions.** A restart resumes the document it was processing. Canceling it puts a document it had started back in quarantine with its previous reason.
 
-Versions quarantined with `pinned_plugin_unavailable` remain recoverable while their Record still desires them and is not withdrawn. Use `code: pinned_plugin_unavailable` in both the dry run and start request after verifying that the active plan's plugins are reachable. The operation retains the original receipt and Version identities and explicitly uses the active plan, even when the old pinned build is permanently gone.
-
 ## Troubleshooting
 
 | Answer | Cause | Fix |
