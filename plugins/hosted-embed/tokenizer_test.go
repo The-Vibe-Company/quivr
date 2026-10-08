@@ -45,6 +45,11 @@ func TestLocalTokenizerOverlapsAndRecovers(t *testing.T) {
 	script := filepath.Join(dir, "python")
 	source := fmt.Sprintf(`#!%s
 import json,os,socket,sys
+s=socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[4])
+s.sendall((json.dumps({'pid':os.getpid(),'text':'startup'})+'\n').encode())
+s.recv(1)
+s.close()
 print('ready',flush=True)
 for line in sys.stdin:
     rows=json.loads(line)
@@ -89,7 +94,7 @@ for line in sys.stdin:
 			entered <- request{conn, payload.Text, payload.PID}
 		}
 	}()
-	next := func() request {
+	event := func() request {
 		t.Helper()
 		select {
 		case r := <-entered:
@@ -98,6 +103,18 @@ for line in sys.stdin:
 		case <-time.After(3 * time.Second):
 			t.Fatal("concurrent tokenizer request did not enter before held exchanges completed")
 			return request{}
+		}
+	}
+	next := func() request {
+		t.Helper()
+		for {
+			r := event()
+			if r.Text != "startup" {
+				return r
+			}
+			if _, err := r.Write([]byte("r")); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	type result struct {
@@ -130,10 +147,29 @@ for line in sys.stdin:
 			t.Fatal(err)
 		}
 	}
+	// Startup is held beyond a caller's deadline. Cancellation must leave
+	// both helpers alive so subsequent calls use those exact processes.
+	startupA, startupB := event(), event()
+	coldCtx, cancelCold := context.WithCancel(t.Context())
+	defer cancelCold()
+	waitingCold := &tokenizerWaitContext{Context: coldCtx, started: make(chan struct{})}
+	cold := start(waitingCold, "cold")
+	select {
+	case <-waitingCold.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cold caller did not reach admission")
+	}
+	cancelCold()
+	finish(cold, false)
+	release(startupA, "r")
+	release(startupB, "r")
 	first := start(t.Context(), "one")
 	a := next()
 	second := start(t.Context(), "two")
 	b := next()
+	if (a.PID != startupA.PID && a.PID != startupB.PID) || (b.PID != startupA.PID && b.PID != startupB.PID) {
+		t.Fatal("startup cancellation replaced a healthy helper")
+	}
 	if a.PID == b.PID {
 		t.Fatal("concurrent exchanges shared a process")
 	}
@@ -173,22 +209,26 @@ for line in sys.stdin:
 	finish(replacement, true)
 	release(d, "r")
 	finish(third, true)
-	// A hung exchange cancels promptly; healthy work completes independently.
+	// A cancelled exchange returns promptly while its helper drains the answer.
 	heldCtx, cancelHeld := context.WithCancel(t.Context())
 	defer cancelHeld()
 	held := start(heldCtx, "held")
-	next()
+	h := next()
 	healthy := start(t.Context(), "healthy")
 	f := next()
 	release(f, "r")
 	finish(healthy, true)
 	cancelHeld()
 	finish(held, false)
+	release(h, "r")
 	// Hold the healthy process so the next call must use the recovered slot.
 	occupy := start(t.Context(), "occupy")
 	g := next()
 	recovered := start(t.Context(), "recovered")
 	j := next()
+	if j.PID != h.PID && g.PID != h.PID {
+		t.Fatal("caller cancellation replaced the healthy helper")
+	}
 	if j.PID == g.PID {
 		t.Fatal("recovered request shared an occupied helper")
 	}
