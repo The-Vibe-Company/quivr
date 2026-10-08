@@ -1284,6 +1284,59 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 }
 
 func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
+	t.Run("twenty paragraph Parts", func(t *testing.T) {
+		fake := embedding.New()
+		server := httptest.NewServer(fake)
+		defer server.Close()
+		c := testConfig("openai", server.URL)
+		c.Packing, c.DocumentTemplate, c.TitleSource = "paragraphs", "gemma", "title"
+		c.BodyTokens, c.MaxTokens, c.MaxChunks = 512, 2048, 4
+		i := newIngester(c, "fake-key", slog.Default())
+		i.tokenizer = wordCounter{}
+		req := ingestRequest(c, "", true)
+		req.Parts = []quivrplugin.IngestPart{{Key: "slug", Role: "context", Text: "update"}, {Key: "headline", Role: "title", Text: "Library opens"}}
+		for n := range 20 {
+			req.Parts = append(req.Parts, quivrplugin.IngestPart{Key: fmt.Sprintf("paragraph-%02d", n), Role: "body", Text: fmt.Sprint(n) + " " + strings.Repeat("word ", 79)})
+		}
+		got, err := i.SegmentAndEmbed(t.Context(), req)
+		if err != nil || len(got) < 3 || len(got) > 5 {
+			t.Fatalf("twenty paragraphs: passages=%d err=%v", len(got), err)
+		}
+		covered := 0
+		for _, s := range got {
+			if len(s.SourceRanges) < 2 || len(s.Vectors[c.spaceID()]) != c.Dimensions {
+				t.Fatalf("unpacked or unembedded passage: %+v", s)
+			}
+			words := 0
+			for _, r := range s.SourceRanges {
+				part := req.Parts[covered+2]
+				if r.PartKey != part.Key || r.Start != 0 || r.End != utf8.RuneCountInString(part.Text) {
+					t.Fatalf("missing or repeated paragraph %d: %+v", covered, r)
+				}
+				words += len(strings.Fields(part.Text))
+				covered++
+			}
+			if words > 512 {
+				t.Fatalf("body budget exceeded: %d words", words)
+			}
+		}
+		if covered != 20 {
+			t.Fatalf("covered %d paragraphs; want twenty", covered)
+		}
+		inputs := 0
+		for _, call := range fake.Calls() {
+			for _, input := range call.Texts {
+				body, ok := strings.CutPrefix(input, "title: Library opens | text: ")
+				if !ok || strings.Contains(body, "Library opens") || strings.Contains(body, "update") {
+					t.Fatalf("unexpected title/context in model input: %q", input)
+				}
+				inputs++
+			}
+		}
+		if inputs != len(got) {
+			t.Fatalf("provider inputs=%d passages=%d", inputs, len(got))
+		}
+	})
 	fake := embedding.New()
 	server := httptest.NewServer(fake)
 	defer server.Close()
