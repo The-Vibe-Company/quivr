@@ -46,6 +46,9 @@ var ErrQueryTooLong = publicerr.QueryTooLong
 var ErrUnsupportedProfile = publicerr.UnsupportedProfile
 var ErrUnavailable = publicerr.SearchUnavailable
 
+// ErrModelUnavailable reports a query encoder that could not answer.
+var ErrModelUnavailable = publicerr.ModelUnavailable
+
 // ErrMetadataFilterUnavailable requires rebuilding a generation that predates
 // typed metadata projection.
 var ErrMetadataFilterUnavailable = publicerr.MetadataFilterUnavailable

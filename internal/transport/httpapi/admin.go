@@ -117,7 +117,8 @@ func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus
 
 func documentToTransport(a content.Activity) transport.AdminDocument {
 	return transport.AdminDocument{VersionId: a.VersionID, RecordId: a.RecordID, CorpusId: a.Source.CorpusID, SourceNamespace: a.Source.Namespace, RecordKey: a.Source.RecordKey,
-		Title: optionalString(a.Title), State: transport.AdminDocumentState(a.State), IsCurrent: a.Current, Steps: stepsToTransport(a.Steps)}
+		Title: optionalString(a.Title), State: transport.AdminDocumentState(a.State), IsCurrent: a.Current, Steps: stepsToTransport(a.Steps),
+		Evaluation: transport.AdminDocumentEvaluation(a.Evaluation)}
 }
 
 func stepsToTransport(s content.Steps) transport.VersionSteps {

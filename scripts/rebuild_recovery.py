@@ -77,7 +77,7 @@ def verify(stack):
     terminal=call('POST','/v0/corpora/'+a+'/rebuilds',{'idempotency_key':'recovery-'+run},202)
     assert terminal['operation_id']==op['operation_id'] and terminal['result']['projection_generation_id']==generation,terminal
     error=call('POST','/v0/search',{'query':'phare','corpus_ids':[a],'mode':'semantic'},503)
-    assert error['retryable'] and error['code']=='search_unavailable',error
+    assert error['retryable'] and error['code']=='model_unavailable',error
     stack.stop_processes();stack.compose('start','tei')
     stack.compose('up','-d','--wait','--wait-timeout','180')
     stack.config();stack.start_processes()

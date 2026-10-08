@@ -212,6 +212,18 @@ def _checkout(repository, revision):
         yield path
 
 
+@contextlib.contextmanager
+def _checkouts(repository):
+    """Share one read-only checkout per revision across one confirmation."""
+    with contextlib.ExitStack() as stack:
+        paths = {}
+        def checkout(revision):
+            if not isinstance(revision, str) or revision not in paths:
+                paths[revision] = stack.enter_context(_checkout(repository, revision))
+            return paths[revision]
+        yield checkout
+
+
 def _fingerprints(checkout):
     paths = _run(['git', 'ls-files', '-z'], checkout).split('\0')
     def relevant(path):
@@ -309,6 +321,7 @@ def _request(state, number, checkout, heldout, fusion='ranked', *,
             or effective_baseline['retrieve']['dense_weight'] != baseline['dense_weight']):
         raise Refused('engine baseline does not match frozen campaign baseline')
     effective_candidate = _candidate_settings(engine_checkout, candidate, baseline, fusion)
+    files = _fingerprints(checkout)
     return {'version': 1, 'campaign': spec['name'], 'trial': int(number),
             'baseline_hash': search_trial.digest(baseline), 'candidate_hash': search_trial.digest(candidate),
             'baseline_config': search_trial.configuration(baseline),
@@ -320,12 +333,12 @@ def _request(state, number, checkout, heldout, fusion='ranked', *,
             'heldout_family_digest': search_trial.digest(heldout_family),
             'dev_evidence': sorted({item['result_key'] for item in dev}),
             'engine_runner_git_sha': engine_git_sha, 'engine_runner_scorer_digest': engine_scorer_digest,
-            'engine_files': _fingerprints(engine_checkout),
+            'engine_files': files if engine_checkout == checkout else _fingerprints(engine_checkout),
             'confirmation_policy_digest': confirmation_policy_digest,
             'mapping_policy': {'ingestion': 'effective_production_configuration',
                                'character_windows': 'no_conversion', 'reranker': 'none',
                                'fusion': fusion, 'maximum_candidate_count': 100},
-            'files': _fingerprints(checkout),
+            'files': files,
             'effective_baseline': effective_baseline, 'effective_candidate': effective_candidate,
             'baseline_request_limit': baseline['candidate_count'], 'candidate_request_limit': candidate['candidate_count'],
             'settings_fingerprint': search_trial.digest([effective_baseline, effective_candidate,
@@ -444,11 +457,12 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
     report = None
     outcome = {'status': 'pending_confirmation', 'reason': 'Trusted full-engine confirmation failed or evidence is incomplete.'}
     try:
-        if hasattr(adapter, 'prepare'):
-            adapter.prepare(trial)
-        with _checkout(repository, state['git_sha']) as checkout, \
-             _checkout(repository, getattr(adapter, 'engine_git_sha', None)) as engine_checkout:
-            request = _request(state, trial, checkout, getattr(adapter, 'heldout_fingerprint', None),
+        # Building the request only reads; promotion edits its own checkout later.
+        with _checkouts(repository) as checkout:
+            if hasattr(adapter, 'prepare'):
+                adapter.prepare(trial, checkout)
+            engine_checkout = checkout(getattr(adapter, 'engine_git_sha', None))
+            request = _request(state, trial, checkout(state['git_sha']), getattr(adapter, 'heldout_fingerprint', None),
                                getattr(adapter, 'fusion', 'ranked'),
                                engine_git_sha=getattr(adapter, 'engine_git_sha', None),
                                engine_scorer_digest=getattr(adapter, 'engine_scorer_digest', None),

@@ -9,7 +9,7 @@ import (
 )
 
 // GaugeDefinition names one process gauge; definitions are fixed by the engine.
-type GaugeDefinition struct{ Name, Help string }
+type GaugeDefinition struct{ Name, Help, Unit string }
 
 // RegisterGauges samples one related group through the OTLP reader, without
 // needing Prometheus requests or a second polling goroutine. A failed read
@@ -23,7 +23,7 @@ func RegisterGauges(definitions []GaugeDefinition, sample func(context.Context) 
 	instruments := make([]metric.Float64ObservableGauge, len(definitions))
 	observables := make([]metric.Observable, len(definitions))
 	for i, definition := range definitions {
-		gauge, err := meter.Float64ObservableGauge(definition.Name, metric.WithDescription(definition.Help))
+		gauge, err := meter.Float64ObservableGauge(definition.Name, metric.WithDescription(definition.Help), metric.WithUnit(definition.Unit))
 		if err != nil {
 			otel.Handle(err)
 			return

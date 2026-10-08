@@ -242,51 +242,62 @@ func TestPinnedWorkStarts(t *testing.T) {
 	}
 }
 
-// TestPinnedWorkDrains runs after the harness restarted the worker. New work
-// goes to B while A is still down; the Record pinned to A never reaches B,
-// which is up: its Version is quarantined with a diagnostic naming A's plan
-// and A. A then has nothing pinned to it and reads as inactive.
-func TestPinnedWorkDrains(t *testing.T) {
+// TestPinnedWorkRetries observes the original receipt after a worker restart:
+// B handles new work while A stays draining and its import keeps retrying.
+func TestPinnedWorkRetries(t *testing.T) {
 	operator, a, _, record := pinnedSetup(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	corpusID, run := ingestionPluginCorpus(t)
 	ingestEnriched(t, corpusID, "after-switch-"+run, "lighthouse", "The lighthouse keeper logged every passing ship.")
-
 	receipt := request(t, "POST", "/v0/records", admin, record, 202)
 	version := "/v0/records/" + receipt["record_id"].(string) + "/versions/" + receipt["version_id"].(string)
-	deadline := time.Now().Add(60 * time.Second)
-	var v map[string]any
+	deadline := time.Now().Add(10 * time.Second)
 	for {
-		v = request(t, "GET", version, admin, nil, 200)
-		if v["availability"].(map[string]any)["state"] == "quarantined" {
-			break
+		v := request(t, "GET", version, admin, nil, 200)
+		availability := v["availability"].(map[string]any)
+		if availability["state"] == "quarantined" || availability["searchable"] == true {
+			t.Fatalf("the import pinned to A must retry, never quarantine or move to B: %v", v)
 		}
-		if v["availability"].(map[string]any)["searchable"] == true || time.Now().After(deadline) {
-			t.Fatalf("the Version pinned to A: %v, want quarantined, never processed by B", v)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	diagnostics := v["diagnostics"].([]any)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics %v, want the pinned plugin's", diagnostics)
-	}
-	d := diagnostics[0].(map[string]any)
-	if d["code"] != "pinned_plugin_unavailable" || d["plugin"] != "example.hash_embedder" || d["plugin_version"] != "0.2.0" || d["contribution"] != "ingestion" {
-		t.Fatalf("diagnostic %v, want pinned_plugin_unavailable naming example.hash_embedder@0.2.0", d)
-	}
-	if pinned := request(t, "GET", "/v0/admin/plugins/plans/"+d["plan"].(string), operator, nil, 200); planRoles(pinned)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
-		t.Fatalf("the diagnostic's plan %v does not name A", pinned)
-	}
-
-	deadline = time.Now().Add(60 * time.Second)
-	for {
-		drained := registrationAt(t, operator, "0.2.0", a)
-		if drained["state"] == "inactive" && drained["pinned_work"].(float64) == 0 {
+		if v["processing"].(map[string]any)["state"] == "retrying" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("A never finished draining: %v", drained)
+			t.Fatalf("the import never retried after the restart: %v", v)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if old := registrationAt(t, operator, "0.2.0", a); old["state"] != "draining" || old["pinned_work"].(float64) < 1 {
+		t.Fatalf("unreachable A must retain its pending import: %v", old)
+	}
+}
+
+// TestPinnedWorkDrains runs once the exact A build returns at its old address.
+// Its receipt finishes and releases A while B continues serving the active plan.
+// The existing 60s drain bound covers the real activity's 10s retry backoff;
+// THE-1308's HTTP owner regression exercises budget exhaustion without time waits.
+func TestPinnedWorkDrains(t *testing.T) {
+	operator, a, _, record := pinnedSetup(t)
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	original := request(t, "POST", "/v0/records", admin, record, 202)
+	receipt := awaitRetrievalReady(t, original["receipt_id"].(string))
+	if receipt["version_id"] != original["version_id"] || receipt["record_id"] != original["record_id"] {
+		t.Fatalf("the resumed import changed identity: original %v, resumed %v", original, receipt)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		drained := registrationAt(t, operator, "0.2.0", a)
+		// The feed starts at its head without a cursor. Inspect durable
+		// completion so an event emitted before this test cannot be missed.
+		version := request(t, "GET", "/v0/records/"+receipt["record_id"].(string)+"/versions/"+receipt["version_id"].(string), admin, nil, 200)
+		if diagnostics, _ := version["diagnostics"].([]any); len(diagnostics) != 0 {
+			t.Fatalf("restored A left the import blocked: %v", version)
+		}
+		if drained["state"] == "inactive" && drained["pinned_work"].(float64) == 0 && version["steps"].(map[string]any)["enriched_at"] != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("A never finished draining after its build returned: %v", drained)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

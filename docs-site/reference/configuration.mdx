@@ -46,7 +46,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
 | `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
 | `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
-| `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
+| `pinned_plugin_attempts` | no | Attempts before `pinned_plugin_unavailable` after a plugin leaves the active plan: an unavailable plugin during an Operation, an incompatible ingestion owner, or an ingestion invocation deadline. Live imports, including normalization, keep retrying reachability outages (connection failure or manifest digest mismatch) on their original pin. Worker only. Default `10`. |
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
 | `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
 | `rebuild` | no | Parallel Version coverage during Corpus rebuilds. See [Rebuild](#rebuild). |
@@ -313,9 +313,17 @@ The setting is part of each generation. A change never alters an existing index:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`32`; `0` selects the default. `1` restores serial work. Worker only. |
+| `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`256`; `0` selects the default. `1` restores serial work. Worker only. |
 
-Each step covers at most 25 Versions, then saves progress before a 200 ms pause.
+Each step refills a free slot as soon as its Version finishes, including across
+candidate pages. A slow Version occupies one slot while the others keep working.
+The worker saves progress below the earliest unfinished Version; stored coverage
+prevents counting completed Versions twice after a restart. A final check catches
+new eligible Versions behind that saved position before the index switches.
+Steps stop starting work after one minute. Once every active Version finishes,
+the worker pauses for 200 ms before the next step starts. Shorter activity deadlines stop
+admission earlier. The worker checks for cancellation every five seconds while
+storage remains available.
 Rebuild and backfill activities use the [bulk worker queue](#worker-queues),
 whose activity budget is separate from live ingestion. Each active rebuild
 step can run `concurrency` Versions; the process-wide upper bound is
