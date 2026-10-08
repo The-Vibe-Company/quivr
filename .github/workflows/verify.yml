@@ -38,9 +38,6 @@ jobs:
           --health-interval 2s --health-timeout 2s --health-retries 20
     env:
       EVAL_CONTROL_TEST_DSN: ${{ startsWith(matrix.group, 'eval-') && 'postgresql://evaluation@localhost:55433/evaluation_tests' || '' }}
-      NUMBA_CACHE_DIR: ${{ github.workspace }}/.scratch/numba
-      NUMBA_CPU_NAME: generic
-      NUMBA_NUM_THREADS: 2
       OPENBLAS_NUM_THREADS: 1
     steps:
       - uses: actions/checkout@v7
@@ -67,12 +64,6 @@ jobs:
         run: |
           pip install -r scripts/eval/requirements-news.txt -r scripts/eval/requirements-campaign.txt -r scripts/check-requirements.txt
           pip install --no-deps -e plugins/jev-rerank
-      # ranx marks its kernels cacheable. Retain compilation, with portable CPU instructions.
-      - if: startsWith(matrix.group, 'eval-')
-        uses: actions/cache@v6
-        with:
-          path: .scratch/numba
-          key: quick-numba-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
       # Real encryption owner tests need both age and age-keygen; avoid apt's index update.
       - if: startsWith(matrix.group, 'eval-')
         run: |
