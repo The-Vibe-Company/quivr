@@ -12,18 +12,20 @@ import (
 // It never waits for canonical row locks, which would invert the writer lock order.
 const queueObservationKeysSQL = `SELECT organization,record_id FROM unnest($1::text[],$2::text[]) k(organization,record_id) ORDER BY organization,record_id OFFSET 0`
 
-func queueRecordObservations(batch *pgx.Batch, organizations, records []string) {
-	batch.Queue(`INSERT INTO queue_enrichment_records(organization,record_id)
- SELECT DISTINCT organization,record_id FROM (`+queueObservationKeysSQL+`) k ORDER BY organization,record_id
- ON CONFLICT DO NOTHING`, organizations, records)
-	batch.Queue(`SELECT q.record_id FROM (`+queueObservationKeysSQL+`) k
+// recordObservationSQL maintains one Record's queue observation from its
+// canonical state. Each statement takes (organizations, records).
+var recordObservationSQL = [...]string{
+	`INSERT INTO queue_enrichment_records(organization,record_id)
+ SELECT DISTINCT organization,record_id FROM (` + queueObservationKeysSQL + `) k ORDER BY organization,record_id
+ ON CONFLICT DO NOTHING`,
+	`SELECT q.record_id FROM (` + queueObservationKeysSQL + `) k
  JOIN LATERAL (SELECT record_id FROM queue_enrichment_records q
- WHERE (q.organization,q.record_id)=(k.organization,k.record_id) LIMIT 1 FOR UPDATE) q ON true`, organizations, records)
+ WHERE (q.organization,q.record_id)=(k.organization,k.record_id) LIMIT 1 FOR UPDATE) q ON true`,
 	// Only current/desired Versions newly become dead on a fence. Older
 	// Versions already died on pointer changes, so observation never scans a
 	// Record's entire Version history.
-	batch.Queue(`INSERT INTO projection_purge_candidates(organization,version_id)
- SELECT DISTINCT q.organization,p.version_id FROM (`+queueObservationKeysSQL+`) k
+	`INSERT INTO projection_purge_candidates(organization,version_id)
+ SELECT DISTINCT q.organization,p.version_id FROM (` + queueObservationKeysSQL + `) k
  JOIN LATERAL (SELECT * FROM queue_enrichment_records q WHERE (q.organization,q.record_id)=(k.organization,k.record_id) LIMIT 1) q ON true
  JOIN LATERAL (SELECT current_version_id,desired_version_id,withdrawn FROM records r WHERE (r.organization,r.id)=(k.organization,k.record_id) LIMIT 1) r ON true
  CROSS JOIN LATERAL (VALUES(q.version_id,r.current_version_id),(q.desired_version_id,r.desired_version_id),
@@ -31,13 +33,13 @@ func queueRecordObservations(batch *pgx.Batch, organizations, records []string) 
  WHERE p.version_id<>'' AND (p.version_id IS DISTINCT FROM p.current_id OR
  (NOT q.gone AND (r.withdrawn OR EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(k.organization,k.record_id)))))
  ORDER BY q.organization,p.version_id
- ON CONFLICT(organization,version_id) DO UPDATE SET version_id=EXCLUDED.version_id`, organizations, records)
-	batch.Queue(`UPDATE queue_enrichment_records q SET
+ ON CONFLICT(organization,version_id) DO UPDATE SET version_id=EXCLUDED.version_id`,
+	`UPDATE queue_enrichment_records q SET
  version_id=coalesce(r.current_version_id,''),desired_version_id=coalesce(r.desired_version_id,''),
  gone=coalesce(r.withdrawn,true) OR EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(q.organization,q.record_id)),
  pending=coalesce(v.baseline_ready AND NOT v.quarantined AND v.enrichment_state IN ('queued','running','retrying') AND NOT r.withdrawn
  AND NOT EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(q.organization,q.record_id)),false)
- FROM (`+queueObservationKeysSQL+`) k
+ FROM (` + queueObservationKeysSQL + `) k
  LEFT JOIN LATERAL (SELECT current_version_id,desired_version_id,withdrawn FROM records r WHERE (r.organization,r.id)=(k.organization,k.record_id) LIMIT 1) r ON true
  LEFT JOIN LATERAL (SELECT baseline_ready,quarantined,enrichment_state FROM record_versions v WHERE (v.organization,v.id)=(k.organization,r.current_version_id) LIMIT 1) v ON true
  WHERE (q.organization,q.record_id)=(k.organization,k.record_id)
@@ -46,8 +48,14 @@ func queueRecordObservations(batch *pgx.Batch, organizations, records []string) 
  coalesce(r.withdrawn,true) OR EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(k.organization,k.record_id)),
  coalesce(v.baseline_ready AND NOT v.quarantined AND v.enrichment_state IN ('queued','running','retrying') AND NOT r.withdrawn
  AND NOT EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(k.organization,k.record_id)),false))
- AND q.ctid=ANY(ARRAY(SELECT locked.ctid FROM (`+queueObservationKeysSQL+`) ids
- JOIN LATERAL (SELECT ctid FROM queue_enrichment_records p WHERE (p.organization,p.record_id)=(ids.organization,ids.record_id) LIMIT 1) locked ON true))`, organizations, records)
+ AND q.ctid=ANY(ARRAY(SELECT locked.ctid FROM (` + queueObservationKeysSQL + `) ids
+ JOIN LATERAL (SELECT ctid FROM queue_enrichment_records p WHERE (p.organization,p.record_id)=(ids.organization,ids.record_id) LIMIT 1) locked ON true))`,
+}
+
+func queueRecordObservations(batch *pgx.Batch, organizations, records []string) {
+	for _, sql := range recordObservationSQL {
+		batch.Queue(sql, organizations, records)
+	}
 }
 
 func observeQueueRecords(ctx context.Context, tx pgx.Tx, organizations, records []string) error {
@@ -66,6 +74,16 @@ func observeQueueRecords(ctx context.Context, tx pgx.Tx, organizations, records 
 	batch := &pgx.Batch{}
 	queueRecordObservations(batch, organizations, records)
 	return tx.SendBatch(ctx, batch).Close()
+}
+
+// observeRecordInBatch observes a Record after the writes already in batch,
+// without another round trip. A journal group observes each member once.
+func observeRecordInBatch(ctx context.Context, batch *pgx.Batch, org, record string) {
+	if group := journalGroupOf(ctx); group != nil {
+		group.records[record] = true
+		return
+	}
+	queueRecordObservations(batch, []string{org}, []string{record})
 }
 
 func observeQueueVersion(ctx context.Context, tx pgx.Tx, organization, version string) error {

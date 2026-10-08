@@ -5,9 +5,10 @@ from unittest import mock
 from types import SimpleNamespace
 
 from load_report import distribution, request_summary
-from load_scenarios import validate
+from load_scenarios import read, validate
 from load import Workload
 from load_stack import LoadStack, local_docker_host
+from local import ROOT
 
 
 class LoadContracts(unittest.TestCase):
@@ -116,3 +117,23 @@ class LoadContracts(unittest.TestCase):
                 invalid.update(changes)
                 with self.assertRaisesRegex(ValueError, message):
                     validate(invalid)
+        # An anchored burst alone may omit search workers; timed arrivals and
+        # faults would make its single common arrival ambiguous.
+        anchored = copy.deepcopy(scenario)
+        anchored['ingestion'].update(per_second=0, anchor_records=800)
+        anchored['search']['concurrency'] = 0
+        del anchored['replicas']['kill_at_seconds']
+        self.assertEqual(validate(copy.deepcopy(anchored)), anchored)
+        self.assertEqual(read(ROOT / 'tests/load/burst-800.yaml')['ingestion']['anchor_records'], 800)
+        for section, changes, message in [('ingestion', {'per_second': 1}, 'per_second'),
+                                          ('replicas', {'kill_at_seconds': 5}, 'kill'),
+                                          ('ingestion', {'anchor_records': 0}, 'anchor_records')]:
+            with self.subTest(section=section, changes=changes):
+                invalid = copy.deepcopy(anchored)
+                invalid[section].update(changes)
+                with self.assertRaisesRegex(ValueError, message):
+                    validate(invalid)
+        searchless = copy.deepcopy(scenario)
+        searchless['search']['concurrency'] = 0
+        with self.assertRaisesRegex(ValueError, 'concurrency'):
+            validate(searchless)
