@@ -160,6 +160,9 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 }
 
 func (s Service) Run(ctx context.Context, org, receiptID string) error {
+	if handled, err := s.runPrepared(ctx, org, receiptID); handled {
+		return err
+	}
 	if err := s.Content.Materialize(ctx, org, receiptID); err != nil {
 		return err
 	}
