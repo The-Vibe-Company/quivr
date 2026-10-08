@@ -266,6 +266,9 @@ class NativeCampaign(unittest.TestCase):
             lambda r: r['receipts'][0].update(status='pending'),
             lambda r: r['receipts'][0].update(run_id='forged-run'),
         )
+        patch = mock.patch('subprocess.run', wraps=subprocess.run)
+        run = patch.start()
+        self.addCleanup(patch.stop)
         for mutate in mutations:
             with self.subTest(mutate=mutate):
                 self.tamper = mutate
@@ -276,6 +279,9 @@ class NativeCampaign(unittest.TestCase):
                 self.assertFalse(self.apps)
         self.assertEqual(len(self.invocations), 1)
         self.assertEqual(self.store.availability(self.name)['confirmation_reads_left'], 9)
+        # Campaign, engine and production settings share one revision: one checkout per confirmation.
+        clones = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ['git', 'clone']]
+        self.assertEqual(len(clones), len(mutations), clones)
 
     def test_production_settings_mismatch_is_unavailable_before_any_paid_dispatch(self):
         for field, value in (('batch_size', 8), ('max_tokens_per_segment', 512), ('hybrid_fusion', 'ranked')):
