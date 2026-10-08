@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import time
@@ -14,6 +15,8 @@ import ports
 
 PLUGIN = ROOT / 'tests/fakes/load-plugin'
 SERVICES = ('postgres', 'temporal', 'seaweed', 'weaviate')
+# Durable Version step columns, in pipeline order (accepted_at is the revision's).
+STEPS = ('accepted', 'materialized', 'segmented', 'retrieval_ready', 'enriched', 'evaluated')
 
 
 def runtime_env():
@@ -152,6 +155,20 @@ class LoadStack(Stack):
                                      {'QUIVR_CONFIG': str(cfg)})
                 target.append({'process': child, 'url': f'http://127.0.0.1:{address}'})
                 self.ready(child, f'http://127.0.0.1:{probe}/readyz')
+
+    def step_times(self, versions):
+        """Durable step times of our own Versions, as epoch seconds by step."""
+        if not versions:
+            return {}
+        if not all(re.fullmatch(r'[A-Za-z0-9_:-]+', v) for v in versions):
+            raise ValueError('unexpected Version identifier')
+        query = ('SELECT v.id,' + ','.join(f"extract(epoch FROM {'a' if step == 'accepted' else 'v'}.{step}_at)" for step in STEPS)
+            + " FROM record_versions v JOIN accepted_revisions a ON (a.organization,a.version_id)=(v.organization,v.id)"
+            + " WHERE v.id=ANY(string_to_array('" + ','.join(versions) + "',','))")
+        rows = self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr', '-At', '-F', '\t',
+                            '-c', query, capture_output=True, text=True).stdout.splitlines()
+        return {row[0]: {step: float(value) for step, value in zip(STEPS, row[1:]) if value}
+                for row in (line.split('\t') for line in rows if line)}
 
     def kill_replica(self):
         killed = []

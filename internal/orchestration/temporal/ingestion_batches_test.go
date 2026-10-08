@@ -22,14 +22,15 @@ import (
 
 // The activity boundary owns bounded receipt execution, retry checkpoints and
 // plan lifetime. Successful siblings release after durable partial completion;
-// unfinished receipts and failed pin releases retry independently.
+// unfinished receipts and failed pin releases retry independently. Live
+// batches, the class of direct submissions, share the ready-commit scope.
 func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	steps := &batchSteps{started: make(chan struct{}, 32), release: make(chan struct{}), runs: map[string]int{}, enriched: map[string]int{}, parents: map[string]string{}}
 	pins := &batchPins{steps: steps, held: map[string]bool{}, released: map[string]int{}}
 	registerIngestionBatches(env, steps, pins)
-	in := content.DispatchBatch{ID: "batch", WorkQueue: workqueue.Bulk}
+	in := content.DispatchBatch{ID: "batch", WorkQueue: workqueue.Live}
 	for i := 0; i < 32; i++ {
 		parent := telemetry.Extract(logging.WithRequestID(context.Background(), fmt.Sprint(i)), http.Header{"Traceparent": {fmt.Sprintf("00-%032x-2222222222222222-01", i+1)}})
 		in.Receipts = append(in.Receipts, content.Dispatch{Organization: "org_a", ReceiptID: fmt.Sprint(i), TraceContext: telemetry.Encode(parent)})
@@ -67,7 +68,7 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 			t.Fatalf("receipt %d lost its caller context: %q", i, got)
 		}
 		if !steps.scoped[fmt.Sprint(i)] {
-			t.Fatalf("receipt %d lost the bulk commit scope while restoring its trace and pin", i)
+			t.Fatalf("receipt %d lost the batch commit scope while restoring its trace and pin", i)
 		}
 		want := 1
 		if i == 0 || i == 1 {

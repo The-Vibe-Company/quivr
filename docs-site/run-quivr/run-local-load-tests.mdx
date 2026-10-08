@@ -94,6 +94,26 @@ threshold is assumed. Stack logs remain under `.scratch/quivr-load-<run id>/`.
 The harness stops its processes and removes its containers and volumes on exit.
 Running again starts fresh synthetic data; reusing `--out` overwrites its reports.
 
+## Measure a burst of documents
+
+`tests/load/burst-800.yaml` is not part of the default run. It submits 800
+documents from 16 clients at one common arrival after a small warmup, with six
+alerts per document and no search workers:
+
+```bash
+make load args='--scenario tests/load/burst-800.yaml'
+```
+
+Set `ingestion.anchor_records` to choose the burst size; `per_second` must be `0`.
+Step times come from each document's stored processing timeline (accepted,
+materialized, segmented, retrieval ready, enriched and evaluated), measured from
+the common arrival. Enriched is when hybrid search can use the document's vectors.
+The receiver gives the time until all alerts of a document arrived. After the
+burst, public hybrid search checks every document. The run fails if any document
+is missing, an alert is missing, or the receiver saw a notice more than once.
+Searching during the burst would load the database it measures, so the
+report has no search lag for it.
+
 ## Share evidence
 
 Attach both reports to your requirements or release record. Compare runs with

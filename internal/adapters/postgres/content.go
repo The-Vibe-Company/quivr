@@ -84,18 +84,40 @@ func eventArguments(ctx context.Context, event eventInput) []any {
 	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx)}
 }
 
+// The append, its Record's queue observation and the checkpoint acknowledgement
+// travel in one round trip: the caller holds the journal lock until commit.
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
-	err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
-	if err == nil && event.Resource == "record" {
-		err = observeQueueRecords(ctx, tx, []string{event.Organization}, []string{event.ResourceID})
+	if journalGroupOf(ctx) != nil {
+		err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
+		if err == nil && event.Resource == "record" {
+			err = observeQueueRecords(ctx, tx, []string{event.Organization}, []string{event.ResourceID})
+		}
+		if err == nil {
+			_, err = tx.Exec(ctx, acknowledgeQueueJournalSQL, event.Organization, 1)
+		}
+		return sequence, err
 	}
-	if err == nil {
-		_, err = tx.Exec(ctx, acknowledgeQueueJournalSQL, event.Organization, 1)
+	batch := &pgx.Batch{}
+	queueEvent(ctx, batch, event)
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	if err := results.QueryRow().Scan(&sequence); err != nil {
+		return 0, err
 	}
-	return sequence, err
+	for range batch.Len() - 1 {
+		if _, err := results.Exec(); err != nil {
+			return 0, err
+		}
+	}
+	return sequence, results.Close()
 }
 
+// queueEvent appends one event, observes its Record and acknowledges the
+// observation checkpoint. Consecutive events in one batch share a single
+// acknowledgement of their contiguous range: it holds exactly when the chain of
+// one-event acknowledgements would. A trailing observation of the same Record
+// moves after the next append, which changes no canonical state it reads.
 func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
 	if group := journalGroupOf(ctx); group != nil {
 		group.events = append(group.events, journalEvent{event, telemetry.Encode(ctx)})
@@ -104,11 +126,41 @@ func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
 		}
 		return
 	}
+	acknowledged := 0
+	queued := batch.QueuedQueries
+	if n := len(queued); n > 0 && queued[n-1].SQL == acknowledgeQueueJournalSQL && queued[n-1].Arguments[0] == event.Organization {
+		if count, ok := queued[n-1].Arguments[1].(int); ok {
+			acknowledged = count
+			queued = queued[:n-1]
+			if event.Resource == "record" && trailingObservation(queued, event.Organization, event.ResourceID) {
+				queued = queued[:len(queued)-len(recordObservationSQL)]
+			}
+			batch.QueuedQueries = queued
+		}
+	}
 	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
 	if event.Resource == "record" {
 		queueRecordObservations(batch, []string{event.Organization}, []string{event.ResourceID})
 	}
-	batch.Queue(acknowledgeQueueJournalSQL, event.Organization, 1)
+	batch.Queue(acknowledgeQueueJournalSQL, event.Organization, acknowledged+1)
+}
+
+// trailingObservation reports whether queued ends with the observation of one Record.
+func trailingObservation(queued []*pgx.QueuedQuery, org, record string) bool {
+	if len(queued) < len(recordObservationSQL) {
+		return false
+	}
+	for i, q := range queued[len(queued)-len(recordObservationSQL):] {
+		if q.SQL != recordObservationSQL[i] || len(q.Arguments) != 2 {
+			return false
+		}
+		orgs, okOrg := q.Arguments[0].([]string)
+		records, okRecord := q.Arguments[1].([]string)
+		if !okOrg || !okRecord || len(orgs) != 1 || len(records) != 1 || orgs[0] != org || records[0] != record {
+			return false
+		}
+	}
+	return true
 }
 
 func notFound(err error) error {
