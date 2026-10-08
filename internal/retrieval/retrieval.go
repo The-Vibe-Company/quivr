@@ -196,6 +196,17 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 	return s.Content.Promote(ctx, org, seg, g)
 }
 
+// PrepareIndex writes the external keyword projection before the canonical
+// publication transaction. Readers still require canonical eligibility.
+func (s Service) PrepareIndex(ctx context.Context, org string, v content.Version, seg content.Segmentation) (content.Generation, error) {
+	r, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
+	if err != nil {
+		return g, err
+	}
+	err = s.Projection.Publish(ctx, g, org, r.Source.CorpusID, r.Source.Namespace, v, seg)
+	return g, err
+}
+
 // Search validates and authorizes a search, routes each Corpus to its
 // generation, and lets the pinned retrieval plugin rank it from the
 // candidates the engine serves (rank).

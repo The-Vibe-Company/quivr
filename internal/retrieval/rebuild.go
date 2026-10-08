@@ -160,6 +160,11 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 				return err
 			}
 			outcomes[i] = r.cover(work, org, target, c)
+			if errors.Is(outcomes[i], workqueue.ErrLeaseLost) && work.Err() == nil {
+				// Another attempt owns this Version now; it stays a candidate
+				// for a later step instead of canceling healthy siblings.
+				outcomes[i] = nil
+			}
 			var item terminal
 			if errors.As(outcomes[i], &item) {
 				reason := content.Diagnostic{Code: item.failure.Code, Message: item.failure.Message}
