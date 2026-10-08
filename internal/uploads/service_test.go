@@ -36,7 +36,11 @@ func (m *memoryStore) Get(_ context.Context, org, id string) (uploads.Meta, erro
 	return uploads.Meta{}, uploads.ErrNotFound
 }
 
-func (m *memoryStore) SetState(_ context.Context, org, id, state, blobID, code string) error {
+// Writes refuse a cancelled context, as PostgreSQL writes do.
+func (m *memoryStore) SetState(ctx context.Context, org, id, state, blobID, code string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, ok := m.sessions[org+"/"+id]; !ok {
 		return uploads.ErrNotFound
 	}
@@ -46,7 +50,10 @@ func (m *memoryStore) SetState(_ context.Context, org, id, state, blobID, code s
 	return nil
 }
 
-func (m *memoryStore) SaveBlob(_ context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
+func (m *memoryStore) SaveBlob(ctx context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.blobs[org+"/"+id] = uploads.Meta{ID: id, State: "verified", ObjectKey: objectKey, SHA256: sha256, SizeBytes: size, MediaType: mediaType, BlobID: id}
 	return nil
 }
@@ -61,6 +68,8 @@ func (m *memoryStore) Blob(_ context.Context, org, id string) (uploads.Meta, err
 type fakeTransfer struct {
 	err    error
 	signed int
+	// onVerify runs while storage is read; afterVerify once it answered.
+	onVerify, afterVerify func()
 }
 
 func (f *fakeTransfer) PresignPut(context.Context, string, int64, string, string, time.Duration) (string, map[string]string, error) {
@@ -68,7 +77,18 @@ func (f *fakeTransfer) PresignPut(context.Context, string, int64, string, string
 	return "http://storage.invalid/upload", map[string]string{"content-type": "text/plain"}, nil
 }
 
-func (f *fakeTransfer) Verify(context.Context, string, int64, string) error { return f.err }
+func (f *fakeTransfer) Verify(ctx context.Context, _ string, _ int64, _ string) error {
+	if f.onVerify != nil {
+		f.onVerify()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if f.afterVerify != nil {
+		defer f.afterVerify()
+	}
+	return f.err
+}
 
 const digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -180,6 +200,42 @@ func TestConfirmRejectsAlteredBytesButRetriesTransientFailure(t *testing.T) {
 	recovered, err := transient.Confirm(context.Background(), "org_a", pending.ID)
 	if err != nil || recovered.State != "verified" || recovered.BlobID == "" {
 		t.Fatalf("retry did not reconcile: %v %v", recovered, err)
+	}
+}
+
+// A worker stopping during or right after verification cancels Confirm. The
+// session must still leave verifying: its replay would carry no upload URL
+// (THE-1314).
+func TestACancelledConfirmStillSettlesTheSession(t *testing.T) {
+	for name, tc := range map[string]struct {
+		during bool
+		err    error
+		want   string
+	}{
+		"during verification": {during: true, want: "awaiting_upload"},
+		"after verification":  {want: "verified"},
+		"after altered bytes": {err: uploads.ErrVerificationMismatch, want: "rejected"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			transfer := &fakeTransfer{err: tc.err, afterVerify: cancel}
+			if tc.during {
+				transfer = &fakeTransfer{onVerify: cancel}
+			}
+			service := uploads.Service{Store: newMemoryStore(), Transfer: transfer}
+			req := uploads.Request{Key: digest + ":5:text/plain", SizeBytes: 5, SHA256: digest, MediaType: "text/plain"}
+			session, err := service.Create(ctx, "org_a", req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Confirm(ctx, "org_a", session.ID); err != nil {
+				t.Fatalf("cancelled Confirm: %v", err)
+			}
+			replayed, err := service.Create(context.Background(), "org_a", req)
+			if err != nil || replayed.State != tc.want || (tc.want == "awaiting_upload") != (replayed.UploadURL != "") {
+				t.Fatalf("replay: state %q url set %v err %v; want %s", replayed.State, replayed.UploadURL != "", err, tc.want)
+			}
+		})
 	}
 }
 

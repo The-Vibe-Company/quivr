@@ -5942,6 +5942,16 @@ components:
           type: boolean
         steps:
           $ref: '#/components/schemas/VersionSteps'
+        evaluation:
+          type: string
+          enum:
+          - applicable
+          - not_applicable
+          description: Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at),
+            an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable
+            otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription
+            created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates
+            it.
       required:
       - version_id
       - record_id
@@ -5951,6 +5961,7 @@ components:
       - state
       - is_current
       - steps
+      - evaluation
     AdminDocumentPage:
       type: object
       additionalProperties: false

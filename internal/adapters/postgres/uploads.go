@@ -61,8 +61,10 @@ func (s UploadStore) scanUpload(row pgx.Row) (uploads.Meta, error) {
 	return m, err
 }
 
+// SetState never leaves a terminal state: a slower concurrent Confirm, or one
+// whose caller was cancelled, cannot turn a verified session back.
 func (s UploadStore) SetState(ctx context.Context, org, id, state, blobID, code string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE uploads SET state=$3,blob_id=nullif($4,''),error_code=$5 WHERE organization=$1 AND id=$2`, org, id, state, blobID, code)
+	_, err := s.Pool.Exec(ctx, `UPDATE uploads SET state=$3,blob_id=nullif($4,''),error_code=$5 WHERE organization=$1 AND id=$2 AND state NOT IN ('verified','rejected')`, org, id, state, blobID, code)
 	return err
 }
 
