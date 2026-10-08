@@ -21,6 +21,7 @@ without forking the platform.
   Versions instead of overwriting history.
 - **Useful early, richer later.** Text is lexically searchable as soon as it is
   segmented; embeddings and other enrichments arrive afterwards without blocking it.
+  Hybrid search keeps keyword results while vectors are rebuilt and reports the affected Corpora.
 - **Rebuildable indexes.** PostgreSQL and S3 hold the canonical data; the search index
   is a projection that can be rebuilt from durable artifacts.
 - **Honest search.** Every hit is rehydrated from canonical storage and re-authorized.

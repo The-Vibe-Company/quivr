@@ -863,6 +863,18 @@
     }
   },
   {
+    "name": "hybrid_search_with_unavailable_vectors",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [],
+      "retrieval_profile": {
+        "name": "default",
+        "version": "plugin:core.retrieve@1.0.0/default",
+        "degraded": [{"reason": "vectors_unavailable", "corpus_ids": ["corpus_1"]}]
+      }
+    }
+  },
+  {
     "name": "plugin_ranked_search_results",
     "schema": "SearchResponse",
     "value": {

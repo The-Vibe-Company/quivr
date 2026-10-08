@@ -441,6 +441,8 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       );
     if (response.status === 422 && response.data?.code === "query_too_long")
       throw failure(422, "Cette recherche est trop longue.");
+    if (response.status === 422 && response.data?.code === "unsupported_search")
+      throw failure(422, "La recherche par sens est indisponible. Réessayez par mots-clés.", "unsupported_search");
     if (response.status === 422) throw failure(422, "Cette recherche n’est pas valide.");
     if (response.status !== 200) throw failure(503, "La recherche est momentanément indisponible. Réessayez.");
     const seen = new Set();
@@ -461,6 +463,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     return {
       items: records.filter(Boolean),
       excluded_corpora: response.data.excluded_corpora,
+      retrieval_profile: response.data.retrieval_profile,
       // As many passages as asked: more documents may match.
       bounded: (response.data.items || []).length >= SEARCH_LIMIT,
     };
@@ -565,6 +568,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       };
       if (data.next_page_cursor) page.next_cursor = data.next_page_cursor;
       if (data.excluded_corpora?.length) page.excluded_corpora = data.excluded_corpora;
+      if (data.retrieval_profile) page.retrieval_profile = data.retrieval_profile;
       if (data.bounded) page.bounded = true;
       return page;
     },

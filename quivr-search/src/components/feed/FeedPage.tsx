@@ -167,6 +167,7 @@ export function FeedPage({
   const [excluded, setExcluded] = useState<Exclusion[]>([]);
   const [searching, setSearching] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [searchError, setSearchError] = useState("");
+  const [degraded, setDegraded] = useState(false);
   // The shown results come from a deep search, with what it spent if said.
   const [deepShown, setDeepShown] = useState<{ usage?: SearchUsage } | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -241,6 +242,7 @@ export function FeedPage({
   const deepOn = deepOffered && deep;
   const meaning = near || deepOn;
   useEffect(() => {
+    setDegraded(false);
     if (!query) {
       setHits(null);
       setSearching("idle");
@@ -290,6 +292,7 @@ export function FeedPage({
           setCapped(data.items.length >= SEARCH_LIMIT);
           setSearchedSources(within);
           setExcluded(data.excluded_corpora || []);
+          setDegraded(data.retrieval_profile.degraded?.some((d) => d.reason === "vectors_unavailable") === true);
           setSearching("ready");
         })
         .catch((error) => {
@@ -1028,6 +1031,9 @@ export function FeedPage({
             >
               {searchError}
             </Notice>
+          )}
+          {query && searching === "ready" && degraded && (
+            <Notice tone="info" title="Recherche par sens indisponible pendant la reconstruction, résultats par mots-clés" />
           )}
           {!query && day && dayFeed.status === "loading" && !rows.length && (
             <LoadingState label="Chargement des articles de ce jour…" rows={5} />

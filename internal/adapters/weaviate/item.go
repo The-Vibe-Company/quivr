@@ -623,14 +623,7 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 			return nil, err
 		}
 		if mixedRanks {
-			pool := map[string]content.Candidate{}
-			for _, row := range rows {
-				keepBest(pool, row, false)
-			}
-			rows = ordered(pool)
-			for i := range rows {
-				rows[i].Score = 1 / float64(60+i+1)
-			}
+			rows = retrieval.NormalizeCandidateRanks(rows)
 		}
 		out = append(out, rows...)
 	}

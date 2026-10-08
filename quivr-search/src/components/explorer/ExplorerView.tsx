@@ -499,6 +499,9 @@ export function ExplorerView({
             )}
             {!state.q && <span className="explorer-sort explorer-sort-fixed">Plus récentes</span>}
             <div className="explorer-scroll" ref={scroller}>
+              {state.q && status === "ready" && page?.retrieval_profile?.degraded?.some((d) => d.reason === "vectors_unavailable") && (
+                <Notice tone="info" title="Recherche par sens indisponible pendant la reconstruction, résultats par mots-clés" />
+              )}
               {status === "loading" && !page ? (
                 <WireSkeleton />
               ) : status === "error" ? (

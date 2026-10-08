@@ -67,7 +67,7 @@ export async function request<T>(
       data.code === "query_too_long"
         ? "Cette requête est trop longue. Raccourcissez-la."
         : data.code === "unsupported_search"
-          ? "Cette recherche dépasse les limites disponibles. Essayez une requête plus courte."
+          ? "La recherche par sens est indisponible. Réessayez par mots-clés."
           : data.message || "La demande a échoué.",
       data.retryable === true,
       typeof data.code === "string" ? data.code : "",

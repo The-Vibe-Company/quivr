@@ -48,7 +48,7 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			return nil, err
 		}
 		requests := []quivrplugin.CandidateRequest{c}
-		if req.Query.Mode != "lexical" {
+		if c.Primitive != quivrplugin.PrimitiveBM25 {
 			requests = nil
 			for _, space := range pending[:min(8, len(pending))] {
 				next := c
@@ -109,6 +109,10 @@ func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, erro
 	}
 	space := req.ServedSpace()
 	if space == nil {
+		if req.Query.Mode == "hybrid" {
+			c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource
+			return c, nil
+		}
 		return c, quivrplugin.TerminalSearchError("no_served_space", "the searched Corpora serve no vector space; search by keywords, or rebuild them")
 	}
 	c.Space = space.ID

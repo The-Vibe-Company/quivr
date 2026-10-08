@@ -54,7 +54,18 @@ Quivr indexes the articles in the background, usually within seconds, so a searc
 | --- | --- | --- |
 | `lexical` | the words matter: names, codes, exact terms | nothing: available as soon as a Version is indexed |
 | `semantic` | the meaning matters, in other words or another language | the passages' vectors, computed seconds after ingestion |
-| `hybrid` | you want both, ranked together. This is the default. | as `semantic`; keyword results appear first |
+| `hybrid` | you want both, ranked together. This is the default. | keywords remain available while vectors are rebuilt |
+
+When served vectors are unavailable, hybrid search returns keyword results with
+`retrieval_profile.degraded`. An entry whose `reason` is `vectors_unavailable`
+names the affected collections in `corpus_ids`, even when no documents match.
+Other collections keep their hybrid results. You can show this notice until a
+later response omits the marker; rebuilding needs no client-side retry loop.
+
+An explicit `semantic` request has no keyword fallback: it returns
+`422 unsupported_search` when vector search cannot run. Unknown coverage counts
+alone do not disable a valid vector route. Model, index and storage outages
+keep their error responses; they do not become keyword-only successes.
 
 {/* runnable retry */}
 ```bash
@@ -71,7 +82,7 @@ EOF
 
 `limit` is 10 by default and 50 at most. There is no pagination: ask for what you will show.
 
-A query has at most 8,192 characters. For `semantic` and `hybrid`, the embedding model also caps its length (256 tokens with the first-party model); a longer query is refused with `422 query_too_long`, never truncated.
+A query has at most 8,192 characters. When vector search runs, the embedding model also caps its length (256 tokens with the first-party model); a longer query is refused with `422 query_too_long`, never truncated.
 
 ## Narrow to some sources
 

@@ -930,6 +930,21 @@ func (e SavedQueryDefinitionTemporalPolicy) Valid() bool {
 	}
 }
 
+// Defines values for SearchDegradationReason.
+const (
+	VectorsUnavailable SearchDegradationReason = "vectors_unavailable"
+)
+
+// Valid indicates whether the value is a known member of the SearchDegradationReason enum.
+func (e SearchDegradationReason) Valid() bool {
+	switch e {
+	case VectorsUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SearchExcerptCoordinateSystem.
 const (
 	SearchExcerptCoordinateSystemUnicodeCodepoint SearchExcerptCoordinateSystem = "unicode_codepoint"
@@ -2996,6 +3011,17 @@ type ScheduleChange struct {
 	IntervalSeconds int `json:"interval_seconds"`
 }
 
+// SearchDegradation defines model for SearchDegradation.
+type SearchDegradation struct {
+	CorpusIds []string `json:"corpus_ids"`
+
+	// Reason No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+	Reason SearchDegradationReason `json:"reason"`
+}
+
+// SearchDegradationReason No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+type SearchDegradationReason string
+
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
 type SearchExcerpt struct {
 	CoordinateSystem SearchExcerptCoordinateSystem `json:"coordinate_system"`
@@ -3067,8 +3093,10 @@ type SearchPhases struct {
 
 // SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	// Degraded Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+	Degraded *[]SearchDegradation `json:"degraded,omitempty"`
+	Name     string               `json:"name"`
+	Version  string               `json:"version"`
 }
 
 // SearchProfileDescription defines model for SearchProfileDescription.
@@ -5105,13 +5133,13 @@ type ClientInterface interface {
 	// SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -7026,7 +7054,7 @@ func (c *Client) GetSavedQueryVersion(ctx context.Context, savedQueryId string, 
 // SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -7042,7 +7070,7 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
 	if err != nil {
@@ -12976,7 +13004,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
@@ -12984,7 +13012,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
 
 	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -19406,7 +19434,7 @@ func (c *ClientWithResponses) GetSavedQueryVersionWithResponse(ctx context.Conte
 // SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
@@ -19420,7 +19448,7 @@ func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Cont
 // SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
 	rsp, err := c.SearchRecords(ctx, body, reqEditors...)
 	if err != nil {

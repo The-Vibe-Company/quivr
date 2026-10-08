@@ -1,12 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { countFacets, periodBounds } from "../explore.mjs";
+import { countFacets, createExplorer, periodBounds } from "../explore.mjs";
 
 // How the Explorer counts a date (THE-1184): the step of its histogram and
 // the filters each count keeps, against a fake engine that answers each
 // interval with the buckets given.
 const date = { name: "metadata.published_at", type: "datetime" };
 const language = { name: "metadata.language", type: "string" };
+
+// The facade owns relaying the engine's marker, including an empty result,
+// and translating a remaining vector refusal without calling it invalid input.
+test("Explorer search preserves degradation and explains unsupported_search", async () => {
+  for (const response of [
+    { status: 200, data: { items: [], retrieval_profile: { name: "default", version: "v", degraded: [{ reason: "vectors_unavailable", corpus_ids: ["corpus_a"] }] } } },
+    { status: 200, data: { items: [], retrieval_profile: { name: "default", version: "v" } } },
+    { status: 422, data: { code: "unsupported_search" } },
+  ]) {
+    const explorer = createExplorer({
+      upstream: async (path) => path === "/v0/search" ? response : { status: 200, data: { name: "Example corpus" } },
+      picked: async () => ["corpus_a"],
+      demo: () => "corpus_a",
+    });
+    if (response.status === 422) {
+      await assert.rejects(explorer.page(new URLSearchParams({ q: "harbour" })), (error) =>
+        error.code === "unsupported_search" && error.message === "La recherche par sens est indisponible. Réessayez par mots-clés.");
+    } else {
+      const page = await explorer.page(new URLSearchParams({ q: "harbour" }));
+      assert.deepEqual(page.retrieval_profile, response.data.retrieval_profile);
+      assert.deepEqual(page.items, []);
+    }
+  }
+});
 
 async function counted(predicates, buckets, timeline) {
   const sent = [];
