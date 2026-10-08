@@ -182,6 +182,7 @@ export function fakeCore({ records: given, alerts = [], latency = 0 } = {}) {
       return;
     }
     if (path === "/v0/corpora" && req.method === "POST") return json(res, 201, { corpus_id: "demo", name: "Espace démo" });
+    if (path === "/v0/corpora/demo") return json(res, 200, { corpus_id: "demo", name: "Espace démo", effective_retrieval: { fields: [] } });
     if (path === "/v0/changes") return json(res, 200, { items: [], next_cursor: "c0", has_more: false });
     if (path === "/v0/records/count") return json(res, 200, { count: inBounds(url).length });
     if (path === "/v0/records") {

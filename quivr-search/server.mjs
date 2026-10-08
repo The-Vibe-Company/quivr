@@ -232,7 +232,7 @@ const changed = () =>
 // The engine's answer to a write on the demo corpus; a 404 because the
 // corpus is gone forgets it.
 async function written(response) {
-  if (response.status === 404 && !(await corpora.confirm())) throw changed();
+  if (response.status === 404 && !(await corpora.confirm({ fresh: true }))) throw changed();
   return response;
 }
 async function jsonBody(req) {
@@ -604,8 +604,10 @@ async function handle(req, res) {
     ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
-      // Each page load checks the demo corpus is still there.
-      if (path === "/demo/session" && req.method === "GET") await corpora.confirm();
+      // Every request checks the demo corpus is still there (its databases may
+      // have been reset), the reads of one page load with one call; the
+      // session always asks.
+      await corpora.confirm({ fresh: path === "/demo/session" });
       const id = await corpora.ready();
       if (path === "/demo/session" && req.method === "GET") {
         await send(res, 200, { corpus_id: id, name: "Espace démo" });

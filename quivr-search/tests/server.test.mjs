@@ -1144,9 +1144,10 @@ test("answers are compressed, revalidated with an ETag and say what they waited 
     upstream.close();
   });
   const base = await startDemo(t, upstream.address().port);
-  // The demo corpus is created on the first request, not counted below.
-  await fetch(`${base}/demo/session`);
   for (const coding of ["br", "gzip"]) {
+    // The session checks the demo corpus exists, so the read just after it
+    // makes its own call only.
+    await fetch(`${base}/demo/session`);
     const first = await raw(`${base}/v0/connectors`, { "Accept-Encoding": coding });
     assert.equal(first.status, 200);
     assert.equal(first.headers["content-encoding"], coding);
@@ -1658,18 +1659,25 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   await get("/demo/feed");
   await until("the demo corpus's change stream", () => streams.has("demo-1"));
 
-  // The databases are wiped while the demo runs. The page still open adds a
-  // source: the engine no longer has the corpus, so the page reloads.
+  // The databases are wiped while the demo runs; the page reloads. The demo
+  // forgets the corpus, leaves its change stream and runs on new corpora,
+  // the archive found by its name.
   generation = 2;
+  assert.equal((await get("/demo/session")).corpus_id, "demo-2");
+  await until("the old change stream to close", () => !streams.has("demo-1"));
+  assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-2", "archive-2"]);
+  assert.equal((await addSource("demo-2")).status, 201);
+  // A tab opened before the reset writes to its old corpus: it reloads.
   const stale = await addSource("demo-1");
   assert.equal(stale.status, 409);
   assert.equal((await stale.json()).code, "demo_corpus_changed");
-  // The forgotten corpus's change stream is left.
-  await until("the old change stream to close", () => !streams.has("demo-1"));
 
-  // After the reload, the demo runs on new corpora, the archive found by its name.
-  assert.equal((await get("/demo/session")).corpus_id, "demo-2");
-  assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-2", "archive-2"]);
-  assert.equal((await addSource("demo-2")).status, 201);
+  // Wiped again, a page left open writes first: the engine no longer has the
+  // corpus, so the demo forgets it and the page reloads.
+  generation = 3;
+  const lost = await addSource("demo-2");
+  assert.equal(lost.status, 409);
+  assert.equal((await lost.json()).code, "demo_corpus_changed");
+  assert.equal((await get("/demo/session")).corpus_id, "demo-3");
   assert.equal(errors.length, 1);
 });

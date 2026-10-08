@@ -5,12 +5,17 @@
 // the names are looked up again on each read of the corpus list.
 const NAME = "Espace démo";
 const MAX_PAGES = 50;
+// How long a check that the demo corpus exists holds: the reads of one page
+// load share it.
+const CHECK_MS = 2000;
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
 export function demoCorpora({ upstream, configured = "", onDropped = () => {} }) {
   const entries = [...new Set(configured.split(",").map((entry) => entry.trim()).filter(Boolean))];
   let demo;
+  // The latest check that the demo corpus exists: { id, promise, at once done }.
+  let checked;
   // The configured corpora found, and the lookup that refreshes them.
   let found = [];
   let lookup;
@@ -36,20 +41,22 @@ export function demoCorpora({ upstream, configured = "", onDropped = () => {} })
   }
   // A failed lookup keeps the corpora found before and is tried again on the next read.
   function refresh() {
-    lookup = resolve().then(
+    const current = (lookup = resolve().then(
       ({ ids }) => {
+        // A newer lookup decides: one that answers late is not applied.
+        if (lookup !== current) return ids;
         const dropped = found.filter((id) => !ids.includes(id));
         found = ids;
         if (dropped.length) onDropped(dropped);
         return ids;
       },
       (error) => {
-        lookup = undefined;
+        if (lookup === current) lookup = undefined;
         if (found.length) return found;
         throw error;
       },
-    );
-    return lookup;
+    ));
+    return current;
   }
   function forget(id) {
     if (demo !== id) return;
@@ -71,6 +78,7 @@ export function demoCorpora({ upstream, configured = "", onDropped = () => {} })
       });
       if (response.status !== 201) throw failure(503, "La démo se prépare. Réessayez dans un instant.");
       demo = response.data.corpus_id;
+      checked = { id: demo, promise: Promise.resolve(true), at: Date.now() };
       return demo;
     },
     /** The demo corpus first, then the configured ones; fresh looks the names up again. */
@@ -80,14 +88,26 @@ export function demoCorpora({ upstream, configured = "", onDropped = () => {} })
       const ids = await (fresh || !lookup ? refresh() : lookup);
       return [id, ...ids.filter((other) => other !== id)];
     },
-    /** Whether the demo corpus is still there; a corpus the engine no longer has is forgotten. */
-    async confirm() {
+    /**
+     * Whether the demo corpus is still there; a corpus the engine no longer
+     * has is forgotten. A check in progress, or done in the last CHECK_MS
+     * unless fresh, answers for it. An engine that does not answer keeps it.
+     */
+    confirm({ fresh = false } = {}) {
       const id = demo;
-      if (!id) return true;
-      const response = await upstream(`/v0/corpora/${encodeURIComponent(id)}`);
-      if (response.status !== 404) return true;
-      forget(id);
-      return false;
+      if (!id) return Promise.resolve(true);
+      if (checked?.id === id && (!checked.at || (!fresh && Date.now() - checked.at < CHECK_MS)))
+        return checked.promise;
+      const check = { id };
+      check.promise = upstream(`/v0/corpora/${encodeURIComponent(id)}`)
+        .then((response) => response.status !== 404, () => true)
+        .then((there) => {
+          check.at = Date.now();
+          if (!there) forget(id);
+          return there;
+        });
+      checked = check;
+      return check.promise;
     },
     /** The startup check: one line naming QUIVR_DEMO_CORPORA when an entry matches no corpus. */
     async check() {
