@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 type fakeRebuildStore struct {
@@ -696,5 +697,47 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)
 			}
 		})
+	}
+}
+
+// loseOnce reports one lost lease for a Version, as when a slow renewal lets
+// another attempt take it, then tracks normally.
+type loseOnce struct {
+	mu   sync.Mutex
+	lost map[string]bool
+	id   string
+}
+
+func (l *loseOnce) Track(ctx context.Context, _, _, _, documentID string, run func(context.Context) error) error {
+	l.mu.Lock()
+	lose := documentID == l.id && !l.lost[documentID]
+	if lose {
+		l.lost[documentID] = true
+	}
+	l.mu.Unlock()
+	if lose {
+		return workqueue.ErrLeaseLost
+	}
+	return run(ctx)
+}
+
+func TestRebuildKeepsSiblingsWhenOneVersionLosesItsLease(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Concurrency = 2
+	ctx := workqueue.WithTracker(context.Background(), &loseOnce{lost: map[string]bool{}, id: "v1"})
+	if done, err := r.Step(ctx, "org", "op"); err != nil || done {
+		t.Fatalf("first step: done=%v err=%v", done, err)
+	}
+	if _, ok := store.covered["v1"]; ok || len(store.covered["v2"]) != 1 {
+		t.Fatalf("covered after a lost lease = %v; want v2 only", store.covered)
+	}
+	for i := 0; i < 5 && !store.activated; i++ {
+		if _, err := r.Step(ctx, "org", "op"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !store.activated || len(store.covered["v1"]) != 1 {
+		t.Fatalf("activated=%v covered=%v", store.activated, store.covered)
 	}
 }
