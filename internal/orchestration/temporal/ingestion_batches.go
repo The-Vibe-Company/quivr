@@ -66,6 +66,15 @@ func ingestionBatch(ctx workflow.Context, in content.DispatchBatch) error {
 func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 	w.RegisterWorkflowWithOptions(ingestionBatch, workflow.RegisterOptions{Name: ingestionBatchWorkflow})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in content.DispatchBatch) (ingestionBatchResult, error) {
+		if in.WorkQueue == workqueue.Bulk {
+			if batches, ok := steps.(interface {
+				BeginIngestionBatch(context.Context) (context.Context, func())
+			}); ok {
+				var closeBatch func()
+				ctx, closeBatch = batches.BeginIngestionBatch(ctx)
+				defer closeBatch()
+			}
+		}
 		var completed []int
 		if activity.HasHeartbeatDetails(ctx) {
 			if err := activity.GetHeartbeatDetails(ctx, &completed); err != nil {

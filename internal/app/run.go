@@ -107,6 +107,8 @@ type Config struct {
 	IngestionEvaluationConcurrency int `json:"ingestion_evaluation_concurrency"`
 	// Retrieval maps deployment short names to installed plugin/profile names.
 	Retrieval RetrievalConfig `json:"retrieval"`
+	// VectorIndex sets how the search index stores vector spaces.
+	VectorIndex VectorIndexConfig `json:"vector_index"`
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
@@ -285,6 +287,9 @@ func Run(command string, args ...string) error {
 	queueRefreshInterval, err := cfg.QueueObservation.Resolve()
 	if err != nil {
 		return invalidConfig("queue_observation", "invalid queue refresh interval", err)
+	}
+	if err = cfg.VectorIndex.Validate(); err != nil {
+		return invalidConfig("vector_index", "invalid vector index settings", err)
 	}
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
@@ -545,7 +550,7 @@ func Run(command string, args ...string) error {
 			}
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
-		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
+		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
 			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
 				return err
 			}
@@ -646,7 +651,7 @@ func Run(command string, args ...string) error {
 	// The registry checks registered plugins with the Contract Runner (api)
 	// and records activations with the spaces they register, refusing one
 	// that breaks a startup rule of this engine.
-	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: DeploymentSpaces, Wake: make(chan struct{}, 1),
+	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: cfg.DeploymentSpaces, Wake: make(chan struct{}, 1),
 		Validate: func(set *plugins.PinSet) error {
 			if command == "api" && len(set.Retrievals()) == 0 {
 				return errors.New("the active pipeline plan requires a retrieval plugin")
@@ -724,7 +729,7 @@ func Run(command string, args ...string) error {
 	// space claimed by another owner, or changed under the same version,
 	// refuses startup. New Corpora then start on the registered spaces.
 	register, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = spaces.RegisterSpaces(register, DeploymentSpaces(resolved))
+	err = spaces.RegisterSpaces(register, cfg.DeploymentSpaces(resolved))
 	if err == nil {
 		err = alignDefaultGeneration(register, baseline)
 	}

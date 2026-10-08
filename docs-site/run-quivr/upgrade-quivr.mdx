@@ -35,11 +35,19 @@ process has stopped before enabling those writes.
 
 The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
 
+Bulk workers group documents whose provider and external-storage work has finished, up to sixteen distinct documents in one organization. A partially filled group flushes two milliseconds after its first ready write. New inline-text documents handled by providers that return segments without vectors in a single response publish content and keyword readiness together. Keyword search becomes available at that commit; vectors remain a separate step. If preparation fails, the worker stores accepted content first, then follows the usual keyword retry or quarantine path. Change-feed cursors keep their synchronous, gap-free commit order. This batching needs no schema or cursor migration; upgrade the bulk workers to use it.
+
 ## Connector pause and resume
 
 The pause API requires workers that understand the durable paused state. Complete the worker-first rollout above before exposing or using pause and resume. Confirm that all previous live and bulk workers have drained and stopped using your platform's rollout status. Previous workers do not check the new `paused_at` field.
 
 Pause also fences the active run and defers its next run indefinitely; resume makes it due immediately, honouring any source `Retry-After`. This schedule guard prevents a previous worker's due-run query from acquiring a newly paused connector, but does not replace the worker-first rollout requirement. Before rolling workers back to a version without pause support, resume paused connectors and stop relying on pause. See [Pause and resume collection](/guides/connectors#pause-and-resume-collection) for the API calls and checkpoint behaviour.
+
+## Compressed search indexes
+
+Every vector space is now stored compressed, with 8-bit rotational quantization by default (see [Search index compression](/reference/configuration#search-index-compression)). The first API, worker or `quivr migrate` start after the upgrade moves new Corpora to a default generation that records the setting. Existing Corpora keep their generation and their current, uncompressed vectors until you rebuild them. A rebuild writes the vectors to a new compressed index and reuses the stored embeddings, so it calls no embedding model. Until every Corpus is rebuilt, the search index holds both indexes. A search across rebuilt and not-yet-rebuilt Corpora combines them the way it combines keyword recipes: by reciprocal rank for lexical and hybrid searches, and by distance for semantic searches. Changing `vector_index` later works the same way: it applies to new Corpora and to existing ones once they are rebuilt.
+
+Previous API and worker versions do not read the setting and store a new Corpus's vectors under the uncompressed index. Drain every previous API and worker instance before creating Corpora, writing content or starting rebuilds. A rollback has the reverse effect: rebuild with the previous version every Corpus that was created or rebuilt after the upgrade, or its semantic and hybrid results miss documents. When you upgrade again, rebuild with the new version every Corpus that was created or written to while rolled back.
 
 ## Compact import storage
 

@@ -13,8 +13,10 @@ import (
 // one (a bare `quivr migrate`), it is the legacy E5 space the engine served
 // itself before the core.ingest plugin (THE-777). A registered space the
 // list leaves out is retired: generations built later no longer carry it,
-// while generations that serve it keep serving it until rebuilt.
-func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
+// while generations that serve it keep serving it until rebuilt. Each space
+// carries its index setting from the configuration.
+func (cfg Config) DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
+	index := cfg.VectorIndex
 	if len(pins.Ingestions()) > 0 {
 		out := []content.RegisteredSpace{}
 		evaluationOwners := map[string]bool{}
@@ -32,16 +34,20 @@ func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
 				if evaluationOwners[pin.Manifest.ID] && !pins.ServingIngestion(pin.Manifest.ID) {
 					role = content.SpaceEvaluation
 				}
+				setting := index.For(s.Key, s.ID)
 				out = append(out, content.RegisteredSpace{
 					VectorSpace: content.VectorSpace{ID: s.Key, Manifest: plugins.SpaceManifest(pin.Manifest.ID, s.ID, s.Space), Dimensions: s.Space.Dimensions},
 					Name:        s.ID, Version: s.Space.Version, OwnerPluginID: pin.Manifest.ID, OwnerPluginVersion: pin.Manifest.Version,
-					Model: s.Space.Model, Metric: s.Space.Metric, Indexes: s.Space.Indexes, QueryModalities: s.Space.QueryModalities, Role: role,
+					Model: s.Space.Model, Metric: s.Space.Metric, Indexes: s.Space.Indexes, QueryModalities: s.Space.QueryModalities, Role: role, Index: &setting,
 				})
 			}
 		}
 		return out
 	}
-	return []content.RegisteredSpace{BuiltinSpace()}
+	builtin := BuiltinSpace()
+	setting := index.For(builtin.ID, builtin.Name)
+	builtin.Index = &setting
+	return []content.RegisteredSpace{builtin}
 }
 
 // BuiltinSpace is the registry entry of the legacy E5 space, owned by the

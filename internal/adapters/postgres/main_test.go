@@ -58,5 +58,5 @@ func bootstrap(path string) error {
 	if pool.QueryRow(ctx, `SELECT count(*) FROM vector_spaces WHERE role='served'`).Scan(&served) == nil && served > 0 {
 		return nil
 	}
-	return app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil))
+	return app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil))
 }
