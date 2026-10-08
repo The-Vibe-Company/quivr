@@ -81,22 +81,10 @@ def encoder_settings(env):
             raise ValueError(name + ' must be an integer from 1 to ' + str(limit))
         values[name] = int(raw)
     return values
-# The demo Organization's webhook destination. The web facade reads Matches
-# through the API, so nothing needs the webhook: the reserved .invalid name never
-# resolves and every delivery attempt fails without leaving the container. The
-# private-address refusal stays on.
-DESTINATION_ID = 'demo-alerts-sink'
-SINK_URL = 'http://alerts-sink.invalid/quivr-demo'
 
 
 def plugins_enabled(env):
     return env.get('QUIVR_DEMO_PLUGINS') == '1'
-
-
-def sink_secret(cursor_key):
-    """A stable signing secret for the sink, derived from the cursor key: no extra variable."""
-    key = hmac.new(cursor_key.encode(), b'quivr-demo-alerts-sink', hashlib.sha256).digest()
-    return 'whsec_' + base64.b64encode(key).decode()
 
 
 def described_enabled(env):
@@ -301,9 +289,6 @@ def build_config(env):
         config['ingestion'] = {'default': 'hosted.embed'}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
-    if plugins_enabled(env):
-        config['destinations'] = {DESTINATION_ID: {'organization': 'quivr-demo', 'url': SINK_URL,
-                                                   'secret': sink_secret(env['QUIVR_CURSOR_KEY'])}}
     # Optional: without it the core starts and refuses only credential deposits.
     if env.get('QUIVR_CREDENTIAL_KEY'):
         config['credential_key'] = env['QUIVR_CREDENTIAL_KEY']

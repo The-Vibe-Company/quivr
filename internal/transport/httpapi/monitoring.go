@@ -316,7 +316,7 @@ func savedQueryToTransport(q monitoring.SavedQuery) transport.SavedQuery {
 func subscriptionVersionToTransport(v monitoring.SubscriptionVersion) transport.SubscriptionVersion {
 	return transport.SubscriptionVersion{SubscriptionId: v.SubscriptionID, VersionId: v.VersionID, SavedQueryId: v.SavedQueryID, SavedQueryVersionId: v.SavedQueryVersionID,
 		Evaluator:     transport.EvaluatorConfig{PluginId: v.Evaluator.PluginID, Version: v.Evaluator.Version, Configuration: v.Evaluator.Configuration},
-		DestinationId: v.DestinationID, Owner: owner(v.Owner)}
+		DestinationId: optionalString(v.DestinationID), Owner: owner(v.Owner)}
 }
 
 func subscriptionToTransport(s monitoring.Subscription) transport.Subscription {

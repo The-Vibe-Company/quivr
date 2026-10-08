@@ -74,7 +74,7 @@ def index_history(sql, known):
                 known.difference_update(index_name(parts) for parts in stmt['objects'])
             elif kind == 'AlterTableStmt':
                 if (stmt['objtype']['name'] != 'OBJECT_TABLE'
-                        or any(cmd['subtype']['name'] not in ('AT_AddColumn', 'AT_SetRelOptions') for cmd in stmt['cmds'])
+                        or any(cmd['subtype']['name'] not in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull') for cmd in stmt['cmds'])
                         or any(node.get('@') == 'FuncCall' for node in nodes(stmt))):
                     known.clear()
             elif kind not in ('CreateStmt', 'CreateSeqStmt', 'CreateEnumStmt', 'CommentStmt'):
@@ -126,6 +126,9 @@ def expand_risks(sql, nonunique_indexes=frozenset()):
         elif kind == 'AlterTableStmt':
             for cmd in stmt['cmds']:
                 operation = cmd['subtype']['name']
+                if operation == 'AT_DropNotNull':
+                    # Relaxing a constraint preserves existing rows and writes.
+                    continue
                 if operation == 'AT_SetRelOptions' and stmt['objtype']['name'] == 'OBJECT_TABLE':
                     continue
                 if operation != 'AT_AddColumn':
