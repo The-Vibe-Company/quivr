@@ -99,7 +99,7 @@ configuration:
     properties:
       max_concurrent_requests: {const: 4}
 `
-	configuration := `{"model":"small","document_template":"prefix","packing":"none","max_tokens_per_segment":512,"max_concurrent_requests":4,"batch_size":16,"max_batch_tokens":8192,"request_timeout_ms":4000,"call_budget_ms":30000}`
+	configuration := `{"model":"small","document_template":"{prefix}{text}","body_tokens":512,"max_tokens_per_segment":512,"max_concurrent_requests":4,"batch_size":16,"max_batch_tokens":8192,"request_timeout_ms":4000,"call_budget_ms":30000}`
 	load := func(manifest, configuration string) *plugins.Pin {
 		t.Helper()
 		pin, err := plugins.LoadPinManifest([]byte(manifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900", Configuration: json.RawMessage(configuration)})
@@ -120,10 +120,10 @@ configuration:
 		{"call budget", `"call_budget_ms":30000`, `"call_budget_ms":60000`, true},
 		{"omitted tuning", `,"batch_size":16`, ``, true},
 		{"model", `"model":"small"`, `"model":"large"`, false},
-		{"template", `"document_template":"prefix"`, `"document_template":"gemma"`, false},
-		{"packing", `"packing":"none"`, `"packing":"paragraphs"`, false},
+		{"template", `"document_template":"{prefix}{text}"`, `"document_template":"title: {title} | text: {text}"`, false},
+		{"body budget", `"body_tokens":512`, `"body_tokens":256`, false},
 		{"tokens per segment", `"max_tokens_per_segment":512`, `"max_tokens_per_segment":256`, false},
-		{"undeclared setting", `"packing":"none"`, `"packing":"none","runtime_note":1`, false},
+		{"undeclared setting", `"body_tokens":512`, `"body_tokens":512,"runtime_note":1`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nextManifest := manifest

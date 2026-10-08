@@ -622,23 +622,26 @@ type notice struct {
 }
 
 // commitNotice commits a notice's public event, optional Match (withMatch runs
-// after the event so it can store the journal position), unique Delivery,
-// immutable body and outbox work. The event identity derives from the kind and
-// the referenced Match, as does the Delivery (match, destination, kind); an
-// existing Delivery commits nothing and reports false, so a repeat never
-// reaches a unique violation.
+// after the event so it can store the journal position), and immutable body.
+// A destination also creates a Delivery and its outbox work. The notice identity
+// derives from the kind and referenced Match independently of delivery; a repeat
+// commits nothing and reports false.
 func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatch func(position int64) error) (bool, error) {
+	event := eventInput{Organization: org, CorpusID: n.CorpusID, Kind: n.Kind, Resource: "match", ResourceID: n.References.MatchID, MutationID: n.References.MatchID}
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM deliveries WHERE organization=$1 AND match_id=$2 AND destination_id=$3 AND event_kind=$4)`, org, n.References.MatchID, n.Destination, n.Kind).Scan(&exists); err != nil || exists {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM monitoring_notices WHERE organization=$1 AND event_id=$2)`, org, eventID(event)).Scan(&exists); err != nil || exists {
 		return false, err
 	}
 	r := &n.References
-	r.DeliveryID = content.StableID("delivery", org, r.MatchID, n.Destination, n.Kind)
+	var deliveryID any
+	if n.Destination != "" {
+		r.DeliveryID = content.StableID("delivery", org, r.MatchID, n.Destination, n.Kind)
+		deliveryID = r.DeliveryID
+	}
 	// The Subscription Owner is fixed at creation, so the notice shares it for good.
 	if err := tx.QueryRow(ctx, `SELECT coalesce(owner,'') FROM subscriptions WHERE organization=$1 AND id=$2`, org, r.SubscriptionID).Scan(&r.Owner); err != nil {
 		return false, err
 	}
-	event := eventInput{Organization: org, CorpusID: n.CorpusID, Kind: n.Kind, Resource: "match", ResourceID: r.MatchID, MutationID: r.MatchID}
 	// The notice time is the transaction time, which is also the event's occurred_at.
 	var now time.Time
 	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
@@ -665,15 +668,19 @@ func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatc
 	if n.Dormant {
 		windowStart = "infinity"
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start) VALUES($1,$2,$3,$4,$5,$6,$7::timestamptz)`, org, r.DeliveryID, r.MatchID, n.Destination, n.Kind, eventID(event), windowStart); err != nil {
-		return false, err
+	if n.Destination != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start) VALUES($1,$2,$3,$4,$5,$6,$7::timestamptz)`, org, r.DeliveryID, r.MatchID, n.Destination, n.Kind, eventID(event), windowStart); err != nil {
+			return false, err
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		org, eventID(event), n.Kind, r.MatchID, r.RecordID, r.RecordVersionID, r.SubscriptionID, r.SubscriptionVersionID, r.DeliveryID, previous, body, position); err != nil {
+		org, eventID(event), n.Kind, r.MatchID, r.RecordID, r.RecordVersionID, r.SubscriptionID, r.SubscriptionVersionID, deliveryID, previous, body, position); err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id,trace_context) VALUES($1,$2,$3)`, org, r.DeliveryID, telemetry.Encode(ctx)); err != nil {
-		return false, err
+	if n.Destination != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id,trace_context) VALUES($1,$2,$3)`, org, r.DeliveryID, telemetry.Encode(ctx)); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
 }

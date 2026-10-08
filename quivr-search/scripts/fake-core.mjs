@@ -7,8 +7,7 @@
 //   FAKE_RECORDS=300 FAKE_DAYS=1 FAKE_LATENCY_MS=20 node scripts/fake-core.mjs
 //
 // Then run the demo against it:
-//   QUIVR_API_URL=http://127.0.0.1:7700 QUIVR_API_KEY=local QUIVR_DEMO_CORPUS_ID=demo \
-//   QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink node server.mjs
+//   QUIVR_API_URL=http://127.0.0.1:7700 QUIVR_API_KEY=local QUIVR_DEMO_CORPUS_ID=demo node server.mjs
 //
 // GET /fake/calls answers how many calls each route received, to check that
 // the facade does not hammer the core.

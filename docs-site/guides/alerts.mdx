@@ -4,7 +4,7 @@ description: "How a saved search and an alert turn each new document into a matc
 keywords: ["alerts", "saved query", "subscription", "match", "webhook", "alert rule"]
 ---
 
-An alert watches your collections for new documents that fit a search you saved. For each new document, a plugin decides whether it fits; Quivr stores each fit as a match with its reason, then tells your application with a signed webhook.
+An alert watches your collections for new documents that fit a search you saved. For each new document, a plugin decides whether it fits; Quivr stores each fit as a match with its reason. Your application reads matches through the API and can also receive signed webhooks when you configure a destination.
 
 Two terms in the picture: meaning vectors are what Quivr computes for meaning search after a document becomes searchable, and the change feed is the API's ordered list of events, which your application can follow.
 
@@ -17,15 +17,15 @@ flowchart TD
     rule -->|not ready| wait["Wait for<br/>vectors"]
     wait --> rule
     rule -->|match| match["Match<br/>stored"]
-    match --> notice["Webhook and<br/>change feed"]
+    match --> notice["Change feed and<br/>optional webhook"]
 ```
 
 In words:
 
-1. A saved search says what to look for and in which collections. An alert switches it on and names the rule that judges, where to send notices and, optionally, which of your users it belongs to.
+1. A saved search says what to look for and in which collections. An alert switches it on and names the rule that judges, an optional destination for webhooks and, optionally, which of your users it belongs to.
 2. Each document that becomes searchable in a watched collection goes to the alert rule, a plugin. It answers match, no match or not ready.
 3. Not ready means the rule needs the document's meaning vectors. Quivr waits and asks it again once they arrive.
-4. A match is stored with its reason. Quivr then sends a notice: a webhook to your receiver, which can arrive more than once, and an event in the change feed.
+4. A match is stored with its reason and an event in the change feed. With a destination, Quivr also sends a webhook to your receiver, which can arrive more than once.
 5. A first no-match decision sends nothing. What happens when a matched document later changes is [below](#corrections-and-withdrawals).
 
 ## The parts of an alert
@@ -36,7 +36,7 @@ The API keeps the parts of an alert as separate objects, so you can change one w
 | --- | --- |
 | Saved Query | The search to repeat: an expression and the collections (Corpora) it watches. Your application creates it. |
 | Expression | The condition, as JSON, inside the Saved Query. Its `kind` picks the check, such as `keywords` or `meaning`. |
-| Subscription | The alert. It switches a Saved Query on and names its rule, destination and `owner`. Your application creates it. |
+| Subscription | The alert. It switches a Saved Query on and names its rule, optional destination and `owner`. Your application creates it. |
 | Alert rule | The plugin version that judges each document, such as `alerts` `0.4.0`. The operator installs it. |
 | Destination | A webhook receiver's URL and signing secret. The operator sets it in Quivr's configuration. |
 | Match | A stored decision that a document version fits a Subscription, with its evidence. Quivr creates it. |
@@ -80,7 +80,7 @@ flowchart TD
     rule -->|no match| gone["Notice:<br/>no longer<br/>matches"]
 ```
 
-In words: a correction that still matches stores a new Match and sends `match.corrected`. A correction that no longer matches sends `match.no_longer_matches`, and a withdrawal sends `match.withdrawn`; neither stores a Match. Each notice is a webhook and a change feed event:
+In words: a correction that still matches stores a new Match and sends `match.corrected`. A correction that no longer matches sends `match.no_longer_matches`, and a withdrawal sends `match.withdrawn`; neither stores a Match. Each notice is a change feed event, with a webhook when its Subscription Version has a destination:
 
 - `match.created`: a new document fits. Quivr stores a Match.
 - `match.corrected`: a correction still fits. Quivr stores a new Match, linked to the earlier one by `previous_match_id`.
@@ -91,7 +91,11 @@ A Match never changes after it is stored, so the history of what your users were
 
 ## Delivery
 
-Each event creates a delivery to the Subscription's destination and an entry in the change feed. Quivr holds a delivery while its Subscription is paused, but its retry window keeps running: a delivery whose window ends during the pause is never sent. It never sends the webhook of a notice that became obsolete: the Subscription was deleted, the document was withdrawn, or a later correction replaced it. The change feed still has the event. Delivery is at least once:
+Omit `destination_id` when creating a Subscription to read alerts through the API alone. Quivr stores Matches and follow-up events without creating Deliveries or sending webhooks. List the Matches with `GET /v0/matches?subscription_id=…`; follow the change feed for negative corrections and withdrawals, which store no new Match. These events omit `delivery_id`.
+
+A new Subscription Version can add or remove a destination. Omitting `destination_id` on the new Version removes delivery for future Matches; it does not inherit the old destination. Earlier Matches keep their pinned Version, including its destination for negative corrections and withdrawals.
+
+With a destination, each notice creates a delivery and an entry in the change feed. Quivr holds a delivery while its Subscription is paused, but its retry window keeps running: a delivery whose window ends during the pause is never sent. It never sends the webhook of a notice that became obsolete: the Subscription was deleted, the document was withdrawn, or a later correction replaced it. The change feed still has the event. Delivery is at least once:
 
 - Quivr retries a timeout, a connection failure or a `408`, `429` or `5xx` answer, with growing delays, for up to 24 hours by default. The window normally starts when Quivr creates the delivery; a withdrawal recorded while the Subscription was paused starts its window when you resume it. The operator can change the window's length.
 - Every retry sends the same event id (`webhook-id`) and the same body, so your receiver deduplicates on it.
@@ -104,14 +108,14 @@ Each webhook is signed with the destination's secret, so your receiver can prove
 Your application, through the API:
 
 1. Creates a Saved Query and a Subscription.
-2. Receives each webhook and verifies its signature.
-3. Deduplicates on `webhook-id` and reads the Match's evidence.
+2. Reads Matches and follows the change feed, or receives each webhook and verifies its signature.
+3. Deduplicates webhook notices on `webhook-id` and reads the Match's evidence.
 4. Changes, pauses or deletes alerts.
 
 The operator who runs Quivr:
 
 1. Installs the `alerts` plugin and chooses the checks it offers ([First-party plugins](/run-quivr/catalog#alerts)).
-2. Configures the webhook destinations ([Configuration](/reference/configuration#webhook-destinations)).
+2. Configures destinations when applications need webhooks ([Configuration](/reference/configuration#webhook-destinations)).
 3. Maps your metadata fields for keyword filters ([Configure alert fields](/run-quivr/configure-alert-fields)).
 4. Moves existing alerts to a new rule version ([Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule)), or abandons evaluations whose old rule is gone ([Retire alert evaluations](/run-quivr/retire-alert-evaluations)).
 

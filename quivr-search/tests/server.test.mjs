@@ -1190,7 +1190,6 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   const state = join(dir, "state.json");
   await writeFile(state, JSON.stringify({ created: { sub_new: iso(now - DAY) } }));
   const base = await startDemo(t, core.server.address().port, {
-    QUIVR_DEMO_DESTINATION_ID: "demo-alerts-sink",
     DEMO_STATE_FILE: state,
   });
   // Today and the three days before, newest first.

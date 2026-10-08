@@ -8664,11 +8664,11 @@ components:
       - saved_query_id
       - saved_query_version_id
       - evaluator
-      - destination_id
       description: Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the
         client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and
-        part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization.
-        URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry
+        part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization.
+        Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL
+        and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry
         in the tracer.
     SubscriptionVersionCreate:
       type: object
@@ -8689,9 +8689,9 @@ components:
       - idempotency_key
       - saved_query_version_id
       - evaluator
-      - destination_id
       description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename
-        changes the name); saved_query_version_id is the current Version of that Saved Query.
+        changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery,
+        including when replacing a Version that had a destination; omission does not inherit the previous destination.
     SubscriptionVersion:
       type: object
       additionalProperties: false
@@ -8721,9 +8721,8 @@ components:
       - saved_query_id
       - saved_query_version_id
       - evaluator
-      - destination_id
       description: Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global
-        Subscription.
+        Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
     Subscription:
       type: object
       additionalProperties: false
@@ -8973,11 +8972,11 @@ components:
       - record_version_id
       - subscription_id
       - subscription_version_id
-      - delivery_id
       description: owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription
         and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match
         for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches,
-        otherwise the matched version. References alone confer no access.
+        otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone
+        confer no access.
     WebhookEvent:
       type: object
       additionalProperties: false

@@ -87,7 +87,8 @@ type SubscriptionVersion struct {
 	SavedQueryID        string
 	SavedQueryVersionID string
 	Evaluator           Evaluator
-	DestinationID       string
+	// DestinationID is empty for a Subscription that records Matches without delivery.
+	DestinationID string
 	// CorpusIDs is the pinned Saved Query scope, used for authorization.
 	CorpusIDs []string
 	// ActivationPosition is the journal position of the commit that created
@@ -424,8 +425,10 @@ func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, dest
 	if tooLarge(evaluator.Configuration) {
 		return ErrTooLarge
 	}
-	if d, ok := s.Destinations[destination]; !ok || d.Organization != scope.Organization {
-		return ErrUnknownDestination
+	if destination != "" {
+		if d, ok := s.Destinations[destination]; !ok || d.Organization != scope.Organization {
+			return ErrUnknownDestination
+		}
 	}
 	return nil
 }

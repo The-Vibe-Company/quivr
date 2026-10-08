@@ -12,7 +12,7 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
 | `alerts` | `alerts` 0.4.0 | Alert rule | keyword and meaning alerts, alone or combined |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
-| `hosted-embed` | `hosted.embed` 1.0.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
+| `hosted-embed` | `hosted.embed` 1.2.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
 | `core-retrieve` | `core.retrieve` 1.2.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, with configurable weight, depth and fusion |
 | `jev-rerank` | `jev.rerank` 1.0.1 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
@@ -105,9 +105,13 @@ The default ingestion plugin. It cuts the `title` and `body` Parts of each Versi
 
 ## hosted-embed
 
-The optional hosted ingestion plugin selects a model, dimensions and input templates by configuration. It supports OpenAI-compatible `/embeddings` and Cohere v2 `/embed` APIs, with bearer, `api-key` or no authentication. Its key is a declared `AZURE_FOUNDRY_KEY` secret in the plugin process environment. It cuts bounded text windows, batches requests and resumes completed batches after a retryable provider failure.
+The optional hosted ingestion plugin selects a model, dimensions and input templates by configuration. It supports OpenAI-compatible `/embeddings` and Cohere v2 `/embed` APIs, with bearer, `api-key` or no authentication. Its key is a declared `EMBED_API_KEY` secret in the plugin process environment. It packs paragraphs and pages through all source text, batches requests and resumes completed batches after a retryable provider failure.
 
-Generate an immutable manifest from the configuration before installing it. Each model, dimension, revision or template change creates a new vector space; evaluation, backfill and promotion use the usual engine operations. Each provider attempt logs input-token usage for cost accounting. See the [configuration examples and package commands](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md).
+Configure `document_template` and `query_template` for the model’s required prompts;
+the model name does not select a template. The
+[EmbeddingGemma 2 example](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/examples/embeddinggemma-2.json)
+shows a model with separate document and query prompts. Generate an immutable manifest
+from the configuration before installing it. Each model, dimension, revision or template change creates a new vector space; evaluation, backfill and promotion use the usual engine operations. Each provider attempt logs input-token usage for cost accounting. See the [configuration examples and package commands](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md).
 
 ## core-retrieve
 

@@ -16,7 +16,7 @@ import fake_feeds
 import gotest
 import subscription_plugin
 import verify_report
-from local import DEMO_DESTINATION, ROOT, Stack, port, run
+from local import ROOT, Stack, port, run
 
 
 def main():
@@ -59,8 +59,8 @@ def main():
                'QUIVR_API_URL': f"http://127.0.0.1:{stack.state['api_port']}",
                'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
                'DEMO_SECURE_COOKIE': 'false', 'DEMO_STATE_FILE': str(stack.directory / 'demo-state.json'),
-               # Keyword alerts (THE-734): the pinned alerts plugin and org_d's webhook destination.
-               'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR,
+               # Keyword alerts use the pinned plugin and read Matches through the API.
+               'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR,
                'DEMO_DESCRIBED_ALERTS': 'true' if described != 'off' else ''}
         feeds_url = None
         if verify:
