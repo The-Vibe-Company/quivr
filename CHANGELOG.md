@@ -1,5 +1,69 @@
 # Changelog
 
+## [2.0.0-alpha.6](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.5...v2.0.0-alpha.6) (2026-10-08)
+
+
+### Features
+
+* **autoscaling:** scale bulk workers from queue backlog ([#3818](https://github.com/The-Vibe-Company/quivr/issues/3818)) ([b7267a7](https://github.com/The-Vibe-Company/quivr/commit/b7267a7f52d9c0c275372ddf87db299fd87a0dda))
+* **connectors:** pause and resume continuing imports ([#3844](https://github.com/The-Vibe-Company/quivr/issues/3844)) ([fa06fe4](https://github.com/The-Vibe-Company/quivr/commit/fa06fe4cf274a798147929733b6c5da26c0133b6))
+* **content:** count metadata values for facets ([#3789](https://github.com/The-Vibe-Company/quivr/issues/3789)) ([63d76a9](https://github.com/The-Vibe-Company/quivr/commit/63d76a953fb3e42beb6fb771e86eec0f0d0fa009))
+* **corpora:** add archive, restore and rename ([#3817](https://github.com/The-Vibe-Company/quivr/issues/3817)) ([939e273](https://github.com/The-Vibe-Company/quivr/commit/939e273e61a2bcd28fc809886b18d4c57542d5d8))
+* **deploy:** let the Railway demo drop core.ingest when hosted embeddings serve ([#3834](https://github.com/The-Vibe-Company/quivr/issues/3834)) ([782d9d2](https://github.com/The-Vibe-Company/quivr/commit/782d9d270753fd34da0267cde61b80cb2a8aef33))
+* **deploy:** serve EmbeddingGemma 2 on Modal ([#3811](https://github.com/The-Vibe-Company/quivr/issues/3811)) ([1bbc9a1](https://github.com/The-Vibe-Company/quivr/commit/1bbc9a18adf70e711dc3fe42d060c7cefe0ae72d))
+* **deploy:** set rebuild concurrency from a Railway variable ([#3823](https://github.com/The-Vibe-Company/quivr/issues/3823)) ([7ad49b5](https://github.com/The-Vibe-Company/quivr/commit/7ad49b5e3cbdc034e79bb2353233ea472f22d54f))
+* **embeddings:** encode queries beside the API on CPU ([#3830](https://github.com/The-Vibe-Company/quivr/issues/3830)) ([8a9d155](https://github.com/The-Vibe-Company/quivr/commit/8a9d1557db1271c30108d4d277ef68cfdf72fb90))
+* **eval:** add text-only EmbeddingGemma 2 bake-off ([#3802](https://github.com/The-Vibe-Company/quivr/issues/3802)) ([9a06b2b](https://github.com/The-Vibe-Company/quivr/commit/9a06b2bd9d9869662abd009d2ffe68ee6bc41e33))
+* **ingestion:** pack paragraphs into hosted embedding passages ([#3827](https://github.com/The-Vibe-Company/quivr/issues/3827)) ([1ff2e28](https://github.com/The-Vibe-Company/quivr/commit/1ff2e28673013c0e9249e74b6552bf202385046d))
+* **ingestion:** preserve recipes when tuning provider execution ([#3845](https://github.com/The-Vibe-Company/quivr/issues/3845)) ([92de9e8](https://github.com/The-Vibe-Company/quivr/commit/92de9e81d16cf30b44456a5a98059f2ebd593fd3))
+* **quarantine:** restart reprocessing from normalization ([#3796](https://github.com/The-Vibe-Company/quivr/issues/3796)) ([f51bfe3](https://github.com/The-Vibe-Company/quivr/commit/f51bfe3147a96424ee245b15cf678eca286ae596))
+* **quivr-search:** find sharper source logos, SVG included ([#3785](https://github.com/The-Vibe-Company/quivr/issues/3785)) ([c990d71](https://github.com/The-Vibe-Company/quivr/commit/c990d7130e9325b44444b6b7814a3d8e1d59a998))
+* **quivr-search:** open the Explorer from its address only ([#3820](https://github.com/The-Vibe-Company/quivr/issues/3820)) ([7eca7a0](https://github.com/The-Vibe-Company/quivr/commit/7eca7a0f1927e2150eb36fd5ed0d57be8d773a20))
+* **quivr-search:** rebuild the Explorer to match the approved layout ([#3804](https://github.com/The-Vibe-Company/quivr/issues/3804)) ([52b939a](https://github.com/The-Vibe-Company/quivr/commit/52b939aa11a93288bb96e8390beddcf17d899ba5))
+* **quivr-search:** redesign the Explorer around a timeline and a preview panel ([#3797](https://github.com/The-Vibe-Company/quivr/issues/3797)) ([d753c3c](https://github.com/The-Vibe-Company/quivr/commit/d753c3c884be77efb75fb2f2cbcb9a31fdd708d9))
+* **quivr-search:** show counts next to each filter value in the Explorer ([#3793](https://github.com/The-Vibe-Company/quivr/issues/3793)) ([0a0ca1d](https://github.com/The-Vibe-Company/quivr/commit/0a0ca1d1b66ffb7d03cd5c38a59a91dda05a2bf5))
+* **retrieval:** rank configurable keywords once per item ([#3829](https://github.com/The-Vibe-Company/quivr/issues/3829)) ([08a63e0](https://github.com/The-Vibe-Company/quivr/commit/08a63e0a3962f13f50134cfc1e33ab846509c095))
+* **storage:** compact durable import data ([#3840](https://github.com/The-Vibe-Company/quivr/issues/3840)) ([951edd2](https://github.com/The-Vibe-Company/quivr/commit/951edd274938e34ece4408f8d575d6efe4ddb29f))
+* **workers:** isolate live and bulk queues ([#3814](https://github.com/The-Vibe-Company/quivr/issues/3814)) ([5a288ea](https://github.com/The-Vibe-Company/quivr/commit/5a288eaf05f601b8f2d8e8a8f7b65e5cbfe2654f))
+
+
+### Bug Fixes
+
+* **acceptance:** await collected record retrieval readiness ([#3816](https://github.com/The-Vibe-Company/quivr/issues/3816)) ([254e437](https://github.com/The-Vibe-Company/quivr/commit/254e437941433d314c67a9483e07e85f63c7d295))
+* **autoscaling:** deploy Railway regional replica changes ([#3826](https://github.com/The-Vibe-Company/quivr/issues/3826)) ([9e4180e](https://github.com/The-Vibe-Company/quivr/commit/9e4180e32db49e5859b891740c47dcea68af22c3))
+* **deploy:** never cap passages per item on the Railway demo ([#3833](https://github.com/The-Vibe-Company/quivr/issues/3833)) ([456f8a1](https://github.com/The-Vibe-Company/quivr/commit/456f8a1384063b3aa08faa7c565de1c473c6626d))
+* **deploy:** read the pinned EmbeddingGemma model card by revision on Modal ([#3812](https://github.com/The-Vibe-Company/quivr/issues/3812)) ([c2330d9](https://github.com/The-Vibe-Company/quivr/commit/c2330d9025222f01d6a308a5754f08493550ca13))
+* **eval:** bound campaign compute and retain trial evidence ([#3794](https://github.com/The-Vibe-Company/quivr/issues/3794)) ([d75e4fd](https://github.com/The-Vibe-Company/quivr/commit/d75e4fd6a21cd772968ddad1c54486985ec833af))
+* **eval:** load EmbeddingGemma 2's model card and processor on Modal ([#3807](https://github.com/The-Vibe-Company/quivr/issues/3807)) ([a990de4](https://github.com/The-Vibe-Company/quivr/commit/a990de409d7a13802f383b9b3a9f6ff8a7de3455))
+* **ingestion:** distinguish model settings in derivation identity ([#3813](https://github.com/The-Vibe-Company/quivr/issues/3813)) ([150842e](https://github.com/The-Vibe-Company/quivr/commit/150842ef10571825e0bae27e89e8908f7f565a98))
+* **ingestion:** embed complete items and isolate rebuild failures ([#3837](https://github.com/The-Vibe-Company/quivr/issues/3837)) ([d717be3](https://github.com/The-Vibe-Company/quivr/commit/d717be3af155f9da4400fa82c4017b9794412648))
+* **modal:** accept packed embedding passages ([#3832](https://github.com/The-Vibe-Company/quivr/issues/3832)) ([116f618](https://github.com/The-Vibe-Company/quivr/commit/116f618517be879b145034367a6500f66f655cf0))
+* **newsml-g2:** import messages within extension limits ([#3792](https://github.com/The-Vibe-Company/quivr/issues/3792)) ([6b37e84](https://github.com/The-Vibe-Company/quivr/commit/6b37e84532e3fba8ed257813364ab092845f51bb))
+* **postgres:** index segments by segmentation during upgrades ([#3825](https://github.com/The-Vibe-Company/quivr/issues/3825)) ([9e84e3f](https://github.com/The-Vibe-Company/quivr/commit/9e84e3f9665fe8fea29d04611905b67a53f564db))
+* **postgres:** keep index builds off the startup path ([#3836](https://github.com/The-Vibe-Company/quivr/issues/3836)) ([564e53b](https://github.com/The-Vibe-Company/quivr/commit/564e53bc2103f1fc187821c86862ccf9beaca84e))
+* **processing:** adopt a vector another derivation stored first ([#3824](https://github.com/The-Vibe-Company/quivr/issues/3824)) ([e2805fa](https://github.com/The-Vibe-Company/quivr/commit/e2805faf8953d85990d9a8035af4b4af50c91743))
+* **processing:** keep imports searchable during recipe changes ([#3839](https://github.com/The-Vibe-Company/quivr/issues/3839)) ([18c678a](https://github.com/The-Vibe-Company/quivr/commit/18c678a21bcabff36eb97b2677514b02f170dc90))
+* **quivr-search:** keep a chart tooltip on its bar when the page moves ([#3790](https://github.com/The-Vibe-Company/quivr/issues/3790)) ([994a317](https://github.com/The-Vibe-Company/quivr/commit/994a31778c33c1a3f981192d6fb5da19e8a936dc))
+* **quivr-search:** keep the feed's controls in place while searching or filtering ([#3822](https://github.com/The-Vibe-Company/quivr/issues/3822)) ([f31dd5e](https://github.com/The-Vibe-Company/quivr/commit/f31dd5e013cfd70d27c3f96f65b8cfbdee5d0677))
+* **railway:** let the demo operator key archive and rename corpora ([#3821](https://github.com/The-Vibe-Company/quivr/issues/3821)) ([650905e](https://github.com/The-Vibe-Company/quivr/commit/650905e947bf15c80bb2556aa0899864f777bf0c))
+* **railway:** make hosted embeddings the ingestion default ([#3798](https://github.com/The-Vibe-Company/quivr/issues/3798)) ([e312794](https://github.com/The-Vibe-Company/quivr/commit/e312794eb2429f3f1691e852e56fc04fd1f74254))
+* **rebuild:** keep candidate lookup steady and batch writes ([#3831](https://github.com/The-Vibe-Company/quivr/issues/3831)) ([a8ec70e](https://github.com/The-Vibe-Company/quivr/commit/a8ec70e24f098c050ea90b5256364401e4ca43ee))
+* **retrieval:** serve coverage snapshots without blocking search ([#3819](https://github.com/The-Vibe-Company/quivr/issues/3819)) ([1cbd569](https://github.com/The-Vibe-Company/quivr/commit/1cbd5693ddea9b4b4065cf8f2b1a7363dc05b1cf))
+* **retrieval:** stop rebuilds that leave coverage unchanged ([#3803](https://github.com/The-Vibe-Company/quivr/issues/3803)) ([c94f1b8](https://github.com/The-Vibe-Company/quivr/commit/c94f1b8a0b8dbecf8ab74378353ce2c54ccfdd91))
+
+
+### Performance Improvements
+
+* **connectors:** acquire archive pages without interval gaps ([#3838](https://github.com/The-Vibe-Company/quivr/issues/3838)) ([568de15](https://github.com/The-Vibe-Company/quivr/commit/568de1535cb7c9d04b86d5c22d2ec2e470f86172))
+* **ingestion:** batch archive embeddings across versions ([#3795](https://github.com/The-Vibe-Company/quivr/issues/3795)) ([62e7c86](https://github.com/The-Vibe-Company/quivr/commit/62e7c865385d55df07192471d099c4576f1b16ac))
+* **postgres:** bound queue observations and version purge discovery ([#3841](https://github.com/The-Vibe-Company/quivr/issues/3841)) ([a9e92fb](https://github.com/The-Vibe-Company/quivr/commit/a9e92fb193e6c1f9b4f3673c9abb231014e71adf))
+* **postgres:** move writes ahead of journal locks ([#3828](https://github.com/The-Vibe-Company/quivr/issues/3828)) ([03a0c38](https://github.com/The-Vibe-Company/quivr/commit/03a0c388edaf1d7ad393808444af9c593bfdf5fc))
+* **queues:** throttle backlog refreshes and use operation counters ([#3843](https://github.com/The-Vibe-Company/quivr/issues/3843)) ([98918e2](https://github.com/The-Vibe-Company/quivr/commit/98918e27356c7fd5a62cd4fb0529064c281e0a15))
+* **railway:** increase hosted embedding throughput ([#3799](https://github.com/The-Vibe-Company/quivr/issues/3799)) ([2a3e96d](https://github.com/The-Vibe-Company/quivr/commit/2a3e96def837f1f882a12ed92371663de57bba0d))
+* **railway:** send 16 concurrent Gemma embedding requests ([#3847](https://github.com/The-Vibe-Company/quivr/issues/3847)) ([cab7ebd](https://github.com/The-Vibe-Company/quivr/commit/cab7ebdd32f61128f1088059d2efa1aefe7db27f))
+* **rebuild:** allow up to 256 versions per rebuild step ([#3842](https://github.com/The-Vibe-Company/quivr/issues/3842)) ([e5dea49](https://github.com/The-Vibe-Company/quivr/commit/e5dea4921f8c8940514e8fc9209c8c0969d77567))
+* **retrieval:** re-embed rebuild candidates concurrently ([#3806](https://github.com/The-Vibe-Company/quivr/issues/3806)) ([c3d4340](https://github.com/The-Vibe-Company/quivr/commit/c3d43402cacc767986b5e453d94504acc2a62e86))
+
 ## [2.0.0-alpha.5](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.4...v2.0.0-alpha.5) (2026-10-06)
 
 

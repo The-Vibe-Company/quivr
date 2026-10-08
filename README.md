@@ -356,7 +356,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   and coverage ([Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)).
   The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
   E5) is pinned by default; the engine segments and embeds nothing itself.
-  Optional [hosted.embed](plugins/hosted-embed/README.md) selects a hosted model
+  Optional [hosted.embed](plugins/hosted-embed/README.md) packs consecutive body Parts
+  together for bounded items and retains full-text paging for large items and size
+  refusals. Rebuild affected Corpora after the packing recipe changes. It selects a hosted model
   or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
   An optional pinned [CPU text encoder](deploy/railway/README.md#optional-cpu-query-encoding)
   answers queries beside the API while documents keep using the remote provider.

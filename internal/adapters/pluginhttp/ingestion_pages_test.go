@@ -157,3 +157,63 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 		})
 	}
 }
+
+// Even bounded source can need more passages or response bytes than one call
+// permits. Both SDKs report these work limits as invalid_response envelopes.
+func TestWholeItemResponseLimitsRemainPageable(t *testing.T) {
+	ring, err := plugins.NewSigningKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signing, _ := json.Marshal(map[string]plugins.SigningKeys{"example.paged": ring})
+	t.Setenv(plugins.EnvSigningKeys, string(signing))
+	for _, message := range []string{"257 segments exceed max_segments 256", "the response exceeds max_segments", "the response is 65537 bytes; max_response_bytes is 65536", "the response exceeds max_response_bytes", "the response exceeds max_response_bytes; the response exceeds max_segments", "invalid vector dimensions", "the response exceeds max_segments; invalid vector dimensions", "engine segment limit", "mixed engine errors"} {
+		t.Run(message, func(t *testing.T) {
+			var pin *plugins.Pin
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r, pin) {
+					return
+				}
+				if message == "engine segment limit" || message == "mixed engine errors" {
+					end := 3
+					if message == "mixed engine errors" {
+						end = 5
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"segments": []map[string]any{
+						{"part_key": "body", "start": 0, "end": 1, "vectors": map[string]any{}},
+						{"part_key": "body", "start": 1, "end": 2, "vectors": map[string]any{}},
+						{"part_key": "body", "start": 2, "end": end, "vectors": map[string]any{}},
+					}})
+					return
+				}
+				w.WriteHeader(500)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": "invalid_response", "message": message, "retryable": false})
+			}))
+			defer server.Close()
+			raw, err := os.ReadFile("../../../contracts/plugins/v0/fixtures/manifests/valid/ingestion-paged.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pin, err = plugins.LoadPinManifest(raw, "paged", plugins.PinConfig{Endpoint: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := content.Version{ID: "item", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "body"}}}}}
+			_, err = (pluginhttp.Ingestor{Pin: pin}).SegmentAndEmbed(t.Context(), "org", "corpus", v, nil)
+			var refusal *plugins.PluginError
+			want := "segmentation_limit"
+			if strings.Contains(message, "invalid vector dimensions") {
+				want = "invalid_response"
+			}
+			if message == "mixed engine errors" {
+				if !errors.Is(err, content.ErrIngestionRefused) || errors.As(err, &refusal) {
+					t.Fatalf("mixed output error was masked: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, content.ErrIngestionRefused) || !errors.As(err, &refusal) || refusal.Code != want {
+				t.Fatalf("error=%v; want terminal %s", err, want)
+			}
+		})
+	}
+}

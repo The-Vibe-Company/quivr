@@ -8,9 +8,40 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 )
+
+// Existing single-Part paging artifacts must not be reused as packed whole
+// items after a host upgrade. Nonpaged owners keep their historical recipe.
+func TestPagedRecipeChangesWithWholeItemPackingPolicy(t *testing.T) {
+	for _, fixture := range []string{"ingestion-paged.yaml", "ingestion-multi-part.yaml"} {
+		raw, err := os.ReadFile("../../../contracts/plugins/v0/fixtures/manifests/valid/" + fixture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin, err := plugins.LoadPinManifest(raw, "recipe", plugins.PinConfig{Endpoint: "http://127.0.0.1:9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy := "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", pin.ManifestDigest, string(registry.SettingsOf(pin).Configuration))
+		got := registry.IngestionRecipe(pin)
+		if pin.Manifest.Contributions.Ingestion.Paging == (got == legacy) {
+			t.Fatalf("%s: recipe=%s legacy=%s", fixture, got, legacy)
+		}
+		// Existing immutable plans may hold a recipe anchor from the older
+		// engine. Apply the new host policy once, then keep it across tuning.
+		pin.IngestionDerivation = &plugins.IngestionDerivation{Recipe: legacy}
+		if anchored := registry.IngestionRecipe(pin); anchored != got {
+			t.Fatalf("%s: anchored recipe %s, want %s", fixture, anchored, got)
+		}
+		pin.IngestionDerivation.Recipe = got
+		if rebound := registry.IngestionRecipe(pin); rebound != got {
+			t.Fatalf("%s: rebinding changed recipe %s to %s", fixture, got, rebound)
+		}
+	}
+}
 
 // TestSeedMirrorsWhatThePinsResolve owns the mapping from startup pins to the
 // seeded registry: one active registration per pinned plugin, keeping its
