@@ -1,6 +1,6 @@
 # Measure open-source embeddings
 
-Compare embedding models on public samples with `hosted.embed` and `direct_bakeoff.py`.
+Compare embedding models on public samples with `hosted.embed` and `direct_bakeoff.py`; operators can start with [Choose an embedding model](../../docs-site/run-quivr/choose-an-embedding-model.mdx).
 Python 3.12+ and the requirements below install the Modal CLI; paid runs need operator authentication.
 The coordinator dispatches paid runs; CI uses offline fixtures only.
 

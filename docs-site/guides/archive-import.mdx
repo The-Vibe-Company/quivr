@@ -63,7 +63,15 @@ Revisions of one Record are submitted on separate pages.
 ## Configure and start the source
 
 Use the [connector creation and credential workflow](/guides/connectors#create-an-instance)
-with kind `object_storage_archive`. Put these settings in its `config`.
+with kind `object_storage_archive`. Set `work_queue: "bulk"` at the creation
+request's top level, alongside `kind`, `config` and `schedule`, so this historical
+import uses bulk workers. For example, these are request fields, outside `config`:
+
+```json
+{"kind":"object_storage_archive","work_queue":"bulk"}
+```
+
+Put the storage settings below in `config`.
 This is an example for your own storage; replace the bucket, prefix and region:
 
 ```json
@@ -162,10 +170,13 @@ rejections reported as `item_rejected` in health. Accepted members can still
 be waiting for normalization or search publication; acceptance does not mean
 searchability.
 
-Use a [long schedule and a manual run](/guides/connectors#change-the-schedule-or-check-now)
-to leave collection idle between runs and continue later. A longer interval
-applies after the already scheduled run; it does not interrupt an active run.
-Disabling an instance is permanent. The checkpoint records the archive ETag and member
+Use [pause and resume](/guides/connectors#pause-and-resume-collection) to stop
+collection and continue from its last saved checkpoint. Pause also stops
+continuing imports. A source request already in progress may finish, but cannot
+save a later checkpoint after pause; already accepted documents keep processing.
+Resume makes collection due immediately unless the source's `Retry-After` delays it.
+A manual run while paused is refused; permanent disable cannot be resumed.
+The checkpoint records the archive ETag and member
 offset. After a worker or plugin restart, the connector scans the compressed
 tar stream to that offset and continues. ZIP uses ranged member reads.
 Escape-heavy archive identities retain compact refs to fit the 1,024-byte
@@ -214,4 +225,5 @@ receipts each, or 64 receipts per process. Each receipt keeps its pinned plan,
 stage deadlines and replay guards. Provider concurrency remains separately
 bounded by `max_concurrent_requests`. Add worker replicas only within your
 database and provider capacity.
-See [hosted embedding settings](/run-quivr/switch-a-vector-model).
+See [Run a large import](/run-quivr/run-a-large-import) for storage sizing,
+provider capacity and queue monitoring, and [hosted embedding settings](/run-quivr/switch-a-vector-model).
