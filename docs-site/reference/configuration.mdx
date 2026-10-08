@@ -295,9 +295,17 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`32`; `0` selects the default. `1` restores serial work. Worker only. |
+| `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`256`; `0` selects the default. `1` restores serial work. Worker only. |
 
-Each step covers at most 25 Versions, then saves progress before a 200 ms pause.
+Each step refills a free slot as soon as its Version finishes, including across
+candidate pages. A slow Version occupies one slot while the others keep working.
+The worker saves progress below the earliest unfinished Version; stored coverage
+prevents counting completed Versions twice after a restart. A final check catches
+new eligible Versions behind that saved position before the index switches.
+Steps stop starting work after one minute. Once every active Version finishes,
+the worker pauses for 200 ms before the next step starts. Shorter activity deadlines stop
+admission earlier. The worker checks for cancellation every five seconds while
+storage remains available.
 Rebuild and backfill activities use the [bulk worker queue](#worker-queues),
 whose activity budget is separate from live ingestion. Each active rebuild
 step can run `concurrency` Versions; the process-wide upper bound is

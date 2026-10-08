@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -33,7 +36,12 @@ type fakeRebuildStore struct {
 	cancelBeforeActivate bool
 	confirms             int
 	checkpoints          int
+	cursor               string
+	coveredEvents        chan string
+	scanWait             bool
+	scanLate             bool
 	quarantined          map[string]content.Diagnostic
+	quarantinedEvents    chan string
 }
 
 func (f *fakeRebuildStore) current() string {
@@ -50,7 +58,7 @@ func (f *fakeRebuildStore) BeginRebuild(context.Context, string, string) (retrie
 	if g.ID == "" {
 		g = content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}
 	}
-	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: g}, nil
+	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: g, Cursor: f.cursor}, nil
 }
 func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error {
 	f.mu.Lock()
@@ -64,8 +72,31 @@ func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error 
 func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, limit int) ([]retrieval.RebuildCandidate, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.scanLate {
+		limit = 2
+	}
+	out := f.candidatesAfter(f.cursor, limit)
+	if len(out) == 0 && f.cursor != "" {
+		out = f.candidatesAfter("", limit)
+	}
+	return out, nil
+}
+func (f *fakeRebuildStore) candidatesAfter(after string, limit int) []retrieval.RebuildCandidate {
 	out := []retrieval.RebuildCandidate{}
-	for _, c := range f.candidates {
+	ordered := slices.Clone(f.candidates)
+	slices.SortFunc(ordered, func(a, b retrieval.RebuildCandidate) int {
+		if a.VersionID < b.VersionID {
+			return -1
+		}
+		if a.VersionID > b.VersionID {
+			return 1
+		}
+		return 0
+	})
+	for _, c := range ordered {
+		if c.VersionID <= after {
+			continue
+		}
 		if _, held := f.quarantined[c.VersionID]; held {
 			continue
 		}
@@ -76,16 +107,37 @@ func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, lim
 			}
 		}
 	}
-	return out, nil
+	return out
 }
-func (f *fakeRebuildStore) CheckpointRebuild(context.Context, string, string, string) error {
-
+func (f *fakeRebuildStore) RebuildCandidatesAfter(ctx context.Context, _, _, after string, limit int) ([]retrieval.RebuildCandidate, error) {
+	if f.scanWait && limit > 1 {
+		<-ctx.Done()
+		if !f.scanLate {
+			return nil, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.candidatesAfter(after, limit), nil
+}
+func (f *fakeRebuildStore) RebuildCandidatePending(_ context.Context, _, _, version string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.candidatesAfter("", len(f.candidates)) {
+		if c.VersionID == version {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeRebuildStore) CheckpointRebuild(_ context.Context, _, _, after string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.current() != operations.StateRunning {
 		return operations.ErrNotRunning
 	}
 	f.checkpoints++
+	f.cursor = after
 	return nil
 }
 func (f *fakeRebuildStore) QuarantineRebuild(_ context.Context, _, _ string, version string, reason content.Diagnostic) error {
@@ -98,6 +150,9 @@ func (f *fakeRebuildStore) QuarantineRebuild(_ context.Context, _, _ string, ver
 		f.quarantined = map[string]content.Diagnostic{}
 	}
 	f.quarantined[version] = reason
+	if f.quarantinedEvents != nil {
+		f.quarantinedEvents <- version
+	}
 	return nil
 }
 
@@ -134,6 +189,9 @@ func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg cont
 		return false, operations.ErrNotRunning
 	}
 	f.covered[seg.VersionID] = artifacts
+	if f.coveredEvents != nil {
+		f.coveredEvents <- seg.VersionID
+	}
 	if f.cancelAfterCovers > 0 && len(f.covered) >= f.cancelAfterCovers {
 		f.state = operations.StateCancelRequested
 	}
@@ -164,6 +222,7 @@ func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operati
 type fakeRebuildContent struct {
 	mu         sync.Mutex
 	versionErr error
+	missingID  string
 	reads      int
 	onRead     func()
 	timeouts   int
@@ -176,7 +235,7 @@ func (f *fakeRebuildContent) TrustedVersion(_ context.Context, _, _ string, reco
 	if f.onRead != nil {
 		f.onRead()
 	}
-	if f.versionErr != nil {
+	if f.versionErr != nil && (f.missingID == "" || f.missingID == id) {
 		return content.Version{}, f.versionErr
 	}
 	return content.Version{ID: id, RecordID: recordID}, nil
@@ -392,6 +451,44 @@ func TestRebuildQuarantinesAnEligibleItemThatCannotBeHydrated(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unreadable Version beyond leased gaps", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, quarantinedEvents: make(chan string, 1)}
+		lost := &loseOnce{lost: map[string]bool{}, ids: map[string]bool{}}
+		for i := range 60 {
+			id := fmt.Sprintf("v%03d", i)
+			store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: id, VectorsRequired: true})
+			if i > 0 && i <= 30 {
+				lost.ids[id] = true
+			}
+		}
+		release := make(chan struct{})
+		close(release)
+		d := &gatedRebuildDeriver{entered: make(chan string, 60), release: release, slow: make(chan struct{}), slowID: "v000"}
+		r := rebuilder(store, &fakeRebuildContent{versionErr: corpus.ErrNotFound, missingID: "v059"}, &fakeRebuildProjection{})
+		r.Plugin, r.Concurrency = d, 3
+		finished := make(chan error, 1)
+		go func() { _, err := r.Step(workqueue.WithTracker(ctx, lost), "org", "op"); finished <- err }()
+		select {
+		case version := <-store.quarantinedEvents:
+			if version != "v059" {
+				t.Fatalf("quarantined %s, want unreadable v059", version)
+			}
+		case err := <-finished:
+			t.Fatalf("stream ended without quarantining eligible unreadable v059 beyond the first gap page: %v", err)
+		case <-ctx.Done():
+			t.Fatal("eligible unreadable v059 was silently skipped beyond the first gap page")
+		}
+		cancel()
+		if err := <-finished; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if store.quarantined["v059"].Code != "canonical_content_unavailable" {
+			t.Fatalf("diagnostic=%v", store.quarantined)
+		}
+	})
+
 }
 
 func TestRebuildRetriesWhenStorageLeavesTheSameCoverageGap(t *testing.T) {
@@ -431,6 +528,27 @@ func TestRebuildStopsRemainingWorkWhenCancellationIsRequested(t *testing.T) {
 	if _, ok := store.covered["v1"]; !ok || len(store.covered) != 1 {
 		t.Fatalf("committed coverage %v", store.covered)
 	}
+	t.Run("while no document completes", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, candidates: []retrieval.RebuildCandidate{{RecordID: "r0", VersionID: "v000", VectorsRequired: true}}}
+			release := make(chan struct{})
+			close(release)
+			d := &gatedRebuildDeriver{entered: make(chan string, 1), release: release, slow: make(chan struct{}), slowID: "v000"}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Plugin = d
+			go func() {
+				<-d.entered
+				store.mu.Lock()
+				store.state = operations.StateCancelRequested
+				store.mu.Unlock()
+			}()
+			done, err := r.Step(context.Background(), "org", "op")
+			if !done || err != nil || store.state != operations.StateCanceled || store.confirms != 1 || store.activated || len(store.covered) != 0 || d.active.Load() != 0 {
+				t.Fatalf("stalled cancellation done=%v err=%v state=%s confirms=%d active=%d covered=%v", done, err, store.state, store.confirms, d.active.Load(), store.covered)
+			}
+		})
+	})
+
 }
 
 // A request observed at the start of a step settles before any content work.
@@ -523,9 +641,20 @@ type gatedRebuildDeriver struct {
 	fakeDeriver
 	entered chan string
 	release <-chan struct{}
+	slow    <-chan struct{}
+	slowID  string
+	active  atomic.Int32
+	peak    atomic.Int32
 }
 
 func (d *gatedRebuildDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	active := d.active.Add(1)
+	defer d.active.Add(-1)
+	for old := d.peak.Load(); active > old; old = d.peak.Load() {
+		if d.peak.CompareAndSwap(old, active) {
+			break
+		}
+	}
 	select {
 	case d.entered <- v.ID:
 	case <-ctx.Done():
@@ -536,20 +665,31 @@ func (d *gatedRebuildDeriver) Derive(ctx context.Context, org, corpusID string, 
 	case <-ctx.Done():
 		return content.Segmentation{}, nil, ctx.Err()
 	}
+	if v.ID == d.slowID {
+		select {
+		case <-d.slow:
+		case <-ctx.Done():
+			return content.Segmentation{}, nil, ctx.Err()
+		}
+	}
 	return d.fakeDeriver.Derive(ctx, org, corpusID, v, g)
 }
 func TestRebuildCoversVersionsConcurrentlyWithinTheLimit(t *testing.T) {
 	for _, concurrency := range []int{3, 32} {
 		t.Run(fmt.Sprint(concurrency), func(t *testing.T) {
-			versions := concurrency * 3
+			versions := max(60, concurrency*3)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			store := &fakeRebuildStore{covered: map[string][]content.Embedding{}}
+			store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, coveredEvents: make(chan string, versions)}
 			for i := range versions {
-				store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
+				store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprintf("v%03d", i), VectorsRequired: true})
 			}
-			release := make(chan struct{})
-			d := &gatedRebuildDeriver{entered: make(chan string, versions), release: release}
+			release, slow := make(chan struct{}), make(chan struct{})
+			slowID, wantCursor := "v000", ""
+			if concurrency == 32 {
+				slowID, wantCursor = "v005", "v004"
+			}
+			d := &gatedRebuildDeriver{entered: make(chan string, versions), release: release, slow: slow, slowID: slowID}
 			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 			r.Plugin, r.Concurrency = d, concurrency
 			finished := make(chan error, 1)
@@ -561,19 +701,104 @@ func TestRebuildCoversVersionsConcurrentlyWithinTheLimit(t *testing.T) {
 					t.Fatalf("%d embedding calls did not overlap", concurrency)
 				}
 			}
-			select {
-			case id := <-d.entered:
-				t.Errorf("Version %s exceeded configured concurrency", id)
-			default:
-			}
 			close(release)
-			if err := <-finished; err != nil {
-				t.Fatal(err)
+			for range versions - 1 {
+				select {
+				case id := <-store.coveredEvents:
+					if id == slowID {
+						t.Fatal("slow Version covered before release")
+					}
+				case <-ctx.Done():
+					store.mu.Lock()
+					covered := len(store.covered)
+					store.mu.Unlock()
+					t.Fatalf("other slots stopped at %d/%d covered Versions behind slow %s; must advance across pages", covered, versions-1, slowID)
+				}
 			}
+			store.mu.Lock()
+			cursor := store.cursor
+			store.mu.Unlock()
+			if cursor > wantCursor {
+				t.Fatalf("checkpoint %q, must stay at or below predecessor %q of unfinished %s", cursor, wantCursor, slowID)
+			}
+			if peak := d.peak.Load(); peak != int32(concurrency) {
+				t.Fatalf("peak concurrency %d, want %d", peak, concurrency)
+			}
+			// Interrupt the attempt while the first Version is unfinished. Resume
+			// from durable coverage; fast Versions must not run again.
+			cancel()
+			if err := <-finished; !errors.Is(err, context.Canceled) {
+				t.Fatalf("interrupted step: %v, want cancellation", err)
+			}
+			next := &fakeDeriver{}
+			r.Plugin = next
 			run(t, r)
-			if !store.activated || len(store.covered) != versions || d.derived != versions {
-				t.Fatalf("activated=%v coverage=%d embedding calls=%d", store.activated, len(store.covered), d.derived)
+			if !store.activated || len(store.covered) != versions || d.derived != versions-1 || next.derived != 1 {
+				t.Fatalf("activated=%v coverage=%d pre-crash calls=%d resumed calls=%d", store.activated, len(store.covered), d.derived, next.derived)
 			}
+		})
+	}
+}
+
+// A one-minute admission budget leaves active documents time to finish; a
+// slow item must not be canceled and restarted forever at each turn boundary.
+type clockedRebuildDeriver struct {
+	fakeDeriver
+	delay time.Duration
+	fast  string
+}
+
+func (d *clockedRebuildDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	if v.ID != d.fast {
+		timer := time.NewTimer(d.delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return content.Segmentation{}, nil, ctx.Err()
+		}
+	}
+	return d.fakeDeriver.Derive(ctx, org, corpusID, v, g)
+}
+func TestRebuildYieldsWithoutConsumingItemDeadlineBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		scanWait, scanLate bool
+		attempt, delay     time.Duration
+	}{
+		{"document", false, false, 30 * time.Minute, 80 * time.Second},
+		{"candidate lookup", true, false, 30 * time.Minute, 80 * time.Second},
+		{"short attempt", false, false, 40 * time.Second, 30 * time.Second},
+		{"lookup returns at cutoff", true, true, 30 * time.Minute, 80 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), tc.attempt)
+				defer cancel()
+				store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, scanWait: tc.scanWait, scanLate: tc.scanLate}
+				versions := 4
+				d := &clockedRebuildDeriver{delay: tc.delay}
+				if tc.scanWait {
+					d.fast = "v001"
+					if !tc.scanLate {
+						versions = 2
+					}
+				}
+				for i := range versions {
+					store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprintf("v%03d", i), VectorsRequired: true})
+				}
+				canonical := &fakeRebuildContent{}
+				r := rebuilder(store, canonical, &fakeRebuildProjection{})
+				r.Concurrency, r.Plugin = 2, d
+				started := time.Now()
+				done, err := r.Step(ctx, "org", "op")
+				if done || err != nil || time.Since(started) != tc.delay || ctx.Err() != nil {
+					t.Fatalf("turn done=%v err=%v elapsed=%v parent=%v; want drain after %v", done, err, time.Since(started), ctx.Err(), tc.delay)
+				}
+				if len(store.covered) != 2 || d.derived != 2 || canonical.timeouts != 0 || len(store.quarantined) != 0 || store.cursor != "v001" {
+					t.Fatalf("yield covered=%v calls=%d deadlines=%d held=%v cursor=%q; want only initial two Versions covered", store.covered, d.derived, canonical.timeouts, store.quarantined, store.cursor)
+				}
+			})
 		})
 	}
 }
@@ -703,41 +928,89 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 // loseOnce reports one lost lease for a Version, as when a slow renewal lets
 // another attempt take it, then tracks normally.
 type loseOnce struct {
-	mu   sync.Mutex
-	lost map[string]bool
-	id   string
+	mu      sync.Mutex
+	lost    map[string]bool
+	id      string
+	ids     map[string]bool
+	join    error
+	runLost bool
 }
 
 func (l *loseOnce) Track(ctx context.Context, _, _, _, documentID string, run func(context.Context) error) error {
 	l.mu.Lock()
-	lose := documentID == l.id && !l.lost[documentID]
+	lose := (documentID == l.id || l.ids[documentID]) && !l.lost[documentID]
 	if lose {
 		l.lost[documentID] = true
 	}
 	l.mu.Unlock()
 	if lose {
-		return workqueue.ErrLeaseLost
+		if l.runLost {
+			return errors.Join(run(ctx), workqueue.ErrLeaseLost, l.join)
+		}
+		return errors.Join(workqueue.ErrLeaseLost, l.join)
 	}
 	return run(ctx)
 }
 
 func TestRebuildKeepsSiblingsWhenOneVersionLosesItsLease(t *testing.T) {
-	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
-	r.Concurrency = 2
-	ctx := workqueue.WithTracker(context.Background(), &loseOnce{lost: map[string]bool{}, id: "v1"})
-	if done, err := r.Step(ctx, "org", "op"); err != nil || done {
-		t.Fatalf("first step: done=%v err=%v", done, err)
-	}
-	if _, ok := store.covered["v1"]; ok || len(store.covered["v2"]) != 1 {
-		t.Fatalf("covered after a lost lease = %v; want v2 only", store.covered)
-	}
-	for i := 0; i < 5 && !store.activated; i++ {
-		if _, err := r.Step(ctx, "org", "op"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !store.activated || len(store.covered["v1"]) != 1 {
-		t.Fatalf("activated=%v covered=%v", store.activated, store.covered)
+	outage := errors.New("lease cleanup unavailable")
+	for _, tc := range []struct {
+		name              string
+		join              error
+		refused, canceled bool
+	}{
+		{name: "lease"},
+		{name: "canceled callback", join: context.Canceled},
+		{name: "terminal callback", refused: true},
+		{name: "transient cleanup", join: outage},
+		{name: "operation cancellation", join: operations.ErrNotRunning, canceled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Concurrency = 2
+			if tc.refused {
+				r.Plugin = &selectiveRebuildDeriver{refused: "v1"}
+			}
+			if tc.canceled {
+				store.candidates = store.candidates[:1]
+			}
+			tracker := &loseOnce{lost: map[string]bool{}, id: "v1", join: tc.join, runLost: tc.refused}
+			// The Operation changes after Begin, so the tracked result drives settlement.
+			if tc.canceled {
+				store.state = ""
+				r.Plugin = &fakeDeriver{onDerive: func() { store.mu.Lock(); store.state = operations.StateCancelRequested; store.mu.Unlock() }}
+				tracker.runLost = true
+			}
+			ctx := workqueue.WithTracker(context.Background(), tracker)
+			done, err := r.Step(ctx, "org", "op")
+			if tc.canceled {
+				if err != nil || !done || store.confirms != 1 || store.state != operations.StateCanceled {
+					t.Fatalf("cancellation done=%v err=%v confirms=%d state=%s", done, err, store.confirms, store.state)
+				}
+				return
+			}
+			if tc.join == outage {
+				if !errors.Is(err, outage) {
+					t.Fatalf("joined outage was hidden: %v", err)
+				}
+				return
+			}
+			if err != nil || done {
+				t.Fatalf("first step: done=%v err=%v", done, err)
+			}
+			if _, ok := store.covered["v1"]; ok || len(store.covered["v2"]) != 1 || store.cursor != "" || len(store.quarantined) != 0 {
+				t.Fatalf("lost lease covered=%v cursor=%q quarantine=%v; want v2 only", store.covered, store.cursor, store.quarantined)
+			}
+			r.Plugin = &fakeDeriver{}
+			for i := 0; i < 5 && !store.activated; i++ {
+				if _, err := r.Step(ctx, "org", "op"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !store.activated || len(store.covered["v1"]) != 1 {
+				t.Fatalf("activated=%v covered=%v", store.activated, store.covered)
+			}
+		})
 	}
 }

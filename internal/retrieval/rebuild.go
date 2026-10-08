@@ -5,19 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
-	"golang.org/x/sync/errgroup"
 )
 
 // RebuildTarget is a running rebuild Operation and its logical target generation.
 type RebuildTarget struct {
 	Operation  operations.Operation
 	Generation content.Generation
+	// Cursor is the durable exclusive resume position, independent of dispatch.
+	Cursor string
 }
 
 // RebuildCandidate is a current eligible Version the target does not yet cover.
@@ -38,8 +40,14 @@ type RebuildStore interface {
 	// RebuildCandidates lists current eligible Versions of the Corpus missing
 	// target projection or vector coverage, in stable order.
 	RebuildCandidates(ctx context.Context, org, operationID string, limit int) ([]RebuildCandidate, error)
-	// CheckpointRebuild persists the last version of a successfully joined page.
-	// Call only after checking progress; failed pages leave the cursor unchanged.
+	// RebuildCandidatesAfter lists forward from an explicit exclusive scan cursor.
+	// Unlike RebuildCandidates it never wraps to gaps behind the cursor.
+	RebuildCandidatesAfter(ctx context.Context, org, operationID, after string, limit int) ([]RebuildCandidate, error)
+	// RebuildCandidatePending tests one Version against the canonical gap
+	// predicate, even when it is beyond the durable cursor's first page.
+	RebuildCandidatePending(ctx context.Context, org, operationID, versionID string) (bool, error)
+	// CheckpointRebuild persists a verified exclusive resume position below all
+	// unfinished work. Reconciliation may move it below its previous position.
 	CheckpointRebuild(ctx context.Context, org, operationID, after string) error
 	// CoverRebuild records target coverage for a verified segmentation and its
 	// reused artifacts. It returns false when the Version is no longer eligible.
@@ -83,8 +91,7 @@ type GenerationRouter interface {
 	Generation(ctx context.Context, org, corpusID string) (content.Generation, error)
 }
 
-// rebuildBatch bounds the work of one step so progress is durable and
-// heartbeats stay frequent.
+// rebuildBatch bounds candidate buffering and the checkpoint completion interval.
 const rebuildBatch = 25
 
 // Rebuild concurrency bounds Version work inside one activity. Plugin/provider
@@ -124,9 +131,9 @@ type terminal struct {
 
 func (t terminal) Error() string { return t.failure.Code }
 
-// Step performs one bounded unit of rebuild work and reports whether the
-// Operation needs no further steps. Transient failures return an error so the
-// caller retries with backoff; the Operation stays running.
+// Step streams bounded pages through a sliding window of Version work. The
+// durable cursor trails unfinished work while dispatch can continue ahead.
+// A turn stops admission after one minute and joins existing document work.
 func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, error) {
 	concurrency := r.Concurrency
 	if concurrency == 0 {
@@ -135,85 +142,283 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	if concurrency < 1 || concurrency > MaxRebuildConcurrency {
 		return false, fmt.Errorf("rebuild concurrency must be between 1 and %d", MaxRebuildConcurrency)
 	}
-	target, err := r.Store.BeginRebuild(ctx, org, operationID)
-	if err != nil {
+	work, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	turnEnded := errors.New("rebuild turn ended")
+	// Leave half the remaining attempt for cleanup in short/legacy histories.
+	budget := time.Minute
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, max(time.Until(deadline)/2, 0))
+	}
+	admission, endAdmission := context.WithCancelCause(work)
+	defer endAdmission(nil)
+	turn := time.AfterFunc(budget, func() { endAdmission(turnEnded) })
+	defer turn.Stop()
+	interrupted := func(err error) (bool, error) {
+		if context.Cause(admission) == turnEnded && errors.Is(err, context.Canceled) && ctx.Err() == nil {
+			return false, nil
+		}
 		return false, err
+	}
+	target, err := r.Store.BeginRebuild(admission, org, operationID)
+	if err != nil {
+		return interrupted(err)
 	}
 	if target.Operation.State != operations.StateRunning {
 		return r.stop(ctx, org, operationID)
 	}
-	candidates, err := r.Store.RebuildCandidates(ctx, org, operationID, max(rebuildBatch, r.Concurrency))
+	limit := max(rebuildBatch, concurrency)
+	page, err := r.Store.RebuildCandidates(admission, org, operationID, limit)
 	if err != nil {
-		return false, err
+		return interrupted(err)
 	}
-	group, work := errgroup.WithContext(ctx)
-	group.SetLimit(concurrency)
-	// Each goroutine owns its outcome slot; read only after the join.
-	outcomes := make([]error, len(candidates))
-	for i, c := range candidates {
-		if work.Err() != nil {
-			break
-		}
-		group.Go(func() error {
-			// Go may unblock after another candidate canceled the group.
-			if err := work.Err(); err != nil {
-				return err
-			}
-			outcomes[i] = r.cover(work, org, target, c)
-			if errors.Is(outcomes[i], workqueue.ErrLeaseLost) && work.Err() == nil {
-				// Another attempt owns this Version now; it stays a candidate
-				// for a later step instead of canceling healthy siblings.
-				outcomes[i] = nil
-			}
-			var item terminal
-			if errors.As(outcomes[i], &item) {
-				reason := content.Diagnostic{Code: item.failure.Code, Message: item.failure.Message}
-				if item.reason != nil {
-					reason = *item.reason
-					reason.Code = item.failure.Code
-				}
-				// An item failure does not cancel healthy siblings. Use the
-				// parent context if another sibling encountered an outage.
-				outcomes[i] = r.Store.QuarantineRebuild(ctx, org, operationID, c.VersionID, reason)
-			}
-			return outcomes[i]
-		})
-	}
-	// Join every effect before settling, comparing progress, or retrying. The
-	// store fences canonical effects and idempotently counts committed coverage.
-	err = group.Wait()
-	// The first transient error cancels work, but cannot hide a cancellation
-	// or deterministic failure another candidate already observed.
-	for _, outcome := range outcomes {
-		if errors.Is(outcome, operations.ErrNotRunning) {
+	if len(page) == 0 {
+		activated, err := r.Store.ActivateRebuild(admission, org, operationID)
+		if errors.Is(err, operations.ErrNotRunning) {
 			return r.stop(ctx, org, operationID)
 		}
+		if err != nil {
+			return interrupted(err)
+		}
+		return activated, nil
 	}
-	if err != nil {
-		return false, err
+	initial := slices.Clone(page)
+	// A full gap sweep may have wrapped below the durable cursor.
+	safe := target.Cursor
+	if page[0].VersionID <= safe {
+		safe = ""
+	}
+	scan := safe
+	type unfinished struct{ id, before string }
+	type result struct {
+		candidate unfinished
+		err       error
+	}
+	pending := make(map[string]unfinished, concurrency)
+	results := make(chan result, concurrency)
+	admissionDone := admission.Done()
+	checkpoints := time.NewTicker(5 * time.Second)
+	defer checkpoints.Stop()
+	var barrier unfinished // earliest lost lease or canceled unfinished Version
+	var retry error
+	stopped, yielded, notRunning := false, false, false
+	completed := 0
+	remember := func(c unfinished) {
+		if barrier.id == "" || c.id < barrier.id {
+			barrier = c
+		}
+	}
+	frontier := func() string {
+		lowest := barrier
+		for _, c := range pending {
+			if lowest.id == "" || c.id < lowest.id {
+				lowest = c
+			}
+		}
+		if lowest.id != "" {
+			return lowest.before
+		}
+		return scan
+	}
+	checkpoint := func(check context.Context, observe bool) error {
+		after := frontier()
+		if after != safe {
+			// A nil document outcome is not proof that every gap disappeared:
+			// enrichment or imports may have changed eligibility during work.
+			gaps, err := r.Store.RebuildCandidatesAfter(check, org, operationID, safe, 1)
+			if err != nil {
+				return err
+			}
+			if len(gaps) > 0 && gaps[0].VersionID <= after {
+				remember(unfinished{id: gaps[0].VersionID, before: safe})
+				after = safe
+			}
+		}
+		if after == safe && !observe {
+			return nil
+		}
+		if err := r.Store.CheckpointRebuild(check, org, operationID, after); err != nil {
+			return err
+		}
+		safe = after
+		return nil
+	}
+	stop := func(err error) {
+		if errors.Is(err, operations.ErrNotRunning) {
+			notRunning = true
+		}
+		// A canceled sibling must not hide the actual outage which canceled it.
+		if retry == nil || (errors.Is(retry, context.Canceled) && !errors.Is(err, context.Canceled)) {
+			retry = err
+		}
+		stopped = true
+		cancel(err)
+	}
+	stopAdmission := func(err error) {
+		if context.Cause(admission) == turnEnded && (errors.Is(err, context.Canceled) || err == turnEnded) && ctx.Err() == nil {
+			yielded, stopped = true, true
+			return
+		}
+		stop(err)
 	}
 
-	if len(candidates) > 0 {
-		remaining, err := r.Store.RebuildCandidates(ctx, org, operationID, max(rebuildBatch, r.Concurrency))
+	for {
+		if admission.Err() != nil {
+			stopped = true
+			if context.Cause(admission) == turnEnded {
+				yielded = true
+			}
+		}
+		for !stopped && len(pending) < concurrency {
+			if admission.Err() != nil {
+				stopAdmission(context.Cause(admission))
+				break
+			}
+			if len(page) == 0 {
+				page, err = r.Store.RebuildCandidatesAfter(admission, org, operationID, scan, limit)
+				if err != nil {
+					stopAdmission(err)
+					break
+				}
+				if len(page) == 0 {
+					stopped = true
+					break
+				}
+			}
+			if admission.Err() != nil {
+				stopAdmission(context.Cause(admission))
+				break
+			}
+			c := page[0]
+			page = page[1:]
+			u := unfinished{id: c.VersionID, before: scan}
+			scan = c.VersionID
+			pending[u.id] = u
+			go func() {
+				err := work.Err()
+				if err == nil {
+					err = r.coverCandidate(work, ctx, org, target, c)
+				}
+				if err != nil && err != workqueue.ErrLeaseLost {
+					cancel(err)
+				}
+				results <- result{candidate: u, err: err}
+			}()
+		}
+		if len(pending) == 0 {
+			break
+		}
+		select {
+		case out := <-results:
+			delete(pending, out.candidate.id)
+			switch {
+			case out.err == workqueue.ErrLeaseLost:
+				remember(out.candidate)
+			case out.err != nil:
+				remember(out.candidate)
+				stop(out.err)
+			default:
+				completed++
+			}
+			if !stopped && completed >= rebuildBatch {
+				if err := checkpoint(admission, false); err != nil {
+					stopAdmission(err)
+				}
+				completed = 0
+			}
+		case <-checkpoints.C:
+			// Observe Operation state even while a slow head prevents advancement.
+			if err := checkpoint(work, true); err != nil {
+				stop(err)
+			}
+		case <-admissionDone:
+			stopAdmission(context.Cause(admission))
+			admissionDone = nil
+		case <-ctx.Done():
+			stop(ctx.Err())
+		}
+	}
+	// Every admitted candidate has reported after its canonical effects and
+	// cleanup joined. Only now may cancellation settle or reconciliation wrap.
+	if notRunning {
+		return r.stop(ctx, org, operationID)
+	}
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if retry != nil {
+		return false, retry
+	}
+	// Finish only bounded canonical bookkeeping after all document effects join.
+	settle, settleCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer settleCancel()
+	if !yielded {
+		remaining, err := r.Store.RebuildCandidates(settle, org, operationID, limit)
 		if err != nil {
 			return false, err
 		}
-		if slices.Equal(candidates, remaining) {
+		if slices.Equal(initial, remaining) {
 			return false, errors.New("rebuild coverage did not advance; retry after storage or routing recovers")
 		}
-		if err := r.Store.CheckpointRebuild(ctx, org, operationID, candidates[len(candidates)-1].VersionID); err != nil {
-			if errors.Is(err, operations.ErrNotRunning) {
-				return r.stop(ctx, org, operationID)
-			}
-			return false, err
+	}
+	if err := checkpoint(settle, false); err != nil {
+		if errors.Is(err, operations.ErrNotRunning) {
+			return r.stop(ctx, org, operationID)
 		}
-		return false, nil
+		return false, err
 	}
-	activated, err := r.Store.ActivateRebuild(ctx, org, operationID)
-	if errors.Is(err, operations.ErrNotRunning) {
-		return r.stop(ctx, org, operationID)
+	return false, nil
+}
+
+// coverCandidate isolates a terminal item without canceling healthy siblings.
+// Quarantine uses the parent context so another candidate's outage cannot hide
+// a deterministic refusal already observed before the join.
+func (r Rebuilder) coverCandidate(work, parent context.Context, org string, target RebuildTarget, c RebuildCandidate) error {
+	err := r.cover(work, org, target, c)
+	if errors.Is(err, workqueue.ErrLeaseLost) {
+		// A terminal or canceled callback under a lost lease cannot authorize
+		// quarantine. Keep the gap, while preserving independent retry causes.
+		if retry := rebuildRetryCause(err); retry != nil {
+			return errors.Join(workqueue.ErrLeaseLost, retry)
+		}
+		return workqueue.ErrLeaseLost
 	}
-	return activated, err
+	var item terminal
+	if errors.As(err, &item) && rebuildRetryCause(err) == nil {
+		reason := content.Diagnostic{Code: item.failure.Code, Message: item.failure.Message}
+		if item.reason != nil {
+			reason = *item.reason
+			reason.Code = item.failure.Code
+		}
+		err = r.Store.QuarantineRebuild(parent, org, target.Operation.ID, c.VersionID, reason)
+	}
+	return err
+}
+
+// rebuildRetryCause keeps independent failures joined by the lease tracker.
+// Lease loss, canceled callbacks and deterministic item failures leave a gap
+// for the next owner; storage failures and Operation fences still stop a turn.
+func rebuildRetryCause(err error) error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var causes []error
+		for _, cause := range joined.Unwrap() {
+			if retry := rebuildRetryCause(cause); retry != nil {
+				causes = append(causes, retry)
+			}
+		}
+		return errors.Join(causes...)
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return rebuildRetryCause(wrapped.Unwrap())
+	}
+	var item terminal
+	if errors.Is(err, workqueue.ErrLeaseLost) || errors.Is(err, context.Canceled) || errors.As(err, &item) {
+		return nil
+	}
+	return err
 }
 
 // stop ends work on an Operation that left the running state. Every canonical
@@ -233,17 +438,14 @@ func (r Rebuilder) coverDocument(ctx context.Context, org string, target Rebuild
 	corpusID := target.Operation.CorpusID
 	v, err := r.Content.TrustedVersion(ctx, org, corpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) {
-		// Hydration can also miss canonical metadata for a still-eligible
-		// Version. Only ignore it if a fresh listing confirms it left the
-		// batch; otherwise the stable head would be selected forever.
-		candidates, listErr := r.Store.RebuildCandidates(ctx, org, target.Operation.ID, max(rebuildBatch, r.Concurrency))
-		if listErr != nil {
-			return listErr
+		// A bounded first-page listing can exclude this Version behind older
+		// lost leases; classify against its actual canonical eligibility.
+		pending, checkErr := r.Store.RebuildCandidatePending(ctx, org, target.Operation.ID, c.VersionID)
+		if checkErr != nil {
+			return checkErr
 		}
-		for _, candidate := range candidates {
-			if candidate.VersionID == c.VersionID {
-				return terminal{failure: operations.Error{Code: "canonical_content_unavailable", Message: "an eligible rebuild Version cannot be read from canonical content"}}
-			}
+		if pending {
+			return terminal{failure: operations.Error{Code: "canonical_content_unavailable", Message: "an eligible rebuild Version cannot be read from canonical content"}}
 		}
 		return nil
 	}
