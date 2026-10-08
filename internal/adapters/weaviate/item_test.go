@@ -2,6 +2,7 @@ package weaviate_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -184,6 +185,10 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-best" {
 		t.Fatalf("lexical highlight %+v %v", hits, err)
 	}
+	// A partial match must still choose the best highlight within a bounded
+	// dependency budget. Exhausting that budget fails immediately, without
+	// sleeping or asserting machine-dependent latency.
+	f.store.Client.Transport = &searchRequestBudget{next: f.store.Client.Transport, remaining: 4}
 	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour harbour harbour ferries boat water", Mode: "lexical", GroupBy: "record", K: 1})
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-coverage" {
 		t.Fatalf("distinct query-term highlight %+v %v", hits, err)
@@ -296,4 +301,21 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 			t.Fatalf("%s owner-eligible item refill: %+v %v", mode, hits, err)
 		}
 	}
+}
+
+// Enforce the search's dependency budget while leaving real Weaviate ranking,
+// filtering and passage selection in the owner test.
+type searchRequestBudget struct {
+	next      http.RoundTripper
+	remaining int
+}
+
+func (b *searchRequestBudget) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/v1/graphql" {
+		b.remaining--
+		if b.remaining < 0 {
+			return nil, errors.New("search dependency request budget exhausted")
+		}
+	}
+	return b.next.RoundTrip(r)
 }
