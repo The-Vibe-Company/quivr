@@ -22,10 +22,13 @@ func (s RecordStore) SaveProjectionMetadata(ctx context.Context, org, versionID,
 	// Cancellation, version retirement and route cutover share this fence.
 	// A publish delayed in the external projection cannot revive SQL metadata
 	// for an abandoned generation after its purge has become terminal.
+	// Prepared ingestion publishes before materialization, so its accepted
+	// revision, rather than record_versions, supplies the reserved identity.
 	var writable bool
 	if err = readJournal(ctx, tx, org, `SELECT EXISTS(
- SELECT 1 FROM record_versions v JOIN records r ON(r.organization,r.id)=(v.organization,v.record_id)
- WHERE v.organization=$1 AND v.id=$2 AND NOT `+deadVersionSQL+`
+ SELECT 1 FROM accepted_revisions a JOIN records r ON(r.organization,r.id)=(a.organization,a.record_id)
+ WHERE a.organization=$1 AND a.version_id=$2 AND NOT `+recordGoneSQL+`
+ AND (a.version_id=r.current_version_id OR a.version_id=r.desired_version_id)
  AND ($3=`+routedGenerationSQL("r.organization", "r.corpus_id")+` OR EXISTS(
   SELECT 1 FROM operations o WHERE o.organization=r.organization AND o.corpus_id=r.corpus_id
    AND o.target_generation_id=$3 AND o.state NOT IN ('succeeded','failed','canceled'))))`, []any{org, versionID, generationID}, &writable); err != nil {

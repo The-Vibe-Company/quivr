@@ -44,14 +44,16 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 			t.Fatal(err)
 		}
 		blob := content.Blob{Key: key, SHA256: content.Hash([]byte(key)), Size: int64(len(key))}
+		// Prepared ingestion publishes the projection before materialization.
+		// Its accepted revision already reserves the desired Version identity.
+		values := map[string]any{"metadata.language": language, "metadata.tags": []string{tag}, "metadata.published_at": date}
+		if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, work.VersionID, g.ID, values); err != nil {
+			t.Fatal(err)
+		}
 		if err = stores.Publish(ctx, work, publication(blob, blob)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, scope.Organization, work.RecordID, work.VersionID); err != nil {
-			t.Fatal(err)
-		}
-		values := map[string]any{"metadata.language": language, "metadata.tags": []string{tag}, "metadata.published_at": date}
-		if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, work.VersionID, g.ID, values); err != nil {
 			t.Fatal(err)
 		}
 		return work.RecordID
