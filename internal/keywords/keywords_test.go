@@ -14,9 +14,12 @@ func TestAnalyzers(t *testing.T) {
 		{"french_light", "LE port et la mer", "port mer"},
 		{"french_light", "cœur coeur ŒUVRES oeuvres", "coeu coeu oeuvr oeuvr"},
 		{"french_light", "organisation", "organ"},
+		// Stored French copies never change: no compatibility folding.
+		{"french_light", "ﬁn 10²", "ﬁn 10"},
 		// Folded is language-neutral: no stopwords and no stemming.
 		{"folded", "Les élections françaises", "les elections francaises"},
 		{"folded", "Café, CRÈME-brûlée; cœur Cæsar ﬁnance ＡＢＣ", "cafe creme brulee coeur caesar finance abc"},
+		{"folded", "Paris¹ 10² 2½ Brand™ 𝐀𝐁𝐂", "paris 10 2 brand abc"},
 		{"folded", "The organisation of organs", "the organisation of organs"},
 	} {
 		a, ok := keywords.Lookup(tc.analyzer)

@@ -25,7 +25,17 @@ func (a Analyzer) Analyze(text string) string { return a.analyze(text) }
 // Folded is language-neutral: lowercase words with accents, ligatures and
 // compatibility forms (ﬁ, full-width letters) folded, nothing removed or
 // stemmed. Passage selection uses it for fields that name no analyzer.
-var Folded = Analyzer{Name: "folded", Property: "folded", analyze: func(text string) string { return strings.Join(fold(text, norm.NFKD), " ") }}
+var Folded = Analyzer{Name: "folded", Property: "folded", analyze: func(text string) string {
+	// Symbols separate words before compatibility decomposition, so ², ½ or ™
+	// never join a neighbouring word; decomposed capitals such as 𝐀 lowercase.
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) {
+			return r
+		}
+		return ' '
+	}, text)
+	return strings.ToLower(strings.Join(fold(text, norm.NFKD), " "))
+}}
 
 var analyzers = []Analyzer{
 	Folded,
