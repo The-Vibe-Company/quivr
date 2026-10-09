@@ -67,7 +67,7 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
 	}
 	// Capture older generations before replacing their routes. Former,
 	// unrouted generations stay historical and are not switched.
-	rows, err := tx.Query(ctx, `SELECT g.id FROM projection_generations g WHERE g.active OR EXISTS(SELECT 1 FROM corpus_projection_routes cr WHERE cr.generation_id=g.id) ORDER BY g.id`)
+	rows, err := tx.Query(ctx, `SELECT g.id FROM `+effectiveGenerationsSQL+` g WHERE g.active OR EXISTS(SELECT 1 FROM corpus_projection_routes cr WHERE cr.generation_id=g.id) ORDER BY g.id`)
 	if err != nil {
 		return false, err
 	}
@@ -107,7 +107,7 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
 			primaryOwners[sp.ID] = sp.OwnerPluginID
 		}
 	}
-	rows, err = tx.Query(ctx, `SELECT sp.id,count(*) FROM projection_generations g
+	rows, err = tx.Query(ctx, `SELECT sp.id,count(*) FROM `+effectiveGenerationsSQL+` g
  CROSS JOIN unnest($2::text[]) sp(id) WHERE g.id=ANY($1::text[])
  AND (NOT g.spaces_projected OR NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',sp.id)))
  GROUP BY sp.id ORDER BY sp.id`, ids, primaries)
@@ -132,7 +132,7 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
 	const prior = `COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')`
 	rows, err = tx.Query(ctx, `SELECT `+selected+`,COALESCE(vs.id,''),count(DISTINCT (v.organization,v.id)) FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
+ JOIN `+effectiveGenerationsSQL+` g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  LEFT JOIN projection_coverage target ON (target.organization,target.version_id,target.generation_id,target.plugin_id)=(v.organization,v.id,g.id,`+selected+`)
  LEFT JOIN vector_spaces vs ON vs.owner_plugin_id=`+selected+` AND vs.id=ANY($2::text[])
  WHERE `+eligibleVersionSQL+` AND `+selected+`<>`+prior+` AND (target.segmentation_id IS NULL OR vs.id IS NULL OR EXISTS(
@@ -153,7 +153,7 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
 		return false, &registry.CoverageError{Gaps: gaps}
 	}
 	// Demote before promoting to preserve the unique served row per Version.
-	changed := `SELECT v.organization,v.id,g.id AS generation_id,` + selected + ` AS owner FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) JOIN projection_generations g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE ` + eligibleVersionSQL + ` AND ` + selected + `<>` + prior
+	changed := `SELECT v.organization,v.id,g.id AS generation_id,` + selected + ` AS owner FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) JOIN ` + effectiveGenerationsSQL + ` g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE ` + eligibleVersionSQL + ` AND ` + selected + `<>` + prior
 	if _, err = tx.Exec(ctx, `UPDATE projection_coverage pc SET role='evaluation' FROM (`+changed+`) c WHERE (pc.organization,pc.version_id,pc.generation_id)=(c.organization,c.id,c.generation_id) AND pc.role='served'`, raw); err != nil {
 		return false, err
 	}
@@ -195,7 +195,7 @@ var pinnedOwnerServesSQL = `SELECT g.ingestion_routing IS NULL OR COALESCE(g.ing
  (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain') LIMIT 1),
  (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role IN ('ingestion','ingestion-default') LIMIT 1),'')
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE v.organization=$1 AND v.id=$2`
+ JOIN ` + effectiveGenerationsSQL + ` g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE v.organization=$1 AND v.id=$2`
 
 func pinnedOwnerServes(ctx context.Context, tx pgx.Tx, org, versionID string) (bool, error) {
 	w, ok := plugins.WorkOf(ctx)

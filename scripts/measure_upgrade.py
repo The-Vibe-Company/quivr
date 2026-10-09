@@ -299,8 +299,18 @@ def drain(base, operator, name, version, endpoint, clock, switched, during=None)
     return d
 
 
+def routing_plan(base, operator, path, body):
+    operation = expect(base, operator, 'POST', path, body, status=202)
+    operation = await_condition('routing operation',
+        lambda: expect(base, operator, 'GET', '/v0/operations/' + operation['operation_id']),
+        lambda value: value['state'] in ('succeeded', 'failed'), deadline=180)
+    if operation['state'] != 'succeeded':
+        raise RuntimeError(f'routing failed: {operation}')
+    return expect(base, operator, 'GET', '/v0/admin/plugins/plans/' + operation['admin']['plan_id'])
+
+
 def activate(base, operator, reg, version):
-    plan = expect(base, operator, 'POST', f"/v0/admin/plugins/{reg['registration_id']}/activate", {})
+    plan = routing_plan(base, operator, f"/v0/admin/plugins/{reg['registration_id']}/activate", {})
     ingestion = [x for x in plan['roles'] if x['role'] == f"ingestion:{reg['plugin_id']}"]
     if len(ingestion) != 1 or ingestion[0]['registration_id'] != reg['registration_id'] or ingestion[0]['version'] != version:
         raise RuntimeError(f'activating {version}: {plan}')
@@ -406,7 +416,7 @@ def scenario(stack, report, clock):
         before_switch('upgrade', '0.2.0', b_endpoint)
         phase('rollback')
         switched = clock.now()
-        back = expect(base, operator, 'POST', '/v0/admin/plugins/plan/rollback', {'idempotency_key': 'rollback-' + run, 'pinned_work': 'drain'})
+        back = routing_plan(base, operator, '/v0/admin/plugins/plan/rollback', {'idempotency_key': 'rollback-' + run, 'pinned_work': 'drain'})
         if back['source'] != 'rollback' or [x['version'] for x in back['roles'] if x['role'] == f"ingestion:{b_reg['plugin_id']}"] != ['0.1.0']:
             raise RuntimeError(f'rollback: {back}')
 

@@ -23,9 +23,9 @@ import (
 // Served coverage is unique; the scalar probe keeps the bounded candidate
 // lookup from hashing every covered Version into an EXISTS subplan.
 var rebuildGapSQL = `r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND (
- NOT COALESCE((SELECT true FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND t.role='served'),false)
+ NOT COALESCE((SELECT true FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND ` + effectiveCoverageSQL("t") + `),false)
  OR EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true
-  JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3) AND tc.role='served'
+  JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3) AND ` + effectiveCoverageSQL("tc") + `
   WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
    AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `
    AND NOT EXISTS(SELECT 1 FROM ` + embeddingCoverageForSegmentSQL("ec.organization", "ec.segment_id") + ` te WHERE te.organization=ec.organization AND te.segment_id=ec.segment_id AND te.generation_id=$3)))`
@@ -97,7 +97,7 @@ func (s RebuildStore) beginRebuildAttempt(ctx context.Context, org, id string) (
 	}
 	g := &out.Generation
 	var cfg, spaces []byte
-	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM `+effectiveGenerationsSQL+` g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg); err != nil {
 		return out, err
 	}
 	if g.Spaces, err = scanSpaces(spaces); err != nil {
@@ -152,7 +152,7 @@ func (s RebuildStore) RebuildCandidatePending(ctx context.Context, org, id, vers
 	return pending, err
 }
 
-var rebuildCandidatesSQL = `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `)
+var rebuildCandidatesSQL = `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true JOIN ` + effectiveGenerationsSQL + ` rg ON rg.id=ec.generation_id JOIN ` + effectiveGenerationsSQL + ` tg ON tg.id=$3 WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `)
 FROM ` + currentVersionsSQL + ` WHERE ` + rebuildGapSQL + ` AND r.current_version_id > $5 AND v.id > $5 ORDER BY r.current_version_id LIMIT $4`
 
 func (s RebuildStore) rebuildCandidatesAfter(ctx context.Context, org, corpusID, generationID, after string, limit int) ([]retrieval.RebuildCandidate, error) {
@@ -218,7 +218,7 @@ func (s RebuildStore) coverRebuildAttempt(ctx context.Context, org, id string, s
 			}
 			target := content.Generation{ID: op.TargetGenerationID}
 			var spaces []byte
-			if err = tx.QueryRow(ctx, `SELECT space_id,spaces,spaces_projected FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&target.SpaceID, &spaces, &target.SpacesProjected); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT space_id,spaces,spaces_projected FROM `+effectiveGenerationsSQL+` WHERE id=$1`, op.TargetGenerationID).Scan(&target.SpaceID, &spaces, &target.SpacesProjected); err != nil {
 				return err
 			}
 			if target.Spaces, err = scanSpaces(spaces); err != nil {
@@ -344,9 +344,9 @@ func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string
 	if err = tx.QueryRow(ctx, `SELECT t.ingestion_routing IS NOT NULL AND ($4::jsonb->>'default'='' OR (COALESCE(t.ingestion_routing->>'default','')=COALESCE($4::jsonb->>'default','') AND COALESCE(t.ingestion_routing->'routes','{}'::jsonb)=COALESCE($4::jsonb->'routes','{}'::jsonb)))
  AND NOT EXISTS(SELECT 1 FROM records rec JOIN record_versions v ON (v.organization,v.id)=(rec.organization,rec.current_version_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.generation_id)=(v.organization,v.id,t.id) AND pc.role='served'
+ JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.generation_id)=(v.organization,v.id,t.id) AND `+effectiveCoverageSQL("pc")+`
  WHERE rec.organization=$1 AND rec.corpus_id=$2 AND $4::jsonb->>'default'<>'' AND pc.plugin_id<>COALESCE(t.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),t.ingestion_routing->>'default',''))
- FROM projection_generations t WHERE t.id=$3`, org, op.CorpusID, op.TargetGenerationID, expected).Scan(&compatible); err != nil {
+ FROM `+effectiveGenerationsSQL+` t WHERE t.id=$3`, org, op.CorpusID, op.TargetGenerationID, expected).Scan(&compatible); err != nil {
 		return false, err
 	}
 	if !compatible {
@@ -368,6 +368,14 @@ func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string
 	// Compare-and-set on the generation read under the journal lock: a route
 	// changed by any other writer aborts this activation instead of being
 	// overwritten.
+	// A previously staged target was not a serving route. Its owner settings
+	// must be restaged now, as well as recounting this Corpus's records.
+	if err = markRoutingGeneration(ctx, tx, op.TargetGenerationID); err != nil {
+		return false, err
+	}
+	if err = markRoutingCorpus(ctx, tx, org, op.CorpusID); err != nil {
+		return false, err
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id,acceptance_seq) VALUES($1,$2,$3,$4)
 ON CONFLICT(organization,corpus_id) DO UPDATE SET generation_id=EXCLUDED.generation_id,acceptance_seq=EXCLUDED.acceptance_seq WHERE corpus_projection_routes.generation_id=$5`, org, op.CorpusID, op.TargetGenerationID, rank.sequence, rank.routed)
 	if err != nil {
@@ -402,8 +410,8 @@ func rankAgainstRoute(ctx context.Context, tx pgx.Tx, op operations.Operation) (
 	var olderConfig, laterAccepted bool
 	err := tx.QueryRow(ctx, `SELECT r.id,o.acceptance_seq,t.retrieval_version<r.retrieval_version,
  t.retrieval_version=r.retrieval_version AND o.acceptance_seq<COALESCE((SELECT cr.acceptance_seq FROM corpus_projection_routes cr WHERE cr.organization=o.organization AND cr.corpus_id=o.corpus_id AND cr.generation_id=r.id),0)
-FROM operations o JOIN projection_generations t ON t.id=o.target_generation_id
-JOIN projection_generations r ON r.id=`+routedGenerationSQL("o.organization", "o.corpus_id")+`
+FROM operations o JOIN `+effectiveGenerationsSQL+` t ON t.id=o.target_generation_id
+JOIN `+effectiveGenerationsSQL+` r ON r.id=`+routedGenerationSQL("o.organization", "o.corpus_id")+`
 WHERE o.organization=$1 AND o.id=$2`, op.Organization, op.ID).Scan(&rank.routed, &rank.sequence, &olderConfig, &laterAccepted)
 	if err != nil || rank.routed == op.TargetGenerationID {
 		return rank, err

@@ -41,6 +41,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
@@ -814,6 +815,7 @@ func Run(command string, args ...string) error {
 		}
 	}
 	loops.Go(func(ctx context.Context) { follower.Run(ctx, planPoll) })
+	routingOperations := routing.Service{Store: postgres.RoutingStore{Pool: pool, Registry: pluginRegistry}}
 	loadMetrics := telemetry.NewLoadMetrics()
 	loadMetrics.RegisterRoutes("/healthz", "/readyz", "/metrics")
 	poolMetrics := postgres.NewPoolMetrics(pool)
@@ -858,6 +860,7 @@ func Run(command string, args ...string) error {
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
+			httpapi.WithRoutingOperations(routingOperations),
 			httpapi.WithBackfills(backfill.Service{Store: backfills, Registry: spaces, Plans: pinnedIngestion, Throughput: backfillThroughput{reader: observability.Reader{Store: rollups}}, Settings: backfillSettings}, backfill.Promotions{Store: backfills}),
 			// Operators list the Versions stuck in quarantine and reprocess them (plugins:admin).
 			httpapi.WithQuarantine(quarantine.Service{Store: quarantines}),
@@ -901,7 +904,7 @@ func Run(command string, args ...string) error {
 				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
 					orchestration.ReceiptDispatchStore
 					orchestration.OperationDispatchStore
-				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal, orchestration.RuntimeOptions{ShutdownGrace: grace, Queues: workerSettings, Tracker: postgres.QueueTracker{Pool: pool}})
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal, orchestration.RuntimeOptions{Routing: &routingOperations, ShutdownGrace: grace, Queues: workerSettings, Tracker: postgres.QueueTracker{Pool: pool}})
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

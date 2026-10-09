@@ -36,6 +36,7 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			var present bool
 			err = database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(
  SELECT 1 FROM projection_coverage pc
+ JOIN `+effectiveGenerationsSQL+` selected_g ON selected_g.id=pc.generation_id
  JOIN LATERAL (
   SELECT v.* FROM record_versions v
   WHERE (v.organization,v.id)=(pc.organization,pc.version_id) OFFSET 0
@@ -44,13 +45,14 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
   SELECT r.* FROM records r
   WHERE (r.organization,r.id)=(v.organization,v.record_id) OFFSET 0
  ) r ON r.current_version_id=v.id
- WHERE pc.organization=$1 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND pc.role='served'
- AND r.corpus_id=$2 AND `+eligibleVersionSQL+`)`, org, corpusID, g.ID, c.OwnerPluginID).Scan(&present)
+ WHERE pc.organization=$1 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND `+effectiveCoverageSQL("pc")+`
+ AND r.corpus_id=$2 AND `+eligibleVersionSQL+` AND $5=`+selectedVectorSpaceSQL("pc", "selected_g")+`)`, org, corpusID, g.ID, c.OwnerPluginID, c.ID).Scan(&present)
 			if err != nil {
 				return g, nil, err
 			}
 			presence := int64(0)
 			if present {
+				c.GenerationRole = content.SpaceServed
 				presence = 1
 			}
 			c.ServingSegments = &presence

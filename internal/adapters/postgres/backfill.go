@@ -66,7 +66,7 @@ WITH current_versions AS MATERIALIZED (
        AND er.role='ingestion-evaluation:'||cv.source_media_type||':'||selected_pr.plugin_id
    ) AS evaluation_match
  FROM current_versions cv
- JOIN projection_coverage served_pc ON served_pc.organization=cv.organization AND served_pc.version_id=cv.version_id AND served_pc.generation_id=$3 AND served_pc.role='served'
+ JOIN projection_coverage served_pc ON served_pc.organization=cv.organization AND served_pc.version_id=cv.version_id AND served_pc.generation_id=$3 AND ` + effectiveCoverageSQL("served_pc") + `
  JOIN plugin_registrations selected_pr ON selected_pr.id=$8
  LEFT JOIN projection_coverage owner_pc ON owner_pc.organization=cv.organization AND owner_pc.version_id=cv.version_id AND owner_pc.generation_id=$3 AND owner_pc.plugin_id=selected_pr.plugin_id
  LEFT JOIN segmentations owner_s ON owner_s.organization=owner_pc.organization AND owner_s.id=owner_pc.segmentation_id
@@ -405,16 +405,39 @@ func (s BackfillStore) CarryBackfillSpaces(ctx context.Context, org, id string) 
 	if g, err = carrySpaces(ctx, tx, g, op.Backfill.Spaces); err != nil {
 		return g, err
 	}
-	if _, counted := op.Counters["versions_in_scope"]; !counted {
-		var size int64
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL("")+` scope`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false).Scan(&size); err != nil {
-			return g, err
-		}
-		if err = addCounters(ctx, tx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
+	if err = tx.Commit(ctx); err != nil {
+		return g, err
+	}
+	if _, counted := op.Counters["versions_in_scope"]; counted {
+		return g, nil
+	}
+	// Counting is observational and can be slow. The carry is already durable;
+	// neither the routing fence nor the Operation row lock spans this query.
+	var size int64
+	if err = database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL("")+` scope`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false).Scan(&size); err != nil {
+		return g, err
+	}
+	countTx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return g, err
+	}
+	defer countTx.Rollback(ctx)
+	if err = lockJournal(ctx, countTx, org); err != nil {
+		return g, err
+	}
+	latest, err := lockOperation(ctx, countTx, org, id)
+	if err != nil {
+		return g, err
+	}
+	if latest.State != operations.StateRunning {
+		return g, operations.ErrNotRunning
+	}
+	if _, counted := latest.Counters["versions_in_scope"]; !counted {
+		if err = addCounters(ctx, countTx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
 			return g, err
 		}
 	}
-	return g, tx.Commit(ctx)
+	return g, countTx.Commit(ctx)
 }
 
 // BackfillByKey returns the backfill accepted under a key, or
@@ -427,7 +450,7 @@ func (s BackfillStore) BackfillByKey(ctx context.Context, org, corpusID, key str
 func routedGeneration(ctx context.Context, tx pgx.Tx, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
 	var spaces, cfg []byte
-	err := tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g,corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).
+	err := tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM `+effectiveGenerationsSQL+` g,corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).
 		Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
 	if err != nil {
 		return g, notFound(err)
@@ -454,7 +477,7 @@ func carrySpaces(ctx context.Context, tx pgx.Tx, g content.Generation, spaces []
 	// Backfills of other Organizations may extend the same shared generation:
 	// read its spaces again under its row lock before adding any.
 	var raw []byte
-	if err := tx.QueryRow(ctx, `SELECT spaces FROM projection_generations WHERE id=$1 FOR UPDATE`, g.ID).Scan(&raw); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT spaces FROM `+effectiveGenerationsSQL+` WHERE id=$1 FOR UPDATE`, g.ID).Scan(&raw); err != nil {
 		return g, err
 	}
 	current, err := scanSpaces(raw)
@@ -469,6 +492,9 @@ func carrySpaces(ctx context.Context, tx pgx.Tx, g content.Generation, spaces []
 	}
 	if len(missing) == 0 {
 		return g, nil
+	}
+	if err = materializeRoutingGeneration(ctx, tx, g.ID); err != nil {
+		return g, err
 	}
 	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(`+spaceEntrySQL+` ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
 WHERE id=$1 RETURNING spaces`, g.ID, missing).Scan(&raw)

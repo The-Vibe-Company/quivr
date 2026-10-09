@@ -19,10 +19,26 @@ import (
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
 func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
 SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true,true
-WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
-	return err
+WHERE NOT EXISTS(SELECT 1 FROM `+effectiveGenerationsSQL+` WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if err = markRoutingGeneration(ctx, tx, content.StableID("generation", collection, retrieval.ProfileVersion)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // DefaultMove reports a default generation AlignDefaultGeneration replaced:
@@ -56,6 +72,9 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
 		return move, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return move, err
+	}
 	// Concurrent api, worker and migrate startups register and align in turn.
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
 		return move, err
@@ -67,7 +86,7 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
  =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
  (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND (NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))
  OR vs.vector_index IS DISTINCT FROM (SELECT e->'index' FROM jsonb_array_elements(d.spaces) e WHERE e->>'id'=vs.id LIMIT 1))))))
-FROM projection_generations d WHERE d.active`).Scan(&move.Previous, &matches)
+FROM `+effectiveGenerationsSQL+` d WHERE d.active`).Scan(&move.Previous, &matches)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
 		return DefaultMove{}, nil
 	}
@@ -91,7 +110,10 @@ SELECT c.organization,c.id,$1 FROM corpora c WHERE NOT EXISTS(SELECT 1 FROM corp
 	}
 	move.Current = content.StableID("generation", collection, profile, move.Previous)
 	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
-SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,d.space_id),true,COALESCE(`+deploymentSpacesSQL+`,CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine')) END),true,true,true FROM projection_generations d WHERE d.id=$4`, move.Current, collection, profile, move.Previous); err != nil {
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,d.space_id),true,COALESCE(`+deploymentSpacesSQL+`,CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine')) END),true,true,true FROM `+effectiveGenerationsSQL+` d WHERE d.id=$4`, move.Current, collection, profile, move.Previous); err != nil {
+		return move, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO routing_dirty_generations(epoch,generation_id) SELECT o.id,g FROM routing_operations o CROSS JOIN unnest($1::text[]) g WHERE o.observing ON CONFLICT DO NOTHING`, []string{move.Previous, move.Current}); err != nil {
 		return move, err
 	}
 	return move, tx.Commit(ctx)
@@ -102,7 +124,7 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM `+effectiveGenerationsSQL+` g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
 	if err != nil {
 		return g, err
 	}
@@ -337,7 +359,7 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 	err := readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready,
  $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`,
  (SELECT digest FROM segmentations WHERE organization=$1 AND id=$4 AND version_id=$2),
- (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
+ (SELECT ingestion_routing FROM `+effectiveGenerationsSQL+` WHERE id=$3),
  (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID, seg.ID}, &recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready, &active, &digest, &routing, &sourceMediaType)
@@ -389,7 +411,8 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 		return nil
 	}
 	writes := &pgx.Batch{}
-	writes.Queue(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID)
+	writes.Queue(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id,role)
+ VALUES($1,$2,$3,$4,CASE WHEN EXISTS(SELECT FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND role='served') THEN 'evaluation' ELSE 'served' END) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID)
 	writes.Queue(`UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
 	if desired == seg.VersionID {
 		writes.Queue(`UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID)
@@ -425,8 +448,8 @@ CROSS JOIN LATERAL (SELECT v.* FROM record_versions v WHERE v.organization=c.org
 CROSS JOIN LATERAL (SELECT r.* FROM records r WHERE r.organization=c.organization AND r.id=v.record_id OFFSET 0) r
 CROSS JOIN LATERAL (SELECT p.blob_id FROM version_parts p WHERE p.organization=c.organization AND p.version_id=sg.version_id AND p.part_key=sg.part_key OFFSET 0) p
 CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blobs b WHERE b.organization=c.organization AND b.blob_id=p.blob_id OFFSET 0) b
-CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND pc.role='served') OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
-LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec JOIN projection_generations g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND (g.space_id=ec.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',ec.space_id,'role','served')))) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
+CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND ` + effectiveCoverageSQL("pc") + `) OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
+LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec JOIN ` + effectiveGenerationsSQL + ` g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
   WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
 WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=r.organization AND cp.id=r.corpus_id AND cp.archived)`
 

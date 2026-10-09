@@ -27,7 +27,7 @@ const eligibleVersionPointSQL = eligibleVersionStateSQL + `COALESCE((SELECT true
 // generation. Promotion, enrichment, hydration and rebuild activation all use it,
 // and every writer that changes a route holds the Organization journal lock.
 func routedGenerationSQL(org, corpusID string) string {
-	return `COALESCE((SELECT cr.generation_id FROM corpus_projection_routes cr WHERE cr.organization=` + org + ` AND cr.corpus_id=` + corpusID + `),(SELECT dg.id FROM projection_generations dg WHERE dg.active))`
+	return `COALESCE((SELECT cr.generation_id FROM corpus_projection_routes cr WHERE cr.organization=` + org + ` AND cr.corpus_id=` + corpusID + `),(SELECT dg.id FROM ` + effectiveGenerationsSQL + ` dg WHERE dg.active))`
 }
 
 // laterNoticesSQL selects, as two booleans, whether a match.corrected and

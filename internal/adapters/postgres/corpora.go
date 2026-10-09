@@ -40,7 +40,7 @@ func (s Store) Create(ctx context.Context, org string, input corpus.CreateInput)
 // effectiveRetrievalSQL is Corpus c's effective retrieval configuration: the
 // pin of its routed generation, or its creation configuration when that
 // generation pins none. It changes only when routing switches.
-var effectiveRetrievalSQL = `COALESCE((SELECT g.retrieval FROM projection_generations g WHERE g.id=` + routedGenerationSQL("c.organization", "c.id") + `),c.retrieval)`
+var effectiveRetrievalSQL = `COALESCE((SELECT g.retrieval FROM ` + effectiveGenerationsSQL + ` g WHERE g.id=` + routedGenerationSQL("c.organization", "c.id") + `),c.retrieval)`
 
 // retrievalFields decodes the fields of a stored retrieval configuration.
 func retrievalFields(data []byte) ([]corpus.Field, error) {

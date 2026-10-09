@@ -1716,5 +1716,38 @@
         }
       ]
     }
+  },
+  {
+    "name": "admin_promotion_queued",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_promotion",
+      "kind": "vector_space_promotion",
+      "state": "queued",
+      "counters": {},
+      "errors": [],
+      "admin": {
+        "target": "example.embedder.large@1"
+      }
+    }
+  },
+  {
+    "name": "admin_rollback_succeeded_with_gap",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_rollback",
+      "kind": "plugin_rollback",
+      "state": "succeeded",
+      "counters": {
+        "versions_missing": 1,
+        "segments_missing": 2
+      },
+      "errors": [],
+      "admin": {
+        "target": "plan_previous",
+        "plan_id": "plan_returning",
+        "previous_plan_id": "plan_outgoing"
+      }
+    }
   }
 ]

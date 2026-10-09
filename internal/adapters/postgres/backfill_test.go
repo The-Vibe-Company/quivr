@@ -91,7 +91,11 @@ contributions:
 
 func newBackfillFixtureForPlugin(t *testing.T, ctx context.Context, enriched, unenriched int, pluginID string) *backfillFixture {
 	t.Helper()
-	pool := rebuildAdapterPool(t, ctx)
+	return newBackfillFixtureWithPool(t, ctx, rebuildAdapterPool(t, ctx), enriched, unenriched, pluginID)
+}
+
+func newBackfillFixtureWithPool(t *testing.T, ctx context.Context, pool *pgxpool.Pool, enriched, unenriched int, pluginID string) *backfillFixture {
+	t.Helper()
 	run := time.Now().UnixNano()
 	f := &backfillFixture{pool: pool, store: contentStores(pool), org: fmt.Sprintf("adapter-backfill-%d", run),
 		served: fmt.Sprintf("%s.small%d@1", pluginID, run), target: fmt.Sprintf("%s.large%d@1", pluginID, run),

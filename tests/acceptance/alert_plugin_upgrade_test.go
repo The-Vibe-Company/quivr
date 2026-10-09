@@ -76,7 +76,7 @@ func TestAlertPluginUpgrade(t *testing.T) {
 	if registered["state"] != "validated" || registered["version"] != "0.2.0" {
 		t.Fatalf("the 0.2.0 build: %v, want validated", registered)
 	}
-	plan := request(t, "POST", "/v0/admin/plugins/"+registered["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	plan := routingRequest(t, "POST", "/v0/admin/plugins/"+registered["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	if got := planRoles(plan)["subscription:"+id]; got != id+"@0.2.0" {
 		t.Fatalf("after the activation the alert rule is served by %q, want 0.2.0 (plan %v)", got, plan)
 	}
@@ -123,7 +123,7 @@ func TestAlertPluginUpgrade(t *testing.T) {
 
 	// Rollback: 0.1.0 serves new Subscriptions again; the migrated ones stay
 	// on 0.2.0, which drains until they are migrated back.
-	back := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "alert-upgrade-rollback-" + run}, 200)
+	back := routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "alert-upgrade-rollback-" + run}, 200)
 	if got := planRoles(back)["subscription:"+id]; got != id+"@"+version {
 		t.Fatalf("after the rollback the alert rule is served by %q, want %s", got, version)
 	}

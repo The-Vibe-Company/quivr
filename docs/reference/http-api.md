@@ -35,7 +35,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/uploads/{upload_id}/confirm`](#post-v0uploadsupload_idconfirm) | `confirmUpload` | `blobs:write` |
 | [`GET /v0/uploads/{upload_id}`](#get-v0uploadsupload_id) | `getUpload` | `blobs:read` |
 | [`GET /v0/blobs/{blob_id}`](#get-v0blobsblob_id) | `getBlob` | `blobs:read` |
-| [`GET /v0/operations/{operation_id}`](#get-v0operationsoperation_id) | `getOperation` | `operations:read` |
+| [`GET /v0/operations/{operation_id}`](#get-v0operationsoperation_id) | `getOperation` |  |
 | [`POST /v0/operations/{operation_id}/cancel`](#post-v0operationsoperation_idcancel) | `cancelOperation` | `operations:write` |
 | [`POST /v0/operations/{operation_id}/rerun`](#post-v0operationsoperation_idrerun) | `rerunOperation` | `operations:write` |
 | [`POST /v0/operations/{operation_id}/pause`](#post-v0operationsoperation_idpause) | `pauseOperation` | `operations:write` |
@@ -388,9 +388,9 @@ Inspect verified Blob metadata within authorized Organization scope; ID possessi
 
 #### `GET /v0/operations/{operation_id}`
 
-Operation `getOperation`. Requires `operations:read`.
+Operation `getOperation`.
 
-Administrative progress only. This read schema does not specify every administrative command.
+Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
 
 **Parameters**
 
@@ -1579,7 +1579,7 @@ One registration with the Contract Runner's report once its check ran. Requires 
 
 Operation `activatePlugin`. Requires `plugins:admin`.
 
-Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active promotes its evaluation source formats to served, retaining the previous owner for evaluation; it returns the active plan when there is nothing to promote. The target must answer discovery with its exact manifest digest, including for an unchanged activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes. Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
 
 **Parameters**
 
@@ -1587,12 +1587,14 @@ Make a validated registration serve every role it declares, as a new immutable P
 | --- | --- | --- | --- | --- |
 | `registration_id` | path | string | yes | Minimum length `1`. |
 
+**Request body**: `application/json` [`PluginActivationRequest`](#pluginactivationrequest)
+
 **Responses**
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 409 registration_not_validated, plugin_conflict or plugin_unreachable, 503 storage unavailable. |
+| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string. Follow this Operation with GET. | Accepted background Operation. |
+| `default` | `application/json` [`Error`](#error) | Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation. |
 
 #### `GET /v0/admin/plugins/plans/{plan_id}`
 
@@ -1652,7 +1654,7 @@ Reprocess a Corpus's past Versions with a selected active ingestion plugin, to f
 
 Operation `promoteVectorSpace`. Requires `plugins:admin`.
 
-Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 
 **Parameters**
 
@@ -1666,8 +1668,8 @@ Make a registered evaluation space the one search uses, in one call, for the who
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`VectorSpacePromotion`](#vectorspacepromotion) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown space, 409 coverage_incomplete, 422 invalid_schema or not_evaluation_space (a retired space), 503 storage unavailable. |
+| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string. Follow this Operation with GET. | Accepted background Operation. |
+| `default` | `application/json` [`Error`](#error) | Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation. |
 
 #### `GET /v0/admin/queues`
 
@@ -1796,7 +1798,7 @@ Read the immutable audit receipt referenced by an evaluation.retired event or th
 
 Operation `rollbackPipelinePlan`. Requires `plugins:admin`.
 
-Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 
 **Request body** (required): `application/json` [`PipelinePlanRollbackRequest`](#pipelineplanrollbackrequest)
 
@@ -1804,8 +1806,8 @@ Make an earlier plan's roles active again, as a new immutable Pipeline Plan with
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 409 idempotency_conflict, no_previous_plan, plugin_conflict, plugin_unreachable or registration_not_validated, 422 invalid_schema, 503 storage unavailable. |
+| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string. Follow this Operation with GET. | Accepted background Operation. |
+| `default` | `application/json` [`Error`](#error) | Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation. |
 
 #### `GET /v0/admin/plugins/plan`
 
@@ -4258,9 +4260,64 @@ required:
 
 </details>
 
+### `PluginActivationRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idempotency_key` | string |  | Minimum length `1`. Maximum length `200`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+    maxLength: 200
+```
+
+</details>
+
+### `OperationAdmin`
+
+Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `target` | string |  |  |
+| `plan_id` | string |  |  |
+| `previous_plan_id` | string |  |  |
+| `served_space_id` | string |  |  |
+| `previous_space_id` | string |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+properties:
+  target:
+    type: string
+  plan_id:
+    type: string
+  previous_plan_id:
+    type: string
+  served_space_id:
+    type: string
+  previous_space_id:
+    type: string
+```
+
+</details>
+
 ### `Operation`
 
-Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
+Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused. vector_space_promotion, plugin_activation and plugin_rollback carry admin, with no corpus_id. Their counters records_scanned, versions_missing and segments_missing describe the preflight; required_missing excludes gaps retained from an earlier rollback. Success publishes routing; rollback recovery continues in the background after success.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4273,6 +4330,7 @@ Administrative execution only. Retries keep identity. Intentional terminal rerun
 | `previous_operation_id` | string |  | Minimum length `1`. |
 | `corpus_id` | string |  | Minimum length `1`. |
 | `result` | [`ProjectionRebuildResult`](#projectionrebuildresult) |  |  |
+| `admin` | [`OperationAdmin`](#operationadmin) |  |  |
 | `backfill` | [`OperationBackfill`](#operationbackfill) |  |  |
 | `quarantine_reprocess` | [`OperationQuarantineReprocess`](#operationquarantinereprocess) |  |  |
 
@@ -4325,6 +4383,41 @@ Example `rebuild_succeeded`:
 }
 ```
 
+Example `admin_promotion_queued`:
+
+```json
+{
+  "operation_id": "operation_promotion",
+  "kind": "vector_space_promotion",
+  "state": "queued",
+  "counters": {},
+  "errors": [],
+  "admin": {
+    "target": "example.embedder.large@1"
+  }
+}
+```
+
+Example `admin_rollback_succeeded_with_gap`:
+
+```json
+{
+  "operation_id": "operation_rollback",
+  "kind": "plugin_rollback",
+  "state": "succeeded",
+  "counters": {
+    "versions_missing": 1,
+    "segments_missing": 2
+  },
+  "errors": [],
+  "admin": {
+    "target": "plan_previous",
+    "plan_id": "plan_returning",
+    "previous_plan_id": "plan_outgoing"
+  }
+}
+```
+
 <details>
 <summary>Full schema</summary>
 
@@ -4371,6 +4464,8 @@ properties:
     minLength: 1
   result:
     $ref: '#/components/schemas/ProjectionRebuildResult'
+  admin:
+    $ref: '#/components/schemas/OperationAdmin'
   backfill:
     $ref: '#/components/schemas/OperationBackfill'
   quarantine_reprocess:
@@ -4381,7 +4476,7 @@ required:
   - state
   - counters
   - errors
-description: Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
+description: Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused. vector_space_promotion, plugin_activation and plugin_rollback carry admin, with no corpus_id. Their counters records_scanned, versions_missing and segments_missing describe the preflight; required_missing excludes gaps retained from an earlier rollback. Success publishes routing; rollback recovery continues in the background after success.
 if:
   properties:
     kind:
@@ -5679,6 +5774,7 @@ required:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `idempotency_key` | string |  | Minimum length `1`. Maximum length `200`. |
 | `force` | boolean |  | Promote even though some current segments have no vector in the space; those lose their semantic hits until a backfill fills them. Default `false`. |
 
 <details>
@@ -5688,6 +5784,10 @@ required:
 type: object
 additionalProperties: false
 properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+    maxLength: 200
   force:
     type: boolean
     default: false

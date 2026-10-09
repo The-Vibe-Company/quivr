@@ -101,12 +101,12 @@ func TestBackfillFillsWindowAndPromotesSpaces(t *testing.T) {
 	if checked := awaitCheck(t, operator, "/v0/admin/plugins/"+small["registration_id"].(string)); checked["state"] != "validated" {
 		t.Fatalf("0.1.0 with its small space alone: %v", checked)
 	}
-	request(t, "POST", "/v0/admin/plugins/"+small["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/"+small["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	corpusID := backfillCorpus(t, run)
 	for _, a := range backfillArticles {
 		ingestEnriched(t, corpusID, "backfill-"+a.key+"-"+run, a.key, a.text)
 	}
-	back := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "backfill-both-" + run}, 200)
+	back := routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "backfill-both-" + run}, 200)
 	if planRoles(back)["ingestion:example.hash_embedder"] != planRoles(both)["ingestion:example.hash_embedder"] {
 		t.Fatalf("the rollback to both spaces: %v", back)
 	}
@@ -153,7 +153,7 @@ func TestBackfillFillsWindowAndPromotesSpaces(t *testing.T) {
 
 	promote := func(space string, force bool, want int) map[string]any {
 		t.Helper()
-		return request(t, "POST", "/v0/admin/spaces/"+space+"/promote", backfiller, map[string]any{"force": force}, want)
+		return routingRequest(t, "POST", "/v0/admin/spaces/"+space+"/promote", backfiller, map[string]any{"force": force}, want)
 	}
 	if refused := promote(pluginEvaluationSpace, false, 409); refused["code"] != "coverage_incomplete" {
 		t.Fatalf("promoting an incomplete space: %v", refused)

@@ -2437,8 +2437,11 @@ type NormalizationProvenance struct {
 // NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
 type NormalizationProvenanceContribution string
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused. vector_space_promotion, plugin_activation and plugin_rollback carry admin, with no corpus_id. Their counters records_scanned, versions_missing and segments_missing describe the preflight; required_missing excludes gaps retained from an earlier rollback. Success publishes routing; rollback recovery continues in the background after success.
 type Operation struct {
+	// Admin Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+	Admin *OperationAdmin `json:"admin,omitempty"`
+
 	// Backfill What a backfill fills and how far it got.
 	Backfill            *OperationBackfill `json:"backfill,omitempty"`
 	CorpusId            *string            `json:"corpus_id,omitempty"`
@@ -2461,6 +2464,15 @@ type Operation struct {
 
 // OperationState defines model for Operation.State.
 type OperationState string
+
+// OperationAdmin Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+type OperationAdmin struct {
+	PlanId          *string `json:"plan_id,omitempty"`
+	PreviousPlanId  *string `json:"previous_plan_id,omitempty"`
+	PreviousSpaceId *string `json:"previous_space_id,omitempty"`
+	ServedSpaceId   *string `json:"served_space_id,omitempty"`
+	Target          *string `json:"target,omitempty"`
+}
 
 // OperationBackfill What a backfill fills and how far it got.
 type OperationBackfill struct {
@@ -2556,6 +2568,11 @@ type PipelinePlanRollbackRequest struct {
 
 // PipelinePlanRollbackRequestPinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
 type PipelinePlanRollbackRequestPinnedWork string
+
+// PluginActivationRequest defines model for PluginActivationRequest.
+type PluginActivationRequest struct {
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+}
 
 // PluginCallStats defines model for PluginCallStats.
 type PluginCallStats struct {
@@ -3570,26 +3587,11 @@ type VectorSpaceList struct {
 	Segments int `json:"segments"`
 }
 
-// VectorSpacePromotion defines model for VectorSpacePromotion.
-type VectorSpacePromotion struct {
-	// CorporaIncomplete Corpora whose routed generation lacks the space or a vector in it.
-	CorporaIncomplete int `json:"corpora_incomplete"`
-
-	// GenerationsSwitched Generations that now serve the space.
-	GenerationsSwitched int `json:"generations_switched"`
-
-	// PreviousSpaceId The space it replaced, now for evaluation; empty when none was served.
-	PreviousSpaceId string `json:"previous_space_id"`
-
-	// SegmentsMissing Current segments without a vector in the space.
-	SegmentsMissing int    `json:"segments_missing"`
-	ServedSpaceId   string `json:"served_space_id"`
-}
-
 // VectorSpacePromotionRequest defines model for VectorSpacePromotionRequest.
 type VectorSpacePromotionRequest struct {
 	// Force Promote even though some current segments have no vector in the space; those lose their semantic hits until a backfill fills them.
-	Force *bool `json:"force,omitempty"`
+	Force          *bool   `json:"force,omitempty"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 }
 
 // Version defines model for Version.
@@ -3924,6 +3926,9 @@ type RegisterPluginJSONRequestBody = PluginRegistrationRequest
 
 // RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
 type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
+
+// ActivatePluginJSONRequestBody defines body for ActivatePlugin for application/json ContentType.
+type ActivatePluginJSONRequestBody = PluginActivationRequest
 
 // ReprocessQuarantineJSONRequestBody defines body for ReprocessQuarantine for application/json ContentType.
 type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
@@ -6449,16 +6454,26 @@ func (response RollbackPipelinePlanResponseFunc) VisitRollbackPipelinePlanRespon
 	return nil
 }
 
-type RollbackPipelinePlan200JSONResponse PipelinePlan
+type RollbackPipelinePlan202ResponseHeaders struct {
+	Location *string
+}
 
-func (response RollbackPipelinePlan200JSONResponse) VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error {
+type RollbackPipelinePlan202JSONResponse struct {
+	Body    Operation
+	Headers RollbackPipelinePlan202ResponseHeaders
+}
+
+func (response RollbackPipelinePlan202JSONResponse) VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6631,6 +6646,7 @@ type ActivatePluginRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest    *http.Request
 	RegistrationId string `json:"registration_id"`
+	Body           *ActivatePluginJSONRequestBody
 }
 
 type ActivatePluginResponseObject interface {
@@ -6645,16 +6661,26 @@ func (response ActivatePluginResponseFunc) VisitActivatePluginResponse(w http.Re
 	return nil
 }
 
-type ActivatePlugin200JSONResponse PipelinePlan
+type ActivatePlugin202ResponseHeaders struct {
+	Location *string
+}
 
-func (response ActivatePlugin200JSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
+type ActivatePlugin202JSONResponse struct {
+	Body    Operation
+	Headers ActivatePlugin202ResponseHeaders
+}
+
+func (response ActivatePlugin202JSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6863,16 +6889,26 @@ func (response PromoteVectorSpaceResponseFunc) VisitPromoteVectorSpaceResponse(w
 	return nil
 }
 
-type PromoteVectorSpace200JSONResponse VectorSpacePromotion
+type PromoteVectorSpace202ResponseHeaders struct {
+	Location *string
+}
 
-func (response PromoteVectorSpace200JSONResponse) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
+type PromoteVectorSpace202JSONResponse struct {
+	Body    Operation
+	Headers PromoteVectorSpace202ResponseHeaders
+}
+
+func (response PromoteVectorSpace202JSONResponse) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }

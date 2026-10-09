@@ -50,12 +50,6 @@ func (p refusedBackfillPlan) ActiveIngestion(context.Context) (backfill.Ingestio
 	return backfill.Ingestion{}, p.err
 }
 
-type refusedPromotion struct{ err error }
-
-func (p refusedPromotion) PromoteSpace(context.Context, string, bool) (backfill.Promotion, error) {
-	return backfill.Promotion{}, p.err
-}
-
 type refusedQuarantine struct {
 	quarantine.Store
 	err error
@@ -79,14 +73,11 @@ func TestBackfillFailureMessagesIgnoreDetail(t *testing.T) {
 	}{
 		{backfillsPath, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`, "invalid_backfill", "", 422, backfill.ErrInvalid},
 		{backfillsPath, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`, "storage_unavailable", "", 503, registry.ErrNoPlan},
-		{spacesPath + "example.space@1/promote", `{}`, "coverage_incomplete", "", 409, backfill.ErrCoverageIncomplete},
-		{spacesPath + "example.space@1/promote", `{}`, "coverage_incomplete", "vector space example.space@1 lacks a vector for 7 current segments in 2 Corpora; backfill them, or force the promotion", 409,
-			&backfill.IncompleteError{Promotion: backfill.Promotion{Served: "example.space@1", SegmentsMissing: 7, CorporaIncomplete: 2}}},
 	} {
 		for style, err := range detailed(route.sentinel) {
 			t.Run(route.code+"/"+style, func(t *testing.T) {
 				checkRefusedRoute(t, "POST", route.path, route.body, route.status, route.code,
-					WithBackfills(backfill.Service{Plans: refusedBackfillPlan{err}}, backfill.Promotions{Store: refusedPromotion{err}}), route.message)
+					WithBackfills(backfill.Service{Plans: refusedBackfillPlan{err}}, backfill.Promotions{}), route.message)
 			})
 		}
 	}
