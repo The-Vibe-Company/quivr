@@ -34,6 +34,14 @@ type facetStorage struct {
 	query content.FacetQuery
 	fail  error
 	reads int
+	fast  content.FacetCounts
+}
+
+func (s *facetStorage) CountFacetsFast(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
+	items, err := s.CountFacets(ctx, org, q)
+	counts := s.fast
+	counts.Items = items
+	return counts, err
 }
 
 func (s *facetStorage) CountFacets(_ context.Context, _ string, q content.FacetQuery) ([]content.Facet, error) {
@@ -68,9 +76,22 @@ func TestFacetRequestAuthorizationAndRouting(t *testing.T) {
 		return e
 	}
 	common := `{"corpus_ids":["corpus_a","corpus_b"],"fields":[{"field":"metadata.language"}]}`
-	call(catalogReader, common, 200)
+	asOf := time.Date(2026, 10, 9, 5, 0, 0, 0, time.FixedZone("CEST", 7200))
+	storage.fast = content.FacetCounts{AsOf: &asOf, SampleFraction: 0.25}
+	if got := call(catalogReader, common, 200); len(got) != 1 || storage.query.Fast || storage.query.Declared != nil {
+		t.Fatalf("exact request answered %v from %#v", got, storage.query)
+	}
 	if len(storage.query.Records.FilterRoutes) != 2 || storage.query.Fields[0].Limit != 20 || storage.query.Fields[0].Type != "string" {
 		t.Fatalf("resolved common request: %#v", storage.query)
+	}
+	// A fast request names each routed Corpus's filter fields, which a
+	// snapshot counts, and relays how its counts were made.
+	fast := call(catalogReader, `{"corpus_ids":["corpus_a","corpus_b"],"fields":[{"field":"metadata.language"}],"accuracy":"fast"}`, 200)
+	if fast["as_of"] != "2026-10-09T03:00:00Z" || fast["approximate"] != true || fast["sample_fraction"] != 0.25 {
+		t.Fatalf("fast markers: %v", fast)
+	}
+	if declared := storage.query.Declared["corpus_a"]; !storage.query.Fast || len(declared) != len(corpus.CommonFilterFields())+1 || declared[len(declared)-1] != (content.FacetField{Field: "rating", Type: "number"}) {
+		t.Fatalf("fast request: %#v", storage.query)
 	}
 	custom := `{"corpus_ids":["corpus_a","corpus_b"],"fields":[{"field":"rating"}],"filter":{"metadata":[{"field":"metadata.language","any_of":["en"]}],"source_namespaces":["source"]}}`
 	excluded := call(catalogReader, custom, 200)["excluded_corpora"].([]any)
@@ -99,6 +120,7 @@ func TestFacetRequestAuthorizationAndRouting(t *testing.T) {
 		{`{"corpus_ids":["corpus_a"],"fields":[{"field":"metadata.language"}],"accepted_after":"2026-10-02T00:00:00Z","accepted_before":"2026-10-01T00:00:00Z"}`, 422},
 		{`{"corpus_ids":["corpus_a"],"fields":[{"field":"metadata.language"}],"filter":{"metadata":[{"field":"rating","any_of":["2"]}]}}`, 422},
 		{`{"corpus_ids":["corpus_a"],"fields":[{"field":"metadata.language"}],"query":"harbour"}`, 422},
+		{`{"corpus_ids":["corpus_a"],"fields":[{"field":"metadata.language"}],"accuracy":"approximate"}`, 422},
 	} {
 		call(catalogReader, tc.body, tc.status)
 	}

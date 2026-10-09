@@ -276,7 +276,7 @@ Authorized immutable source Manifest plus separate live availability and relatio
 
 Operation `countFacets`. Requires `content:read`.
 
-Exact document counts for projected metadata fields across authorized Corpora. Uses content:read and validates every requested Corpus before resolving mappings, including Corpora excluded for missing facet or predicate fields. Exclusions use the same excluded_corpora shape and rules as search and metadata-filtered listing. All fields are aggregated in one read snapshot from current baseline-ready, non-quarantined Versions; withdrawn Records and Tombstones are excluded immediately. Each distinct array value counts a document once. Missing field values contribute no bucket. Common metadata.* fields and custom fields declared with the filter role are supported. Incompatible types across Corpora return 422 invalid_query. Existing projections without metadata require rebuilding (422 metadata_filter_unavailable). Each field returns at most its limit, selected by descending count then JSON value text in byte order for ties. UTC date buckets are then returned chronologically; empty date buckets are omitted. Histograms require day, month or year on datetime fields; interval on another type is invalid_query. Counts are independent of search and listing reads and can change with ingestion. No text query or ranking is applied. Each API process admits at most 8 active facet requests; excess work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.
+Exact document counts for projected metadata fields across authorized Corpora. Uses content:read and validates every requested Corpus before resolving mappings, including Corpora excluded for missing facet or predicate fields. Exclusions use the same excluded_corpora shape and rules as search and metadata-filtered listing. All fields are aggregated in one read snapshot from current baseline-ready, non-quarantined Versions; withdrawn Records and Tombstones are excluded immediately. Each distinct array value counts a document once. Missing field values contribute no bucket. Common metadata.* fields and custom fields declared with the filter role are supported. Incompatible types across Corpora return 422 invalid_query. Existing projections without metadata require rebuilding (422 metadata_filter_unavailable). Each field returns at most its limit, selected by descending count then JSON value text in byte order for ties. UTC date buckets are then returned chronologically; empty date buckets are omitted. Histograms require day, month or year on datetime fields; interval on another type is invalid_query. Counts are independent of search and listing reads and can change with ingestion. No text query or ranking is applied. Each API process admits at most 8 active facet requests; excess work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline. With accuracy fast, counts may instead come from each Corpus's stored snapshot, exact as of the response's as_of and refreshed in the background while it is read, when the request has no predicate or only whole UTC days of the single date field it counts; otherwise from an exact count that ends within about a second, or else estimates scaled from a uniform sample of the Corpora's Records, marked approximate with their sample_fraction. Exact responses carry neither as_of nor approximate.
 
 **Request body** (required): `application/json` [`FacetRequest`](#facetrequest)
 
@@ -10035,6 +10035,7 @@ required:
 | `filter` | [`FacetFilter`](#facetfilter) |  |  |
 | `accepted_after` | string (date-time) |  | Inclusive current-Version acceptance-time lower bound, as in listing. |
 | `accepted_before` | string (date-time) |  | Exclusive current-Version acceptance-time upper bound, as in listing. |
+| `accuracy` | string |  | Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of), a uniform sample (approximate), or an exact count that ended within about a second (neither marker). The 25-second request deadline still applies. One of `exact`, `fast`. |
 
 Example `metadata_facets_request`:
 
@@ -10104,6 +10105,11 @@ properties:
     type: string
     format: date-time
     description: Exclusive current-Version acceptance-time upper bound, as in listing.
+  accuracy:
+    type: string
+    enum: [exact, fast]
+    description: >-
+      Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of), a uniform sample (approximate), or an exact count that ended within about a second (neither marker). The 25-second request deadline still applies.
 ```
 
 </details>
@@ -10146,6 +10152,9 @@ properties:
 | --- | --- | --- | --- |
 | `items` | array of [`Facet`](#facet) | yes | At most `16` items. |
 | `excluded_corpora` | array of [`CorpusExclusion`](#corpusexclusion) |  | At most `16` items. |
+| `as_of` | string (date-time) |  | Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots of other Corpora include their later changes. |
+| `approximate` | boolean |  | Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records. |
+| `sample_fraction` | number (double) |  | Share of the Corpora's Records counted when approximate. Greater than `0`. Less than `1`. |
 
 Example `typed_metadata_facets`:
 
@@ -10226,6 +10235,21 @@ properties:
     maxItems: 16
     items:
       $ref: '#/components/schemas/CorpusExclusion'
+  as_of:
+    type: string
+    format: date-time
+    description: >-
+      Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots of other Corpora include their later changes.
+  approximate:
+    type: boolean
+    description: Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
+  sample_fraction:
+    type: number
+    format: double
+    exclusiveMinimum: 0
+    exclusiveMaximum: 1
+    x-go-type: float64
+    description: Share of the Corpora's Records counted when approximate.
 ```
 
 </details>

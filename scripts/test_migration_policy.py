@@ -24,6 +24,13 @@ class PolicyTests(unittest.TestCase):
             ("ALTER TABLE items ADD COLUMN flags jsonb DEFAULT '{}'::jsonb;", True),
             ("ALTER TABLE items SET (vacuum_truncate=false, fillfactor=70, autovacuum_vacuum_threshold=10);", True),
             ("ALTER TABLE items SET (toast.autovacuum_vacuum_scale_factor=0);", True),
+            ("ANALYZE items;", True),
+            ("ANALYZE (VERBOSE) items(id), other;", True),
+            ("ANALYZE;", False),
+            ("ANALYZE (VERBOSE);", False),
+            ("VACUUM items;", False),
+            ("VACUUM ANALYZE items;", False),
+            ("VACUUM (FULL, ANALYZE) items;", False),
             ("ALTER INDEX by_id SET (fillfactor=70);", False),
             ("ALTER TABLE items RESET (fillfactor);", False),
             ("ALTER TABLE items SET SCHEMA other;", False),
@@ -82,7 +89,8 @@ CREATE INDEX by_id ON items(id);
 CREATE SCHEMA other;
 CREATE TABLE other.items(id int);
 CREATE INDEX by_id ON other.items(id);
-ALTER TABLE items ALTER COLUMN title DROP NOT NULL;''')
+ALTER TABLE items ALTER COLUMN title DROP NOT NULL;
+ANALYZE items;''')
             (root / p.INVENTORY).write_text(json.dumps({baseline.name: {
                 'sha256': hashlib.sha256(baseline.read_bytes()).hexdigest(),
                 'classification': 'legacy-risk', 'risks': ['RenameStmt']}}))

@@ -151,7 +151,6 @@ test("the timeline counts outside its range, within its window, and totals what 
         interval: "day",
         values: ["2026-10-01 2", "2026-10-03 3"],
         asked: [
-          [undefined, ["language", "published_at 2026-10-03T00:00:00.000Z"]],
           [undefined, ["published_at 2026-10-03T00:00:00.000Z"]],
           ["month", ["language"]],
           ["year", ["language", "published_at 2026-10-03T00:00:00.000Z"]],
@@ -200,4 +199,60 @@ test("a corpus's own fields are counted apart, 16 at a time, and only the common
   assert.deepEqual(sent.map((names) => names.length), [1, 16, 4]);
   assert.equal(out.excluded_corpora, undefined);
   assert.deepEqual(out.fields[0].values, [{ value: "x", count: 3 }]);
+});
+
+// The browser asks one field at a time (THE-1387). A fast count may come from
+// the engine's stored counts or a sample: the facade relays how, the oldest
+// date for stored counts and any estimate as approximate, and asks the
+// engine for that field alone.
+test("one field is counted alone, once, fast when asked, and says how its counts were made", async () => {
+  const sent = [];
+  // The timeline's counts are dated apart: the earliest instant dates them,
+  // though its text sorts after a later one's.
+  const answers = [
+    { as_of: "2026-10-09T05:00:00Z" },
+    { as_of: "2026-10-09T04:00:00.500Z", approximate: true, sample_fraction: 0.05 },
+    { as_of: "2026-10-09T04:00:00Z" },
+  ];
+  const explorer = createExplorer({
+    upstream: async (path, method, body) => {
+      if (path !== "/v0/facets")
+        return { status: 200, data: { name: "Example corpus", effective_retrieval: { fields: [{ name: "desk", type: "string", roles: ["filter"], source_pointer: "/desk" }] } } };
+      sent.push(body);
+      const marker = answers[sent.length - 1] || {};
+      return { status: 200, data: { items: body.fields.map((f) => ({ field: f.field, buckets: f.interval ? [at("2026-10-01T00:00:00Z", 4)] : [at("fr", 3)] })), ...marker } };
+    },
+    picked: async () => ["c1"],
+    demo: () => "c1",
+  });
+  const ask = (params) => explorer.facets(new URLSearchParams(params));
+  const one = await ask({ field: "metadata.language", accuracy: "fast" });
+  assert.deepEqual(sent.map((b) => [b.fields.map((f) => f.field), b.accuracy]), [[["metadata.language"], "fast"]]);
+  assert.deepEqual(one, { fields: [{ field: "metadata.language", type: "string", values: [at("fr", 3)] }], as_of: "2026-10-09T05:00:00Z" });
+  // The timeline also totals its documents; a range picked counts the total apart.
+  const range = [{ field: date.name, gte: "2026-10-01T00:00:00.000Z", lte: "2026-10-01T23:59:59.999Z" }];
+  const timeline = await ask({ field: date.name, accuracy: "fast", metadata: JSON.stringify(range) });
+  assert.ok(sent.slice(1).every((b) => b.fields.length === 1 && b.fields[0].field === date.name && b.accuracy === "fast"));
+  assert.deepEqual([timeline.total, timeline.as_of, timeline.approximate], [4, "2026-10-09T04:00:00Z", true]);
+  // A field asked alone names the corpora its count excluded.
+  const excluded = [{ corpus_id: "c1", fields: ["desk"] }];
+  const lone = createExplorer({
+    upstream: async (path, method, body) =>
+      path === "/v0/facets"
+        ? { status: 200, data: { items: body.fields.map((f) => ({ field: f.field, buckets: [] })), excluded_corpora: excluded } }
+        : { status: 200, data: { name: "Example corpus", effective_retrieval: { fields: [{ name: "desk", type: "string", roles: ["filter"], source_pointer: "/desk" }] } } },
+    picked: async () => ["c1"],
+    demo: () => "c1",
+  });
+  assert.deepEqual((await lone.facets(new URLSearchParams({ field: "desk" }))).excluded_corpora, excluded);
+  // Exact counts carry no marker and send none.
+  const exact = await ask({ field: "metadata.language" });
+  assert.equal(sent.at(-1).accuracy, undefined);
+  assert.deepEqual([exact.as_of, exact.approximate], [undefined, undefined]);
+  // A corpus's own field is counted once too.
+  const before = sent.length;
+  await ask({ field: "desk" });
+  assert.deepEqual(sent.slice(before).map((b) => b.fields.map((f) => f.field)), [["desk"]]);
+  for (const params of [{ field: "metadata.unknown" }, { field: "metadata.language", accuracy: "approximate" }])
+    await assert.rejects(ask(params), (error) => error.status === 422, JSON.stringify(params));
 });
