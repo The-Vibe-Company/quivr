@@ -280,6 +280,41 @@ class Infrastructure(unittest.TestCase):
                         if row['service'] == 'postgres' and row['scope'] == 'filesystem_capacity')
         self.assertEqual(capacity['status'], 'match')
 
+    def test_image_reporting_consumers_follow_the_shared_pins(self):
+        with patch.object(sys, 'path', [str(ROOT / 'scripts'), *sys.path]):
+            import weaviate_upgrade, inventory, measure, load, load_stack
+        def docker(command, **kwargs):
+            if 'up' in command:
+                raise RuntimeError('isolated startup stopped')
+            return subprocess.CompletedProcess(command, 0)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'upgrade'
+            with patch.object(weaviate_upgrade.subprocess, 'run', side_effect=docker):
+                with self.assertRaisesRegex(RuntimeError, 'isolated startup stopped'):
+                    weaviate_upgrade.exercise(target)
+            report = json.loads((target / 'report.json').read_text())
+            self.assertEqual(report['images'][-1], infra.resolve(environ={})['weaviate']['image'])
+            self.assertEqual(report['result'], 'failed')
+            declared = infra.resolve(environ={})
+            self.assertTrue({declared['postgres']['image'], declared['weaviate']['image']}.issubset(
+                {row['image'] for row in inventory.images()}))
+            with patch.object(measure, 'output', return_value='local'), patch.dict(os.environ, {}, clear=True):
+                self.assertTrue({declared['postgres']['image'], declared['weaviate']['image']}.issubset(
+                    set(measure.pins()['images'])))
+            output = Path(directory) / 'load'
+            with patch.object(load, 'read', return_value={'name': 'local', 'search': {'concurrency': 1}}), \
+                    patch.object(load_stack, 'local_docker_host', return_value='unix:///local.sock'), \
+                    patch.object(load, 'machine', return_value={'system': 'local', 'architecture': 'amd64',
+                                                               'cpus': 1, 'memory_bytes': 1024}), \
+                    patch.object(load, 'output', return_value='local'), \
+                    patch.object(load, 'run_scenario', side_effect=RuntimeError('measurement not executed')), \
+                    patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, 'measurement not executed'):
+                    load.main(['--scenario', 'local.yaml', '--out', str(output)])
+            services = json.loads((output / 'report.json').read_text())['versions']['services']
+            self.assertEqual(services['postgres'], declared['postgres']['image'])
+            self.assertEqual(services['weaviate'], declared['weaviate']['image'])
+
     def test_runtime_capacity_probe_keeps_the_database_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             location = Path(directory)
