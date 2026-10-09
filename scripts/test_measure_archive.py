@@ -8,7 +8,10 @@ tests observe the report and stack lifecycle rather than helper call shapes.
 
 import contextlib
 import json
+import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -16,6 +19,16 @@ from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 import measure_archive
+
+
+class Startup(unittest.TestCase):
+    def test_help_starts_from_outside_the_repository_without_pythonpath(self):
+        script = pathlib.Path(__file__).resolve().with_name("measure_archive.py")
+        with tempfile.TemporaryDirectory() as folder:
+            result = subprocess.run([sys.executable, str(script), "--help"], cwd=folder,
+                                    env={**os.environ, "PYTHONPATH": ""}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--hosted-fake", result.stdout)
 
 
 class _Response:

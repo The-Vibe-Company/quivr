@@ -27,11 +27,11 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from local import Stack
 from archive_source import seed
 from fake_api import Fake
 import hosted_embed_plugin
 import ingestion_plugin
-from local import Stack
 import plugin_environment
 import ports
 
