@@ -26,6 +26,8 @@ class PolicyTests(unittest.TestCase):
             ("ALTER TABLE items SET (toast.autovacuum_vacuum_scale_factor=0);", True),
             ("ANALYZE items;", True),
             ("ANALYZE (VERBOSE) items(id), other;", True),
+            ("ANALYZE;", False),
+            ("ANALYZE (VERBOSE);", False),
             ("VACUUM items;", False),
             ("VACUUM ANALYZE items;", False),
             ("VACUUM (FULL, ANALYZE) items;", False),
