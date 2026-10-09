@@ -1,34 +1,40 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { WarningCircle } from "@phosphor-icons/react";
 import { exclusionNotice, fieldLabel, type Corpus, type Exclusion } from "../../lib/corpora";
 import {
-  countLabel,
+  ageLabel,
+  earliest,
+  estimateLabel,
   periodLabel,
   periodsBetween,
-  TIMELINE_FIELD,
   valueLabel,
   type Facet,
   type Interval,
   type Scalar,
 } from "../../lib/explore";
 import { LoadingState } from "../ui";
+import { useNow, type FieldCount } from "./useFacetCounts";
 
 // A facet shows this many values, then offers the rest this many at a time.
 const SHOWN_VALUES = 6;
 const MORE_VALUES = 20;
 // The common fields shown first, in this order; the others wait in a group.
-const FIRST = ["metadata.language", "metadata.subjects", "metadata.country"];
+export const FIRST = ["metadata.language", "metadata.subjects", "metadata.country"];
 
 /**
  * The filters column (THE-1204): Langue, Sujets, Pays, then the corpus's own
- * fields when one corpus is picked, then the other common fields. Each value
- * says how many documents have it, with a bar against the largest. A notice
- * names the corpora a filter left out.
+ * fields when one corpus is picked, then the other common fields, counted
+ * once opened. Each field arrives on its own (THE-1387). Each value says how
+ * many documents have it, with a bar against the largest; an estimate reads
+ * "≈" until its exact count arrives, and stored counts say their age. A
+ * notice names the corpora a filter left out.
  */
 export function FacetColumn({
-  facets,
-  stale,
-  error,
+  counts,
+  current,
+  fields,
+  more,
+  onMore,
   onRetry,
   single,
   excluded,
@@ -37,9 +43,16 @@ export function FacetColumn({
   onToggle,
   onPick,
 }: {
-  facets: Facet[] | null;
-  stale: boolean;
-  error: string;
+  /** Each field's counts, as last read. */
+  counts: Map<string, FieldCount>;
+  /** The corpora, filters and span the counts are wanted for. */
+  current: string;
+  /** The corpus's own fields, and the common fields after the first ones. */
+  fields: { own: string[]; rest: string[] };
+  /** Whether the other common fields are counted. */
+  more: boolean;
+  /** The other common fields were opened: count them. */
+  onMore: () => void;
   onRetry: () => void;
   single?: Corpus;
   excluded: Exclusion[];
@@ -48,58 +61,137 @@ export function FacetColumn({
   onToggle: (field: string, value: string) => void;
   onPick: (field: string, period: string | undefined) => void;
 }) {
-  const list = (facets || []).filter((f) => f.field !== TIMELINE_FIELD);
-  const common = list.filter((f) => f.field.startsWith("metadata."));
-  const first = FIRST.map((name) => common.find((f) => f.field === name)).filter((f): f is Facet => !!f);
-  const rest = common.filter((f) => !FIRST.includes(f.field));
-  const own = single ? list.filter((f) => !f.field.startsWith("metadata.")) : [];
-  const box = (facet: Facet) =>
-    facet.interval ? (
+  // The oldest stored counts shown date the column, read again as time passes.
+  const asOf = earliest([...counts.values()].filter((c) => c.key === current && c.as_of).map((c) => c.as_of!));
+  const now = useNow(!!asOf);
+  const box = (field: string) => {
+    const count = counts.get(field);
+    const facet = count?.fields?.[0];
+    const label = fieldLabel(field);
+    if (!facet)
+      return count?.error ? (
+        <section key={field} className="facet" aria-label={label}>
+          <h3>{label}</h3>
+          <p className="facets-note" role="status">
+            {count.error}{" "}
+            <button type="button" className="link-button" onClick={onRetry}>
+              Réessayer<span className="visually-hidden"> {label}</span>
+            </button>
+          </p>
+        </section>
+      ) : (
+        <section key={field} className="facet" aria-label={label} aria-busy="true">
+          <h3>{label}</h3>
+          <LoadingState rows={1} />
+        </section>
+      );
+    const shown = {
+      facet,
+      stale: count.key !== current,
+      approximate: count.approximate,
+      refining: count.refining,
+      error: count.error || count.refineError,
+      onRetry,
+    };
+    return facet.interval ? (
       <DateFacet
-        key={facet.field}
-        facet={facet}
-        picked={selection[facet.field]?.[0]}
-        onPick={(period) => onPick(facet.field, period)}
+        key={field}
+        {...shown}
+        picked={selection[field]?.[0]}
+        onPick={(period) => onPick(field, period)}
       />
     ) : (
       <FacetBox
-        key={facet.field}
-        facet={facet}
-        picked={selection[facet.field] || []}
-        onToggle={(value) => onToggle(facet.field, value)}
+        key={field}
+        {...shown}
+        picked={selection[field] || []}
+        onToggle={(value) => onToggle(field, value)}
       />
     );
+  };
   return (
-    <aside className="facets" aria-label="Filtres" tabIndex={-1} aria-busy={stale || undefined} data-stale={stale || undefined}>
+    <aside className="facets" aria-label="Filtres" tabIndex={-1}>
       {excluded.length > 0 && (
         <p className="facets-warning" role="note">
           <WarningCircle size={16} aria-hidden="true" />
           <span>{exclusionNotice(excluded, corpora)}</span>
         </p>
       )}
-      {error && (
-        <p className="facets-note" role="status">
-          {error}{" "}
-          <button type="button" className="link-button" onClick={onRetry}>
-            Réessayer
-          </button>
+      {asOf && ageLabel(asOf, now) && (
+        <p className="facets-note facets-age" title={new Date(asOf).toLocaleString("fr-FR")}>
+          Nombres comptés {ageLabel(asOf, now)}
         </p>
       )}
-      {!facets && !error && <LoadingState label="Comptage des valeurs…" rows={4} />}
-      {first.map(box)}
-      {own.length > 0 && (
+      {FIRST.map(box)}
+      {single && fields.own.length > 0 && (
         <>
-          <h2 className="facets-corpus">Champs de {single!.name}</h2>
-          {own.map(box)}
+          <h2 className="facets-corpus">Champs de {single.name}</h2>
+          {fields.own.map(box)}
         </>
       )}
-      {rest.some((f) => f.values.length || selection[f.field]?.length) && (
-        <details className="facets-more" open={rest.some((f) => selection[f.field]?.length) || undefined}>
+      {fields.rest.length > 0 && (
+        <details
+          className="facets-more"
+          open={fields.rest.some((field) => selection[field]?.length) || undefined}
+          onToggle={(event) => event.currentTarget.open && onMore()}
+        >
           <summary>Autres champs</summary>
-          {rest.map(box)}
+          {more && fields.rest.map(box)}
+          {more &&
+            fields.rest.every((field) => counts.get(field)?.fields?.[0]?.values.length === 0 && !selection[field]?.length) && (
+              <p className="facets-note">Aucune valeur pour ces filtres.</p>
+            )}
         </details>
       )}
     </aside>
+  );
+}
+
+/** How a facet's counts were read, for its box. */
+interface Shown {
+  facet: Facet;
+  /** Counts read for other filters, while new ones load. */
+  stale: boolean;
+  approximate?: boolean;
+  refining?: boolean;
+  /** Why the counts, or an estimate's exact counts, could not be read. */
+  error?: string;
+  onRetry: () => void;
+}
+
+/**
+ * The head of a facet: its name, whether its counts are estimated, and
+ * why the last read failed, with a way to ask again.
+ */
+function FacetHead({
+  label,
+  stale,
+  approximate,
+  refining,
+  error,
+  onRetry,
+  children,
+}: Omit<Shown, "facet"> & { label: string; children?: ReactNode }) {
+  return (
+    <>
+      <div className="facet-head">
+        <h3>{label}</h3>
+        {approximate && (
+          <span className="facet-estimate" title="Nombres estimés sur un échantillon des documents">
+            {refining && !stale && !error ? "estimation, calcul exact…" : "estimation"}
+          </span>
+        )}
+        {children}
+      </div>
+      {error && (
+        <p className="facets-note facet-error" role="status">
+          {error}{" "}
+          <button type="button" className="link-button" onClick={onRetry}>
+            Réessayer<span className="visually-hidden"> {label}</span>
+          </button>
+        </p>
+      )}
+    </>
   );
 }
 
@@ -108,8 +200,8 @@ function FacetBox({
   facet,
   picked,
   onToggle,
-}: {
-  facet: Facet;
+  ...head
+}: Shown & {
   picked: string[];
   onToggle: (value: string) => void;
 }) {
@@ -120,15 +212,14 @@ function FacetBox({
     ...picked.filter((v) => !facet.values.some((x) => String(x.value) === v)).map((value) => ({ value })),
     ...facet.values,
   ];
-  if (!values.length) return null;
+  if (!values.length && !head.error) return null;
   const most = Math.max(1, ...facet.values.map((v) => v.count));
   const shown = values.slice(0, limit);
   const rest = values.length - shown.length;
   const label = fieldLabel(facet.field);
   return (
-    <section className="facet" aria-label={label} ref={box}>
-      <div className="facet-head">
-        <h3>{label}</h3>
+    <section className="facet" aria-label={label} ref={box} aria-busy={head.stale || undefined} data-stale={head.stale || undefined}>
+      <FacetHead label={label} {...head}>
         {picked.length > 0 && (
           <button
             type="button"
@@ -146,7 +237,7 @@ function FacetBox({
             Effacer<span className="visually-hidden"> {label}</span>
           </button>
         )}
-      </div>
+      </FacetHead>
       <ul>
         {shown.map(({ value, count }) => (
           <li key={String(value)}>
@@ -160,7 +251,7 @@ function FacetBox({
               <span className="facet-label" dir="auto">
                 {valueLabel(value, facet.type, facet.field)}
               </span>
-              {count !== undefined && <span className="menu-count">{countLabel(count)}</span>}
+              {count !== undefined && <span className="menu-count">{estimateLabel(count, head.approximate)}</span>}
               {count !== undefined && (
                 <span
                   className="facet-share"
@@ -205,8 +296,8 @@ function DateFacet({
   facet,
   picked,
   onPick,
-}: {
-  facet: Facet;
+  ...head
+}: Shown & {
   picked?: string;
   onPick: (period: string | undefined) => void;
 }) {
@@ -260,17 +351,19 @@ function DateFacet({
     refocus.current = true;
     onPick(period);
   };
-  if (!periods.length && !picked) return null;
+  if (!periods.length && !picked && !head.error) return null;
   return (
     <section
       className="facet facet-dates"
       aria-label={label}
       ref={section}
+      aria-busy={head.stale || undefined}
+      data-stale={head.stale || undefined}
       onBlur={(event) => {
         if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) refocus.current = false;
       }}
     >
-      <h3>{label}</h3>
+      <FacetHead label={label} {...head} />
       {picked && (
         <ol className="facet-path" aria-label="Période choisie">
           <li>
@@ -298,7 +391,7 @@ function DateFacet({
           <div className="pulse facet-histogram" role="group" data-tips aria-label={STEP[interval]} onKeyDown={move}>
             {periods.map((p) => {
               const count = counts.get(p) || 0;
-              const documents = `${countLabel(count)} ${count > 1 ? "documents" : "document"}`;
+              const documents = `${estimateLabel(count, head.approximate)} ${count > 1 ? "documents" : "document"}`;
               return (
                 <button
                   key={p}

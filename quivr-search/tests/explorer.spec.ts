@@ -206,6 +206,90 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   await expect(page).not.toHaveURL(/range=/);
 });
 
+// Large corpora (THE-1387): each field is counted on its own, fast first.
+// Answers the fake engine holds back, by "field:accuracy", released when
+// the step that waits for them is done, and after each test in any case.
+let releases: (() => void)[] = [];
+const hold = (key: string) => {
+  let release!: () => void;
+  engine.explorer.hold ??= new Map();
+  engine.explorer.hold.set(key, new Promise<void>((resolve) => (release = resolve)));
+  releases.push(release);
+  return release;
+};
+test.afterEach(() => {
+  releases.forEach((release) => release());
+  releases = [];
+});
+// The facets the page asks for, as "field:accuracy", in order.
+const askedFacets = (page: Page) => {
+  const asked: string[] = [];
+  page.on("request", (r) => {
+    const url = new URL(r.url());
+    if (url.pathname === "/demo/explore/facets") asked.push(`${url.searchParams.get("field")}:${url.searchParams.get("accuracy")}`);
+  });
+  return asked;
+};
+
+// Counts say how they were made: stored counts their age, estimates "≈"
+// until their exact count replaces them, or for good when it fails.
+test("les nombres disent comment ils ont été comptés : âge, estimation, puis compte exact", async ({ page }) => {
+  const asOf = new Date(Date.now() - 3 * 60000).toISOString();
+  engine.explorer.fast = (field) =>
+    field === "metadata.language"
+      ? { ...WIRE_FACETS, approximate: true, fields: [facet("metadata.language", [["en", 1200], ["fr", 800]])] }
+      : { ...WIRE_FACETS, as_of: asOf };
+  const exactLanguage = hold("metadata.language:exact");
+  await page.goto("/?view=explorer&corpora=wires");
+  await expect(counts(page, "Langue")).toHaveText(["anglais≈ 1\u202f200", "français≈ 800"]);
+  await expect(facets(page, "Langue")).toContainText("estimation, calcul exact…");
+  await expect(page.getByRole("complementary", { name: "Filtres" })).toContainText("Nombres comptés il y a 3 min");
+  await expect(page.getByRole("region", { name: "Chronologie" })).toContainText("comptés il y a 3 min");
+  exactLanguage();
+  await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
+  await expect(facets(page, "Langue")).not.toContainText("estimation");
+
+  // Exact counts that fail leave the estimate said to be one, and ask again on request.
+  engine.explorer.fail = new Set(["metadata.language:exact"]);
+  answer(["rec_wport", "rec_wcup"], { ...WIRE_FACETS, total: 2 });
+  await facets(page, "Desk").getByRole("button", { name: /^economy/ }).click();
+  await expect(facets(page, "Langue")).toContainText("Les nombres sont momentanément indisponibles.");
+  await expect(counts(page, "Langue")).toHaveText(["anglais≈ 1\u202f200", "français≈ 800"]);
+  await expect(facets(page, "Langue").locator(".facet-estimate")).toHaveText("estimation");
+  engine.explorer.fail.clear();
+  await facets(page, "Langue").getByRole("button", { name: "Réessayer Langue" }).click();
+  await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
+});
+
+// One slow or failing field holds back no other; a retry asks for it
+// alone; the other common fields are counted once opened.
+test("chaque filtre arrive seul, se réessaie seul, et les autres champs se comptent à l’ouverture", async ({ page }) => {
+  const asked = askedFacets(page);
+  const desk = hold("desk:fast");
+  engine.explorer.fail = new Set(["metadata.subjects:fast"]);
+  await page.goto("/?view=explorer&corpora=wires");
+  await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
+  await expect(facets(page, "Desk")).toHaveAttribute("aria-busy", "true");
+  await expect(facets(page, "Sujets")).toContainText("Les nombres sont momentanément indisponibles.");
+  await expect(rows(page)).toHaveCount(4);
+  desk();
+  await expect(counts(page, "Desk")).toHaveText(["economy2", "politics1", "sport1"]);
+
+  engine.explorer.fail.clear();
+  const before = asked.length;
+  await facets(page, "Sujets").getByRole("button", { name: "Réessayer Sujets" }).click();
+  await expect(facets(page, "Sujets")).toHaveCount(0);
+  expect(asked.slice(before)).toEqual(["metadata.subjects:fast"]);
+
+  expect(asked.filter((a) => a.startsWith("metadata.source"))).toEqual([]);
+  const opened = page.waitForRequest((r) => new URL(r.url()).searchParams.get("field") === "metadata.source");
+  await page.getByText("Autres champs").click();
+  expect((await opened).url()).toContain("accuracy=fast");
+  await expect(page.getByRole("complementary", { name: "Filtres" })).toContainText("Aucune valeur pour ces filtres.");
+  // Opening asks for the other fields only; nothing counted is asked again.
+  expect(asked.filter((a) => a === "metadata.language:fast")).toHaveLength(1);
+});
+
 test("le clavier parcourt la liste, l’aperçu montre les versions, Entrée ouvre le document", async ({ page }) => {
   await page.goto("/?view=explorer&corpora=wires");
   // The first row is previewed: corrected once, with what changed.
