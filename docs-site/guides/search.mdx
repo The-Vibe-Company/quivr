@@ -278,7 +278,7 @@ filter sidebar. Quivr then says how it counted:
 
 | Response | Meaning |
 | --- | --- |
-| `as_of` | Exact counts stored for each Corpus at that time. Quivr keeps them for requests without a filter, or with only whole UTC days of the date field being counted (a timeline). Reading them refreshes them in the background, so changes since `as_of` show up a few minutes later. |
+| `as_of` | Exact counts stored for each Corpus at that time. Quivr keeps them for requests without a filter, or with only whole UTC days of the date field being counted (a timeline). Reading them refreshes them in the background once they are older than a minute and ten times what a refresh takes, so on a million documents changes since `as_of` show up within about ten minutes. |
 | `approximate: true` and `sample_fraction` | Estimates scaled from that share of the Records, returned when an exact count would take more than about a second. Values that are frequent are estimated closely; rare values may be missed or off. |
 | Neither | Exact counts, as without `accuracy`. |
 

@@ -14,7 +14,7 @@ var _ content.FacetReader = RecordStore{}
 // CountFacets aggregates current eligible Record Versions in one statement,
 // so every field sees the same snapshot. Arrays count documents, not members.
 func (s RecordStore) CountFacets(ctx context.Context, org string, q content.FacetQuery) ([]content.Facet, error) {
-	counted, err := s.facetRows(ctx, org, q, "")
+	counted, err := facetRows(ctx, database(ctx, s.Pool), org, q, "")
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func decodeFacets(fields []content.FacetField, counted [][]rawBucket) ([]content
 
 // facetRows counts each field's buckets; below, when set, keeps only Records
 // whose ID sorts under it: a uniform sample, since Record IDs are hashes.
-func (s RecordStore) facetRows(ctx context.Context, org string, q content.FacetQuery, below string) ([][]rawBucket, error) {
+func facetRows(ctx context.Context, db querier, org string, q content.FacetQuery, below string) ([][]rawBucket, error) {
 	out := make([][]rawBucket, len(q.Fields))
 	if len(q.Records.FilterRoutes) == 0 {
 		return out, nil
@@ -112,7 +112,7 @@ func (s RecordStore) facetRows(ctx context.Context, org string, q content.FacetQ
  JOIN projection_metadata pm ON pm.organization=records.organization AND pm.version_id=v.id
 	WHERE ` + where + groupBy + ") SELECT idx,value,count FROM (" + strings.Join(branches, " UNION ALL ") + ") counted ORDER BY idx,CASE WHEN idx=ANY(" + bind(dateFields) + `::int[]) THEN value::text END COLLATE "C",count DESC,value::text COLLATE "C"`
 
-	rows, err := database(ctx, s.Pool).Query(ctx, sql, args...)
+	rows, err := db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

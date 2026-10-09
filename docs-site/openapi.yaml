@@ -1463,7 +1463,7 @@ paths:
         work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.
         With accuracy fast, counts may instead come from each Corpus''s stored snapshot, exact as of the response''s as_of
         and refreshed in the background while it is read, when the request has no predicate or only whole UTC days of the
-        single date field it counts; otherwise from an exact count that ends within about 2 seconds, or else estimates scaled
+        single date field it counts; otherwise from an exact count that ends within about a second, or else estimates scaled
         from a uniform sample of the Corpora''s Records, marked approximate with their sample_fraction. Exact responses carry
         neither as_of nor approximate.'
       requestBody:

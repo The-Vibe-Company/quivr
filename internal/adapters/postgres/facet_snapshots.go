@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
 // Fast facet counting (THE-1387). Exact aggregation reads every current
@@ -45,6 +47,8 @@ const (
 	// Record IDs are this prefix and a SHA-256 in hex: a range of IDs is a
 	// uniform sample, read from the catalog index.
 	recordIDPrefix = "record_"
+	// SQLSTATE of a statement stopped by statement_timeout.
+	queryCanceled = "57014"
 )
 
 var _ content.FastFacetReader = RecordStore{}
@@ -72,13 +76,31 @@ func (s RecordStore) CountFacetsFast(ctx context.Context, org string, q content.
 			return counts, err
 		}
 	}
-	attempt, cancel := context.WithTimeout(ctx, facetExactAttempt)
-	items, err := s.CountFacets(attempt, org, q)
-	cancel()
-	if err == nil || ctx.Err() != nil || !errors.Is(attempt.Err(), context.DeadlineExceeded) {
-		return content.FacetCounts{Items: items}, err
+	counted, err := s.boundedFacetRows(ctx, org, q, "", facetExactAttempt)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == queryCanceled && ctx.Err() == nil {
+		return s.sampleFacets(ctx, org, q)
 	}
-	return s.sampleFacets(ctx, org, q)
+	if err != nil {
+		return content.FacetCounts{}, err
+	}
+	items, err := decodeFacets(q.Fields, counted)
+	return content.FacetCounts{Items: items}, err
+}
+
+// boundedFacetRows counts in a read-only transaction whose statement
+// PostgreSQL stops itself after limit. A cancelled context only closes the
+// client's connection, and the server would finish the scan regardless.
+func (s RecordStore) boundedFacetRows(ctx context.Context, org string, q content.FacetQuery, below string, limit time.Duration) ([][]rawBucket, error) {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	if _, err = tx.Exec(ctx, `SELECT set_config('statement_timeout',$1,true)`, fmt.Sprint(max(limit.Milliseconds(), 1))); err != nil {
+		return nil, err
+	}
+	return facetRows(ctx, tx, org, q, below)
 }
 
 // snapshotScope says whether snapshots can answer the request exactly: no
@@ -188,10 +210,14 @@ func (s RecordStore) snapshotFacets(ctx context.Context, org string, q content.F
 	if err = rows.Err(); err != nil {
 		return content.FacetCounts{}, false, err
 	}
+	stale := []snapshotTarget{}
 	for _, id := range refresh {
 		if declared, ok := q.Declared[id]; ok {
-			s.refreshLater(org, id, routes[id], declared)
+			stale = append(stale, snapshotTarget{corpusID: id, generation: routes[id], declared: declared})
 		}
+	}
+	if len(stale) > 0 {
+		s.refreshLater(ctx, org, stale)
 	}
 	if !usable {
 		return content.FacetCounts{}, false, nil
@@ -214,7 +240,9 @@ func mergeSnapshots(snapshots []facetSnapshot, f content.FacetField, days dayRan
 	counts := map[string]int64{}
 	for _, snap := range snapshots {
 		field, ok := snap.Fields[f.Field]
-		if !ok || field.Type != f.Type || (!field.Complete && len(snapshots) > 1) {
+		// Merged values, and days summed into periods or kept by a window,
+		// are exact only when every value was kept.
+		if !ok || field.Type != f.Type || (!field.Complete && (len(snapshots) > 1 || f.Type == "datetime")) {
 			return nil, false
 		}
 		for _, b := range field.Buckets {
@@ -274,18 +302,30 @@ func period(raw json.RawMessage, interval string, days dayRange) (string, bool) 
 	return string(text), true
 }
 
-func (s RecordStore) refreshLater(org, corpusID, generation string, declared []content.FacetField) {
+type snapshotTarget struct {
+	corpusID, generation string
+	declared             []content.FacetField
+}
+
+// refreshLater refreshes, one after another, those of the Corpora whose
+// lease it takes. It outlives the request but not the process's grace.
+func (s RecordStore) refreshLater(ctx context.Context, org string, targets []snapshotTarget) {
+	if _, admitted := lifecycle.Admit(ctx); !admitted {
+		return
+	}
 	select {
 	case facetRefreshes <- struct{}{}:
 	default:
 		return
 	}
+	work, cancel := lifecycle.CleanupContext(ctx, time.Duration(len(targets))*facetSnapshotDeadline)
 	go func() {
 		defer func() { <-facetRefreshes }()
-		ctx, cancel := context.WithTimeout(context.Background(), facetSnapshotDeadline)
 		defer cancel()
-		if err := s.refreshFacetSnapshot(ctx, org, corpusID, generation, declared); err != nil {
-			slog.WarnContext(ctx, "facet snapshot refresh failed; fast counts fall back to samples", "event", "quivr.facets.snapshot_failed", "corpus_id", corpusID, "error", err)
+		for _, t := range targets {
+			if err := s.refreshFacetSnapshot(work, org, t.corpusID, t.generation, t.declared); err != nil {
+				slog.WarnContext(work, "facet snapshot refresh failed; fast counts fall back to samples", "event", "quivr.facets.snapshot_failed", "corpus_id", t.corpusID, "error", err)
+			}
 		}
 	}()
 }
@@ -315,7 +355,7 @@ func (s RecordStore) refreshFacetSnapshot(ctx context.Context, org, corpusID, ge
 		}
 	}
 	q := content.FacetQuery{Records: content.RecordQuery{CorpusIDs: []string{corpusID}, FilterRoutes: []content.CatalogFilterRoute{{CorpusID: corpusID, GenerationID: generation}}}, Fields: fields}
-	counted, err := s.facetRows(ctx, org, q, "")
+	counted, err := s.boundedFacetRows(ctx, org, q, "", facetSnapshotDeadline)
 	if err != nil {
 		return err
 	}
@@ -350,15 +390,24 @@ func (s RecordStore) sampleFacets(ctx context.Context, org string, q content.Fac
 	if probe > 0 {
 		bound = int(math.Ceil(float64(facetSampleRecords) * span / 256 / float64(probe)))
 	}
-	if bound >= span {
-		items, err := s.CountFacets(ctx, org, q)
-		return content.FacetCounts{Items: items}, err
+	// The rest of the request's time bounds the count on the server too.
+	limit := facetSnapshotDeadline
+	if deadline, ok := ctx.Deadline(); ok {
+		limit = time.Until(deadline)
 	}
-	fraction := float64(bound) / span
-	counted, err := s.facetRows(ctx, org, q, recordIDPrefix+fmt.Sprintf("%04x", bound))
+	below := ""
+	if bound < span {
+		below = recordIDPrefix + fmt.Sprintf("%04x", bound)
+	}
+	counted, err := s.boundedFacetRows(ctx, org, q, below, limit)
 	if err != nil {
 		return content.FacetCounts{}, err
 	}
+	if below == "" {
+		items, err := decodeFacets(q.Fields, counted)
+		return content.FacetCounts{Items: items}, err
+	}
+	fraction := float64(bound) / span
 	for _, buckets := range counted {
 		for i := range buckets {
 			buckets[i].Count = int64(math.Round(float64(buckets[i].Count) / fraction))

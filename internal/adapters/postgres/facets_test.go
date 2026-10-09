@@ -305,12 +305,63 @@ func TestFastFacets(t *testing.T) {
 		t.Fatalf("filtered = %#v, want live %#v", got, exact(filtered))
 	}
 
-	// A snapshot of another generation never answers.
-	if _, err = pool.Exec(ctx, `UPDATE facet_snapshots SET generation_id='retired' WHERE organization=$1 AND corpus_id=$2`, scope.Organization, a); err != nil {
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, append([]any{scope.Organization, a}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshotOf := func() (generation string, taken time.Time) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT generation_id,taken_at FROM facet_snapshots WHERE organization=$1 AND corpus_id=$2`, scope.Organization, a).Scan(&generation, &taken); err != nil {
+			t.Fatal(err)
+		}
+		return generation, taken
+	}
+	// A snapshot of another generation never answers. Reads without declared
+	// fields start no refresh, so none outlives the test.
+	exec(`UPDATE facet_snapshots SET generation_id='retired' WHERE organization=$1 AND corpus_id=$2`)
+	quiet := q
+	quiet.Declared = nil
+	if got := fast(quiet); got.AsOf != nil {
+		t.Fatalf("retired generation answered: %#v", got)
+	}
+	// A refresh waits for another holder's lease, then replaces the snapshot
+	// it finds of another generation, and leaves a fresh one alone.
+	exec(`UPDATE facet_snapshots SET refreshing_until=now()+interval '1 hour' WHERE organization=$1 AND corpus_id=$2`)
+	if err = rs.RefreshFacetSnapshot(ctx, scope.Organization, a, g.ID, declared); err != nil {
 		t.Fatal(err)
 	}
-	if got := fast(q); got.AsOf != nil {
-		t.Fatalf("retired generation answered: %#v", got)
+	if generation, _ := snapshotOf(); generation != "retired" {
+		t.Fatalf("refresh took a held lease: %s", generation)
+	}
+	exec(`UPDATE facet_snapshots SET refreshing_until=now()-interval '1 second' WHERE organization=$1 AND corpus_id=$2`)
+	if err = rs.RefreshFacetSnapshot(ctx, scope.Organization, a, g.ID, declared); err != nil {
+		t.Fatal(err)
+	}
+	generation, refreshed := snapshotOf()
+	if err = rs.RefreshFacetSnapshot(ctx, scope.Organization, a, g.ID, declared); err != nil {
+		t.Fatal(err)
+	}
+	if again, retaken := snapshotOf(); generation != g.ID || again != g.ID || !retaken.Equal(refreshed) {
+		t.Fatalf("refresh = %s at %v, then %s at %v", generation, refreshed, again, retaken)
+	}
+	// Values a snapshot cut short still give one Corpus's top values, but
+	// neither a merge across Corpora nor days summed into periods.
+	exec(`UPDATE facet_snapshots SET data=jsonb_set(data,'{fields,metadata.language,complete}','false') WHERE organization=$1 AND corpus_id=$2`)
+	quiet.Fields = fields[:1]
+	if got := fast(quiet); got.AsOf != nil {
+		t.Fatalf("merged a cut snapshot: %#v", got)
+	}
+	alone := routed(fields[:1], nil, a)
+	alone.Declared = nil
+	if got := fast(alone); got.AsOf == nil || !reflect.DeepEqual(got.Items, exact(alone)) {
+		t.Fatalf("one Corpus's top values = %#v, want %#v from its snapshot", got, exact(alone))
+	}
+	exec(`UPDATE facet_snapshots SET data=jsonb_set(data,'{fields,metadata.published_at,complete}','false') WHERE organization=$1 AND corpus_id=$2`)
+	alone.Fields = fields[2:]
+	if got := fast(alone); got.AsOf != nil {
+		t.Fatalf("summed a cut day list: %#v", got)
 	}
 
 	// A sample reads a range of hashed Record IDs and scales what it counts.

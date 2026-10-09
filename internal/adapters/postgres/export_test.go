@@ -8,6 +8,11 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
+// RefreshFacetSnapshot refreshes now, as a fast read does in the background.
+func (s RecordStore) RefreshFacetSnapshot(ctx context.Context, org, corpusID, generation string, declared []content.FacetField) error {
+	return s.refreshFacetSnapshot(ctx, org, corpusID, generation, declared)
+}
+
 // SampleFacets counts a uniform sample, as a fast count does once an exact
 // count overruns its attempt: a fixture cannot make a small Corpus slow.
 func (s RecordStore) SampleFacets(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
