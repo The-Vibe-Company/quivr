@@ -71,30 +71,47 @@ class RailwayIsolation(unittest.TestCase):
                         reset.preview()
                 self.assertTrue(calls)
 
-    # Owns Railway's reset lifecycle when stop is ineffective and create ignores mountPath.
+    # Owns Railway's reset lifecycle, including delayed attachment deployments.
     # Existing preflight refusal tests cannot reach shutdown or artifact restore.
     def test_reset_removes_unresponsive_deployment_and_restores_recorded_artifacts(self):
         from deploy.reset import main
         from deploy.railway.infrastructure import Railway
         roles = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk',
-                 'postgres', 'temporal', 'seaweed', 'weaviate')
-        for failure in (None, 'stop', 'remove', 'quiescence', 'restore'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                 'postgres', 'temporal', 'seaweed', 'weaviate', 'tei')
+        scenarios = [(failure, ()) for failure in (None, 'preview', 'stop', 'remove', 'quiescence', 'restore')]
+        scenarios += [(None, delays) for delays in ((0,), (4,), (4, 8), (4, 5))]
+        scenarios += [(failure, (4, 8)) for failure in ('other-service', 'other-helper', 'late-deployment', 'attach-remove', 'attach-quiescence')]
+        for failure, attach_delays in scenarios:
+            with self.subTest(failure=failure, attach_delays=attach_delays), tempfile.TemporaryDirectory() as directory:
                 deployments = {role + '-original': {'id': role + '-original', 'status': 'SUCCESS',
                     'deploymentStopped': False, 'canRedeploy': True,
                     'instances': [{'id': role + '-instance', 'status': 'RUNNING'}]} for role in roles}
                 current = {role: role + '-original' for role in roles}
+                owners = {identifier: role for role, identifier in current.items()}
                 volumes = [{'volumeId': role + '-volume', 'environmentId': 'target', 'serviceId': role,
                     'mountPath': '/var/lib/weaviate' if role == 'weaviate' else '/data',
+                    'sizeMB': 65536 if role == 'postgres' else 32768,
                     'region': 'us-west', 'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None}
                     for role in ('postgres', 'temporal', 'seaweed', 'weaviate')]
                 removed, redeployed, deleted, delays = [], {}, [], []
                 clock = [0]
                 workflow_reads = [0]
+                pending, removing = [], {}
+                attached = {}
                 def sleep(seconds):
                     delays.append(seconds)
                     clock[0] += seconds
                 def transport(args, stdin=None):
+                    for due, target, identifier, stopped in pending[:]:
+                        if clock[0] >= due:
+                            deployments[identifier] = {'id': identifier, 'status': 'BUILDING',
+                                'deploymentStopped': stopped, 'canRedeploy': True, 'instances': []}
+                            owners[identifier] = target
+                            pending.remove((due, target, identifier, stopped))
+                    for identifier, due in list(removing.items()):
+                        if clock[0] >= due:
+                            deployments[identifier].update(status='REMOVED', instances=[])
+                            del removing[identifier]
                     if args[0] == 'ssh':
                         command = args[-1]
                         if 'print(json.dumps(inventory(' in command:
@@ -104,6 +121,8 @@ class RailwayIsolation(unittest.TestCase):
                             return '{"count":"1"}' if workflow_reads[0] <= 2 else '{}'
                         return '0'
                     query, variables = args[1], json.loads(args[3])
+                    if failure == 'preview' and query.startswith('mutation'):
+                        self.fail('preview issued a mutation')
                     if 'project(id:' in query:
                         data = {'project': {'id': 'project',
                             'environments': {'edges': [{'node': {'id': 'target', 'projectId': 'project',
@@ -111,13 +130,22 @@ class RailwayIsolation(unittest.TestCase):
                             'services': {'edges': [{'node': {'id': r, 'name': r}} for r in roles],
                                 'pageInfo': {'hasNextPage': False}}}}
                     elif 'volumeInstances(' in query:
+                        rows = [v.copy() for v in volumes]
+                        if 'sizeMB' not in query:
+                            for row in rows:
+                                row.pop('sizeMB')
+                        if failure == 'late-deployment' and 'postgres' in attached and clock[0] < attached['postgres'] + 12:
+                            for row in rows:
+                                if row['volumeId'] == 'postgres-volume':
+                                    row['serviceId'] = 'postgres'
                         data = {'environment': {'id': 'target', 'projectId': 'project',
-                            'volumeInstances': {'edges': [{'node': v.copy()} for v in volumes],
+                            'volumeInstances': {'edges': [{'node': v} for v in rows],
                                 'pageInfo': {'hasNextPage': False}}}}
                     elif 'serviceInstance(' in query:
                         role = variables['serviceId']
                         deployment = deployments[current[role]]
-                        active = [] if deployment['deploymentStopped'] or deployment['status'] == 'REMOVED' else [deployment]
+                        active = [d for identifier, d in deployments.items() if owners[identifier] == role
+                            and d['status'] != 'REMOVED' and (not d['deploymentStopped'] or d['status'] == 'BUILDING')]
                         data = {'serviceInstance': {'serviceId': role, 'environmentId': 'target',
                             'latestDeployment': deployment, 'activeDeployments': active}}
                     elif 'deploymentStop(' in query:
@@ -131,10 +159,14 @@ class RailwayIsolation(unittest.TestCase):
                     elif 'deploymentRemove(' in query:
                         identifier = variables['id']
                         removed.append((identifier, clock[0]))
-                        if failure == 'remove':
+                        if failure == 'remove' or failure == 'attach-remove' and '-attach-' in identifier:
                             raise RuntimeError('provider-secret-payload')
-                        deployments[identifier].update(status='REMOVED', instances=[{
-                            'id': 'web-instance', 'status': 'RESTARTING' if failure == 'quiescence' else 'REMOVED'}])
+                        if '-attach-' in identifier:
+                            # Removal acknowledges before the build actually disappears.
+                            removing[identifier] = clock[0] + (1000 if failure == 'attach-quiescence' else 2)
+                        else:
+                            deployments[identifier].update(status='REMOVED', instances=[{
+                                'id': 'web-instance', 'status': 'RESTARTING' if failure == 'quiescence' else 'REMOVED'}])
                         data = {'deploymentRemove': True}
                     elif 'deploymentRedeploy(' in query:
                         identifier = variables['id']
@@ -143,6 +175,7 @@ class RailwayIsolation(unittest.TestCase):
                             raise RuntimeError('provider-secret-payload')
                         redeployed[role] = identifier
                         current[role] = role + '-restored'
+                        owners[current[role]] = role
                         deployments[current[role]] = {'id': current[role], 'status': 'SUCCESS',
                             'deploymentStopped': False, 'canRedeploy': True,
                             'instances': [{'id': role + '-new-instance', 'status': 'RUNNING'}]}
@@ -153,6 +186,7 @@ class RailwayIsolation(unittest.TestCase):
                         self.assertFalse(any(i['status'] in ('RUNNING', 'RESTARTING')
                             for d in deployments.values() for i in d['instances']), 'volume changed before shutdown')
                         volume = {'volumeId': 'replacement-' + str(len(deleted)), 'serviceId': None,
+                            'sizeMB': 32768,
                             'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None,
                             **{k: v for k, v in variables['input'].items() if k not in ('projectId', 'mountPath')},
                             'mountPath': '/tmp'}
@@ -161,8 +195,20 @@ class RailwayIsolation(unittest.TestCase):
                     elif 'volumeInstanceUpdate(' in query:
                         volume = next(v for v in volumes if v['volumeId'] == variables['volumeId'])
                         volume.update(variables['input'])
+                        target = variables['input']['serviceId']
+                        if target:
+                            attached[target] = clock[0]
+                            for number, delay in enumerate(attach_delays, 1):
+                                pending.append((clock[0] + delay, target, target + '-attach-' + str(number), number == 2))
+                            if target == 'postgres' and failure in ('other-service', 'other-helper', 'late-deployment'):
+                                unexpected = {'other-service': 'web', 'other-helper': 'tei', 'late-deployment': target}[failure]
+                                pending.append((clock[0] + (11 if failure == 'late-deployment' else 4),
+                                    unexpected, 'unexpected', False))
                         data = {'volumeInstanceUpdate': True}
                     elif 'volumeDelete(' in query:
+                        self.assertFalse(any(d['status'] == 'BUILDING' or any(i['status'] in ('RUNNING', 'RESTARTING')
+                            for i in d['instances']) for d in deployments.values()), 'deleted a volume before deployment quiescence')
+                        self.assertFalse(pending, 'deleted a volume before delayed attachment deployments surfaced')
                         deleted.append(variables['volumeId'])
                         volumes[:] = [v for v in volumes if v['volumeId'] != variables['volumeId']]
                         data = {'volumeDelete': True}
@@ -179,7 +225,15 @@ class RailwayIsolation(unittest.TestCase):
                      patch.dict(os.environ, {'RAILWAY_API_TOKEN': 'fixture-account-not-real'}), \
                      contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                     os.environ.pop('RAILWAY_TOKEN', None)
-                    result = main(['-f', str(declaration), '--confirm', '--deployment-name', 'isolated-install'])
+                    result = main(['-f', str(declaration)] + ([] if failure == 'preview' else
+                                  ['--confirm', '--deployment-name', 'isolated-install']))
+                if failure == 'preview':
+                    self.assertEqual(result, 0, errors.getvalue())
+                    scope = json.loads(output.getvalue())['scope']
+                    self.assertEqual(scope['volume_sizes']['postgres'], {'old_sizeMB': 65536, 'replacement_sizeMB': None})
+                    self.assertIn('unknown until created', scope['replacement_capacity'])
+                    self.assertFalse(Path(str(declaration) + '.reset-state.json').exists())
+                    continue
                 state = json.loads(Path(str(declaration) + '.reset-state.json').read_text())
                 if failure is None:
                     self.assertEqual(result, 0, errors.getvalue())
@@ -190,12 +244,24 @@ class RailwayIsolation(unittest.TestCase):
                         {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data',
                          'weaviate': '/var/lib/weaviate'})
                     self.assertTrue(all(deployments[current[r]]['instances'][0]['status'] == 'RUNNING' for r in roles))
+                    decoder = json.JSONDecoder()
+                    preview, end = decoder.raw_decode(output.getvalue())
+                    report = json.loads(output.getvalue()[end:])['result']
+                    self.assertEqual(preview['scope']['volume_sizes']['postgres'],
+                        {'old_sizeMB': 65536, 'replacement_sizeMB': None})
+                    self.assertEqual(report['volume_sizes']['postgres'],
+                        {'old_sizeMB': 65536, 'replacement_sizeMB': 32768, 'shrunk': True})
+                    self.assertEqual(report['volume_sizes']['weaviate'],
+                        {'old_sizeMB': 32768, 'replacement_sizeMB': 32768, 'shrunk': False})
+                    self.assertIn('Railway dashboard', report['warnings'][0])
+                    self.assertIn('before importing', report['warnings'][0])
                 else:
                     self.assertEqual(result, 1)
-                    phase = 'restoring' if failure == 'restore' else 'stopping-writers'
+                    phase = ('attaching-volume' if attach_delays else
+                             'restoring' if failure == 'restore' else 'stopping-writers')
                     self.assertEqual(state['phase'], phase)
                     self.assertIn(phase, errors.getvalue())
-                    self.assertIn('web', errors.getvalue())
+                    self.assertIn('postgres' if attach_delays else 'web', errors.getvalue())
                     self.assertNotIn('provider-secret-payload', output.getvalue() + errors.getvalue())
                     if failure != 'restore':
                         self.assertEqual(deleted, [])
@@ -203,7 +269,16 @@ class RailwayIsolation(unittest.TestCase):
                 if failure == 'stop':
                     self.assertEqual(removed, [], 'API errors must not trigger removal')
                 else:
-                    self.assertEqual(removed, [('web-original', 30)])
+                    self.assertEqual([row for row in removed if row[0].endswith('-original')], [('web-original', 30)])
+                    if failure in ('other-service', 'other-helper', 'late-deployment'):
+                        self.assertTrue(deployments['unexpected']['deploymentStopped'], 'unexpected deployment escaped the stop guard')
+                        self.assertNotIn('unexpected', {identifier for identifier, _ in removed})
+                    if failure == 'attach-quiescence':
+                        self.assertLessEqual(clock[0] - attached['postgres'], 180, 'attachment cleanup was unbounded')
+                    if failure is None:
+                        self.assertEqual({identifier for identifier, _ in removed if '-attach-' in identifier},
+                            {role + '-attach-' + str(number) for role in ('postgres', 'temporal', 'seaweed', 'weaviate')
+                             for number in range(1, len(attach_delays) + 1)})
                     self.assertTrue(delays)
                     self.assertTrue(all(delay >= 1 for delay in delays), delays)
 
