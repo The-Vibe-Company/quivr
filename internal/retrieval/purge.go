@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"errors"
 
 	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
@@ -32,6 +33,7 @@ type PurgeItem struct {
 	GenerationID string
 	VersionID    string
 	Collections  []string
+	NoticedAt    time.Time
 }
 
 // PurgeResult is the outcome of one bounded delete-by-filter. Complete means
@@ -39,6 +41,8 @@ type PurgeItem struct {
 type PurgeResult struct {
 	Deleted  int
 	Complete bool
+	// RemainingAtLeast is a lower bound from a bounded provider observation.
+	RemainingAtLeast int
 }
 
 // PurgeStore selects, leases and records purges in PostgreSQL. Selection only
@@ -53,7 +57,7 @@ type PurgeStore interface {
 	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool) error
 }
 
-// PurgeProjection deletes projection objects by filter, never by object ID.
+// PurgeProjection deletes scoped projection objects in bounded batches.
 type PurgeProjection interface {
 	PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (PurgeResult, error)
 	PurgeVersion(ctx context.Context, collection, org, versionID string) (PurgeResult, error)
@@ -61,14 +65,15 @@ type PurgeProjection interface {
 
 // PurgeMetrics counts completed purges and deleted objects per kind.
 type PurgeMetrics struct {
-	Purges, Objects map[string]*atomic.Int64
+	Purges, Objects, Failures, Oldest, Remaining map[string]*atomic.Int64
 }
 
 // NewPurgeMetrics returns zeroed counters for both purge kinds.
 func NewPurgeMetrics() *PurgeMetrics {
-	m := &PurgeMetrics{Purges: map[string]*atomic.Int64{}, Objects: map[string]*atomic.Int64{}}
+	m := &PurgeMetrics{Purges: map[string]*atomic.Int64{}, Objects: map[string]*atomic.Int64{}, Failures: map[string]*atomic.Int64{}, Oldest: map[string]*atomic.Int64{}, Remaining: map[string]*atomic.Int64{}}
 	for _, kind := range []string{PurgeGeneration, PurgeVersion} {
 		m.Purges[kind], m.Objects[kind] = &atomic.Int64{}, &atomic.Int64{}
+		m.Failures[kind], m.Oldest[kind], m.Remaining[kind] = &atomic.Int64{}, &atomic.Int64{}, &atomic.Int64{}
 	}
 	return m
 }
@@ -76,13 +81,16 @@ func NewPurgeMetrics() *PurgeMetrics {
 // Write renders the purge counters in the Prometheus text format.
 func (m *PurgeMetrics) Write(w io.Writer) {
 	for _, family := range []struct {
-		name, help string
-		counts     map[string]*atomic.Int64
+		name, help, metricType string
+		counts                 map[string]*atomic.Int64
 	}{
-		{"quivr_projection_purges_total", "Completed projection purges by kind (abandoned generation or dead Version).", m.Purges},
-		{"quivr_projection_purged_objects_total", "Projection objects physically deleted by purges, by kind.", m.Objects},
+		{"quivr_projection_purges_total", "Completed projection purges by kind (abandoned generation or dead Version).", "counter", m.Purges},
+		{"quivr_projection_purged_objects_total", "Projection objects physically deleted by purges, by kind.", "counter", m.Objects},
+		{"quivr_projection_purge_failures_total", "Failed projection purge batches by kind.", "counter", m.Failures},
+		{"quivr_projection_purge_oldest_observed_age_seconds", "Oldest unfinished purge age among items observed in the last nonempty sweep.", "gauge", m.Oldest},
+		{"quivr_projection_purge_remaining_objects_lower_bound", "Remaining object lower bound among unfinished items observed in the last nonempty sweep; not a backlog total.", "gauge", m.Remaining},
 	} {
-		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n", family.name, family.help, family.name)
+		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", family.name, family.help, family.name, family.metricType)
 		for _, kind := range []string{PurgeGeneration, PurgeVersion} {
 			fmt.Fprintf(w, "%s{kind=%q} %d\n", family.name, kind, family.counts[kind].Load())
 		}
@@ -113,7 +121,7 @@ func (p Purger) Run(ctx context.Context) {
 			return
 		}
 		if _, err := p.Sweep(work); err != nil && ctx.Err() == nil {
-			slog.Warn("projection purge sweep failed; retrying next interval", "error", err)
+			slog.Warn("projection purge sweep failed; retrying next interval", "reason", err.Error())
 		}
 		select {
 		case <-ctx.Done():
@@ -126,6 +134,8 @@ func (p Purger) Run(ctx context.Context) {
 // Sweep notices newly dead items, then purges at most Batch items whose grace
 // period elapsed. It reports how many items it completed.
 func (p Purger) Sweep(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	batch, grace := p.Batch, p.Grace
 	if batch <= 0 {
 		batch = 100
@@ -140,10 +150,16 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if p.Metrics != nil && len(items) > 0 {
+		for _, kind := range []string{PurgeGeneration, PurgeVersion} {
+			p.Metrics.Oldest[kind].Store(0)
+			p.Metrics.Remaining[kind].Store(0)
+		}
+	}
 	completed := 0
 	var failure error
 	for _, item := range items {
-		deleted, complete := 0, true
+		deleted, complete, remaining := 0, true, 0
 		for _, collection := range item.Collections {
 			var r PurgeResult
 			if item.Kind == PurgeGeneration {
@@ -152,29 +168,36 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 				r, err = p.Projection.PurgeVersion(ctx, collection, item.Organization, item.VersionID)
 			}
 			deleted += r.Deleted
+			remaining += r.RemainingAtLeast
 			if err != nil {
 				break
 			}
 			complete = complete && r.Complete
 		}
 		if err != nil {
-			// The item stays unrecorded; its lease expires and a later run
-			// repeats the idempotent delete. Other items still proceed.
+			complete = false
 			if p.Metrics != nil {
-				p.Metrics.Objects[item.Kind].Add(int64(deleted))
+				p.Metrics.Failures[item.Kind].Add(1)
 			}
-			if failure == nil {
-				failure = err
-			}
-			if ctx.Err() != nil {
-				return completed, failure
-			}
-			continue
+			failure = errors.Join(failure, err)
+			slog.Warn("projection purge batch failed", "kind", item.Kind, "reason", err.Error(), "objects_deleted", deleted)
 		}
-		// An incomplete item (more objects than one delete may match) is
-		// released and continues next run.
-		if err = p.Store.RecordPurge(ctx, item, deleted, complete); err != nil {
-			return completed, err
+		// Save confirmed progress even on partial failure/cancellation. The bounded
+		// cleanup context retains the managed process shutdown budget.
+		checkpoint, finish := lifecycle.CleanupContext(ctx, 5*time.Second)
+		recordErr := p.Store.RecordPurge(checkpoint, item, deleted, complete)
+		finish()
+		if recordErr != nil {
+			return completed, errors.Join(failure, recordErr)
+		}
+		if p.Metrics != nil && !complete {
+			if !item.NoticedAt.IsZero() {
+				age := max(int64(0), int64(time.Since(item.NoticedAt).Seconds()))
+				if age > p.Metrics.Oldest[item.Kind].Load() {
+					p.Metrics.Oldest[item.Kind].Store(age)
+				}
+			}
+			p.Metrics.Remaining[item.Kind].Add(int64(remaining))
 		}
 		if p.Metrics != nil {
 			p.Metrics.Objects[item.Kind].Add(int64(deleted))
@@ -184,6 +207,11 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		}
 		if complete {
 			completed++
+		}
+		// One final checkpoint may outlive the attempt deadline; do not renew
+		// cleanup budgets or contact further collections/items after expiry.
+		if ctx.Err() != nil {
+			return completed, errors.Join(failure, ctx.Err())
 		}
 	}
 	return completed, failure

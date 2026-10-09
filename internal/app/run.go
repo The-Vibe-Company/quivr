@@ -894,7 +894,7 @@ func Run(command string, args ...string) error {
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
 		loops.Go(func(ctx context.Context) {
-			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, Interval: time.Minute, Batch: 100, Metrics: purgeMetrics}.Run(ctx)
+			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, Interval: time.Second, Batch: 4, Metrics: purgeMetrics}.Run(ctx)
 		})
 		loops.Go(func(ctx context.Context) {
 			for ctx.Err() == nil {

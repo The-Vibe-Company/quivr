@@ -3,7 +3,10 @@ package weaviate_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"io"
 	"net/http"
 	"testing"
 
@@ -74,13 +77,45 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 	if err := f.store.Publish(f.ctx, old, "adapter-attach-other", f.corpusID, "example-feed", content.Version{ID: "version-segment-a"}, a); err != nil {
 		t.Fatal(err)
 	}
-	collection := f.gen.Collection
-	if n := f.count(collection, ""); n != 6 {
-		t.Fatalf("fixture objects %d, want 6", n)
+	// One generation exceeds the application window, even though the store's
+	// global delete cap would admit every object in one request.
+	extra := f.segmentation("bulk", "")
+	for i := 0; i < 600; i++ {
+		extra.Segments = append(extra.Segments, content.Segment{ID: fmt.Sprintf("bulk-%d", i), PartKey: "body", Text: "abandoned text"})
 	}
-	r, err := f.store.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID)
-	if err != nil || !r.Complete || r.Deleted != 3 {
-		t.Fatalf("generation purge %+v %v, want 3 deleted (a lexical+enriched, b lexical)", r, err)
+	extra.Segments = extra.Segments[1:]
+	f.publish(old, extra)
+	collection := f.gen.Collection
+	if n := f.count(collection, ""); n != 606 {
+		t.Fatalf("fixture objects %d, want 606", n)
+	}
+	// Lose one real delete response, as a process interruption after the
+	// provider committed would. A fresh adapter must drain the survivors.
+	interrupted := weaviate.New(f.url)
+	interrupted.Client = &http.Client{Transport: lostPurgeReply{next: http.DefaultTransport}}
+	if _, err := interrupted.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err == nil {
+		t.Fatal("lost delete reply must report failure")
+	}
+	afterInterruption := f.count(collection, textFilter("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID))
+	if afterInterruption < 347 || afterInterruption >= 603 {
+		t.Fatalf("interrupted batch left %d of 603 objects, want at most 256 deleted", afterInterruption)
+	}
+	f.store = weaviate.New(f.url)
+	deleted, sweeps := 0, 0
+	var r retrieval.PurgeResult
+	var err error
+	for ; sweeps < 8; sweeps++ {
+		r, err = f.store.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID)
+		if err != nil || r.Deleted > 256 {
+			t.Fatalf("bounded generation purge %+v %v", r, err)
+		}
+		deleted += r.Deleted
+		if r.Complete {
+			break
+		}
+	}
+	if !r.Complete || sweeps < 1 || deleted != afterInterruption {
+		t.Fatalf("resumed purge: %d sweeps, %d deleted, %+v, want %d survivors drained", sweeps+1, deleted, r, afterInterruption)
 	}
 	if n := f.count(collection, textFilter("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID)); n != 0 {
 		t.Fatalf("%d objects left in the purged generation", n)
@@ -96,6 +131,15 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 	}
 	if r, err = f.store.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err != nil || !r.Complete || r.Deleted != 0 {
 		t.Fatalf("repeated generation purge %+v %v", r, err)
+	}
+	// A lost reply for the final window must not report attempted objects as
+	// a remaining-object lower bound: the real store already removed them.
+	f.publish(old, b)
+	if lost, err := interrupted.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err == nil || lost.Complete || lost.RemainingAtLeast != 0 {
+		t.Fatalf("unknown final delete outcome: %+v %v", lost, err)
+	}
+	if r, err = f.store.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err != nil || !r.Complete || r.Deleted != 0 {
+		t.Fatalf("resume after lost final reply: %+v %v", r, err)
 	}
 	r, err = f.store.PurgeVersion(f.ctx, collection, f.org, a.VersionID)
 	if err != nil || !r.Complete || r.Deleted != 1 {
@@ -178,4 +222,17 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 	if liveBefore >= records || liveAfter != records {
 		t.Fatalf("live Records within the candidate window: %d before, %d after, want crowding then all %d", liveBefore, liveAfter, records)
 	}
+}
+
+// The dependency performs the delete; only its reply is interrupted.
+type lostPurgeReply struct{ next http.RoundTripper }
+
+func (f lostPurgeReply) RoundTrip(r *http.Request) (*http.Response, error) {
+	res, err := f.next.RoundTrip(r)
+	if err == nil && r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" {
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		return nil, errors.New("injected lost purge response")
+	}
+	return res, err
 }

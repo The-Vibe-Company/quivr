@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  countLabel,
+  ageLabel,
+  estimateLabel,
   overlaps,
   periodLabel,
   periodsBetween,
@@ -69,11 +70,16 @@ function tickLabel(period: string, interval: Interval) {
  * click and a Shift+click, picks a range of whole periods; the range is
  * tinted, the documents outside it stay drawn quieter. The caption reads
  * the bar under the pointer. "Zoomer" narrows the span shown to the range,
- * and the step follows the span.
+ * and the step follows the span. Estimated counts read "≈".
  */
 export function Timeline({
   facet,
   stale,
+  approximate,
+  asOf,
+  now,
+  error,
+  onRetry,
   range,
   window: shown,
   onRange,
@@ -81,6 +87,13 @@ export function Timeline({
 }: {
   facet?: Facet;
   stale: boolean;
+  approximate?: boolean;
+  /** When the engine's stored counts drawn were taken, and the time now. */
+  asOf?: string;
+  now: number;
+  /** Why the counts could not be read; the last ones stay drawn. */
+  error?: string;
+  onRetry: () => void;
   range?: Range;
   window?: Range;
   onRange: (range: Range | undefined) => void;
@@ -180,25 +193,36 @@ export function Timeline({
             <>
               <strong>{periodLabel(read)}</strong>
               <span className="timeline-figure">
-                {countLabel(readCount)} document{readCount > 1 ? "s" : ""}
+                {estimateLabel(readCount, approximate)} document{readCount > 1 ? "s" : ""}
               </span>
             </>
           ) : dragged ? (
             <>
               <strong>{rangeLabel(dragged)}</strong>
               <span className="timeline-figure">
-                {countLabel(draggedCount)} document{draggedCount > 1 ? "s" : ""}
+                {estimateLabel(draggedCount, approximate)} document{draggedCount > 1 ? "s" : ""}
               </span>
+            </>
+          ) : error ? (
+            <>
+              {error}{" "}
+              <button type="button" className="link-button" onClick={onRetry}>
+                Réessayer
+              </button>
             </>
           ) : span ? (
             <>
               <strong>{rangeLabel(span)}</strong>
               <span>{STEP[interval]}</span>
+              {asOf && ageLabel(asOf, now) && <span className="timeline-age">comptés {ageLabel(asOf, now)}</span>}
             </>
           ) : stale ? (
             "Comptage des dates…"
           ) : (
-            "Aucun document daté pour ces filtres."
+            <>
+              Aucun document daté pour ces filtres.
+              {asOf && ageLabel(asOf, now) && <span className="timeline-age"> Comptés {ageLabel(asOf, now)}.</span>}
+            </>
           )}
         </p>
         <div className="timeline-actions">
@@ -232,7 +256,7 @@ export function Timeline({
       >
         {periods.map((p, i) => {
           const count = counts.get(p) || 0;
-          const documents = `${countLabel(count)} ${count > 1 ? "documents" : "document"}`;
+          const documents = `${estimateLabel(count, approximate)} ${count > 1 ? "documents" : "document"}`;
           const inside = !!picked && overlaps(p, picked);
           return (
             <button

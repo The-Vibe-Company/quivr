@@ -342,7 +342,7 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.facets[data-stale] .facet {
+.facet[data-stale] {
   opacity: 0.55;
 }
 .facet {
@@ -372,6 +372,22 @@
   padding-top: 14px;
   border-top: 1px solid var(--line-soft);
   color: var(--accent);
+}
+/* An estimate's tag sits beside the field's name, the clear button stays right. */
+.facet-estimate {
+  margin: 0 auto 0 6px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.facets-age,
+.facet-error {
+  padding: 0 4px;
+}
+.facet-error {
+  margin-bottom: 4px;
+}
+.timeline-age {
+  color: var(--ink-faint);
 }
 .facet-clear {
   padding: 0;
