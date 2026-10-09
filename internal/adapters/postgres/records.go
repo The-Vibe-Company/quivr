@@ -43,13 +43,23 @@ func catalogBound(t time.Time) time.Time {
 
 func catalogRange(q content.RecordQuery, args *[]any) string {
 	where := "records.organization=$1 AND records.corpus_id=$2"
-	if len(q.CorpusIDs) > 0 {
+	if len(q.CorpusIDs) == 1 {
+		(*args)[1] = q.CorpusIDs[0]
+	} else if len(q.CorpusIDs) > 1 {
 		(*args)[1] = q.CorpusIDs
 		where = "records.organization=$1 AND records.corpus_id=ANY($2::text[])"
 	}
-	// A scalar primary-key lookup prevents an archive anti-join from estimating
-	// that almost no Records survive when the tiny corpus table lacks statistics.
-	where += " AND NOT coalesce((SELECT c.archived FROM corpora c WHERE c.organization=records.organization AND c.id=records.corpus_id),false)"
+	corpusSQL := "$2"
+	if len(q.CorpusIDs) > 1 {
+		corpusSQL = "records.corpus_id"
+	}
+	return where + catalogPredicates(q, args, corpusSQL)
+}
+
+func catalogPredicates(q content.RecordQuery, args *[]any, corpusSQL string) string {
+	// The scalar primary-key lookup preserves the ordered plan even without
+	// corpus statistics. A bound corpus needs only one archive check per page.
+	where := " AND NOT COALESCE((SELECT c.archived FROM corpora c WHERE c.organization=$1 AND c.id=" + corpusSQL + "),false)"
 	where += catalogMetadata(q, args)
 	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
 		where += " AND current_accepted_at IS NOT NULL"
@@ -67,8 +77,15 @@ func catalogRange(q content.RecordQuery, args *[]any) string {
 
 // Records reads one keyset page, defaulting to the original byte-wise ID order.
 func (s RecordStore) Records(ctx context.Context, org, corpusID string, q content.RecordQuery) ([]content.Record, error) {
+	q.CorpusIDs = union(q.CorpusIDs, nil)
 	args := []any{org, corpusID}
-	where := catalogRange(q, &args)
+	where := ""
+	if len(q.CorpusIDs) > 1 {
+		args[1] = q.CorpusIDs
+		where = "records.organization=$1 AND records.corpus_id=requested.corpus_id" + catalogPredicates(q, &args, "requested.corpus_id")
+	} else {
+		where = catalogRange(q, &args)
+	}
 	order := `id COLLATE "C"`
 	if q.Order == content.AcceptedAtDesc {
 		order = catalogTimeSQL + ` DESC,id COLLATE "C" DESC`
@@ -85,7 +102,14 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 		where += fmt.Sprintf(` AND id > $%d COLLATE "C"`, len(args))
 	}
 	args = append(args, q.Limit)
-	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,''),current_accepted_at FROM records WHERE `+where+` ORDER BY `+order+fmt.Sprintf(" LIMIT $%d", len(args)), args...)
+	// Each corpus contributes at most one page. The outer merge can never
+	// sort the corpus; its input is bounded by the requested corpus count.
+	page := `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') AS current_version_id,current_accepted_at FROM records WHERE ` + where + ` ORDER BY ` + order + fmt.Sprintf(" LIMIT $%d", len(args))
+	sql := page
+	if len(q.CorpusIDs) > 1 {
+		sql = `SELECT page.* FROM unnest($2::text[]) AS requested(corpus_id) CROSS JOIN LATERAL (` + page + `) page ORDER BY ` + order + fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := database(ctx, s.Pool).Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

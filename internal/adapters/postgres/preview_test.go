@@ -26,6 +26,11 @@ func TestRecentListsCurrentEligibleVersionsNewestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Backdating receipt fixtures must republish the current pointer so its
+	// cached acceptance date follows the production trigger.
+	if _, err := f.pool.Exec(ctx, `UPDATE records SET current_version_id=current_version_id WHERE organization=$1`, f.org); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.pool.Exec(ctx, `UPDATE records SET withdrawn=true WHERE organization=$1 AND id=$2`, f.org, withdrawn); err != nil {
 		t.Fatal(err)
 	}
