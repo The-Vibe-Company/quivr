@@ -9167,8 +9167,9 @@ components:
           enum:
           - exact
           - fast
-          description: Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from
-            a stored snapshot (as_of) or a uniform sample (approximate).
+          description: 'Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually
+            within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline
+            still applies.'
     FacetField:
       type: object
       additionalProperties: false
@@ -9209,8 +9210,9 @@ components:
         as_of:
           type: string
           format: date-time
-          description: Fast requests only. The counts are those of stored snapshots, exact when the oldest was taken at this
-            time; documents accepted or withdrawn since are not reflected.
+          description: Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this
+            is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots
+            of other Corpora include their later changes.
         approximate:
           type: boolean
           description: Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.

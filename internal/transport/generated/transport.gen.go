@@ -2254,7 +2254,7 @@ type FacetRequest struct {
 	// AcceptedBefore Exclusive current-Version acceptance-time upper bound, as in listing.
 	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
 
-	// Accuracy Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+	// Accuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies.
 	Accuracy  *FacetRequestAccuracy `json:"accuracy,omitempty"`
 	CorpusIds []string              `json:"corpus_ids"`
 
@@ -2265,7 +2265,7 @@ type FacetRequest struct {
 	Filter *FacetFilter `json:"filter,omitempty"`
 }
 
-// FacetRequestAccuracy Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+// FacetRequestAccuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies.
 type FacetRequestAccuracy string
 
 // FacetResponse defines model for FacetResponse.
@@ -2273,7 +2273,7 @@ type FacetResponse struct {
 	// Approximate Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
 	Approximate *bool `json:"approximate,omitempty"`
 
-	// AsOf Fast requests only. The counts are those of stored snapshots, exact when the oldest was taken at this time; documents accepted or withdrawn since are not reflected.
+	// AsOf Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots of other Corpora include their later changes.
 	AsOf            *time.Time         `json:"as_of,omitempty"`
 	ExcludedCorpora *[]CorpusExclusion `json:"excluded_corpora,omitempty"`
 	Items           []Facet            `json:"items"`

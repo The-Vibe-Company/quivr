@@ -9935,7 +9935,7 @@ required:
 | `filter` | [`FacetFilter`](#facetfilter) |  |  |
 | `accepted_after` | string (date-time) |  | Inclusive current-Version acceptance-time lower bound, as in listing. |
 | `accepted_before` | string (date-time) |  | Exclusive current-Version acceptance-time upper bound, as in listing. |
-| `accuracy` | string |  | Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate). One of `exact`, `fast`. |
+| `accuracy` | string |  | Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies. One of `exact`, `fast`. |
 
 Example `metadata_facets_request`:
 
@@ -10009,7 +10009,7 @@ properties:
     type: string
     enum: [exact, fast]
     description: >-
-      Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+      Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies.
 ```
 
 </details>
@@ -10052,7 +10052,7 @@ properties:
 | --- | --- | --- | --- |
 | `items` | array of [`Facet`](#facet) | yes | At most `16` items. |
 | `excluded_corpora` | array of [`CorpusExclusion`](#corpusexclusion) |  | At most `16` items. |
-| `as_of` | string (date-time) |  | Fast requests only. The counts are those of stored snapshots, exact when the oldest was taken at this time; documents accepted or withdrawn since are not reflected. |
+| `as_of` | string (date-time) |  | Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots of other Corpora include their later changes. |
 | `approximate` | boolean |  | Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records. |
 | `sample_fraction` | number (double) |  | Share of the Corpora's Records counted when approximate. Greater than `0`. Less than `1`. |
 
@@ -10139,7 +10139,7 @@ properties:
     type: string
     format: date-time
     description: >-
-      Fast requests only. The counts are those of stored snapshots, exact when the oldest was taken at this time; documents accepted or withdrawn since are not reflected.
+      Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots of other Corpora include their later changes.
   approximate:
     type: boolean
     description: Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
