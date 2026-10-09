@@ -28,7 +28,7 @@ const gullsText = "Gulls circled the trawler until the nets came up empty."
 // through it while A still runs.
 func TestRollbackStarts(t *testing.T) {
 	operator, _, b, corpusID, run := rollbackSetup(t)
-	plan := request(t, "POST", "/v0/admin/plugins/"+registrationAt(t, operator, "0.2.0", b)["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	plan := routingRequest(t, "POST", "/v0/admin/plugins/"+registrationAt(t, operator, "0.2.0", b)["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	if planRoles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("activating B: %v", plan)
 	}
@@ -60,14 +60,14 @@ func TestRollback(t *testing.T) {
 	}
 
 	body := map[string]any{"idempotency_key": "rollback-" + run, "pinned_work": "stop"}
-	back := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200)
+	back := routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200)
 	if planRoles(back)["ingestion:core.ingest"] != planRoles(bad)["ingestion:core.ingest"] {
 		t.Fatalf("hash rollback changed core ingestion: %v", back)
 	}
 	if back["source"] != "rollback" || back["previous_plan_id"] != bad["plan_id"] || planRoles(back)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("rollback: %v, want a rollback plan after %v with A serving ingestion", back, bad["plan_id"])
 	}
-	if replay := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200); replay["plan_id"] != back["plan_id"] {
+	if replay := routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200); replay["plan_id"] != back["plan_id"] {
 		t.Fatalf("the same key again: %v, want plan %v", replay["plan_id"], back["plan_id"])
 	}
 	history := request(t, "GET", "/v0/admin/plugins/plans?limit=2", operator, nil, 200)["items"].([]any)
@@ -102,7 +102,7 @@ func TestRollback(t *testing.T) {
 		t.Fatalf("the Record B produced after the rollback: %v, want it still searchable", r)
 	}
 
-	refused := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "rollback-to-b-" + run}, 409)
+	refused := routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "rollback-to-b-" + run}, 409)
 	if refused["code"] != "plugin_unreachable" {
 		t.Fatalf("rolling back to B while it is down: %v, want plugin_unreachable", refused)
 	}

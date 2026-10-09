@@ -31,6 +31,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	adminrouting "github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
@@ -41,18 +42,19 @@ import (
 )
 
 type API struct {
-	Queues         workqueue.Reader
-	Audit          audit.Store
-	draining       func() bool
-	processWork    context.Context
-	router         *routing.Mux
-	routes         http.Handler
-	loadMetrics    *telemetry.LoadMetrics
-	searches       chan struct{}
-	facets         chan struct{}
-	pushProxyCIDRs []string
-	Content        content.Service
-	Retrieval      retrieval.Service
+	RoutingOperations *adminrouting.Service
+	Queues            workqueue.Reader
+	Audit             audit.Store
+	draining          func() bool
+	processWork       context.Context
+	router            *routing.Mux
+	routes            http.Handler
+	loadMetrics       *telemetry.LoadMetrics
+	searches          chan struct{}
+	facets            chan struct{}
+	pushProxyCIDRs    []string
+	Content           content.Service
+	Retrieval         retrieval.Service
 	// Spaces lists a Corpus's vector spaces; nil answers 404.
 	Spaces     SpaceRegistry
 	Uploads    uploads.Service

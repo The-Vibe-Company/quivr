@@ -142,7 +142,7 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
   OFFSET 0
  ) v ON v.record_id=r.id
  JOIN LATERAL (
-  SELECT sg.id AS segment_id,pc.plugin_id,pc.role FROM projection_coverage pc
+  SELECT sg.id AS segment_id,pc.plugin_id,CASE WHEN `+effectiveCoverageSQL("pc")+` THEN 'served' ELSE 'evaluation' END AS role FROM projection_coverage pc
   JOIN segments sg ON (sg.organization,sg.version_id,sg.segmentation_id)=(pc.organization,pc.version_id,pc.segmentation_id)
   WHERE pc.organization=r.organization AND pc.version_id=v.id AND pc.generation_id=$3
   OFFSET 0

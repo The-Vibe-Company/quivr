@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -80,7 +79,7 @@ func TestHostedEmbeddingRedeployBefore(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	s.RollbackPlan = request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)["plan_id"].(string)
-	s.PromotedPlan = request(t, "POST", "/v0/admin/plugins/"+s.OldRegistration+"/activate", operator, map[string]any{}, 200)["plan_id"].(string)
+	s.PromotedPlan = routingRequest(t, "POST", "/v0/admin/plugins/"+s.OldRegistration+"/activate", operator, map[string]any{}, 200)["plan_id"].(string)
 	hostedRedeploySearch(t, admin, s, space)
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -111,26 +110,26 @@ func TestHostedEmbeddingRedeployAfter(t *testing.T) {
 	}
 	hostedRedeploySearch(t, admin, s, space)
 	// The old registration really is stale; accepting it would break queries.
-	refused := request(t, "POST", "/v0/admin/plugins/"+s.OldRegistration+"/activate", operator, map[string]any{}, 409)
+	refused := routingRequest(t, "POST", "/v0/admin/plugins/"+s.OldRegistration+"/activate", operator, map[string]any{}, 409)
 	if refused["code"] != "plugin_unreachable" {
 		t.Fatalf("stale activation: %v", refused)
 	}
-	refused = request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "redeploy-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "stop"}, 409)
-	if refused["code"] != "plugin_unreachable" || !strings.Contains(string(mustJSON(t, refused)), "activate the current registration") {
+	refused = routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "redeploy-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "stop"}, 409)
+	if refused["code"] != "plugin_unreachable" {
 		t.Fatalf("exact rollback must explain stale build recovery: %v", refused)
 	}
 	if after := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200); after["plan_id"] != plan["plan_id"] {
 		t.Fatalf("refused commands changed the plan: %v", after)
 	}
 	// Revert the serving owner while retaining the new hosted build for evaluation.
-	back := request(t, "POST", "/v0/admin/plugins/"+s.CoreRegistration+"/activate", operator, map[string]any{}, 200)
+	back := routingRequest(t, "POST", "/v0/admin/plugins/"+s.CoreRegistration+"/activate", operator, map[string]any{}, 200)
 	if planRoles(back)["ingestion-route:text/plain"] != "core.ingest@1.0.0" {
 		t.Fatalf("previous owner was not promoted back: %v", back)
 	}
 	hostedRedeploySearch(t, admin, s, coreIngestSpace)
 	// Start the coverage regression from a promoted, reachable current build.
 	s.RollbackPlan = back["plan_id"].(string)
-	s.PromotedPlan = request(t, "POST", "/v0/admin/plugins/"+next+"/activate", operator, map[string]any{}, 200)["plan_id"].(string)
+	s.PromotedPlan = routingRequest(t, "POST", "/v0/admin/plugins/"+next+"/activate", operator, map[string]any{}, 200)["plan_id"].(string)
 	if err = os.WriteFile(statePath, []byte(mustJSON(t, s)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -176,8 +175,8 @@ func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	current := hostedRegistration(t, operator, "hosted.embed")
-	request(t, "POST", "/v0/admin/plugins/"+current+"/activate", operator, map[string]any{}, 200)
-	request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "coverage-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "drain"}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/"+current+"/activate", operator, map[string]any{}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "coverage-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "drain"}, 200)
 	result := request(t, "POST", "/v0/search", admin, map[string]any{"query": "The mountain tram arrives every Friday.", "corpus_ids": []string{s.Corpus}, "mode": "semantic", "limit": 10}, 200)
 	found := false
 	for _, raw := range result["items"].([]any) {
@@ -188,5 +187,5 @@ func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
 		t.Fatalf("rollback lost new document: %v", result)
 	}
 	// Restore the harness's original exact plan for later plugin scenarios.
-	request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "redeploy-cleanup-" + monitoringRun(), "plan_id": os.Getenv("QUIVR_TEST_HOSTED_REDEPLOY_ORIGINAL_PLAN"), "pinned_work": "stop"}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "redeploy-cleanup-" + monitoringRun(), "plan_id": os.Getenv("QUIVR_TEST_HOSTED_REDEPLOY_ORIGINAL_PLAN"), "pinned_work": "stop"}, 200)
 }

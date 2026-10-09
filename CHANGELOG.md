@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Breaking API changes
+
+- Plugin activation, plan rollback and vector space promotion return `202 Accepted` with an Operation and `Location`, replacing the immediate `200` plan or promotion response. Follow the Operation with the same `plugins:admin` key. Successful results appear in `admin`; background discovery and coverage errors appear in `errors`.
+
+### Fixes
+
+- Prepare deployment routing changes in checkpointed batches while imports continue. Publish the final switch through one routing pointer. Rollback accepts missing coverage and retains outgoing searchable projections while recovery completes. Backfill scope counting runs outside the routing lock.
+
 ## [2.0.0-alpha.6](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.5...v2.0.0-alpha.6) (2026-10-08)
 
 

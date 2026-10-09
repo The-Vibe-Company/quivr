@@ -18,7 +18,7 @@ import (
 var abandonedGenerationsSQL = `SELECT o.organization,o.corpus_id,o.target_generation_id FROM operations o
 WHERE o.state IN ('succeeded','failed','canceled') AND o.target_generation_id<>` + routedGenerationSQL("o.organization", "o.corpus_id") + `
 UNION
-SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN projection_generations dg ON dg.active OR dg.default_until IS NOT NULL WHERE cr.generation_id<>dg.id`
+SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN ` + effectiveGenerationsSQL + ` dg ON dg.active OR dg.default_until IS NOT NULL WHERE cr.generation_id<>dg.id`
 
 // deadVersionSQL is true for a Version aliased v of Record r that can never be
 // served again: its Record is withdrawn or tombstoned (absorbing fences), or it
@@ -107,9 +107,9 @@ RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id,p.notic
 		// A generation lives in its own collection; a Version may have objects
 		// in any collection its Organization's generations or the current or
 		// former defaults use.
-		query, args := `SELECT collection FROM projection_generations WHERE id=$1`, []any{it.GenerationID}
+		query, args := `SELECT collection FROM `+effectiveGenerationsSQL+` WHERE id=$1`, []any{it.GenerationID}
 		if it.Kind == retrieval.PurgeVersion {
-			query, args = `SELECT DISTINCT collection FROM projection_generations WHERE active OR default_until IS NOT NULL OR organization=$1 ORDER BY collection`, []any{it.Organization}
+			query, args = `SELECT DISTINCT collection FROM `+effectiveGenerationsSQL+` WHERE active OR default_until IS NOT NULL OR organization=$1 ORDER BY collection`, []any{it.Organization}
 		}
 		cols, err := s.Pool.Query(ctx, query, args...)
 		if err != nil {

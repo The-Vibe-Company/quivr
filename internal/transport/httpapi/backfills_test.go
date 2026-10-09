@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
@@ -56,20 +57,6 @@ func (backfillStore) AcceptBackfill(_ context.Context, org, corpusID, _ string, 
 	return operations.Operation{ID: "operation_fill", Organization: org, Kind: operations.KindBackfill, CorpusID: corpusID, State: operations.StateQueued, Backfill: &spec}, nil
 }
 
-type promotionStore struct{}
-
-func (promotionStore) PromoteSpace(_ context.Context, space string, force bool) (backfill.Promotion, error) {
-	switch {
-	case space == "p.old@1":
-		return backfill.Promotion{}, backfill.ErrNotEvaluation
-	case space == "p.unknown@1":
-		return backfill.Promotion{}, corpus.ErrNotFound
-	case !force:
-		return backfill.Promotion{}, &backfill.IncompleteError{Promotion: backfill.Promotion{Served: space, CorporaIncomplete: 1, SegmentsMissing: 3}}
-	}
-	return backfill.Promotion{Served: space, Previous: "p.small@1", GenerationsSwitched: 2}, nil
-}
-
 // Each backfill and promotion outcome has its status and public code; the
 // dry run answers its estimate and the backfill its Operation.
 func TestBackfillAndPromotionRoutes(t *testing.T) {
@@ -80,7 +67,7 @@ func TestBackfillAndPromotionRoutes(t *testing.T) {
 	}
 	store := backfillStore{estimates: map[string][]byte{}}
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
-		httpapi.WithBackfills(backfill.Service{Store: store, Registry: store, Plans: backfillPlans{}}, backfill.Promotions{Store: promotionStore{}}))
+		httpapi.WithBackfills(backfill.Service{Store: store, Registry: store, Plans: backfillPlans{}}, backfill.Promotions{}), httpapi.WithRoutingOperations(routing.Service{Store: &routingCommands{}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +86,7 @@ func TestBackfillAndPromotionRoutes(t *testing.T) {
 		t.Fatalf("dry run of a busy Corpus %d", res.StatusCode)
 	}
 	res, promoted := operationCall(t, server, "POST", "/v0/admin/spaces/p.large@1/promote", operator, "application/json", `{"force":true}`)
-	if res.StatusCode != 200 || promoted["served_space_id"] != "p.large@1" || promoted["previous_space_id"] != "p.small@1" || promoted["generations_switched"] != float64(2) {
+	if res.StatusCode != 202 || promoted["kind"] != "vector_space_promotion" || promoted["state"] != "queued" || res.Header.Get("Location") != "/v0/operations/operation_admin" {
 		t.Fatalf("promoted %d %v", res.StatusCode, promoted)
 	}
 	for _, tc := range []struct {
@@ -116,7 +103,6 @@ func TestBackfillAndPromotionRoutes(t *testing.T) {
 		{"a space the plugin does not declare", "/v0/admin/backfills", operator, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true,"spaces":["q.large@1"]}`, 422, "invalid_backfill"},
 		{"dry_run missing", "/v0/admin/backfills", operator, `{"idempotency_key":"k","corpus_id":"corpus_a"}`, 422, "invalid_schema"},
 		{"promotion without plugins:admin", "/v0/admin/spaces/p.large@1/promote", organization, `{}`, 403, "forbidden"},
-		{"incomplete coverage", "/v0/admin/spaces/p.large@1/promote", operator, `{}`, 409, "coverage_incomplete"},
 		{"a retired space", "/v0/admin/spaces/p.old@1/promote", operator, `{"force":true}`, 422, "not_evaluation_space"},
 		{"an unknown space", "/v0/admin/spaces/p.unknown@1/promote", operator, `{"force":true}`, 404, "not_found"},
 	} {
