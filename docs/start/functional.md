@@ -13,6 +13,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 ## Guides
 
 - [Size PostgreSQL for imports](../../deploy/compose/README.md): size PostgreSQL connections and memory for imports
+- [Shared infrastructure settings](../../deploy/infrastructure.md): resolve shared profiles, apply deployment settings and check drift
 - [Deploy a search measurement store](../../deploy/mlflow/README.md): deploy an authenticated shared search measurement store
 - [Serve EmbeddingGemma 2 on Modal](../../deploy/modal/README.md): authenticated Modal embedding deployment, corpus rebuild and rollback
 - [Railway evaluation demo](../../deploy/railway/README.md): run a hosted single-node evaluation demo

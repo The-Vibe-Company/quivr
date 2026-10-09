@@ -29,9 +29,14 @@ def fingerprint():
 
 def lineage():
     import yaml
+    sys.path.insert(0, str(ROOT))
+    from deploy import infrastructure
     compose = yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())
+    shared = infrastructure.resolve(os.environ.get('QUIVR_INFRASTRUCTURE_PROFILE', 'small'),
+                                    os.environ.get('QUIVR_INFRASTRUCTURE_OVERRIDES'), os.environ)
     model = json.loads((ROOT / 'third_party/e5/model-lock.json').read_text())
-    return {'services': {name: value['image'] for name, value in compose['services'].items()},
+    return {'services': {name: (shared[name] if name in shared else value)['image']
+                         for name, value in compose['services'].items()},
             'model_revision': model['model_revision'],
             'tokenizer_sha256': model['files']['tokenizer.json'],
             'go_version': next(line.split()[1] for line in (ROOT / 'go.mod').read_text().splitlines()

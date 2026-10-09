@@ -2,6 +2,13 @@
 
 Run `quivr-autoscaler` with its `railway` backend as one small, always-on service. It reads waiting bulk documents from Quivr and adjusts only the bulk worker's replica count; the live worker stays at one replica. The scaling rule, the other backends and every variable are in [Scale workers on backlog](../../../docs-site/run-quivr/deploy.mdx#scale-workers-on-backlog); this page covers Railway's part.
 
+The shared [infrastructure declaration](../../infrastructure.md) records the default
+queue, replica bounds, poll and stabilization settings. Keep Railway credentials and
+the target service ID external to that declaration.
+
+The large profile selects `QUIVR_AUTOSCALER_BACKEND=railway`; override it to `kubernetes`
+when using that backend. Keep backend credentials and target IDs external.
+
 ## Prerequisites
 
 You need a Railway project with the API and worker deployed from a release that provides `GET /v0/admin/queues`. You also need permission to create services and secrets, and an environment-scoped Railway **project token** from project settings. This token uses `Project-Access-Token`, as described in [Railway's API authentication](https://docs.railway.com/integrations/api).
@@ -40,7 +47,7 @@ Create bulk work, watch `queues.bulk.waiting` rise and confirm `scaled` decision
 
 PostgreSQL, Weaviate, Temporal and the embedding provider are shared by every replica. Adding workers does not add GPU capacity. Measure waiting and in-progress documents, oldest waiting age, searchable throughput, provider latency/throttling and database/search CPU/connection pressure at each replica count. If throughput plateaus or live freshness worsens, lower the ceiling or per-process slots and address the measured dependency bottleneck. Configure your embedding service's container/concurrency ceiling separately. See [worker backlog metrics](../../../docs-site/run-quivr/deploy.mdx#scale-workers-on-backlog) and [observability configuration](../../../docs-site/reference/configuration.mdx#opentelemetry) for collection; measure live freshness from durable acceptance until the document appears in search.
 
-To disable scaling, stop the autoscaler service or set `QUIVR_AUTOSCALER_ENABLED=false` and redeploy it with restart policy `ON_FAILURE`. Disabling preserves the last replica count; set `worker-bulk` manually to your chosen count (at least one). Stop the autoscaler before rerunning the provisioner: provisioning resets both workers to one replica. To return to one mixed worker, stop the autoscaler, restore `QUIVR_WORKER_QUEUES=live,bulk` on `worker`, verify it is ready, then stop `worker-bulk`.
+To disable scaling, stop the autoscaler service or set `QUIVR_AUTOSCALER_ENABLED=false` and redeploy it with restart policy `ON_FAILURE`. Disabling preserves the last replica count; set `worker-bulk` manually to your chosen count (at least one). Stop the autoscaler before rerunning the provisioner: existing worker replica counts are preserved, while new worker services start at one replica. To return to one mixed worker, stop the autoscaler, restore `QUIVR_WORKER_QUEUES=live,bulk` on `worker`, verify it is ready, then stop `worker-bulk`.
 
 ## Next
 

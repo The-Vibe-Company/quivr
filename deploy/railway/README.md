@@ -28,27 +28,48 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
 Redeploying a volume-backed service can interrupt requests. No public dependency domains are needed.
 
-## Size PostgreSQL before importing
+## Apply shared infrastructure settings
 
-The template builds `postgres.Dockerfile` and applies the [shared startup settings](../compose/README.md):
-256 server connections, memory-based buffers/cache, bounded maintenance memory,
-`dynamic_shared_memory_type=mmap`, `pg_stat_statements` and I/O timing.
-WAL budgets scale with the data volume up to 32 GiB/4 GiB, with 15-minute checkpoints
-and LZ4 compression. Set `QUIVR_POSTGRES_VOLUME_MB` (integer MiB) on postgres if the mount reports
-host capacity instead of its quota; the shared guide covers overrides and trade-offs.
-`synchronous_commit`, `fsync` and `full_page_writes` stay on for durable acknowledged writes.
-`jit=on` is retained: a local A/B run of the updated backlog query did not trigger JIT at default thresholds.
-These settings are **command-line options**: they override old `ALTER SYSTEM` values
-in `postgresql.auto.conf` on existing volumes. Removing an option restores config-file precedence.
-Fresh databases install the statistics extension; an existing database needs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` once.
+The [shared infrastructure guide](../infrastructure.md) owns the declaration, profiles,
+PostgreSQL memory/WAL formulas and override rules. The infrastructure adapter requires an
+environment ID, applies the shared variables and limits, and preserves existing replica
+counts. A fresh project can use `provision.py` first; otherwise preview and apply the profile:
 
-On each API/worker service, `QUIVR_POSTGRES_MAX_CONNECTIONS` sets the generated
-`postgres.max_connections` pool limit (default 16). On the **postgres** service,
-the same variable sets the server limit (default 256). Usable server connections
-must cover the **sum of pool sizes across all replicas**, other clients and
-rolling-deployment headroom, after subtracting PostgreSQL's reserved connections.
-One API, one live worker and eight bulk workers can use `10 × 16 = 160` connections.
-Choose memory and connection budgets together; worker activity slots are separate.
+```sh
+python3 deploy/railway/infrastructure.py preview \
+  --project-id ID --environment-id ENV_ID --profile large
+python3 deploy/railway/infrastructure.py apply \
+  --project-id ID --environment-id ENV_ID --profile large
+railway up --project ID --environment ID \
+  --service POSTGRES_SERVICE_ID --detach
+```
+
+The environment-scoped apply/provision step switches PostgreSQL from an image source to `deploy/railway/postgres.Dockerfile` and clears `source.image`; it only stages that change.
+For an existing installation, run `railway up` from the repository root; a newly provisioned installation can use the repository deploy helper. This explicit selection changes no replica count.
+On restart, startup command-line settings take precedence over existing `ALTER SYSTEM` values in `postgresql.auto.conf`.
+
+After deploying PostgreSQL and any other changed services, initialize the statistics
+extension and check active startup/SQL settings:
+
+```sh
+python3 deploy/railway/infrastructure.py initialize-monitoring \
+  --project-id ID --environment-id ENV_ID --profile large
+python3 deploy/railway/infrastructure.py check \
+  --project-id ID --environment-id ENV_ID --profile large
+```
+
+For `small`, the infrastructure adapter defaults to PostgreSQL and Weaviate. For `large`,
+it also selects API, worker and worker-bulk to apply their 32,000,000,000-byte/32-vCPU
+limits. Without `--service`, an existing uniquely named `autoscaler` is included; it is
+never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` replaces the defaults
+and selects exactly the listed services. Existing replica counts are preserved, and new
+services start at one. Large PostgreSQL and Weaviate budgets each plan 500,000,000,000
+bytes; check reports filesystem capacity but does not resize volumes or verify shared
+filesystem quotas.
+The check probes each running replica; a failed or unavailable probe is unknown. The
+distroless autoscaler has no shell, so use its startup log for effective policy. Fresh
+databases already run `init.sql`; monitoring handles an existing database without a core
+migration.
 
 ## Upgrade the search database
 
@@ -63,13 +84,14 @@ Stop if a deployment is killed or runs out of memory instead of shutting down cl
 For a 1.37 deployment, temporarily set the service image to
 `cr.weaviate.io/semitechnologies/weaviate:1.38.20@sha256:d23d7bb6242026106ee1ec5aefdbb6a867e260ff171cedc9c3af55c9688e30f6`
 and redeploy. Wait for readiness and synchronized metadata, then deploy the
-1.39.10 image from `services.json` on that same volume. Check `/v1/meta` for the
+1.39.10 image from `deploy/infrastructure.json` on that same volume. Check `/v1/meta` for the
 expected version and exercise lexical, semantic and hybrid search before resuming
 writes. Recover from the pre-upgrade backup if needed; do not assume a newer
 volume can be downgraded safely. Preview drop-vector-index functionality in
 1.39 is not enabled by this template. Index types and compression are unchanged.
 
-Set startup variables on the **weaviate** service for the installation's resources:
+Set Weaviate overrides in the [shared declaration profile](../infrastructure.md),
+then apply and redeploy; avoid a separate set of hand-edited service variables:
 
 | Variable | Purpose |
 | --- | --- |
@@ -340,8 +362,8 @@ does not match the explicit argument.
 
 ```sh
 railway init --name quivr-v2-demo --workspace YOUR_WORKSPACE_ID --json
-python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID
-python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID --apply
+python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID
+python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID --apply
 ```
 
 The first command previews the service plan. Applying creates missing services and
@@ -352,15 +374,17 @@ repeated provisioning; do not rotate the database or S3 password by rerunning wi
 new file against an existing deployment. The web password is `demo_password` in that
 file. It is a shared evaluation space, not per-user access.
 
-The deployment helper connects pinned image sources or uploads Dockerfile services
-from the repository root. It starts deployment but does not wait for readiness:
+For a newly provisioned installation, the deployment helper connects pinned image sources
+or uploads Dockerfile services from the repository root. It starts deployment but does not
+wait for readiness; existing installations can use the environment-scoped `railway up`
+command above without provisioner state:
 
 ```sh
-python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID postgres temporal seaweed weaviate tei
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID postgres temporal seaweed weaviate tei
 # Wait for dependencies to start successfully, then:
-python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID api
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID api
 # Wait for API readiness, then:
-python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID worker worker-bulk web
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID worker worker-bulk web
 ```
 
 The provisioner sets each Dockerfile path. Deploy in order:

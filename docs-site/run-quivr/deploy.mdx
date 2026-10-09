@@ -26,6 +26,58 @@ Quivr is at the evaluation stage: its API is `v0` and may change. Do not run it 
 
 `make dev` runs all of these on one machine, with the service versions pinned in [`deploy/compose/compose.yaml`](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/compose.yaml). The [Quickstart](/quickstart) walks through it.
 
+## Choose shared dependency settings
+
+Compose and Railway resolve PostgreSQL, Weaviate and autoscaler settings from the
+[shared infrastructure declaration](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md).
+The `small` profile is the conservative starting point. The opt-in `large` profile gives
+PostgreSQL, Weaviate, API and live/bulk workers 32,000,000,000 bytes and 32 vCPUs on a
+PaaS; its autoscaler stays at 134,217,728 bytes and 0.25 vCPU. It enables Weaviate
+`ASYNC_INDEXING=true`, 1024 MiB memtables, 27 GiB `GOMEMLIMIT` and a 3,600-second
+bootstrap timeout. These are unbenchmarked starting values: async writes can precede
+vector visibility, and memtable memory grows across active buckets and shards. `GOMEMLIMIT`
+is a soft budget around 80–90% of service memory, not an RSS cap.
+
+Large PostgreSQL and Weaviate storage planning budgets are 500,000,000,000 bytes each;
+PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden. Capacity checks
+report the filesystem minimum and do not resize volumes or verify shared filesystem quotas.
+
+For local development, `make dev` reads `QUIVR_INFRASTRUCTURE_PROFILE` and
+`QUIVR_INFRASTRUCTURE_OVERRIDES` and writes an ignored Compose overlay, including on
+macOS. Compose manages PostgreSQL and Weaviate; API and worker processes stay native
+host processes. For example:
+
+```sh
+export QUIVR_INFRASTRUCTURE_PROFILE=large
+export QUIVR_INFRASTRUCTURE_OVERRIDES=.scratch/installation.json
+make dev
+```
+
+To render the same overlay for a direct Compose launch, append it after the base file:
+
+```sh
+python3 deploy/infrastructure.py render --profile large \
+  --overrides .scratch/installation.json --output .scratch/infrastructure.json
+docker compose -f deploy/compose/compose.yaml \
+  -f .scratch/infrastructure.json config
+```
+
+Direct Compose requires `QUIVR_DB_PASSWORD`, `QUIVR_LOCAL_ROOT` (with `s3.json`)
+and `QUIVR_MODEL_ROOT` (the prepared model directory). `make dev` supplies them.
+
+The [deployment settings guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md)
+covers Railway `preview`, `apply`, `initialize-monitoring` and `check`, including the
+`match`, `drift` and `unknown` exit statuses. Small Railway defaults to PostgreSQL and
+Weaviate; large also applies limits to API, live worker and bulk worker. Without an
+explicit `--service`, an existing uniquely named autoscaler is included automatically;
+it is never created or replica-reset. Apply stages settings and resource limits without
+resetting existing replica counts; for PostgreSQL it selects
+`deploy/railway/postgres.Dockerfile` and clears the Railway image source. For an existing
+installation, run `railway up --project ID --environment ID --service POSTGRES_SERVICE_ID --detach`
+from the repository root; a newly provisioned installation can use the deploy helper. This
+selection changes no replica count. Then initialize monitoring and check active values;
+startup command-line settings take precedence over existing `ALTER SYSTEM` values after restart.
+
 ## The configuration file
 
 `QUIVR_CONFIG` holds the path of a JSON file. Give `api`, `worker` and `migrate` the same file, except for addresses such as `probe_listen`. It must set:
