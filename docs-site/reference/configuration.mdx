@@ -54,6 +54,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `backfill` | no | How backfills run and when their cost needs a confirmation. See [Backfill](#backfill). |
 | `migration_wait` | no | How long a worker that starts before the api has applied its migrations waits for them, unready, before it exits. `0s` exits at once. Worker only. Default `5m`. |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
+| `projection_purge_timeout` | no | Deadline for each purge selection or delete request, worker only. Default `60s`; positive and at most `120s`. Search and write request deadlines are independent. |
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -31,6 +32,10 @@ var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 type Store struct {
 	Endpoint string
 	Client   *http.Client
+	// PurgeTimeout bounds each purge selection/delete request independently of search.
+	PurgeTimeout time.Duration
+	purgeBatch   atomic.Int64
+	purgeLimit   atomic.Int64
 	// LegacySpace is the built-in space, whose named vector keeps the name it
 	// had before named spaces (legacyVector), so generations built before and
 	// after them stay searchable in one query.
@@ -889,10 +894,6 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 	}
 }
 
-// purgeTimeout bounds one purge delete; a large match can exceed the default
-// request timeout, and an interrupted delete is simply repeated.
-const purgeTimeout = 30 * time.Second
-
 // deleteWhere runs one batch delete by filter. Weaviate deletes at most its
 // configured maximum matches per call; the result is complete only when fewer
 // objects matched than that limit and none failed.
@@ -900,21 +901,8 @@ func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection
 	if !className.MatchString(collection) {
 		return retrieval.PurgeResult{}, errors.New("invalid projection collection")
 	}
-	var response struct {
-		Results *struct {
-			Matches    *int `json:"matches"`
-			Limit      int  `json:"limit"`
-			Successful *int `json:"successful"`
-			Failed     *int `json:"failed"`
-			Objects    []struct {
-				Errors *struct {
-					Error []struct {
-						Message string `json:"message"`
-					} `json:"error"`
-				} `json:"errors"`
-			} `json:"objects"`
-		} `json:"results"`
-	}
+	var response purgeResponse
+
 	scoped := Store{Endpoint: s.Endpoint, Client: client}
 	if err := scoped.purgeCall(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "verbose"}, &response); err != nil {
 		return retrieval.PurgeResult{}, err
@@ -946,7 +934,7 @@ func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection
 
 func (s *Store) purgeClient() *http.Client {
 	c := *s.Client
-	c.Timeout = purgeTimeout
+	c.Timeout = s.purgeRequestTimeout()
 	return &c
 }
 

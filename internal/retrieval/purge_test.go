@@ -22,6 +22,7 @@ type recorded struct {
 type fakePurgeStore struct {
 	noticeLimit, claimLimit int
 	grace                   time.Duration
+	budget, lease           time.Duration
 	items                   []retrieval.PurgeItem
 	records                 []recorded
 }
@@ -31,8 +32,12 @@ func (s *fakePurgeStore) NoticePurges(_ context.Context, limit int) (int, error)
 	return 0, nil
 }
 
-func (s *fakePurgeStore) ClaimPurges(_ context.Context, grace, _ time.Duration, limit int) ([]retrieval.PurgeItem, error) {
+func (s *fakePurgeStore) ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]retrieval.PurgeItem, error) {
 	s.grace, s.claimLimit = grace, limit
+	s.lease = lease
+	if deadline, ok := ctx.Deadline(); ok {
+		s.budget = time.Until(deadline)
+	}
 	if len(s.items) > limit {
 		return s.items[:limit], nil
 	}
@@ -48,10 +53,11 @@ func (s *fakePurgeStore) RecordPurge(ctx context.Context, item retrieval.PurgeIt
 }
 
 type fakePurgeProjection struct {
-	calls   []string
-	results map[string]retrieval.PurgeResult
-	fail    string
-	cancel  context.CancelFunc
+	calls       []string
+	results     map[string]retrieval.PurgeResult
+	fail        string
+	cancel      context.CancelFunc
+	cancelAfter string
 }
 
 func (p *fakePurgeProjection) PurgeGeneration(_ context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
@@ -64,6 +70,9 @@ func (p *fakePurgeProjection) PurgeVersion(_ context.Context, collection, org, v
 
 func (p *fakePurgeProjection) call(key string) (retrieval.PurgeResult, error) {
 	p.calls = append(p.calls, key)
+	if key == p.cancelAfter {
+		p.cancel()
+	}
 	if key == p.fail {
 		if p.cancel != nil {
 			p.cancel()
@@ -77,51 +86,67 @@ func (p *fakePurgeProjection) call(key string) (retrieval.PurgeResult, error) {
 }
 
 func TestPurgerSweepIsBoundedAndRecordsOutcomes(t *testing.T) {
-	store := &fakePurgeStore{items: []retrieval.PurgeItem{
-		{Organization: "o", Kind: retrieval.PurgeGeneration, CorpusID: "c", GenerationID: "g", Collections: []string{"C1"}},
-		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "v", Collections: []string{"C1", "C2"}},
-		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "big", Collections: []string{"C1"}},
-		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "beyond-batch", Collections: []string{"C1"}},
-	}}
-	projection := &fakePurgeProjection{results: map[string]retrieval.PurgeResult{"version/C1/o/big": {Deleted: 10000, Complete: false}}}
-	metrics := retrieval.NewPurgeMetrics()
-	done, err := retrieval.Purger{Store: store, Projection: projection, Batch: 3, Grace: 2 * time.Hour, Metrics: metrics}.Sweep(context.Background())
-	if err != nil || done != 2 {
-		t.Fatalf("sweep completed %d %v", done, err)
-	}
-	if store.noticeLimit != 3 || store.claimLimit != 3 || store.grace != 2*time.Hour {
-		t.Fatalf("bounds notice %d claim %d grace %s", store.noticeLimit, store.claimLimit, store.grace)
-	}
-	wantCalls := []string{"generation/C1/o/c/g", "version/C1/o/v", "version/C2/o/v", "version/C1/o/big"}
-	if len(projection.calls) != len(wantCalls) {
-		t.Fatalf("calls %v", projection.calls)
-	}
-	for i := range wantCalls {
-		if projection.calls[i] != wantCalls[i] {
-			t.Fatalf("calls %v, want %v", projection.calls, wantCalls)
-		}
-	}
-	want := []recorded{{store.items[0], 2, true}, {store.items[1], 4, true}, {store.items[2], 10000, false}}
-	if len(store.records) != len(want) {
-		t.Fatalf("records %+v", store.records)
-	}
-	for i := range want {
-		got := store.records[i]
-		if got.item.VersionID != want[i].item.VersionID || got.deleted != want[i].deleted || got.complete != want[i].complete {
-			t.Fatalf("record %d = %+v, want %+v", i, got, want[i])
-		}
-	}
-	if metrics.Purges[retrieval.PurgeGeneration].Load() != 1 || metrics.Purges[retrieval.PurgeVersion].Load() != 1 ||
-		metrics.Objects[retrieval.PurgeGeneration].Load() != 2 || metrics.Objects[retrieval.PurgeVersion].Load() != 10004 {
-		t.Fatalf("metrics purges %d/%d objects %d/%d", metrics.Purges[retrieval.PurgeGeneration].Load(), metrics.Purges[retrieval.PurgeVersion].Load(), metrics.Objects[retrieval.PurgeGeneration].Load(), metrics.Objects[retrieval.PurgeVersion].Load())
+	for _, tc := range []struct {
+		name            string
+		timeout, budget time.Duration
+	}{
+		{"default", 0, 135 * time.Second},
+		{"maximum", 2 * time.Minute, 255 * time.Second},
+		{"clamped", 5 * time.Minute, 255 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakePurgeStore{items: []retrieval.PurgeItem{
+				{Organization: "o", Kind: retrieval.PurgeGeneration, CorpusID: "c", GenerationID: "g", Collections: []string{"C1"}},
+				{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "v", Collections: []string{"C1", "C2"}},
+				{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "big", Collections: []string{"C1"}},
+				{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "beyond-batch", Collections: []string{"C1"}},
+			}}
+			projection := &fakePurgeProjection{results: map[string]retrieval.PurgeResult{"version/C1/o/big": {Deleted: 10000, Complete: false}}}
+			metrics := retrieval.NewPurgeMetrics()
+			done, err := retrieval.Purger{Store: store, Projection: projection, Batch: 3, RequestTimeout: tc.timeout, Grace: 2 * time.Hour, Metrics: metrics}.Sweep(context.Background())
+			if err != nil || done != 2 {
+				t.Fatalf("sweep completed %d %v", done, err)
+			}
+			if store.noticeLimit != 3 || store.claimLimit != 3 || store.grace != 2*time.Hour {
+				t.Fatalf("bounds notice %d claim %d grace %s", store.noticeLimit, store.claimLimit, store.grace)
+			}
+			if store.budget < tc.budget-time.Second || store.budget > tc.budget || store.lease != 5*time.Minute {
+				t.Fatalf("claim-wide budget %s lease %s, want %s budget below 5m lease", store.budget, store.lease, tc.budget)
+			}
+			wantCalls := []string{"generation/C1/o/c/g", "version/C1/o/v", "version/C2/o/v", "version/C1/o/big"}
+			if len(projection.calls) != len(wantCalls) {
+				t.Fatalf("calls %v", projection.calls)
+			}
+			for i := range wantCalls {
+				if projection.calls[i] != wantCalls[i] {
+					t.Fatalf("calls %v, want %v", projection.calls, wantCalls)
+				}
+			}
+			want := []recorded{{store.items[0], 2, true}, {store.items[1], 4, true}, {store.items[2], 10000, false}}
+			if len(store.records) != len(want) {
+				t.Fatalf("records %+v", store.records)
+			}
+			for i := range want {
+				got := store.records[i]
+				if got.item.VersionID != want[i].item.VersionID || got.deleted != want[i].deleted || got.complete != want[i].complete {
+					t.Fatalf("record %d = %+v, want %+v", i, got, want[i])
+				}
+			}
+			if metrics.Purges[retrieval.PurgeGeneration].Load() != 1 || metrics.Purges[retrieval.PurgeVersion].Load() != 1 ||
+				metrics.Objects[retrieval.PurgeGeneration].Load() != 2 || metrics.Objects[retrieval.PurgeVersion].Load() != 10004 {
+				t.Fatalf("metrics purges %d/%d objects %d/%d", metrics.Purges[retrieval.PurgeGeneration].Load(), metrics.Purges[retrieval.PurgeVersion].Load(), metrics.Objects[retrieval.PurgeGeneration].Load(), metrics.Objects[retrieval.PurgeVersion].Load())
+			}
+		})
 	}
 }
 
 // A failure after one collection checkpoints its confirmed successes as
 // incomplete; other items proceed, and a later sweep can resume.
 func TestPurgerLeavesFailedItemsForALaterSweep(t *testing.T) {
-	for _, interrupted := range []bool{false, true} {
-		t.Run(map[bool]string{false: "provider failure", true: "interrupted sweep"}[interrupted], func(t *testing.T) {
+	for _, scenario := range []string{"provider failure", "interrupted sweep", "interrupted successful response"} {
+		t.Run(scenario, func(t *testing.T) {
+			interrupted := scenario != "provider failure"
+			cancelledSuccess := scenario == "interrupted successful response"
 			var output bytes.Buffer
 			logger, err := logging.New(&output, logging.Options{})
 			if err != nil {
@@ -139,6 +164,9 @@ func TestPurgerLeavesFailedItemsForALaterSweep(t *testing.T) {
 			projection := &fakePurgeProjection{fail: "version/C2/o/v", results: map[string]retrieval.PurgeResult{"version/C1/o/v": {Deleted: 2, RemainingAtLeast: 3}}}
 			if interrupted {
 				projection.cancel = cancel
+				if cancelledSuccess {
+					projection.cancelAfter = "version/C1/o/v"
+				}
 			}
 			metrics := retrieval.NewPurgeMetrics()
 			done, err := retrieval.Purger{Store: store, Projection: projection, Metrics: metrics}.Sweep(ctx)
@@ -152,9 +180,19 @@ func TestPurgerLeavesFailedItemsForALaterSweep(t *testing.T) {
 			if metrics.Objects[retrieval.PurgeVersion].Load() != wantObjects || metrics.Purges[retrieval.PurgeVersion].Load() != int64(wantDone) {
 				t.Fatalf("metrics objects %d purges %d", metrics.Objects[retrieval.PurgeVersion].Load(), metrics.Purges[retrieval.PurgeVersion].Load())
 			}
+			wantCalls, reason := 3, "context deadline exceeded"
+			if interrupted {
+				wantCalls = 2
+			}
+			if cancelledSuccess {
+				wantCalls, reason = 1, "context canceled"
+			}
+			if len(projection.calls) != wantCalls {
+				t.Fatalf("contacts after cancellation: %v, want %d", projection.calls, wantCalls)
+			}
 			var exposition bytes.Buffer
 			metrics.Write(&exposition)
-			if !strings.Contains(output.String(), "context deadline exceeded") || strings.Contains(output.String(), "private-value") ||
+			if !strings.Contains(output.String(), reason) || strings.Contains(output.String(), "private-value") ||
 				!strings.Contains(exposition.String(), `quivr_projection_purge_failures_total{kind="version"} 1`) ||
 				!strings.Contains(exposition.String(), `quivr_projection_purge_remaining_objects_lower_bound{kind="version"} 3`) || metrics.Oldest[retrieval.PurgeVersion].Load() < 7200 {
 				t.Fatalf("purge diagnostics: logs %s metrics %s", output.String(), exposition.String())
