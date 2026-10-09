@@ -60,10 +60,14 @@ const listed = (page: Page) =>
       { timeout: 10_000 },
     )
     .then((r) => new URL(r.url()).searchParams);
-// The address the next facets are read from. Start it before the action.
+// The timeline count for the next view. Other fields can still be queued for
+// the preceding view (THE-1336); their requests cannot identify this action.
 const counted = (page: Page) =>
   page
-    .waitForRequest((r) => new URL(r.url()).pathname === "/demo/explore/facets", { timeout: 10_000 })
+    .waitForRequest((r) => {
+      const url = new URL(r.url());
+      return url.pathname === "/demo/explore/facets" && url.searchParams.get("field") === "metadata.published_at";
+    }, { timeout: 10_000 })
     .then((r) => new URL(r.url()).searchParams);
 
 test("l’Explorer passe d’un corpus à l’autre, filtre par facettes et dit quels corpus il exclut", async ({ page }) => {
@@ -175,11 +179,26 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
 
   // Zoomed in, the timeline asks for the range's span and shows it alone;
   // the overview widens it back.
+  // Keep the zoom's other field counts in flight while its timeline is ready.
+  // Releasing them below exposes queued reads from the preceding view.
+  let releaseZoom!: () => void;
+  const zoomReplies = new Promise<void>((resolve) => { releaseZoom = resolve; });
+  await page.route("**/demo/explore/facets?**", async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (query.has("window") && query.get("field") !== "metadata.published_at") await zoomReplies;
+    await route.fallback();
+  });
+  const zoomQueued = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/demo/explore/facets" && url.searchParams.has("window") && url.searchParams.get("field") === "metadata.country";
+  });
   let asked = counted(page);
   await page.getByRole("button", { name: "Zoomer sur la période" }).click();
   expect((await asked).get("window")).toBe(`${range.gte},${range.lte}`);
   await expect(bar).toHaveCount(2);
+  await zoomQueued;
   asked = counted(page);
+  releaseZoom();
   await page.getByRole("button", { name: "Vue d’ensemble" }).click();
   expect((await asked).has("window")).toBe(false);
   await expect(bar).toHaveCount(3);
