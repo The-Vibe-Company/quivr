@@ -26,6 +26,8 @@ import uuid
 import measure_metrics as m
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from deploy import infrastructure
 WORKLOAD = ROOT / 'tests/measurement/workload-v2.json'
 # The search parity queries (THE-779): the 24 fixture queries, then edge cases of query normalization.
 PARITY_QUERIES = ROOT / 'plugins/core-ingest/testdata/parity-input.json'
@@ -83,8 +85,11 @@ def host():
 
 def pins():
     compose = (ROOT / 'deploy/compose/compose.yaml').read_text()
+    shared_images = [spec['image'] for spec in infrastructure.resolve(
+        os.environ.get('QUIVR_INFRASTRUCTURE_PROFILE', 'small'),
+        os.environ.get('QUIVR_INFRASTRUCTURE_OVERRIDES')).values() if 'image' in spec]
     return {'source_revision': output('git', 'rev-parse', 'HEAD'), 'source_dirty': bool(output('git', 'status', '--porcelain', '--untracked-files=no')),
-            'images': sorted(set(re.findall(r'image:\s*(\S+)', compose))),
+            'images': sorted(set(re.findall(r'image:\s*(\S+)', compose) + shared_images)),
             'model_lock': json.loads((ROOT / 'third_party/e5/model-lock.json').read_text()),
             'processing_profile_sha256': sha256('plugins/core-ingest/profile.json'),
             'tokenizer_requirements_sha256': sha256('third_party/tokenizer/requirements-linux-x86_64.txt'),

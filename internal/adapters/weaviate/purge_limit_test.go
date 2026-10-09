@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
@@ -20,12 +21,17 @@ func TestPurgeCompletenessFailsClosed(t *testing.T) {
 		deleted  int
 		complete bool
 		err      bool
+		reason   string
 	}{
-		{"under limit", map[string]any{"matches": 3, "limit": 10000, "successful": 3}, 3, true, false},
-		{"capped at limit", map[string]any{"matches": 10000, "limit": 10000, "successful": 10000}, 10000, false, false},
-		{"limit missing", map[string]any{"matches": 3, "successful": 3}, 3, false, false},
-		{"nothing left", map[string]any{"matches": 0}, 0, true, false},
-		{"failed objects", map[string]any{"matches": 3, "limit": 10000, "successful": 2, "failed": 1}, 2, false, true},
+		{"under limit", map[string]any{"matches": 3, "limit": 10000, "successful": 3, "failed": 0}, 3, true, false, ""},
+		{"capped at limit", map[string]any{"matches": 10000, "limit": 10000, "successful": 10000, "failed": 0}, 10000, false, false, ""},
+		{"limit missing", map[string]any{"matches": 3, "successful": 3, "failed": 0}, 3, false, false, ""},
+		{"nothing left", map[string]any{"matches": 0, "successful": 0, "failed": 0}, 0, true, false, ""},
+		{"failed objects", map[string]any{"matches": 3, "limit": 10000, "successful": 2, "failed": 1, "objects": []any{map[string]any{"errors": map[string]any{"error": []any{map[string]any{"message": "context deadline exceeded"}}}}}}, 2, false, true, "context deadline exceeded"},
+		{"unaccounted objects", map[string]any{"matches": 3, "limit": 10000, "successful": 2, "failed": 0}, 2, false, false, ""},
+		{"missing failed count", map[string]any{"matches": 3, "limit": 10000, "successful": 3}, 0, false, true, "result missing"},
+		{"missing result", nil, 0, false, true, "result missing"},
+		{"missing counts", map[string]any{}, 0, false, true, "result missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var where any
@@ -43,8 +49,40 @@ func TestPurgeCompletenessFailsClosed(t *testing.T) {
 			if (err != nil) != tc.err || r.Deleted != tc.deleted || r.Complete != tc.complete {
 				t.Fatalf("result %+v %v", r, err)
 			}
+			if tc.reason != "" && (err == nil || !strings.Contains(err.Error(), tc.reason)) {
+				t.Fatalf("provider reason lost: %v", err)
+			}
 			if b, _ := json.Marshal(where); string(b) != `{"operands":[{"operator":"Equal","path":["organization"],"valueText":"org"},{"operator":"Equal","path":["versionId"],"valueText":"version"}],"operator":"And"}` {
 				t.Fatalf("filter %s", b)
+			}
+		})
+	}
+}
+
+// Only an explicit empty list proves no matching generation objects remain.
+// Null/missing data and provider errors must leave the durable purge unfinished.
+func TestGenerationPurgeListingFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		complete   bool
+	}{
+		{"empty", `{"data":{"Get":{"QuivrTextV4":[]}}}`, true},
+		{"null", `{"data":{"Get":{"QuivrTextV4":null}}}`, false},
+		{"missing", `{"data":{"Get":{}}}`, false},
+		{"provider failure", `{"data":{"Get":{"QuivrTextV4":[]}},"errors":[{"message":"query deadline exceeded"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "POST" || r.URL.Path != "/v1/graphql" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			result, err := weaviate.New(server.URL).PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
+			if result.Complete != tc.complete || (err == nil) != tc.complete || result.Deleted != 0 {
+				t.Fatalf("listing result %+v %v, complete want %v", result, err, tc.complete)
 			}
 		})
 	}

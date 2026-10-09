@@ -141,7 +141,7 @@ func TestPurgeSelectsOnlyAbandonedGenerations(t *testing.T) {
 		t.Fatalf("claimed %+v", items)
 	}
 	for _, it := range items {
-		if it.Kind != retrieval.PurgeGeneration || len(it.Collections) != 1 || it.Collections[0] == "" {
+		if it.Kind != retrieval.PurgeGeneration || len(it.Collections) != 1 || it.Collections[0] == "" || it.NoticedAt.IsZero() {
 			t.Fatalf("claimed item %+v", it)
 		}
 	}

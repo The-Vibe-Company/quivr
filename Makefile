@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility
+.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -86,6 +86,8 @@ docs-preview:
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
 denylist:
 	python3 scripts/denylist.py
+infrastructure-check:
+	python3 deploy/infrastructure.py generate --check
 # Fails when code under plugins/ or sdks/go/ imports the engine's internal/ packages.
 plugin-boundary:
 	python3 scripts/plugin_boundary.py

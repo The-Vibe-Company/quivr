@@ -11,7 +11,9 @@
 // (`POST /v0/facets`, THE-1184) under the same corpora and predicates as the
 // list. A date field gives a histogram whose step suits the period picked;
 // the publication date is the page's timeline (THE-1204), counted outside the
-// range it picks, within the span it shows.
+// range it picks, within the span it shows. The browser asks one field at a
+// time; a fast count (THE-1387) may come from the engine's stored counts,
+// dated, or from a sample, approximate, and says so.
 //
 // A text query searches the same corpora under the same predicates
 // (`POST /v0/search`), its documents shown as the list's rows.
@@ -217,7 +219,7 @@ const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slic
  * count under every predicate, as the list's: a corpus's own fields, counted
  * apart, 16 at a time, exclude nothing the page would announce.
  */
-export async function countFacets({ count, ids, fields, predicates, timeline }) {
+export async function countFacets({ count, ids, fields, predicates, timeline, accuracy }) {
   const own = new Map(predicates.map((p) => [p.field, p]));
   const histograms = new Map(
     fields
@@ -235,7 +237,13 @@ export async function countFacets({ count, ids, fields, predicates, timeline }) 
         return { field, limit: FACET_VALUES, ...(interval ? { interval } : {}) };
       }),
       ...(kept.length ? { filter: { metadata: kept } } : {}),
+      ...(accuracy === "fast" ? { accuracy } : {}),
+    }).then((answer) => {
+      counted.push(answer);
+      return answer;
     });
+  // Every answer, for how its counts were made.
+  const counted = [];
   // Fields counted under every predicate, and each other one under its own.
   const shared = [];
   const alone = [];
@@ -258,8 +266,10 @@ export async function countFacets({ count, ids, fields, predicates, timeline }) 
   const ownShared = shared.filter((name) => !name.startsWith("metadata."));
   // The timeline counted apart: its total is its years under every predicate.
   const totalApart = timeline && !shared.includes(timeline.field);
+  // Without a common field shared, as when one field is asked alone, the
+  // list names the corpora the predicates exclude: no extra count.
   const tasks = [
-    () => ask(common.length ? common : [fields[0].name], predicates),
+    ...(common.length ? [() => ask(common, predicates)] : []),
     ...Array.from({ length: Math.ceil(ownShared.length / FACET_FIELDS) }, (_, i) => () =>
       ask(ownShared.slice(i * FACET_FIELDS, (i + 1) * FACET_FIELDS), predicates),
     ),
@@ -281,11 +291,11 @@ export async function countFacets({ count, ids, fields, predicates, timeline }) 
   );
   const rejected = workers.find((w) => w.status === "rejected");
   if (rejected) throw rejected.reason;
-  const all = answers[0];
+  const all = common.length ? answers[0] : undefined;
   const years = totalApart ? answers.pop() : undefined;
-  const others = answers.slice(1);
+  const others = answers.slice(common.length ? 1 : 0);
   const buckets = new Map();
-  for (const item of [...(common.length ? all.items : []), ...others.flatMap((o) => o.items)])
+  for (const item of [...(all?.items || []), ...others.flatMap((o) => o.items)])
     buckets.set(item.field, item.buckets);
   const intervals = new Map([...histograms].map(([name, h]) => [name, h.interval]));
 
@@ -316,6 +326,11 @@ export async function countFacets({ count, ids, fields, predicates, timeline }) 
   }
 
   const sum = (list = []) => list.reduce((n, b) => n + b.count, 0);
+  // The oldest stored counts date them all; one estimate makes them all approximate.
+  const asOf = counted
+    .map((a) => a.as_of)
+    .filter((t) => t && !Number.isNaN(Date.parse(t)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
   return {
     fields: fields.map((field) => {
       const interval = intervals.get(field.name);
@@ -325,10 +340,13 @@ export async function countFacets({ count, ids, fields, predicates, timeline }) 
       }));
       return { field: field.name, type: field.type, ...(interval ? { interval } : {}), values };
     }),
-    ...(all.excluded_corpora?.length ? { excluded_corpora: all.excluded_corpora } : {}),
+    // A field asked alone names the corpora its own count excluded.
+    ...((all || others[0])?.excluded_corpora?.length ? { excluded_corpora: (all || others[0]).excluded_corpora } : {}),
     ...(timeline
       ? { total: years ? sum(years.items[0]?.buckets) : sum(buckets.get(timeline.field)) }
       : {}),
+    ...(asOf ? { as_of: asOf } : {}),
+    ...(counted.some((a) => a.approximate) ? { approximate: true } : {}),
   };
 }
 
@@ -572,17 +590,32 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       if (data.bounded) page.bounded = true;
       return page;
     },
-    /** GET /demo/explore/facets: each field's values and how many documents have them. */
+    /**
+     * GET /demo/explore/facets: each field's values and how many documents
+     * have them, or one field's (?field=). ?accuracy=fast lets the engine
+     * answer from its stored counts or a sample.
+     */
     async facets(params, signal) {
       const ids = await picked(params);
       const predicates = predicatesOf(params.get("metadata"));
+      const accuracy = params.get("accuracy") || "exact";
+      if (!["exact", "fast"].includes(accuracy)) throw failure(422, "Cette précision de comptage n’est pas valide.");
       const infos = await Promise.all(ids.map(corpus));
+      let fields = [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])];
+      const field = params.get("field");
+      if (field) {
+        fields = fields.filter((f) => f.name === field);
+        if (!fields.length) throw failure(422, "Ce filtre n’est pas valide.");
+      }
       return countFacets({
         count: (body) => count(body, signal),
         ids,
-        fields: [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])],
+        fields,
         predicates,
-        timeline: { field: TIMELINE_FIELD, window: windowOf(params.get("window")) },
+        accuracy,
+        ...(!field || field === TIMELINE_FIELD
+          ? { timeline: { field: TIMELINE_FIELD, window: windowOf(params.get("window")) } }
+          : {}),
       });
     },
     /**

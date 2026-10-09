@@ -901,25 +901,47 @@ func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection
 		return retrieval.PurgeResult{}, errors.New("invalid projection collection")
 	}
 	var response struct {
-		Results struct {
-			Matches    int `json:"matches"`
-			Limit      int `json:"limit"`
-			Successful int `json:"successful"`
-			Failed     int `json:"failed"`
+		Results *struct {
+			Matches    *int `json:"matches"`
+			Limit      int  `json:"limit"`
+			Successful *int `json:"successful"`
+			Failed     *int `json:"failed"`
+			Objects    []struct {
+				Errors *struct {
+					Error []struct {
+						Message string `json:"message"`
+					} `json:"error"`
+				} `json:"errors"`
+			} `json:"objects"`
 		} `json:"results"`
 	}
-	// The purge only needs the HTTP configuration; do not copy the schema
-	// cache's mutex when using its longer request timeout.
 	scoped := Store{Endpoint: s.Endpoint, Client: client}
-	if _, err := scoped.call(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "minimal"}, &response); err != nil {
+	if err := scoped.purgeCall(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "verbose"}, &response); err != nil {
 		return retrieval.PurgeResult{}, err
 	}
 	r := response.Results
-	if r.Failed > 0 {
-		return retrieval.PurgeResult{Deleted: r.Successful}, errors.New("projection delete failed")
+	if r == nil || r.Matches == nil || r.Successful == nil || r.Failed == nil || *r.Matches < 0 || *r.Successful < 0 || *r.Successful > *r.Matches || *r.Failed < 0 {
+		return retrieval.PurgeResult{}, errors.New("projection purge result missing or invalid")
 	}
-	// Fail closed: without a reported limit only an empty match proves nothing is left.
-	return retrieval.PurgeResult{Deleted: r.Successful, Complete: r.Matches == 0 || (r.Limit > 0 && r.Matches < r.Limit)}, nil
+	result := retrieval.PurgeResult{Deleted: *r.Successful}
+	// Failed slots may already have committed tombstones. Only matches beyond
+	// the server's admitted delete limit are known to be outside this attempt.
+	if r.Limit > 0 {
+		result.RemainingAtLeast = max(0, *r.Matches-r.Limit)
+	}
+	if *r.Failed > 0 {
+		reason := "provider reported failed objects"
+		for _, object := range r.Objects {
+			if object.Errors != nil && len(object.Errors.Error) > 0 {
+				reason = object.Errors.Error[0].Message
+				break
+			}
+		}
+		return result, fmt.Errorf("projection delete: %d failed, %d successful: %.1024s", *r.Failed, *r.Successful, reason)
+	}
+	// Missing limits or incomplete success counts never prove completion.
+	result.Complete = *r.Successful == *r.Matches && (*r.Matches == 0 || (r.Limit > 0 && *r.Matches < r.Limit))
+	return result, nil
 }
 
 func (s *Store) purgeClient() *http.Client {
@@ -938,8 +960,7 @@ func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, 
 	if org == "" || corpusID == "" || generationID == "" {
 		return retrieval.PurgeResult{}, errors.New("incomplete generation purge filter")
 	}
-	return s.deleteWhere(ctx, s.purgeClient(), collection, map[string]any{"operator": "And", "operands": []any{
-		equalText("organization", org), equalText("corpusId", corpusID), equalText("generationId", generationID)}})
+	return s.purgeGenerationWindow(ctx, collection, org, corpusID, generationID)
 }
 
 // PurgeVersion deletes every object of one Record Version, lexical and

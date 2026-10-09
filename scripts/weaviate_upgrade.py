@@ -3,7 +3,7 @@ import argparse
 import json
 import os
 import pathlib
-import re
+import sys
 import subprocess
 import time
 import urllib.error
@@ -13,6 +13,8 @@ import uuid
 import gotest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from deploy import infrastructure
 OLD_IMAGE = 'cr.weaviate.io/semitechnologies/weaviate:1.37.15@sha256:cede92f9f43f9b4be25a9f453e756173bbe171d2e88210a0e5b7ab72e8b96d96'
 BRIDGE_IMAGE = 'cr.weaviate.io/semitechnologies/weaviate:1.38.20@sha256:d23d7bb6242026106ee1ec5aefdbb6a867e260ff171cedc9c3af55c9688e30f6'
 OWNER = 'TestPersistedProjectionAcrossWeaviateUpgrade'
@@ -28,7 +30,7 @@ def exercise(directory, negative_control=False):
     compose_file = directory / 'compose.json'
     config_file = directory / 'config.json'
     snapshot = directory / 'snapshot.json'
-    target = re.search(r'image: (cr\.weaviate\.io/semitechnologies/weaviate:[^\s]+)', (ROOT / 'deploy/compose/compose.yaml').read_text()).group(1)
+    target = infrastructure.resolve(environ={})['weaviate']['image']
     report = {'images': [OLD_IMAGE, BRIDGE_IMAGE, target], 'stages': [], 'result': 'failed', 'negative_control': negative_control}
     started = time.monotonic()
 

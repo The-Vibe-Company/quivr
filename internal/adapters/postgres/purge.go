@@ -88,14 +88,14 @@ func (s PurgeStore) ClaimPurges(ctx context.Context, grace, lease time.Duration,
  ORDER BY p.noticed_at LIMIT $3 FOR UPDATE OF p SKIP LOCKED)
 UPDATE projection_purges p SET lease_until=now()+make_interval(secs=>$2::double precision) FROM due
 WHERE (p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id)=(due.organization,due.kind,due.corpus_id,due.generation_id,due.version_id)
-RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id`, grace.Seconds(), lease.Seconds(), limit)
+RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id,p.noticed_at`, grace.Seconds(), lease.Seconds(), limit)
 	if err != nil {
 		return nil, err
 	}
 	items := []retrieval.PurgeItem{}
 	for rows.Next() {
 		var it retrieval.PurgeItem
-		if err = rows.Scan(&it.Organization, &it.Kind, &it.CorpusID, &it.GenerationID, &it.VersionID); err != nil {
+		if err = rows.Scan(&it.Organization, &it.Kind, &it.CorpusID, &it.GenerationID, &it.VersionID, &it.NoticedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}

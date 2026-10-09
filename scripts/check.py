@@ -16,7 +16,7 @@ import gotest
 ROOT = Path(__file__).resolve().parent.parent
 REPORTS = Path(os.environ.get('QUIVR_CHECK_REPORTS', ROOT / '.scratch' / 'check'))
 GROUPS = {
-    'guards': ['docs', 'denylist', 'migrations', 'image-context', 'plugin-boundary', 'conformance-validate'],
+    'guards': ['docs', 'denylist', 'infrastructure-check', 'migrations', 'image-context', 'plugin-boundary', 'conformance-validate'],
     'contracts': ['contracts'],
     'go': ['test-go'],
     'python': ['test-python'],

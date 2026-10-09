@@ -32,6 +32,12 @@ A missing observation or queue endpoint `503` means unknown work, never zero. Us
 
 **Recommendation:** diagnose before raising replicas. More workers once produced roughly 180 journal-lock waiters; another increase overloaded embedding. Both lengthened downstream queues without increasing completed work.
 
+### Abandoned index generations
+
+Cancelled or superseded rebuild generations are deleted in resumable windows of at most 256 objects. Each worker runs one purge sweep at a time, claims at most four items, bounds sweep work to 30 seconds, allows up to five additional seconds to checkpoint the current item after expiry, and waits one second before the next sweep. This keeps deletion requests small while allowing a large generation to advance without a minute between every window. Confirmed deletions are checkpointed in PostgreSQL even when a later request fails. A lost reply may leave the confirmed count below the number actually deleted; the next window still resumes from surviving objects.
+
+On the worker's private `/metrics`, watch `quivr_projection_purge_failures_total`, `quivr_projection_purge_oldest_observed_age_seconds`, and `quivr_projection_purge_remaining_objects_lower_bound`, alongside `quivr_projection_purged_objects_total`. Age and remaining objects describe unfinished items in the last nonempty sweep, not the whole backlog. Remaining objects are a lower bound from a capped window, never an exact generation size. A rising age with failures or flat deletion progress indicates a stuck purge; worker logs include the sanitized provider reason. Check search latency and index IO while cleanup runs.
+
 ## Capacity per dependency
 
 ### Embedding provider
@@ -60,7 +66,7 @@ Batch across documents. **Example measurements:** tiny calls of roughly 80 token
 
 **Connections:** usable server capacity must cover `sum(replicas × pool per process) + other clients + rolling-deploy headroom`. Subtract reserved server connections. Worker slots and pool connections are independent. **Example:** one API, one live worker and eight bulk workers with pools of 16 can use 160 connections; a stock 100-connection server previously refused a four-replica bulk deployment.
 
-Link engine pools to [PostgreSQL connections](../reference/configuration.mdx#postgresql-connections), and server settings to the [shared startup script](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/postgres/start.sh) and [connection, memory and WAL guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/README.md). Set an explicit memory budget or container limit. Stock `shared_buffers` of 128 MB on a 32 GB machine left much of its useful cache capacity unused. Leave memory for sort/hash operations, connections, autovacuum and OS cache; multiplying pools also multiplies potential memory use.
+Link engine pools to [PostgreSQL connections](../reference/configuration.mdx#postgresql-connections), and server settings to the [shared startup script](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/postgres/start.sh), [connection, memory and WAL guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/README.md) and [shared infrastructure declaration](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md). Set an explicit memory budget or container limit. Stock `shared_buffers` of 128 MB on a 32 GB machine left much of its useful cache capacity unused. Leave memory for sort/hash operations, connections, autovacuum and OS cache; multiplying pools also multiplies potential memory use.
 
 **WAL and checkpoints:** write-ahead log (WAL) records changes for recovery. Frequent checkpoints can repeatedly write full-page images. Compare changes in `pg_stat_checkpointer.num_requested` and `num_timed` over the same period, alongside `WALInsert`/`WALWrite` waits. **Example incident:** 370 requested versus 111 timed checkpoints accompanied about 226 GB of WAL and 33.5 million full-page images in a day with a 1 GB WAL budget. A larger WAL budget, longer checkpoint interval and LZ4 compression removed that forced-checkpoint pattern.
 
@@ -84,6 +90,12 @@ Quivr's `vector_index.quantization` applies per vector space, including spaces a
 
 Set `GOMEMLIMIT` at roughly 80–90% of the service's memory allocation as a starting soft runtime limit, following [Weaviate resource planning](https://docs.weaviate.io/weaviate/concepts/resources). It does not cap RSS or make an oversized index fit. Compare anonymous process memory with reclaimable page cache. **Example:** a container reporting 29 GB used held about 3.8 GB process memory and 23.6 GB page cache.
 
+The shared `large` profile sets `ASYNC_INDEXING=true` and
+`PERSISTENCE_MEMTABLES_MAX_SIZE_MB=1024`, `GOMEMLIMIT=27GiB` and
+`RAFT_BOOTSTRAP_TIMEOUT=3600`; it retains RQ-8, disabled schema and the `none` vectorizer.
+These are unbenchmarked opt-in settings: async object writes may precede vector visibility,
+and memtable memory multiplies across active buckets and shards. Choose limits from measurements.
+
 **Watch disk I/O pressure, even with idle CPU.** Linux `io.pressure` reports time tasks stall on I/O. **Example incident:** 24–87% I/O pressure accompanied search timeouts with only 12 of 32 cores busy; pressure fell below 5% after writes slowed. One network volume delivered only about 1,600 read IOPS and 55 MB/s. Prefer local NVMe or adequately provisioned IOPS for large indexes, and verify sustained write/search performance on your actual disk.
 
 Old and replacement search generations coexist during a rebuild. Budget roughly twice steady objects, memory and disk when both are comparable; purging after cutover also uses I/O. Retained older generations can require more. **Example incident:** loading 3.2 million uncompressed vectors took over ten minutes and the node repeatedly failed startup. Plan compression and startup allowances before big jobs; schedule restarts and supported-version upgrades between them. Restarting a saturated index mid-rebuild can extend the outage.
@@ -103,6 +115,8 @@ Tune `tokenizer_processes` when cutting queues and CPU/memory have room. Auto us
 Object storage grows with raw content, parts and vector files. Measure physical bytes, including retained object versions, separately from referenced files. **Example observations with an older recipe:** index disk grew 2.5–3.9 GB/h, PostgreSQL 1.9 GB/h and object storage 1.5–2.6 GB/h. These rates are workload-specific and are not estimates for a different recipe.
 
 Use a disk guard to pause connectors before a volume fills, for example at 85% used. This is an operator policy, not a built-in Quivr threshold. Leave room for already accepted work, WAL and cleanup. Check how every volume grows before importing; some platforms require a manual console operation.
+
+The [shared large profile](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md) declares a 500,000,000,000-byte (500 GB decimal) planning budget for each PostgreSQL and Weaviate service. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden; checks report filesystem capacity against that minimum and do not resize volumes or verify shared filesystem quotas.
 
 ## Efficient ingestion
 
