@@ -19,15 +19,25 @@ def vector_objects(value):
     return count
 
 
-def wait_until(read, ready, seconds=180):
+class ResetTimeout(RuntimeError):
+    """A polling deadline expired, rather than a provider request failing."""
+
+
+class ResetFailure(RuntimeError):
+    """Only locally authored phase and role/condition may reach the CLI."""
+    def __init__(self, phase, role):
+        super().__init__(f'Reset incomplete at phase {phase}, role/condition {role}.')
+
+
+def wait_until(read, ready, seconds=180, interval=.2):
     deadline = time.monotonic() + seconds
     while True:
         value = read()
         if ready(value):
             return value
         if time.monotonic() >= deadline:
-            raise RuntimeError('reset dependency condition timed out')
-        time.sleep(.2)
+            raise ResetTimeout('reset dependency condition timed out')
+        time.sleep(interval)
 
 
 class Checkpoint:
@@ -68,7 +78,7 @@ class Checkpoint:
         os.close(self.lock)
 
 
-def terminate_workflows(run):
+def terminate_workflows(run, interval=.2):
     arguments = ['workflow', 'count', '--address', '127.0.0.1:7233', '--namespace', 'default',
                  '--query', 'ExecutionStatus = "Running"', '--output', 'json']
     def count():
@@ -84,5 +94,5 @@ def terminate_workflows(run):
     if before:
         run(['workflow', 'terminate', '--address', '127.0.0.1:7233', '--namespace', 'default',
              '--query', 'ExecutionStatus = "Running"', '--reason', 'confirmed installation reset', '--yes'])
-        wait_until(count, lambda value: value == 0)
+        wait_until(count, lambda value: value == 0, interval=interval)
     return before

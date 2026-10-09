@@ -6,7 +6,7 @@ from pathlib import Path
 import shlex
 
 from deploy.railway.infrastructure import Railway
-from deploy.reset_support import Checkpoint, terminate_workflows, wait_until
+from deploy.reset_support import Checkpoint, ResetFailure, ResetTimeout, terminate_workflows, wait_until
 
 PROJECT = '''query($id:String!){project(id:$id){id
  environments(first:100){edges{node{id projectId canAccess deletedAt}} pageInfo{hasNextPage}}
@@ -18,6 +18,7 @@ INSTANCE = '''query($serviceId:String!,$environmentId:String!){serviceInstance(s
  serviceId environmentId latestDeployment{id status} activeDeployments{id status deploymentStopped canRedeploy instances{id status}}}}'''
 DEPLOYMENT = '''query($id:String!){deployment(id:$id){id status deploymentStopped instances{id status}}}'''
 STOP = 'mutation($id:String!){deploymentStop(id:$id)}'
+REMOVE = 'mutation($id:String!){deploymentRemove(id:$id)}'
 REDEPLOY = 'mutation($id:String!){deploymentRedeploy(id:$id){id status}}'
 CREATE = 'mutation($input:VolumeCreateInput!){volumeCreate(input:$input){id projectId}}'
 ATTACH = '''mutation($volumeId:String!,$environmentId:String!,$input:VolumeInstanceUpdateInput!){
@@ -140,8 +141,17 @@ class RailwayReset:
     def stop(self, role):
         identifier = self.deployments[role]
         self.api(STOP, {'id': identifier})
-        wait_until(lambda: self.api(DEPLOYMENT, {'id': identifier})['deployment'],
-                   lambda d: d['deploymentStopped'] and not any(i['status'] in ('RUNNING', 'RESTARTING') for i in d['instances']))
+        def deployment():
+            return self.api(DEPLOYMENT, {'id': identifier})['deployment']
+        def quiescent(value):
+            return not any(i['status'] in ('RUNNING', 'RESTARTING') for i in value['instances'])
+        try:
+            wait_until(deployment, lambda d: d['deploymentStopped'] and quiescent(d), seconds=30, interval=1)
+        except ResetTimeout:
+            # Railway can acknowledge stop while keeping instances running.
+            # Removed deployments remain redeployable through the recorded ID.
+            self.api(REMOVE, {'id': identifier})
+            wait_until(deployment, quiescent, interval=1)
 
     def stopped(self, roles):
         for role in roles:
@@ -159,7 +169,7 @@ class RailwayReset:
         checkpoint.data.setdefault('restored', {})[role] = value['id']
         checkpoint.save('restoring')
         deployment = wait_until(lambda: self.api(DEPLOYMENT, {'id': value['id']})['deployment'],
-                               lambda d: d['status'] in ('SUCCESS', 'FAILED', 'CRASHED'), seconds=600)
+                               lambda d: d['status'] in ('SUCCESS', 'FAILED', 'CRASHED'), seconds=600, interval=1)
         if deployment['status'] != 'SUCCESS':
             raise RuntimeError('restored deployment failed')
         running = [i['id'] for i in deployment['instances'] if i['status'] == 'RUNNING']
@@ -170,14 +180,17 @@ class RailwayReset:
     def reset(self):
         checkpoint = Checkpoint(self.checkpoint_path, self.spec)
         writers = [k for k in WRITERS if k in self.deployments]
+        role = 'installation'
         try:
             checkpoint.save('stopping-writers', deployments=self.deployments, volumes=self.volumes)
             for role in writers:
                 self.stop(role)
-            workflows = terminate_workflows(lambda args: self.ssh('temporal', shlex.join(['temporal', *args])))
+            role = 'temporal'
+            workflows = terminate_workflows(lambda args: self.ssh('temporal', shlex.join(['temporal', *args])), interval=1)
             checkpoint.save('stopping-dependencies', terminated_workflows=workflows)
             for role in MOUNTS:
                 self.stop(role)
+            role = 'writer-quiescence'
             self.stopped(writers + list(MOUNTS))
             # Revalidate project-wide ownership immediately before deleting anything.
             for role, old in self.volumes.items():
@@ -194,13 +207,13 @@ class RailwayReset:
                 checkpoint.save('attaching-volume')
                 def replacement():
                     return [v for v in self.all_volumes() if v['volumeId'] == new['id']]
-                wait_until(replacement, lambda rows: len(rows) == 1 and rows[0]['state'] == 'READY')
+                wait_until(replacement, lambda rows: len(rows) == 1 and rows[0]['state'] == 'READY', interval=1)
                 variables = {'environmentId': self.spec['environment'], 'input': {'serviceId': None}, 'volumeId': old['volumeId']}
                 self.api(ATTACH, variables)
                 variables.update(volumeId=new['id'], input={'serviceId': self.adapter.targets[role]})
                 self.api(ATTACH, variables)
                 wait_until(replacement, lambda rows: len(rows) == 1 and rows[0]['serviceId'] == self.adapter.targets[role]
-                           and rows[0]['mountPath'] == old['mountPath'] and rows[0]['environmentId'] == self.spec['environment'])
+                           and rows[0]['mountPath'] == old['mountPath'] and rows[0]['environmentId'] == self.spec['environment'], interval=1)
                 self.stopped(writers + list(MOUNTS))
                 def detached():
                     rows = [v for v in self.all_volumes() if v['volumeId'] == old['volumeId']]
@@ -213,7 +226,7 @@ class RailwayReset:
                     return row['serviceId'] is None
                 # An acknowledgement is not proof that detach is visible. Each
                 # poll re-enumerates every environment and fails on sharing/drift.
-                wait_until(detached, lambda ready: ready)
+                wait_until(detached, lambda ready: ready, interval=1)
                 # Detach visibility can take time. Repeat both terminal guards
                 # after that wait, immediately before the destructive request.
                 self.stopped(writers + list(MOUNTS))
@@ -224,11 +237,14 @@ class RailwayReset:
             checkpoint.save('restoring')
             for role in MOUNTS:
                 self.restore(role, checkpoint)
+            role = 'api'
             self.restore('api', checkpoint)
+            role = 'replacement-stores'
             storage = self.storage_inventory()
             if storage['objects_at_least'] or storage['truncated'] or self.index_inventory():
                 raise RuntimeError('replacement stores are not empty')
             query = 'SELECT count(*) FROM corpora'
+            role = 'postgres'
             count = self.ssh('postgres', 'sh -c ' + shlex.quote(
                 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c ' + shlex.quote(query)))
             if count.strip() != '0':
@@ -244,12 +260,12 @@ class RailwayReset:
         except Exception:
             # A failed restore can leave an API or worker running. Stop any newly
             # restored writers before returning; preserve all checkpoints for recovery.
-            for role, identifier in checkpoint.data.get('restored', {}).items():
-                if role in WRITERS:
+            for restored_role, identifier in checkpoint.data.get('restored', {}).items():
+                if restored_role in WRITERS:
                     try:
                         self.api(STOP, {'id': identifier})
                     except Exception:
                         pass
-            raise
+            raise ResetFailure(checkpoint.data['phase'], role) from None
         finally:
             checkpoint.close()
