@@ -210,7 +210,8 @@ class RailwayReset:
                 wait_until(replacement, lambda rows: len(rows) == 1 and rows[0]['state'] == 'READY', interval=1)
                 variables = {'environmentId': self.spec['environment'], 'input': {'serviceId': None}, 'volumeId': old['volumeId']}
                 self.api(ATTACH, variables)
-                variables.update(volumeId=new['id'], input={'serviceId': self.adapter.targets[role]})
+                variables.update(volumeId=new['id'], input={'serviceId': self.adapter.targets[role],
+                                                          'mountPath': old['mountPath']})
                 self.api(ATTACH, variables)
                 wait_until(replacement, lambda rows: len(rows) == 1 and rows[0]['serviceId'] == self.adapter.targets[role]
                            and rows[0]['mountPath'] == old['mountPath'] and rows[0]['environmentId'] == self.spec['environment'], interval=1)
