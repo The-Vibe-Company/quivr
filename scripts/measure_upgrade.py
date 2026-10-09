@@ -6,8 +6,8 @@ only, like the rest of the harness). Two builds of the Go SDK sample ingestion
 plugin (sdks/go/examples/hash-embedder) run side by side: A, 0.1.0, pinned by
 the configuration with its small space, and B, 0.2.0, which adds its large
 space for evaluation. Each is reached through a proxy that delays
-segment_and_embed by PLUGIN_DELAY, like a model would, so work is always in
-flight when the plan changes. While a client ingests Records without pause and
+segment_and_embed by PLUGIN_DELAY, like a model would. Before each async
+switch, the proxy holds outgoing requests until the drain is observed. While a client ingests Records without pause and
 a sampler reads the API every 100 ms, an operator follows the upgrade guide
 (docs-site/run-quivr/upgrade-a-plugin.mdx):
 
@@ -110,10 +110,17 @@ class Proxy:
     """Forwards every request to a plugin, holding segment_and_embed for PLUGIN_DELAY first."""
 
     def __init__(self, target):
+        self.ingestion_gate = threading.Event()
+        self.ingestion_gate.set()
+        self.ingestion_held = threading.Event()
+        proxy = self
         class Handler(http.server.BaseHTTPRequestHandler):
             def forward(self):
                 body = self.rfile.read(int(self.headers.get('Content-Length') or 0)) or None
                 if self.path == SEGMENT_ROUTE:
+                    if not proxy.ingestion_gate.is_set():
+                        proxy.ingestion_held.set()
+                        proxy.ingestion_gate.wait()
                     time.sleep(PLUGIN_DELAY)
                 headers = {k: v for k, v in self.headers.items() if k.lower() not in ('host', 'content-length', 'connection')}
                 req = urllib.request.Request(target + self.path, data=body, method=self.command, headers=headers)
@@ -140,7 +147,18 @@ class Proxy:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.endpoint = f'http://127.0.0.1:{self.port}'
 
+    def hold_ingestion(self):
+        """Keep actual outgoing requests pinned until the switch is observed."""
+        self.ingestion_held.clear()
+        self.ingestion_gate.clear()
+        await_condition('an outgoing plugin request held across the switch',
+                        self.ingestion_held.is_set, bool, deadline=60, interval=.02)
+
+    def release_ingestion(self):
+        self.ingestion_gate.set()
+
     def close(self):
+        self.release_ingestion()
         self.server.shutdown()
 
 
@@ -277,13 +295,15 @@ def registration(base, operator, version, endpoint):
     return found[0]
 
 
-def drain(base, operator, name, version, endpoint, clock, switched, during=None):
+def drain(base, operator, name, version, endpoint, clock, switched, during=None, release=None):
     """Follow a registration from the switch until it reads inactive; `during` runs while it drains."""
     first = registration(base, operator, version, endpoint)
     d = {'name': name, 'switched': switched, 'at_switch': {'state': first['state'], 'pinned_work': first['pinned_work']}, 'peak_pinned_work': first['pinned_work']}
     if during:
         d['restart_while_draining'] = first['state'] == 'draining'
         during()
+    if release:
+        release()
 
     def read():
         reg = registration(base, operator, version, endpoint)
@@ -404,9 +424,14 @@ def scenario(stack, report, clock):
         if b_reg['state'] != 'validated':
             raise RuntimeError(f'0.2.0 not validated: {b_reg}')
         before_switch('a_alone', '0.1.0', a_endpoint)
-        switched = clock.now()
+        # Async completion can outlast the ordinary plugin delay. Hold real
+        # requests through completion so the drain/restart proof has old pins.
+        proxies[0].hold_ingestion()
         activate(base, operator, b_reg, '0.2.0')
-        d = drain(base, operator, 'a_after_upgrade', '0.1.0', a_endpoint, clock, switched, during=lambda: (stack.stop_worker(), stack.start_worker()))
+        switched = clock.now()
+        d = drain(base, operator, 'a_after_upgrade', '0.1.0', a_endpoint, clock, switched,
+                  during=lambda: (stack.stop_worker(), proxies[0].release_ingestion(), stack.start_worker()),
+                  release=proxies[0].release_ingestion)
         d['worker_killed'] = True
         report['drains'].append(d)
         expectations['upgrade'] = {'since': max(d['done'], switched + FOLLOW), 'version': '0.2.0'}
@@ -415,15 +440,18 @@ def scenario(stack, report, clock):
         # Rollback to A in one call; B's pinned work drains while the api restarts.
         before_switch('upgrade', '0.2.0', b_endpoint)
         phase('rollback')
-        switched = clock.now()
+        proxies[1].hold_ingestion()
         back = routing_plan(base, operator, '/v0/admin/plugins/plan/rollback', {'idempotency_key': 'rollback-' + run, 'pinned_work': 'drain'})
+        switched = clock.now()
         if back['source'] != 'rollback' or [x['version'] for x in back['roles'] if x['role'] == f"ingestion:{b_reg['plugin_id']}"] != ['0.1.0']:
             raise RuntimeError(f'rollback: {back}')
 
         def restart_api():
+            proxies[1].release_ingestion()
             clock.restart_api(stack)
             report['plans_after_restart'].append({'phase': 'rollback', 'want': back['plan_id'], 'got': active_plan(base, operator)})
-        d = drain(base, operator, 'b_after_rollback', '0.2.0', b_endpoint, clock, switched, during=restart_api)
+        d = drain(base, operator, 'b_after_rollback', '0.2.0', b_endpoint, clock, switched, during=restart_api,
+                  release=proxies[1].release_ingestion)
         report['drains'].append(d)
         expectations['rollback'] = {'since': max(d['done'], switched + FOLLOW), 'version': '0.1.0'}
         load('rollback', expectations['rollback']['since'])
@@ -431,9 +459,11 @@ def scenario(stack, report, clock):
         # Upgrade again, then backfill B's large space for every Record accepted before this phase.
         before_switch('rollback', '0.1.0', a_endpoint)
         phase('backfill')
-        switched = clock.now()
+        proxies[0].hold_ingestion()
         plan_b = activate(base, operator, b_reg, '0.2.0')
-        d = drain(base, operator, 'a_after_upgrade_again', '0.1.0', a_endpoint, clock, switched)
+        switched = clock.now()
+        d = drain(base, operator, 'a_after_upgrade_again', '0.1.0', a_endpoint, clock, switched,
+                  release=proxies[0].release_ingestion)
         report['drains'].append(d)
         expectations['backfill'] = {'since': max(d['done'], switched + FOLLOW), 'version': '0.2.0'}
         boundary = await_condition('a Record accepted in the backfill phase', lambda: client.accepted('backfill'), lambda xs: xs, interval=.05)[0]

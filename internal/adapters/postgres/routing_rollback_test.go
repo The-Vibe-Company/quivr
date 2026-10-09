@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,6 +331,51 @@ func TestAsyncRoutingRollbackKeepsReadableGapAndRecoversBothVersions(t *testing.
 	stopped, err := pluginsStore.WorkStopped(ctx, plugins.WorkIngestion, scope.Organization, pending.ID)
 	if err != nil || stopped {
 		t.Fatalf("no-op rollback stopped active work: %v (%v)", stopped, err)
+	}
+	// Replacing a build of the same owner leaves pending work on its exact
+	// recipe. A stop rollback must not turn that work into a returning-build job.
+	hashManifest, err := os.ReadFile(hashEmbedder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashReplacement := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
+	if err = os.WriteFile(hashReplacement, []byte(strings.Replace(string(hashManifest), "version: 0.1.0", "version: 0.2.0", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hashPins, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: hashReplacement, Endpoint: startIngestionFixture(t, ctx, hashReplacement, "ingestion-valid"), Spaces: hashSpaces}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashCandidate := registry.FromPins(hashPins).Registrations[0]
+	hashCandidate.State = registry.StateRegistered
+	if _, _, err = pluginsStore.RegisterPlugin(ctx, hashCandidate, "new-owner-build"); err != nil {
+		t.Fatal(err)
+	}
+	if err = pluginsStore.RecordCheck(ctx, hashCandidate.ID, registry.CheckReport{Certified: true}); err != nil {
+		t.Fatal(err)
+	}
+	run(routing.Command{Kind: routing.KindActivation, Target: hashCandidate.ID, Key: "new-owner-build"})
+	stoppedReceipt := accept("stopped-owner-build", "A pending document from an abandoned build")
+	stoppedCtx := pin(stoppedReceipt)
+	if err = contents.Materialize(stoppedCtx, scope.Organization, stoppedReceipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	run(routing.Command{Kind: routing.KindRollback, Target: activeBeforeNoop.ID, Key: "stop-owner-build", PinnedWork: registry.PinnedWorkStop})
+	if stopped, err = pluginsStore.WorkStopped(ctx, plugins.WorkIngestion, scope.Organization, stoppedReceipt.ID); err != nil || !stopped {
+		t.Fatalf("abandoned build pin not stopped: %v (%v)", stopped, err)
+	}
+	jobsAfterStop, err := store.ClaimServingProjections(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobsAfterStop {
+		if job.RecordID == stoppedReceipt.RecordID {
+			t.Fatalf("stop rollback rebound pending same-owner work: %+v", job)
+		}
+	}
+	activeBeforeNoop, err = pluginsStore.ActivePlan(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
 	// A rollback restores exact registrations, including retained evaluation
 	// members. Discovery refusal must finish without publishing their plan.

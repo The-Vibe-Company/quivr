@@ -9,6 +9,12 @@ import (
 // readable version and a different desired successor can need the new owner.
 // Failed recovery never removes the readable outgoing projection.
 func (s RoutingStore) recoverRouting(ctx context.Context, tx pgx.Tx, w *routingWork) (bool, error) {
+	// A build replacement preserves owner routing and original work recipes.
+	// Re-admitting its pending versions would override a stop rollback's pins.
+	if w.settings.NoRoutingChange {
+		_, err := tx.Exec(ctx, `UPDATE routing_operations SET phase='cleanup' WHERE organization=$1 AND id=$2`, w.org, w.id)
+		return false, err
+	}
 	if err := lockProjectionRouting(ctx, tx); err != nil {
 		return false, err
 	}
