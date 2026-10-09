@@ -8,6 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from deploy.reset_support import ResetFailure
 
 
 def declaration(path):
@@ -31,6 +32,7 @@ def main(argv=None):
     parser.add_argument('--confirm', action='store_true')
     parser.add_argument('--deployment-name', help='type the declared deployment name exactly')
     args = parser.parse_args(argv)
+    phase = 'preflight'
     try:
         spec = declaration(args.f)
         if (args.confirm or args.deployment_name is not None) and (not args.confirm or args.deployment_name != spec['deployment']):
@@ -48,6 +50,7 @@ def main(argv=None):
         print(json.dumps({'deployment': spec['deployment'], 'mode': 'reset' if args.confirm else 'preview', 'scope': plan}, indent=2), flush=True)
         if not args.confirm:
             return 0
+        phase = 'reset'
         result = adapter.reset()
         print(json.dumps({'status': 'reset', 'result': result}, indent=2))
         return 0
@@ -56,8 +59,11 @@ def main(argv=None):
         # RuntimeError with an already sanitized message.
         print(str(error), file=sys.stderr)
         return 2
+    except ResetFailure as error:
+        print(f'{error} Retain private reset state and inspect the selected deployment privately.', file=sys.stderr)
+        return 1
     except Exception:
-        print('Reset incomplete; writers remain stopped if shutdown began. Retain private reset state and inspect the selected deployment privately.', file=sys.stderr)
+        print(f'Reset incomplete at phase {phase}, role/condition installation. Retain private reset state and inspect the selected deployment privately.', file=sys.stderr)
         return 1
 
 

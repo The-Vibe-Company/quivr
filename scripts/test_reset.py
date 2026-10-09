@@ -1,5 +1,7 @@
 """Reset safety at the operator boundary; the real Compose proof lives in lifecycle.py."""
 import json
+import contextlib
+import io
 import os
 from unittest.mock import patch
 from pathlib import Path
@@ -68,6 +70,138 @@ class RailwayIsolation(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, 'read access|shared across environments|enumeration is incomplete'):
                         reset.preview()
                 self.assertTrue(calls)
+
+    # Owns Railway's reset lifecycle when stop acknowledgements are ineffective.
+    # Existing preflight refusal tests cannot reach shutdown or artifact restore.
+    def test_reset_removes_unresponsive_deployment_and_restores_recorded_artifacts(self):
+        from deploy.reset import main
+        from deploy.railway.infrastructure import Railway
+        roles = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk',
+                 'postgres', 'temporal', 'seaweed', 'weaviate')
+        for failure in (None, 'stop', 'remove', 'quiescence', 'restore'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                deployments = {role + '-original': {'id': role + '-original', 'status': 'SUCCESS',
+                    'deploymentStopped': False, 'canRedeploy': True,
+                    'instances': [{'id': role + '-instance', 'status': 'RUNNING'}]} for role in roles}
+                current = {role: role + '-original' for role in roles}
+                volumes = [{'volumeId': role + '-volume', 'environmentId': 'target', 'serviceId': role,
+                    'mountPath': '/var/lib/weaviate' if role == 'weaviate' else '/data',
+                    'region': 'us-west', 'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None}
+                    for role in ('postgres', 'temporal', 'seaweed', 'weaviate')]
+                removed, redeployed, deleted, delays = [], {}, [], []
+                clock = [0]
+                workflow_reads = [0]
+                def sleep(seconds):
+                    delays.append(seconds)
+                    clock[0] += seconds
+                def transport(args, stdin=None):
+                    if args[0] == 'ssh':
+                        command = args[-1]
+                        if 'print(json.dumps(inventory(' in command:
+                            return '{"objects_at_least":0,"truncated":false}'
+                        if 'workflow count' in command:
+                            workflow_reads[0] += 1
+                            return '{"count":"1"}' if workflow_reads[0] <= 2 else '{}'
+                        return '0'
+                    query, variables = args[1], json.loads(args[3])
+                    if 'project(id:' in query:
+                        data = {'project': {'id': 'project',
+                            'environments': {'edges': [{'node': {'id': 'target', 'projectId': 'project',
+                                'canAccess': True, 'deletedAt': None}}], 'pageInfo': {'hasNextPage': False}},
+                            'services': {'edges': [{'node': {'id': r, 'name': r}} for r in roles],
+                                'pageInfo': {'hasNextPage': False}}}}
+                    elif 'volumeInstances(' in query:
+                        data = {'environment': {'id': 'target', 'projectId': 'project',
+                            'volumeInstances': {'edges': [{'node': v.copy()} for v in volumes],
+                                'pageInfo': {'hasNextPage': False}}}}
+                    elif 'serviceInstance(' in query:
+                        role = variables['serviceId']
+                        deployment = deployments[current[role]]
+                        active = [] if deployment['deploymentStopped'] or deployment['status'] == 'REMOVED' else [deployment]
+                        data = {'serviceInstance': {'serviceId': role, 'environmentId': 'target',
+                            'latestDeployment': deployment, 'activeDeployments': active}}
+                    elif 'deploymentStop(' in query:
+                        identifier = variables['id']
+                        if identifier == 'web-original':
+                            if failure == 'stop':
+                                raise RuntimeError('provider-secret-payload')
+                        else:
+                            deployments[identifier].update(deploymentStopped=True, instances=[])
+                        data = {'deploymentStop': True}
+                    elif 'deploymentRemove(' in query:
+                        identifier = variables['id']
+                        removed.append((identifier, clock[0]))
+                        if failure == 'remove':
+                            raise RuntimeError('provider-secret-payload')
+                        deployments[identifier].update(status='REMOVED', instances=[{
+                            'id': 'web-instance', 'status': 'RESTARTING' if failure == 'quiescence' else 'REMOVED'}])
+                        data = {'deploymentRemove': True}
+                    elif 'deploymentRedeploy(' in query:
+                        identifier = variables['id']
+                        role = identifier.removesuffix('-original')
+                        if role == 'web' and failure == 'restore':
+                            raise RuntimeError('provider-secret-payload')
+                        redeployed[role] = identifier
+                        current[role] = role + '-restored'
+                        deployments[current[role]] = {'id': current[role], 'status': 'SUCCESS',
+                            'deploymentStopped': False, 'canRedeploy': True,
+                            'instances': [{'id': role + '-new-instance', 'status': 'RUNNING'}]}
+                        data = {'deploymentRedeploy': deployments[current[role]]}
+                    elif 'deployment(id:' in query:
+                        data = {'deployment': deployments[variables['id']]}
+                    elif 'volumeCreate(' in query:
+                        self.assertFalse(any(i['status'] in ('RUNNING', 'RESTARTING')
+                            for d in deployments.values() for i in d['instances']), 'volume changed before shutdown')
+                        volume = {'volumeId': 'replacement-' + str(len(deleted)), 'serviceId': None,
+                            'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None,
+                            **{k: v for k, v in variables['input'].items() if k != 'projectId'}}
+                        volumes.append(volume)
+                        data = {'volumeCreate': {'id': volume['volumeId'], 'projectId': 'project'}}
+                    elif 'volumeInstanceUpdate(' in query:
+                        volume = next(v for v in volumes if v['volumeId'] == variables['volumeId'])
+                        volume.update(variables['input'])
+                        data = {'volumeInstanceUpdate': True}
+                    elif 'volumeDelete(' in query:
+                        deleted.append(variables['volumeId'])
+                        volumes[:] = [v for v in volumes if v['volumeId'] != variables['volumeId']]
+                        data = {'volumeDelete': True}
+                    else:
+                        self.fail('unexpected Railway request: ' + query)
+                    return json.dumps({'data': data})
+                declaration = Path(directory) / 'installation.json'
+                declaration.write_text(json.dumps({'version': 1, 'deployment': 'isolated-install',
+                    'platform': 'railway', 'project': 'project', 'environment': 'target', 'dedicated': True}))
+                output, errors = io.StringIO(), io.StringIO()
+                with patch('deploy.railway.reset.Railway', side_effect=lambda p, e: Railway(p, e, run=transport)), \
+                     patch('deploy.reset_support.time.monotonic', side_effect=lambda: clock[0]), \
+                     patch('deploy.reset_support.time.sleep', side_effect=sleep), \
+                     patch.dict(os.environ, {'RAILWAY_API_TOKEN': 'fixture-account-not-real'}), \
+                     contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    os.environ.pop('RAILWAY_TOKEN', None)
+                    result = main(['-f', str(declaration), '--confirm', '--deployment-name', 'isolated-install'])
+                state = json.loads(Path(str(declaration) + '.reset-state.json').read_text())
+                if failure is None:
+                    self.assertEqual(result, 0, errors.getvalue())
+                    self.assertEqual(state['phase'], 'complete')
+                    self.assertEqual(redeployed, {role: role + '-original' for role in roles})
+                    self.assertEqual(len(deleted), 4)
+                    self.assertTrue(all(deployments[current[r]]['instances'][0]['status'] == 'RUNNING' for r in roles))
+                else:
+                    self.assertEqual(result, 1)
+                    phase = 'restoring' if failure == 'restore' else 'stopping-writers'
+                    self.assertEqual(state['phase'], phase)
+                    self.assertIn(phase, errors.getvalue())
+                    self.assertIn('web', errors.getvalue())
+                    self.assertNotIn('provider-secret-payload', output.getvalue() + errors.getvalue())
+                    if failure != 'restore':
+                        self.assertEqual(deleted, [])
+                        self.assertEqual(redeployed, {})
+                if failure == 'stop':
+                    self.assertEqual(removed, [], 'API errors must not trigger removal')
+                else:
+                    self.assertEqual(removed, [('web-original', 30)])
+                    self.assertTrue(delays)
+                    self.assertTrue(all(delay >= 1 for delay in delays), delays)
 
 
 class TemporalTransport(unittest.TestCase):
