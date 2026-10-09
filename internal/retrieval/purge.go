@@ -208,6 +208,11 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		if complete {
 			completed++
 		}
+		// One final checkpoint may outlive the attempt deadline; do not renew
+		// cleanup budgets or contact further collections/items after expiry.
+		if ctx.Err() != nil {
+			return completed, errors.Join(failure, ctx.Err())
+		}
 	}
 	return completed, failure
 }

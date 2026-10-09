@@ -58,3 +58,32 @@ func TestPurgeCompletenessFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// Only an explicit empty list proves no matching generation objects remain.
+// Null/missing data and provider errors must leave the durable purge unfinished.
+func TestGenerationPurgeListingFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		complete   bool
+	}{
+		{"empty", `{"data":{"Get":{"QuivrTextV4":[]}}}`, true},
+		{"null", `{"data":{"Get":{"QuivrTextV4":null}}}`, false},
+		{"missing", `{"data":{"Get":{}}}`, false},
+		{"provider failure", `{"data":{"Get":{"QuivrTextV4":null}},"errors":[{"message":"query deadline exceeded"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "POST" || r.URL.Path != "/v1/graphql" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			result, err := weaviate.New(server.URL).PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
+			if result.Complete != tc.complete || (err == nil) != tc.complete || result.Deleted != 0 {
+				t.Fatalf("listing result %+v %v, complete want %v", result, err, tc.complete)
+			}
+		})
+	}
+}

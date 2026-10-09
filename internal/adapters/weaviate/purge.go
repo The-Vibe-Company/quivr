@@ -45,7 +45,7 @@ func (s *Store) purgeGenerationWindow(ctx context.Context, collection, org, corp
 		return retrieval.PurgeResult{}, fmt.Errorf("projection purge listing: %.1024s", response.Errors[0].Message)
 	}
 	rows, ok := response.Data.Get[collection]
-	if !ok {
+	if !ok || rows == nil {
 		return retrieval.PurgeResult{}, errors.New("projection purge listing missing")
 	}
 	if len(rows) == 0 {
