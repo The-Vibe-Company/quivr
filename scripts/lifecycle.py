@@ -65,7 +65,7 @@ def verify(stack):
     index_url = json.loads((stack.directory / 'config.json').read_text())['weaviate_url']
     def indexed():
         with urllib.request.urlopen(index_url + '/v1/objects?limit=1', timeout=5) as response:
-            return json.load(response)['totalResults']
+            return len(json.load(response).get('objects') or [])
     wait_until(indexed, lambda count: count > 0, seconds=30)
     # The command owns this proof: no direct down(True) can bypass its guards.
     source = stack.directory / 'lifecycle-sources.json'

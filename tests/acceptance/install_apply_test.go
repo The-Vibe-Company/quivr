@@ -183,8 +183,8 @@ func TestInstallApply(t *testing.T) {
 		t.Fatal("unsupported change modified connector")
 	}
 	// Append a provider through the same journal: selecting an operator key later
-	// must not change the organization/deployment binding. This runs at the end of
-	// the connector lane because activation deliberately replaces its RSS pin.
+	// must not change the organization/deployment binding. This runs last in the
+	// connector lane because activation deliberately replaces its RSS pin.
 	declaration["connectors"].([]any)[0].(map[string]any)["work_queue"] = "live"
 	operator := os.Getenv("QUIVR_TEST_OPERATOR")
 	pinned := request(t, "GET", "/v0/admin/plugins", operator, nil, 200)
@@ -198,6 +198,14 @@ func TestInstallApply(t *testing.T) {
 	if endpoint == "" {
 		t.Fatal("RSS provider missing from installation fixture")
 	}
+	providerURL, err := url.Parse(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Forward to the real provider at a unique transport address, so its
+	// registration identity cannot collide with the existing fixture owner.
+	provider := httptest.NewServer(httputil.NewSingleHostReverseProxy(providerURL))
+	defer provider.Close()
 	manifest, err := filepath.Abs("../../plugins/rss/quivr-plugin.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +219,7 @@ func TestInstallApply(t *testing.T) {
 		fixtures[name] = path
 	}
 	declaration["plugins"] = []any{map[string]any{"idempotency_key": key + "-rss-provider", "manifest_file": manifest,
-		"endpoint": strings.Replace(endpoint, "127.0.0.1", "localhost", 1), "fixture_files": fixtures}}
+		"endpoint": provider.URL, "fixture_files": fixtures}}
 	write()
 	code, out = invoke(false)
 	if code != 0 || !strings.Contains(out, "+ plugin") {

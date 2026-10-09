@@ -7,6 +7,18 @@ import tempfile
 import time
 
 
+def vector_objects(value):
+    # Weaviate's pinned response declares totalResults with omitempty.
+    if not isinstance(value, dict) or 'objects' not in value:
+        raise RuntimeError('unexpected Weaviate object response')
+    objects = value['objects']
+    count = value.get('totalResults', 0)
+    if (objects is not None and not isinstance(objects, list) or isinstance(count, bool)
+            or not isinstance(count, int) or count < len(objects or []) or bool(count) != bool(objects)):
+        raise RuntimeError('unexpected Weaviate object count')
+    return count
+
+
 def wait_until(read, ready, seconds=180):
     deadline = time.monotonic() + seconds
     while True:

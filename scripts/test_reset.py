@@ -84,6 +84,18 @@ class TemporalTransport(unittest.TestCase):
         self.assertIn('--yes', calls[1])
 
 
+class WeaviateTransport(unittest.TestCase):
+    # The pinned provider omits totalResults for an empty index. This literal
+    # wire response owns successful post-reset readback, including omissions.
+    def test_empty_count_is_omitted_only_for_an_empty_object_list(self):
+        from deploy.reset_support import vector_objects
+        self.assertEqual(vector_objects({'objects': []}), 0)
+        self.assertEqual(vector_objects({'objects': [{'id': 'fixture'}], 'totalResults': 1}), 1)
+        for response in ({}, {'objects': [{'id': 'fixture'}]}, {'objects': [], 'totalResults': True}):
+            with self.assertRaisesRegex(RuntimeError, 'Weaviate'):
+                vector_objects(response)
+
+
 class RailwayAuthScope(unittest.TestCase):
     def test_environment_token_cannot_prove_project_volume_isolation(self):
         from deploy.railway.reset import RailwayReset

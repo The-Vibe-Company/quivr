@@ -75,9 +75,11 @@ class RailwayReset:
         return json.loads(self.ssh('api', 'python3 -c ' + shlex.quote(code)))
 
     def index_inventory(self):
-        code = ('import json, urllib.request; c=json.load(open("/tmp/quivr-runtime.json")); '
+        from deploy.reset_support import vector_objects
+        code = ('import json, urllib.request\n' + inspect.getsource(vector_objects)
+                + '\nc=json.load(open("/tmp/quivr-runtime.json")); '
                 'r=urllib.request.urlopen(c["weaviate_url"]+"/v1/objects?limit=1",timeout=10); '
-                'print(json.load(r)["totalResults"])')
+                'print(vector_objects(json.load(r)))')
         return int(self.ssh('api', 'python3 -c ' + shlex.quote(code)).strip())
 
     def preview(self):

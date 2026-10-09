@@ -7,7 +7,7 @@ import sys
 import urllib.request
 
 from deploy.compose.infrastructure import Compose
-from deploy.reset_support import Checkpoint, terminate_workflows
+from deploy.reset_support import Checkpoint, terminate_workflows, vector_objects
 
 ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = {'postgres': ('data', '/var/lib/postgresql/data'),
@@ -85,7 +85,7 @@ class ComposeReset:
         from deploy.reset_storage import inventory
         self.storage = inventory(self.config['s3'])
         with urllib.request.urlopen(self.config['weaviate_url'] + '/v1/objects?limit=1', timeout=10) as response:
-            self.index_count = json.load(response)['totalResults']
+            self.index_count = vector_objects(json.load(response))
         return {'volumes': self.volumes, 'object_store': self.storage,
                 'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
                 'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
@@ -127,7 +127,7 @@ class ComposeReset:
             if storage['objects_at_least'] != 0 or storage['truncated']:
                 raise RuntimeError('new object store is not empty')
             with urllib.request.urlopen(config['weaviate_url'] + '/v1/objects?limit=1', timeout=10) as response:
-                if json.load(response)['totalResults'] != 0:
+                if vector_objects(json.load(response)) != 0:
                     raise RuntimeError('new vector store is not empty')
             postgres = stack.compose('ps', '-q', 'postgres', capture_output=True, text=True).stdout.strip()
             counts = self.adapter.run(['exec', postgres, 'sh', '-c',
