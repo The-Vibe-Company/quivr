@@ -71,7 +71,7 @@ class RailwayIsolation(unittest.TestCase):
                         reset.preview()
                 self.assertTrue(calls)
 
-    # Owns Railway's reset lifecycle when stop acknowledgements are ineffective.
+    # Owns Railway's reset lifecycle when stop is ineffective and create ignores mountPath.
     # Existing preflight refusal tests cannot reach shutdown or artifact restore.
     def test_reset_removes_unresponsive_deployment_and_restores_recorded_artifacts(self):
         from deploy.reset import main
@@ -154,7 +154,8 @@ class RailwayIsolation(unittest.TestCase):
                             for d in deployments.values() for i in d['instances']), 'volume changed before shutdown')
                         volume = {'volumeId': 'replacement-' + str(len(deleted)), 'serviceId': None,
                             'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None,
-                            **{k: v for k, v in variables['input'].items() if k != 'projectId'}}
+                            **{k: v for k, v in variables['input'].items() if k not in ('projectId', 'mountPath')},
+                            'mountPath': '/tmp'}
                         volumes.append(volume)
                         data = {'volumeCreate': {'id': volume['volumeId'], 'projectId': 'project'}}
                     elif 'volumeInstanceUpdate(' in query:
@@ -185,6 +186,9 @@ class RailwayIsolation(unittest.TestCase):
                     self.assertEqual(state['phase'], 'complete')
                     self.assertEqual(redeployed, {role: role + '-original' for role in roles})
                     self.assertEqual(len(deleted), 4)
+                    self.assertEqual({v['serviceId']: v['mountPath'] for v in volumes},
+                        {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data',
+                         'weaviate': '/var/lib/weaviate'})
                     self.assertTrue(all(deployments[current[r]]['instances'][0]['status'] == 'RUNNING' for r in roles))
                 else:
                     self.assertEqual(result, 1)
