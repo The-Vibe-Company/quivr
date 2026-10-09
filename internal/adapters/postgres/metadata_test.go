@@ -44,14 +44,16 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 			t.Fatal(err)
 		}
 		blob := content.Blob{Key: key, SHA256: content.Hash([]byte(key)), Size: int64(len(key))}
+		// Prepared ingestion publishes the projection before materialization.
+		// Its accepted revision already reserves the desired Version identity.
+		values := map[string]any{"metadata.language": language, "metadata.tags": []string{tag}, "metadata.published_at": date}
+		if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, work.VersionID, g.ID, values); err != nil {
+			t.Fatal(err)
+		}
 		if err = stores.Publish(ctx, work, publication(blob, blob)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, scope.Organization, work.RecordID, work.VersionID); err != nil {
-			t.Fatal(err)
-		}
-		values := map[string]any{"metadata.language": language, "metadata.tags": []string{tag}, "metadata.published_at": date}
-		if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, work.VersionID, g.ID, values); err != nil {
 			t.Fatal(err)
 		}
 		return work.RecordID
@@ -115,14 +117,14 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO projection_purges (organization,kind,corpus_id,generation_id,version_id) VALUES ($1,$2,$3,$4,'')`, scope.Organization, item.Kind, a.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, item, 0, false); err != nil {
+	if _, err = purger.RecordPurge(ctx, item, 0, false, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var count int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 6 {
 		t.Fatalf("incomplete purge removed metadata: %d %v", count, err)
 	}
-	if err = purger.RecordPurge(ctx, item, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, item, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var survivingVersion string
@@ -140,7 +142,7 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO projection_purges (organization,kind,corpus_id,generation_id,version_id) VALUES ($1,$2,'','',$3)`, scope.Organization, retrieval.PurgeVersion, survivingVersion); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 0 {
@@ -149,7 +151,7 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, survivingVersion, g.ID, map[string]any{"metadata.language": "en"}); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 1 {

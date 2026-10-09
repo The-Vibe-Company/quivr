@@ -26,6 +26,16 @@ func (s ProjectionStore) SaveIngestionPage(ctx context.Context, org, version, re
 	if err = lockProcessingVersion(ctx, tx, org, version); err != nil {
 		return content.IngestionPage{}, err
 	}
+	var finished bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ingestion_page_completions WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4)
+ OR NOT EXISTS(SELECT 1 FROM record_versions v JOIN records r ON(r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 AND NOT `+deadVersionSQL+`)`, org, version, recipe, spaces).Scan(&finished); err != nil {
+		return content.IngestionPage{}, err
+	}
+	// The in-flight caller still needs its provider result. Canonical artifacts
+	// arbitrate its eventual publication, but this response needs no new page.
+	if finished {
+		return page, tx.Commit(ctx)
+	}
 	if _, err = tx.Exec(ctx, `INSERT INTO ingestion_pages(organization,version_id,recipe,spaces_key,page_number,segments,next_cursor) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, org, version, recipe, spaces, number, page.Segments, page.Next); err != nil {
 		return content.IngestionPage{}, err
 	}
@@ -47,10 +57,22 @@ func (s ProjectionStore) DeleteIngestionPages(ctx context.Context, org, version,
 	if err = lockProcessingVersion(ctx, tx, org, version); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4`, org, version, recipe, inputKey); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO ingestion_page_completions(organization,version_id,recipe,spaces_key)
+ SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM record_versions v JOIN records r ON(r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 AND NOT `+deadVersionSQL+`) ON CONFLICT DO NOTHING`, org, version, recipe, inputKey); err != nil {
+		return err
+	}
+	if _, err = deleteIngestionPageBatch(ctx, tx, org, version, recipe, inputKey, 1000); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 var _ content.IngestionPageStore = ProjectionStore{}
+
+func deleteIngestionPageBatch(ctx context.Context, tx pgx.Tx, org, version, recipe, key string, limit int) (int, error) {
+	tag, err := tx.Exec(ctx, `WITH candidates AS MATERIALIZED (
+ SELECT organization,version_id,recipe,spaces_key,page_number FROM ingestion_pages
+ WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4 ORDER BY page_number LIMIT $5
+ ) DELETE FROM ingestion_pages p USING candidates c WHERE(p.organization,p.version_id,p.recipe,p.spaces_key,p.page_number)=(c.organization,c.version_id,c.recipe,c.spaces_key,c.page_number)`, org, version, recipe, key, limit)
+	return int(tag.RowsAffected()), err
+}
