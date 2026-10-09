@@ -77,6 +77,9 @@ def index_history(sql, known):
                         or any(cmd['subtype']['name'] not in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull') for cmd in stmt['cmds'])
                         or any(node.get('@') == 'FuncCall' for node in nodes(stmt))):
                     known.clear()
+            elif kind == 'VacuumStmt' and not stmt['is_vacuumcmd']:
+                # ANALYZE changes statistics, not index definitions.
+                continue
             elif kind not in ('CreateStmt', 'CreateSeqStmt', 'CreateEnumStmt', 'CommentStmt'):
                 if kind != 'CreateSchemaStmt' or stmt.get('schemaElts'):
                     known.clear()
@@ -114,6 +117,11 @@ def expand_risks(sql, nonunique_indexes=frozenset()):
                         if (target['schemaname'], target['relname']) not in created:
                             risks.append('foreign key into an existing table can constrain previous deletes')
         elif kind in ('CreateSeqStmt', 'CreateEnumStmt'):
+            continue
+        elif kind == 'VacuumStmt' and not stmt['is_vacuumcmd']:
+            # PostgreSQL also parses ANALYZE as VacuumStmt. Statistics-only
+            # analysis preserves writes and can run in the runner transaction;
+            # VACUUM, including VACUUM ANALYZE, remains outside this subset.
             continue
         elif kind == 'IndexStmt':
             table = (stmt['relation']['schemaname'], stmt['relation']['relname'])
