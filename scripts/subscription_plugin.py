@@ -19,6 +19,7 @@ stays in the single ``plugin`` pin:
 Each runs as its own process with the repository's Python Plugin SDK. Every
 oracle is a public HTTP read or a webhook.
 """
+import ci_dependencies
 import plugin_environment
 import json, os, pathlib, shutil, signal, subprocess, time, urllib.request
 
@@ -123,8 +124,11 @@ def prepare(stack):
     if stack.state.get('alerts_plugin', True):
         python = normalizer_plugin.python()
         if subprocess.run([str(python), '-c', 'import alerts.rule'], cwd=normalizer_plugin.SDK, capture_output=True).returncode:
-            subprocess.run([str(python), '-m', 'pip', 'install', '-q', '--disable-pip-version-check',
-                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(ALERTS)], cwd=normalizer_plugin.ROOT, check=True)
+            if ci_dependencies.in_github_actions():
+                ci_dependencies.install_editable(python, ALERTS)
+            else:
+                subprocess.run([str(python), '-m', 'pip', 'install', '-q', '--disable-pip-version-check',
+                                '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(ALERTS)], cwd=normalizer_plugin.ROOT, check=True)
 
 
 def healthy(stack, port='subscription_plugin_port'):

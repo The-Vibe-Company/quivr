@@ -20,6 +20,7 @@ startup refusal of invalid pins and that an unreachable plugin leaves the API
 and worker healthy, then switches the pin to pdf-text. Every oracle is a
 process exit status or a public HTTP read.
 """
+import ci_dependencies
 import plugin_environment
 import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request
 import ports
@@ -117,8 +118,12 @@ def python():
     if not py.exists():
         SDK.mkdir(parents=True, exist_ok=True)
         subprocess.run([sys.executable, '-m', 'venv', str(SDK / 'venv')], check=True)
-        subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
-                        '-c', 'contracts/http/v0/checks/requirements.txt', '-e', 'sdks/python'], cwd=ROOT, check=True)
+        if ci_dependencies.in_github_actions():
+            ci_dependencies.install_locked(py, ROOT / 'scripts' / 'ci-requirements-sdk.txt')
+            ci_dependencies.install_editable(py, ROOT / 'sdks' / 'python')
+        else:
+            subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
+                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', 'sdks/python'], cwd=ROOT, check=True)
     return py
 
 
@@ -135,8 +140,11 @@ def prepare(stack):
     if name in {'pdf-text', 'newsml-g2'}:
         imports = 'import pdf_text, pypdf, cryptography' if name == 'pdf-text' else 'import newsml_g2, defusedxml'
         if subprocess.run([str(python()), '-c', imports], cwd=SDK, capture_output=True).returncode:
-            subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
-                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(directory(stack))], cwd=ROOT, check=True)
+            if ci_dependencies.in_github_actions():
+                ci_dependencies.install_editable(python(), directory(stack))
+            else:
+                subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
+                                '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(directory(stack))], cwd=ROOT, check=True)
     elif name == 'template' and not manifest(stack).exists():
         with (stack.directory / 'normalizer-plugin-init.log').open('w') as log:
             subprocess.run([str(stack.directory / 'quivr'), 'plugin', 'init', NAME, '--dir', str(directory(stack))], cwd=ROOT, check=True, stdout=log, stderr=log)

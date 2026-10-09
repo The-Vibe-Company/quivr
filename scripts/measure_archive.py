@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
+import http.server
 import json
 import os
 import pathlib
 import platform
 import re
 import statistics
+import stat
+import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -23,12 +28,171 @@ import urllib.request
 import uuid
 
 from archive_source import seed
+from fake_api import Fake
+import hosted_embed_plugin
+import ingestion_plugin
 from local import Stack
+import plugin_environment
+import ports
 
 
 UTC = dt.timezone.utc
 WORKER_LOG_RE = re.compile(r"worker\.log(?:\.\d+)?$")
 ROLLUP_WINDOW = "1h"
+
+
+def _running(stack: Stack) -> bool:
+    try:
+        return stack.probe("probe_port") == 204 and stack.probe("worker_probe_port") == 204
+    except (KeyError, OSError):
+        return bool(stack.state.get("pids"))
+
+
+def _acquire_stack_lock(directory: pathlib.Path) -> int:
+    path = directory / ".measure-archive-hosted.lock"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError) as error:
+        os.close(fd)
+        if isinstance(error, BlockingIOError) or getattr(error, "errno", None) in {11, 13}:
+            raise RuntimeError("another hosted archive measurement already owns this stack") from None
+        raise
+    return fd
+
+
+def _release_stack_lock(fd: int | None) -> None:
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _json_config(raw: str) -> dict:
+    return json.loads(raw)
+
+
+def _write_json(path: pathlib.Path, value: dict) -> None:
+    path.write_text(json.dumps(value, indent=2) + "\n")
+
+
+def _package_with_optional_batch_wait(
+    binary: pathlib.Path,
+    directory: pathlib.Path,
+    endpoint: str,
+    batch_wait_ms: int | None,
+):
+    manifest, configuration, space = hosted_embed_plugin.package(binary, directory, endpoint, "cohere")
+    if batch_wait_ms is None:
+        return manifest, configuration, space
+    configuration["batch_wait_ms"] = batch_wait_ms
+    config_path = manifest.parent / "configuration.json"
+    _write_json(config_path, configuration)
+    with manifest.open("w") as output:
+        subprocess.run([str(binary), "configure", str(config_path)], stdout=output, check=True)
+    declaration = json.loads(manifest.read_text())
+    space = next(iter(declaration["contributions"]["ingestion"]["spaces"]))
+    return manifest, configuration, space
+
+
+class _ProviderProxy(http.server.BaseHTTPRequestHandler):
+    """Delay and forward provider requests to the per-run loopback fake."""
+
+    server_version = "QuivrMeasurementProxy/1"
+
+    def log_message(self, *_args):
+        return
+
+    def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler API
+        started = time.perf_counter()
+        status = 502
+        body = b'{"error":"provider proxy failure"}'
+        item_count = 0
+        input_bytes = 0
+        mode = ""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            request_body = self.rfile.read(length)
+            request = json.loads(request_body)
+            values = request.get("texts", request.get("input", []))
+            if not isinstance(values, list):
+                raise ValueError("provider input is not a list")
+            item_count = len(values)
+            input_bytes = sum(len(str(value).encode()) for value in values)
+            mode = request.get("input_type", "")
+            time.sleep(self.server.provider_latency_ms / 1000)
+            target = urllib.request.Request(
+                self.server.fake_url + self.path,
+                method="POST",
+                data=request_body,
+                headers={"Content-Type": "application/json", "api-key": "fake-key"},
+            )
+            with urllib.request.urlopen(target, timeout=30) as response:
+                body = response.read()
+                status = response.status
+                content_type = response.headers.get("Content-Type", "application/json")
+        except urllib.error.HTTPError as error:
+            status = error.code
+            content_type = "application/json"
+            try:
+                body = error.read()
+            except OSError:
+                body = b'{"error":"provider fake HTTP error"}'
+        except Exception:
+            content_type = "application/json"
+        self.server.record({
+            "ts": _iso_now(),
+            "items": item_count,
+            "bytes": input_bytes,
+            "mode": mode,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "status": status,
+        })
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+
+def _start_proxy(fake: Fake, latency_ms: int, log_path: pathlib.Path):
+    fake_url = fake.url
+    hostname = urllib.parse.urlsplit(fake_url).hostname
+    if hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("embedding fake did not bind to loopback")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("")
+    lock = threading.Lock()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ProviderProxy)
+    server.fake_url = fake_url
+    server.provider_latency_ms = latency_ms
+    server.log_path = log_path
+    server.log_lock = lock
+
+    def record(item):
+        with lock:
+            with log_path.open("a") as output:
+                output.write(json.dumps(item, sort_keys=True) + "\n")
+                output.flush()
+
+    server.record = record
+    thread = threading.Thread(target=server.serve_forever, name="archive-provider-proxy", daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _stop_proxy(server, thread):
+    if server is None:
+        return
+    server.shutdown()
+    server.server_close()
+    if thread is not None:
+        thread.join(timeout=10)
 
 
 def _now() -> dt.datetime:
@@ -37,6 +201,10 @@ def _now() -> dt.datetime:
 
 def _iso(value: dt.datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _iso_now() -> str:
+    return _iso(_now())
 
 
 def _parse_time(value) -> dt.datetime | None:
@@ -365,32 +533,8 @@ def _stage_evidence(report: dict, worker: dict, provider: dict | None) -> dict:
     }
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stack", required=True, help="Running local stack name under .scratch/")
-    parser.add_argument("--items", type=int, default=5000, help="Synthetic unique filler members, plus three revisions")
-    parser.add_argument("--batch-size", type=int, default=100)
-    parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--timeout", type=int, default=600)
-    parser.add_argument(
-        "--provider-log",
-        type=pathlib.Path,
-        help="Optional JSONL provider proxy log to summarize in stage evidence",
-    )
-    args = parser.parse_args(argv)
-    if (
-        not re.fullmatch(r"[a-z0-9-]+", args.stack)
-        or args.items < 1
-        or not 1 <= args.batch_size <= 1000
-        or not 1 <= args.concurrency <= 32
-        or args.timeout < 1
-    ):
-        parser.error("invalid stack, item count, batch size, concurrency or timeout")
-    directory = pathlib.Path(__file__).resolve().parents[1] / ".scratch" / args.stack
-    if not (directory / "config.json").exists():
-        parser.error("start the named local stack first")
-    stack = Stack(args.stack)
-    run = uuid.uuid4().hex[:12]
+def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | None = None) -> dict:
+    directory = stack.directory
     # Fresh bytes prevent repeated runs from measuring verified-Blob cache hits.
     private = seed(stack, bucket="synthetic-archive-" + run, count=args.items, marker=run)
     fixture = json.loads(private.read_text())
@@ -518,7 +662,8 @@ def main(argv=None):
     after_rollups = _rollup_snapshot(api)
     run_record_ids = seen_accepted_records | seen_materialized | seen_searchable | seen_enriched
     worker = _worker_outcomes(directory, run_started_wall, finished_wall, run_record_ids)
-    provider = _read_provider_log(args.provider_log.resolve() if args.provider_log else None)
+    provider_path = provider_log or args.provider_log
+    provider = _read_provider_log(provider_path.resolve() if provider_path else None)
     accepted_rate = expected / accepted_at if accepted_at else 0
     ready_rate = expected_records / ready_at if ready_at else 0
     enriched_rate = expected_records / enriched_at if enriched_at else 0
@@ -594,6 +739,11 @@ def main(argv=None):
         },
         "timings_window": "1h, Organization-wide; before/after deltas require an exclusive Organization workload",
     }
+    if args.hosted_fake:
+        report["hosted_fake"] = {
+            "provider_latency_ms": args.provider_latency_ms,
+            "batch_wait_ms": args.batch_wait_ms,
+        }
     report["stage_evidence"] = _stage_evidence(report, worker, provider)
     if provider is not None:
         report["provider_log"] = provider
@@ -614,6 +764,171 @@ def main(argv=None):
     if report["status"] != "complete":
         raise SystemExit(1)
     return report
+
+
+def _run_hosted_fake(args, stack: Stack, run: str) -> dict:
+    directory = stack.directory / "measure-hosted"
+    directory.mkdir(parents=True, exist_ok=True)
+    provider_log = directory / f"provider-calls-{run}.jsonl"
+    plugin_log = directory / f"plugin-{run}.log"
+    lock_fd = _acquire_stack_lock(stack.directory)
+    try:
+        original = {}
+        for name in ("config.json", "worker.json"):
+            path = stack.directory / name
+            original[name] = {"text": path.read_text(), "mode": stat.S_IMODE(path.stat().st_mode)}
+    except BaseException:
+        _release_stack_lock(lock_fd)
+        raise
+
+    binary = None
+    manifest = None
+    plugin = None
+    fake = None
+    proxy = None
+    proxy_thread = None
+    stack_was_stopped = False
+    temporary_processes_started = False
+    configs_modified = False
+    measurement = None
+    measurement_error = None
+    cleanup_errors = []
+    try:
+        # This helper is deliberately the repository's shared Go fake. No
+        # provider address from outside loopback is accepted by _start_proxy.
+        binary = hosted_embed_plugin.build(directory)
+        fake = Fake("embedding")
+        proxy, proxy_thread = _start_proxy(fake, args.provider_latency_ms, provider_log)
+        endpoint = f"http://127.0.0.1:{proxy.server_port}"
+        manifest, configuration, space = _package_with_optional_batch_wait(
+            binary, directory / f"pin-{run}", endpoint, args.batch_wait_ms
+        )
+        env = {
+            **plugin_environment.inherited(),
+            "QUIVR_PLUGIN_HOST": "127.0.0.1",
+            "QUIVR_PLUGIN_PORT": str(ports.allocate()),
+            "QUIVR_PLUGIN_MANIFEST": str(manifest),
+            "EMBED_API_KEY": "fake-key",
+        }
+        with plugin_log.open("w") as output:
+            plugin = subprocess.Popen(
+                [str(binary)],
+                env=env,
+                stdout=output,
+                stderr=output,
+                start_new_session=True,
+            )
+        ingestion_plugin.await_healthy(plugin, int(env["QUIVR_PLUGIN_PORT"]), plugin_log)
+
+        # Mark this before the first write so a partial configuration update is
+        # restored if the second file cannot be written.
+        configs_modified = True
+        for name, saved in original.items():
+            config = _json_config(saved["text"])
+            config["ingestion"] = {"default": "hosted.embed"}
+            config.setdefault("plugins", []).append({
+                "manifest": str(manifest),
+                "endpoint": f"http://127.0.0.1:{env['QUIVR_PLUGIN_PORT']}",
+                "configuration": configuration,
+                "spaces": {space: "served"},
+            })
+            path = stack.directory / name
+            _write_json(path, config)
+            path.chmod(0o600)
+        stack.stop_processes()
+        stack_was_stopped = True
+        stack.start_processes()
+        temporary_processes_started = True
+        measurement = _measure_archive(args, stack, run, provider_log=provider_log)
+    except BaseException as error:
+        measurement_error = error
+    finally:
+        if plugin is not None:
+            try:
+                ingestion_plugin.stop_plugin(plugin)
+            except BaseException as error:
+                cleanup_errors.append(f"plugin cleanup: {type(error).__name__}")
+        try:
+            _stop_proxy(proxy, proxy_thread)
+        except BaseException as error:
+            cleanup_errors.append(f"provider proxy cleanup: {type(error).__name__}")
+        if stack_was_stopped or temporary_processes_started or configs_modified:
+            try:
+                stack.stop_processes()
+            except BaseException as error:
+                cleanup_errors.append(f"temporary stack stop: {type(error).__name__}")
+            for name, saved in original.items():
+                try:
+                    path = stack.directory / name
+                    path.write_text(saved["text"])
+                    path.chmod(saved["mode"])
+                except BaseException as error:
+                    cleanup_errors.append(f"restore {name}: {type(error).__name__}")
+            try:
+                stack.start_processes()
+            except BaseException as error:
+                cleanup_errors.append(f"restore stack start: {type(error).__name__}")
+        if fake is not None:
+            try:
+                fake.close()
+            except BaseException as error:
+                cleanup_errors.append(f"embedding fake cleanup: {type(error).__name__}")
+        _release_stack_lock(lock_fd)
+
+    if measurement_error is not None:
+        raise measurement_error
+    if cleanup_errors:
+        raise RuntimeError("measurement cleanup failed: " + ", ".join(cleanup_errors))
+    return measurement
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stack", required=True, help="Running local stack name under .scratch/")
+    parser.add_argument("--hosted-fake", action="store_true", help="Measure hosted.embed through the loopback fake")
+    parser.add_argument("--items", type=int, default=None, help="Synthetic unique filler members, plus three revisions")
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=None)
+    parser.add_argument("--timeout", type=int, default=None)
+    parser.add_argument("--provider-latency-ms", type=int, default=500)
+    parser.add_argument(
+        "--batch-wait-ms",
+        type=int,
+        default=None,
+        help="Optional hosted.embed document collection window (0..100 ms); omitted uses the plugin default",
+    )
+    parser.add_argument(
+        "--provider-log",
+        type=pathlib.Path,
+        help="Optional JSONL provider proxy log to summarize in stage evidence",
+    )
+    args = parser.parse_args(argv)
+    hosted_defaults = args.hosted_fake
+    args.items = 5000 if args.items is None else args.items
+    args.batch_size = (500 if hosted_defaults else 100) if args.batch_size is None else args.batch_size
+    args.concurrency = (32 if hosted_defaults else 8) if args.concurrency is None else args.concurrency
+    args.timeout = (1200 if hosted_defaults else 600) if args.timeout is None else args.timeout
+    if (
+        not re.fullmatch(r"[a-z0-9-]+", args.stack)
+        or args.items < 1
+        or not 1 <= args.batch_size <= 1000
+        or not 1 <= args.concurrency <= 32
+        or args.timeout < 1
+        or args.provider_latency_ms < 0
+        or args.batch_wait_ms is not None
+        and not 0 <= args.batch_wait_ms <= 100
+    ):
+        parser.error("invalid stack, item count, batch size, concurrency, timeout, provider latency or batch wait")
+    directory = pathlib.Path(__file__).resolve().parents[1] / ".scratch" / args.stack
+    if not (directory / "config.json").exists():
+        parser.error("start the named local stack first")
+    stack = Stack(args.stack)
+    if args.hosted_fake and not _running(stack):
+        parser.error("the named local stack must be running")
+    run = uuid.uuid4().hex[:12]
+    if args.hosted_fake:
+        return _run_hosted_fake(args, stack, run)
+    return _measure_archive(args, stack, run)
 
 
 if __name__ == "__main__":

@@ -160,10 +160,23 @@ def check_python_plugins(root, dockerfile):
         if result.returncode:
             return f'{dockerfile.name}: cannot prepare the Python plugins environment:\n{result.stderr.strip()}'
         python = str(environment / 'bin' / 'python')
-        result = subprocess.run([python, '-m', 'pip', 'install', *args], cwd=context, capture_output=True, text=True)
+        if os.environ.get('GITHUB_ACTIONS') == 'true' and '--no-index' not in args:
+            # Validate image package metadata offline against the locked CI inputs.
+            # Keep resolution enabled: a new/missing dependency must fail this guard.
+            locked = subprocess.run([sys.executable, str(ROOT / 'scripts/ci_fetch.py'), '--', python,
+                                     '-m', 'pip', 'install', '--require-hashes', '-r',
+                                     str(ROOT / 'scripts/ci-requirements-sdk.txt')],
+                                    cwd=ROOT, capture_output=True, text=True)
+            if locked.returncode:
+                return f'{dockerfile.name}: cannot prepare locked image dependencies:\n{locked.stdout}{locked.stderr}'
+            args += ['--no-index', '--no-build-isolation']
+        command = [python, '-m', 'pip', 'install', *args]
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            command = [sys.executable, str(ROOT / 'scripts/ci_fetch.py'), '--', *command]
+        result = subprocess.run(command, cwd=context, capture_output=True, text=True)
         if result.returncode:
             return (f'{dockerfile.name}: the plugins stage cannot install its Python packages.\n'
-                    f'{result.stderr.strip()}\nFix: COPY each package and constraint file used by pip into the plugins stage.')
+                    f'{(result.stderr or result.stdout).strip()}\nFix: COPY each package and constraint file used by pip into the plugins stage.')
         result = subprocess.run([python, '-m', 'pip', 'check'], cwd=context, capture_output=True, text=True)
         if result.returncode:
             return f'{dockerfile.name}: incompatible Python plugin dependencies:\n{result.stdout.strip()}'
@@ -193,8 +206,15 @@ def check_connectors(root, dockerfile, go):
             if not (context / plugin / 'go.mod').exists():
                 return (f'{dockerfile.name}: the {CONNECTOR_STAGE} stage does not copy {plugin}.\n'
                         f'Fix: COPY {plugin} into the {CONNECTOR_STAGE} stage.')
+            environment = {**os.environ, 'CGO_ENABLED': '0'}
+            if os.environ.get('GITHUB_ACTIONS') == 'true':
+                fetched = subprocess.run([sys.executable, str(ROOT/'scripts/ci_fetch.py'), '--', go, 'mod', 'download'],
+                                         cwd=root / plugin, capture_output=True, text=True)
+                if fetched.returncode:
+                    return f'{dockerfile.name}: cannot fetch pinned {plugin} dependencies:\n{fetched.stdout}{fetched.stderr}'
+                environment['GOPROXY'] = 'off'
             result = subprocess.run([go, 'build', '-o', os.devnull, '.'], cwd=context / plugin,
-                                    capture_output=True, text=True, env={**os.environ, 'CGO_ENABLED': '0'})
+                                    capture_output=True, text=True, env=environment)
             if result.returncode != 0:
                 return (f'{dockerfile.name}: the {CONNECTOR_STAGE} stage cannot build {plugin}.\n'
                         f'{result.stderr.strip()}\n'
@@ -290,7 +310,9 @@ def main(argv):
     failure = check(ROOT, dockerfile, os.environ.get('GO', 'go'))
     if not failure and len(argv) <= 1:
         failure = (check_engine(ROOT, ENGINE_DOCKERFILE, os.environ.get('GO', 'go'))
-                   or check_web(ROOT, WEB_DOCKERFILE) or check_python(ROOT, TEI_DOCKERFILE, TEI_ENTRY))
+                   or check_web(ROOT, WEB_DOCKERFILE) or check_python(ROOT, TEI_DOCKERFILE, TEI_ENTRY)
+                   or check_python(ROOT, DOCKERFILE, 'scripts/prepare_tokenizer.py')
+                   or check_python(ROOT, ROOT/'deploy/images/plugin.Dockerfile', 'scripts/prepare_tokenizer.py'))
     if failure:
         print(failure, file=sys.stderr)
         return 1

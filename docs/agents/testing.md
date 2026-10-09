@@ -71,10 +71,14 @@ artifacts are for depth, not for finding the failure.
 
 ## In CI
 
-- A pull request runs one quick lane (checks, unit, adapter) and the full
-  local-stack verification. Both must pass.
-- The full verification runs in parallel parts, each with its own stack.
-- Measurements run nightly, and on pull requests that change what they measure.
+- Every PR runs guards (docs lint/denylist), Go/Python units and small-fixture
+  PostgreSQL adapters, including EXPLAIN-shape proofs.
+- One merge-base selector runs the affected contracts, SDKs, eval correctness,
+  stack parts, images and documentation site. Unknown inputs run the full suite.
+- `ci-full` opts into every lane. Main/releases run full verification on isolated stacks.
+- Aggregates accept irrelevant skips; selected failures, cancellations or skips fail.
+  Failure artifacts have byte/file caps and three-day retention. Success keeps summaries.
+- Measurements run locally; Weaviate upgrades and vector parity run nightly.
 
 The method for pruning existing tests area by area is the test-audit campaign
 used in THE-737: a per-test ledger, one owner per contract, and one deliberate

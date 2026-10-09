@@ -29,6 +29,8 @@ ENTRYPOINT ["/usr/local/bin/plugin"]
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-build
 WORKDIR /src
 COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
+COPY scripts/ci-constraints.txt /tmp/ci-constraints.txt
+ENV PIP_CONSTRAINT=/tmp/ci-constraints.txt
 COPY sdks/python ./sdks/python
 COPY plugins ./plugins
 ARG PLUGIN
@@ -55,11 +57,9 @@ RUN python -m venv /opt/tokenizer \
 
 # The interpreter is required at runtime; package installers and headers are not.
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-runtime
-# Apply Debian security fixes newer than the pinned interpreter image before
-# removing package managers. Every Python plugin and core-ingest shares this.
-RUN apt-get update \
- && apt-get upgrade -y --no-install-recommends \
- && rm -rf /var/lib/apt/lists/* \
+# Security fixes come from reviewed base-digest updates. The current vulnerability
+# database still gates every built image; avoid moving apt inputs in required CI.
+RUN rm -rf /var/lib/apt/lists/* \
       /usr/local/lib/python3.12/site-packages/pip* \
       /usr/local/lib/python3.12/site-packages/setuptools* \
       /usr/local/lib/python3.12/site-packages/pkg_resources* \

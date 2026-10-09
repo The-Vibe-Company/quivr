@@ -1,8 +1,8 @@
-name: Ingestion vector parity
-on:
+name: Nightly correctness proofs
+'on':
   schedule:
-    - cron: '43 3 * * *'
-  workflow_dispatch:
+  - cron: 43 3 * * *
+  workflow_dispatch: null
 permissions:
   contents: read
 concurrency:
@@ -13,38 +13,64 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-python@v7
-        id: python
-        with:
-          python-version: '3.12'
-      - uses: actions/cache@v6
-        with:
-          path: |
-            .scratch/e5-model
-            .scratch/tokenizer
-          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
-      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
-      # A parity failure is a job failure. Publishing evidence always runs.
-      - run: make verify part=ingest-parity
-      - uses: actions/upload-artifact@v7
-        id: parity-artifact
-        if: always()
-        with:
-          name: ingestion-vector-parity
-          include-hidden-files: true
-          path: |
-            .scratch/quivr-verify-ingest-parity-*/report.json
-            .scratch/quivr-verify-ingest-parity-*/report.md
-            .scratch/quivr-verify-ingest-parity-*/readiness.json
-            .scratch/quivr-verify-ingest-parity-*/core-ingest-parity.log
-            .scratch/quivr-verify-ingest-parity-*/core-ingest-parity.jsonl
-            .scratch/quivr-verify-ingest-parity-*/api*.log*
-            .scratch/quivr-verify-ingest-parity-*/worker*.log*
-            .scratch/quivr-verify-ingest-parity-*/tei.log
-          if-no-files-found: error
-      - if: always()
-        run: python3 scripts/ci_summary.py "${{ steps.parity-artifact.outputs.artifact-url }}"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: go.mod
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: python
+      with:
+        python-version: 3.12.15
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: |
+          .scratch/e5-model
+          .scratch/tokenizer
+        key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json',
+          'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+    - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
+        && df -h /
+    - run: make verify part=ingest-parity
+    - name: Pack bounded failure evidence
+      if: failure()
+      run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: failure()
+      id: failure-artifact
+      with:
+        name: nightly-vectors
+        path: ${{ runner.temp }}/failure.tar.gz
+        if-no-files-found: ignore
+        retention-days: 3
+        compression-level: 0
+    - if: always()
+      run: python3 scripts/ci_summary.py "${{ steps.failure-artifact.outputs.artifact-url }}"
+  weaviate-upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: go.mod
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: 3.12.15
+    - run: python3 scripts/weaviate_upgrade.py
+    - name: Pack bounded failure evidence
+      if: failure()
+      run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: failure()
+      id: failure-artifact
+      with:
+        name: weaviate-upgrade
+        path: ${{ runner.temp }}/failure.tar.gz
+        if-no-files-found: ignore
+        retention-days: 3
+        compression-level: 0
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/scripts/ci-constraints.txt
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_RETRIES: '0'
+  npm_config_fetch_retries: '0'

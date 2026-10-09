@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prepare pinned offline tokenizers for core.ingest or hosted models; never download weights or execute model code."""
-import argparse, hashlib, json, pathlib, platform, re, subprocess, sys, tempfile, urllib.request, venv
+import argparse, hashlib, json, os, pathlib, platform, re, subprocess, sys, tempfile, urllib.request, venv
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 PROFILE=json.loads((ROOT/'plugins/core-ingest/profile.json').read_text())
 # The hosts the local stack (make dev) runs on, each with the hash-pinned tokenizers wheel it installs.
@@ -22,7 +22,12 @@ def prepare_runtime(hosted=False):
     check=subprocess.run([str(python),'-c','import tokenizers;assert tokenizers.__version__=="0.23.2"'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if check.returncode:
         options = {'stdout': sys.stderr} if hosted else {}
-        subprocess.run([str(python),'-m','pip','install','--only-binary=:all:','--no-deps','--require-hashes','-r',str(pinned)],check=True, **options)
+        command = [str(python), '-m', 'pip', 'install', '--only-binary=:all:',
+                   '--no-deps', '--require-hashes', '-r', str(pinned)]
+        # Docker copies this script alone; use the repository fetch boundary only in CI checkouts.
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            command = [sys.executable, str(ROOT/'scripts/ci_fetch.py'), '--', *command]
+        subprocess.run(command, check=True, **options)
     return python
 
 def prepare():

@@ -566,7 +566,9 @@ def contract_python():
     venv_dir=ROOT/'.scratch/contracts/venv'
     if not (venv_dir/'bin/python').exists():run(['python3','-m','venv',str(venv_dir)])
     # Idempotent and quick when satisfied; recovers a half-installed venv and follows requirement changes.
-    run([str(venv_dir/'bin/pip'),'-q','install','-r','contracts/http/v0/checks/requirements.txt'])
+    requirements = (['--require-hashes', '-r', str(ROOT/'contracts/http/v0/checks/requirements-lock.txt')]
+                    if os.environ.get('GITHUB_ACTIONS') == 'true' else ['-r', 'contracts/http/v0/checks/requirements.txt'])
+    run([sys.executable, str(ROOT/'scripts/ci_fetch.py'), '--', str(venv_dir/'bin/pip'), 'install', '-q', *requirements])
     return str(venv_dir/'bin/python')
 
 def validate_captures(stack):
@@ -595,7 +597,6 @@ def parts():
     from connector_x_restart import verify as verify_connector_x_restart
     from connector_x_push import verify as verify_connector_x_push
     from lifecycle import verify as verify_lifecycle
-    from weaviate_upgrade import verify as verify_weaviate_upgrade
     # Every part first restarts PostgreSQL under load and grants the scoped key its Corpus.
     setup=[step('persistence_across_restart',persistence)]
     return {
@@ -604,7 +605,6 @@ def parts():
             acceptance('core_acceptance','TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch'),
             # A cold query encoder and a fresh api answer the first semantic and hybrid searches (THE-813).
             step('first_search_after_start',verify_first_search),
-            step('weaviate_persistence_upgrade',verify_weaviate_upgrade),
             step('adapter_integration',adapters),
             # Tokenizer-only golden parity and certification; full vectors run in ingest-parity nightly.
             step('core_ingest_plugin',core_ingest_plugin.verify),
@@ -704,7 +704,9 @@ DEMO='demo'
 def extra_parts():
     """Explicit stack proofs outside the default PR lane."""
     from lifecycle import verify as verify_lifecycle
-    return {'ingest-parity':[step('core_ingest_vector_parity',core_ingest_plugin.parity)],
+    from weaviate_upgrade import verify as verify_weaviate_upgrade
+    return {'weaviate-upgrade':[step('weaviate_persistence_upgrade',verify_weaviate_upgrade)],
+            'ingest-parity':[step('core_ingest_vector_parity',core_ingest_plugin.parity)],
             'lifecycle':[step('lifecycle',verify_lifecycle)]}
 
 def verify(stack,steps,part):
