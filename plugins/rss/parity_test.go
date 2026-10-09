@@ -192,6 +192,8 @@ func TestCutoverFromABuiltInCheckpoint(t *testing.T) {
 	if _, changed := delivered["https://news.example.org/first"]; !changed {
 		t.Fatal("the changed item was not in the built-in delivery")
 	}
+	// A fresh response must converge through revision tracking, not a 304.
+	serve([]byte(testdata(t, "rss2-v2.xml")), `"v3"`)
 	settled, err := feed{}.Fetch(context.Background(), request(t, allowPrivate, cfg(srv.URL+"/feed"), "", cp(page), builtIn.Now.Add(2*time.Hour)))
 	if err != nil {
 		t.Fatal(err)

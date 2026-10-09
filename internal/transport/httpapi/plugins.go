@@ -3,13 +3,13 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
@@ -66,8 +66,21 @@ func (a *API) handleActivatePlugin(w http.ResponseWriter, r *http.Request, scope
 		writeError(w, publicerr.NotFound, nil)
 		return
 	}
-	plan, err := a.Plugins.Activate(r.Context(), scope, registrationID)
-	sendPlan(w, plan, err)
+	{
+		command := routing.Command{Kind: routing.KindActivation, Target: registrationID}
+		a.requestRouting(w, r, scope, command, func() (routing.Command, error) {
+			var in struct {
+				Key string `json:"idempotency_key"`
+			}
+			if r.ContentLength != 0 && !decodeInto(w, r, a.schemas["PluginActivationRequest"], &in) {
+				return command, errResponseWritten
+			}
+			command.Key = in.Key
+			return command, nil
+		})
+		return
+	}
+
 }
 
 // pluginRegistrationRequest is the registration command; configuration stays
@@ -122,20 +135,18 @@ type pluginRollbackRequest struct {
 
 func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in pluginRollbackRequest
-	plan, err := a.Plugins.Rollback(r.Context(), scope, registry.RollbackRequest{}, func() (registry.RollbackRequest, error) {
-		if !decodeInto(w, r, a.schemas["PipelinePlanRollbackRequest"], &in) {
-			return registry.RollbackRequest{}, errResponseWritten
-		}
-
-		return registry.RollbackRequest{Key: in.IdempotencyKey, Plan: in.PlanID, PinnedWork: in.PinnedWork}, nil
-	})
-	if errors.Is(err, errResponseWritten) {
+	{
+		command := routing.Command{Kind: routing.KindRollback}
+		a.requestRouting(w, r, scope, command, func() (routing.Command, error) {
+			if !decodeInto(w, r, a.schemas["PipelinePlanRollbackRequest"], &in) {
+				return command, errResponseWritten
+			}
+			command.Target, command.Key, command.PinnedWork = in.PlanID, in.IdempotencyKey, in.PinnedWork
+			return command, nil
+		})
 		return
 	}
-	if err == nil {
-		slog.InfoContext(r.Context(), "pipeline plan rolled back", "plan", plan.ID, "previous", plan.PreviousPlanID, "pinned_work", in.PinnedWork)
-	}
-	sendPlan(w, plan, err)
+
 }
 
 // maxPlanList bounds one read of the plan history; earlier plans stay

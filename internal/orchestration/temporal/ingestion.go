@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"go.temporal.io/sdk/activity"
@@ -141,6 +142,9 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		if conns != nil {
 			registerConnectors(w, conns, pins)
 		}
+		if len(options) > 0 && options[0].Routing != nil {
+			registerRouting(w, *options[0].Routing)
+		}
 		if backfiller != nil {
 			registerBackfill(w, *backfiller, pins)
 		}
@@ -209,6 +213,7 @@ func heartbeating(ctx context.Context, interval time.Duration, run func() error)
 
 // RuntimeOptions carries the process grace budget to all activity workers.
 type RuntimeOptions struct {
+	Routing       *routing.Service
 	ShutdownGrace time.Duration
 	Queues        workqueue.Config
 	Tracker       workqueue.Tracker

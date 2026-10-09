@@ -20,7 +20,7 @@ import (
 // dispatching a current-plan job into that old space would recreate retries.
 const currentServingRecipeSQL = `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance
  FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=$3 JOIN active_pipeline_plan a ON true
+ JOIN ` + effectiveGenerationsSQL + ` g ON g.id=$3 JOIN active_pipeline_plan a ON true
  JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
  JOIN pipeline_plan_roles rr ON rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id
  WHERE v.organization=$1 AND v.id=$2`
@@ -81,10 +81,10 @@ func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID strin
 	err := tx.QueryRow(ctx, `SELECT v.record_id,g.id,pr.plugin_id,pr.id,a.plan_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance,g.spaces,COALESCE((SELECT promoted_at::text FROM vector_space_promotions WHERE owner_plugin_id=pr.plugin_id),'')
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
+ JOIN `+effectiveGenerationsSQL+` g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  JOIN active_pipeline_plan a ON true JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
  JOIN pipeline_plan_roles rr ON rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id
- WHERE v.organization=$1 AND v.id=$2 AND r.desired_version_id=v.id AND (NOT v.baseline_ready OR v.enrichment_error=$3) AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID, content.CodeRebuildRequired).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &recipe, &provenance, &generationSpaces, &modelSelection)
+ WHERE v.organization=$1 AND v.id=$2 AND (r.desired_version_id=v.id OR r.current_version_id=v.id) AND (NOT v.baseline_ready OR v.enrichment_error=$3 OR EXISTS(SELECT FROM routing_coverage_gaps gap JOIN routing_switch_state st ON st.singleton AND gap.epoch=st.epoch WHERE gap.organization=r.organization AND gap.record_id=r.id AND gap.version_id=v.id)) AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID, content.CodeRebuildRequired).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &recipe, &provenance, &generationSpaces, &modelSelection)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -193,11 +193,11 @@ func (s ServingProjectionStore) ServingProjectionDispatched(ctx context.Context,
 
 func servingProjectionEligible(ctx context.Context, q querier, j content.IngestionEvaluation) (bool, error) {
 	var eligible bool
-	err := q.QueryRow(ctx, `SELECT r.desired_version_id=v.id AND NOT r.withdrawn AND NOT v.quarantined AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
+	err := q.QueryRow(ctx, `SELECT (r.desired_version_id=v.id OR r.current_version_id=v.id) AND NOT r.withdrawn AND NOT v.quarantined AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
  AND g.id=$3 AND EXISTS(SELECT 1 FROM jsonb_array_elements(g.spaces) sp WHERE sp->>'owner_plugin_id'=$4 AND sp->>'role'='served' AND sp->>'id'=ANY($5::text[])) AND COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')=$4
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+` WHERE v.organization=$1 AND v.id=$2`, j.Organization, j.VersionID, j.GenerationID, j.PluginID, j.Spaces).Scan(&eligible)
+ JOIN `+effectiveGenerationsSQL+` g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+` WHERE v.organization=$1 AND v.id=$2`, j.Organization, j.VersionID, j.GenerationID, j.PluginID, j.Spaces).Scan(&eligible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -345,7 +345,7 @@ func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Contex
 		return nil
 	}
 	var carriesPrimary bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jsonb_array_elements(spaces) sp WHERE sp->>'owner_plugin_id'=$2 AND sp->>'role'='served' AND sp->>'id'=ANY($3::text[])) FROM projection_generations WHERE id=$1`, j.GenerationID, j.PluginID, j.Spaces).Scan(&carriesPrimary); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jsonb_array_elements(spaces) sp WHERE sp->>'owner_plugin_id'=$2 AND sp->>'role'='served' AND sp->>'id'=ANY($3::text[])) FROM `+effectiveGenerationsSQL+` WHERE id=$1`, j.GenerationID, j.PluginID, j.Spaces).Scan(&carriesPrimary); err != nil {
 		return err
 	}
 	if !carriesPrimary || len(j.Spaces) == 0 {
@@ -371,6 +371,9 @@ func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Contex
 	if _, err = tx.Exec(ctx, `UPDATE projection_coverage SET role='served' WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4`, j.Organization, j.VersionID, g.ID, j.PluginID); err != nil {
 		return err
 	}
+	if err = resolveRoutingGap(ctx, tx, j.Organization, j.VersionID, g.ID, j.PluginID); err != nil {
+		return err
+	}
 	var ready, enriched bool
 	if err = tx.QueryRow(ctx, `SELECT baseline_ready,enriched_at IS NOT NULL FROM record_versions WHERE organization=$1 AND id=$2`, j.Organization, j.VersionID).Scan(&ready, &enriched); err != nil {
 		return err
@@ -378,7 +381,7 @@ func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Contex
 	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+`,enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, j.Organization, j.VersionID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, j.Organization, j.RecordID, j.VersionID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2 AND (desired_version_id=$3 OR current_version_id=$3)`, j.Organization, j.RecordID, j.VersionID); err != nil {
 		return err
 	}
 	var corpusID string

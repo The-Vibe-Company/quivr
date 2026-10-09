@@ -2469,8 +2469,11 @@ type NormalizationProvenance struct {
 // NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
 type NormalizationProvenanceContribution string
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused. vector_space_promotion, plugin_activation and plugin_rollback carry admin, with no corpus_id. Their counters records_scanned, versions_missing and segments_missing describe the preflight; required_missing excludes gaps retained from an earlier rollback. Success publishes routing; rollback recovery continues in the background after success.
 type Operation struct {
+	// Admin Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+	Admin *OperationAdmin `json:"admin,omitempty"`
+
 	// Backfill What a backfill fills and how far it got.
 	Backfill            *OperationBackfill `json:"backfill,omitempty"`
 	CorpusId            *string            `json:"corpus_id,omitempty"`
@@ -2493,6 +2496,15 @@ type Operation struct {
 
 // OperationState defines model for Operation.State.
 type OperationState string
+
+// OperationAdmin Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+type OperationAdmin struct {
+	PlanId          *string `json:"plan_id,omitempty"`
+	PreviousPlanId  *string `json:"previous_plan_id,omitempty"`
+	PreviousSpaceId *string `json:"previous_space_id,omitempty"`
+	ServedSpaceId   *string `json:"served_space_id,omitempty"`
+	Target          *string `json:"target,omitempty"`
+}
 
 // OperationBackfill What a backfill fills and how far it got.
 type OperationBackfill struct {
@@ -2588,6 +2600,11 @@ type PipelinePlanRollbackRequest struct {
 
 // PipelinePlanRollbackRequestPinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
 type PipelinePlanRollbackRequestPinnedWork string
+
+// PluginActivationRequest defines model for PluginActivationRequest.
+type PluginActivationRequest struct {
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+}
 
 // PluginCallStats defines model for PluginCallStats.
 type PluginCallStats struct {
@@ -3602,26 +3619,11 @@ type VectorSpaceList struct {
 	Segments int `json:"segments"`
 }
 
-// VectorSpacePromotion defines model for VectorSpacePromotion.
-type VectorSpacePromotion struct {
-	// CorporaIncomplete Corpora whose routed generation lacks the space or a vector in it.
-	CorporaIncomplete int `json:"corpora_incomplete"`
-
-	// GenerationsSwitched Generations that now serve the space.
-	GenerationsSwitched int `json:"generations_switched"`
-
-	// PreviousSpaceId The space it replaced, now for evaluation; empty when none was served.
-	PreviousSpaceId string `json:"previous_space_id"`
-
-	// SegmentsMissing Current segments without a vector in the space.
-	SegmentsMissing int    `json:"segments_missing"`
-	ServedSpaceId   string `json:"served_space_id"`
-}
-
 // VectorSpacePromotionRequest defines model for VectorSpacePromotionRequest.
 type VectorSpacePromotionRequest struct {
 	// Force Promote even though some current segments have no vector in the space; those lose their semantic hits until a backfill fills them.
-	Force *bool `json:"force,omitempty"`
+	Force          *bool   `json:"force,omitempty"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 }
 
 // Version defines model for Version.
@@ -3956,6 +3958,9 @@ type RegisterPluginJSONRequestBody = PluginRegistrationRequest
 
 // RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
 type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
+
+// ActivatePluginJSONRequestBody defines body for ActivatePlugin for application/json ContentType.
+type ActivatePluginJSONRequestBody = PluginActivationRequest
 
 // ReprocessQuarantineJSONRequestBody defines body for ReprocessQuarantine for application/json ContentType.
 type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
@@ -4574,13 +4579,13 @@ type ClientInterface interface {
 	// RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 	RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 	RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPipelinePlans performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
@@ -4598,10 +4603,17 @@ type ClientInterface interface {
 	// One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
 	GetPluginRegistration(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	// ActivatePluginWithBody performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request,
+	// with any type of body and a specified content type.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active promotes its evaluation source formats to served, retaining the previous owner for evaluation; it returns the active plan when there is nothing to promote. The target must answer discovery with its exact manifest digest, including for an unchanged activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes. Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
-	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+	ActivatePluginWithBody(ctx context.Context, registrationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+	ActivatePlugin(ctx context.Context, registrationId string, body ActivatePluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListQuarantinedVersions performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
 	//
@@ -4628,13 +4640,13 @@ type ClientInterface interface {
 	// PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 	PromoteVectorSpaceWithBody(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PromoteVectorSpace performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 	PromoteVectorSpace(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListConnectorPushStats Count accepted and refused pushes per source instance
@@ -4997,7 +5009,7 @@ type ClientInterface interface {
 
 	// GetOperation performs a GET /v0/operations/{operation_id} (the `GetOperation` operationId) request.
 	//
-	// Administrative progress only. This read schema does not specify every administrative command.
+	// Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
 	GetOperation(ctx context.Context, operationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CancelOperationWithBody performs a POST /v0/operations/{operation_id}/cancel (the `CancelOperation` operationId) request,
@@ -5465,7 +5477,7 @@ func (c *Client) GetActivePipelinePlan(ctx context.Context, reqEditors ...Reques
 // RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 func (c *Client) RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRollbackPipelinePlanRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -5481,7 +5493,7 @@ func (c *Client) RollbackPipelinePlanWithBody(ctx context.Context, contentType s
 // RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 func (c *Client) RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRollbackPipelinePlanRequest(c.Server, body)
 	if err != nil {
@@ -5539,11 +5551,28 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 	return c.Client.Do(req)
 }
 
-// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+// ActivatePluginWithBody performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request,
+// with any type of body and a specified content type.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active promotes its evaluation source formats to served, retaining the previous owner for evaluation; it returns the active plan when there is nothing to promote. The target must answer discovery with its exact manifest digest, including for an unchanged activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes. Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
-func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewActivatePluginRequest(c.Server, registrationId)
+// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+func (c *Client) ActivatePluginWithBody(ctx context.Context, registrationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivatePluginRequestWithBody(c.Server, registrationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, body ActivatePluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivatePluginRequest(c.Server, registrationId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5619,7 +5648,7 @@ func (c *Client) GetQueueBacklog(ctx context.Context, reqEditors ...RequestEdito
 // PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 func (c *Client) PromoteVectorSpaceWithBody(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPromoteVectorSpaceRequestWithBody(c.Server, vectorSpaceId, contentType, body)
 	if err != nil {
@@ -5635,7 +5664,7 @@ func (c *Client) PromoteVectorSpaceWithBody(ctx context.Context, vectorSpaceId s
 // PromoteVectorSpace performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 func (c *Client) PromoteVectorSpace(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPromoteVectorSpaceRequest(c.Server, vectorSpaceId, body)
 	if err != nil {
@@ -6628,7 +6657,7 @@ func (c *Client) GetMatch(ctx context.Context, matchId string, reqEditors ...Req
 
 // GetOperation performs a GET /v0/operations/{operation_id} (the `GetOperation` operationId) request.
 //
-// Administrative progress only. This read schema does not specify every administrative command.
+// Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
 func (c *Client) GetOperation(ctx context.Context, operationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetOperationRequest(c.Server, operationId)
 	if err != nil {
@@ -8039,8 +8068,19 @@ func NewGetPluginRegistrationRequest(server string, registrationId string) (*htt
 	return req, nil
 }
 
-// NewActivatePluginRequest constructs an http.Request for the ActivatePlugin method
-func NewActivatePluginRequest(server string, registrationId string) (*http.Request, error) {
+// NewActivatePluginRequest calls the generic ActivatePlugin builder with application/json body
+func NewActivatePluginRequest(server string, registrationId string, body ActivatePluginJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewActivatePluginRequestWithBody(server, registrationId, "application/json", bodyReader)
+}
+
+// NewActivatePluginRequestWithBody constructs an http.Request for the ActivatePlugin method, with any body, and a specified content type
+func NewActivatePluginRequestWithBody(server string, registrationId string, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -8065,10 +8105,12 @@ func NewActivatePluginRequest(server string, registrationId string) (*http.Reque
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -12299,7 +12341,7 @@ type ClientWithResponsesInterface interface {
 	// RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
@@ -12307,7 +12349,7 @@ type ClientWithResponsesInterface interface {
 	// RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 	RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
 
 	// ListPipelinePlansWithResponse performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
@@ -12331,12 +12373,19 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetPluginRegistrationWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*GetPluginRegistrationResponse, error)
 
-	// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	// ActivatePluginWithBodyWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request,
+	// with any type of body and a specified content type.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active promotes its evaluation source formats to served, retaining the previous owner for evaluation; it returns the active plan when there is nothing to promote. The target must answer discovery with its exact manifest digest, including for an unchanged activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes. Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+	// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
-	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
+	ActivatePluginWithBodyWithResponse(ctx context.Context, registrationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
+
+	// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+	ActivatePluginWithResponse(ctx context.Context, registrationId string, body ActivatePluginJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
 
 	// ListQuarantinedVersionsWithResponse performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
 	//
@@ -12369,7 +12418,7 @@ type ClientWithResponsesInterface interface {
 	// PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	PromoteVectorSpaceWithBodyWithResponse(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error)
@@ -12377,7 +12426,7 @@ type ClientWithResponsesInterface interface {
 	// PromoteVectorSpaceWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 	PromoteVectorSpaceWithResponse(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error)
 
 	// ListConnectorPushStatsWithResponse Count accepted and refused pushes per source instance
@@ -12832,7 +12881,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetOperationWithResponse performs a GET /v0/operations/{operation_id} (the `GetOperation` operationId) request.
 	//
-	// Administrative progress only. This read schema does not specify every administrative command.
+	// Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetOperationWithResponse(ctx context.Context, operationId string, reqEditors ...RequestEditorFn) (*GetOperationResponse, error)
@@ -13616,18 +13665,25 @@ func (r GetActivePipelinePlanResponse) ContentType() string {
 	return ""
 }
 
+// RollbackPipelinePlanResponse202Headers the declared response headers of an HTTP 202 response for RollbackPipelinePlan
+type RollbackPipelinePlanResponse202Headers struct {
+	Location *string
+}
+
 type RollbackPipelinePlanResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *PipelinePlan
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *RollbackPipelinePlanResponse202Headers
 }
 
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r RollbackPipelinePlanResponse) GetJSON200() *PipelinePlan {
-	return r.JSON200
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RollbackPipelinePlanResponse) GetJSON202() *Operation {
+	return r.JSON202
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -13808,18 +13864,25 @@ func (r GetPluginRegistrationResponse) ContentType() string {
 	return ""
 }
 
+// ActivatePluginResponse202Headers the declared response headers of an HTTP 202 response for ActivatePlugin
+type ActivatePluginResponse202Headers struct {
+	Location *string
+}
+
 type ActivatePluginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *PipelinePlan
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *ActivatePluginResponse202Headers
 }
 
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ActivatePluginResponse) GetJSON200() *PipelinePlan {
-	return r.JSON200
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ActivatePluginResponse) GetJSON202() *Operation {
+	return r.JSON202
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -14014,18 +14077,25 @@ func (r GetQueueBacklogResponse) ContentType() string {
 	return ""
 }
 
+// PromoteVectorSpaceResponse202Headers the declared response headers of an HTTP 202 response for PromoteVectorSpace
+type PromoteVectorSpaceResponse202Headers struct {
+	Location *string
+}
+
 type PromoteVectorSpaceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *VectorSpacePromotion
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *PromoteVectorSpaceResponse202Headers
 }
 
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r PromoteVectorSpaceResponse) GetJSON200() *VectorSpacePromotion {
-	return r.JSON200
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r PromoteVectorSpaceResponse) GetJSON202() *Operation {
+	return r.JSON202
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -18111,7 +18181,7 @@ func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Cont
 // RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
@@ -18125,7 +18195,7 @@ func (c *ClientWithResponses) RollbackPipelinePlanWithBodyWithResponse(ctx conte
 // RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. Restore that registration's exact build at its endpoint, or activate the current registration of the previous ingestion owner to restore its evaluated source formats while retaining the newer build. Historical plans are never rewritten to follow a redeployed build. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
 func (c *ClientWithResponses) RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
 	rsp, err := c.RollbackPipelinePlan(ctx, body, reqEditors...)
 	if err != nil {
@@ -18173,13 +18243,26 @@ func (c *ClientWithResponses) GetPluginRegistrationWithResponse(ctx context.Cont
 	return ParseGetPluginRegistrationResponse(rsp)
 }
 
-// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+// ActivatePluginWithBodyWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request,
+// with any type of body and a specified content type.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active promotes its evaluation source formats to served, retaining the previous owner for evaluation; it returns the active plan when there is nothing to promote. The target must answer discovery with its exact manifest digest, including for an unchanged activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes. Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
-func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
-	rsp, err := c.ActivatePlugin(ctx, registrationId, reqEditors...)
+func (c *ClientWithResponses) ActivatePluginWithBodyWithResponse(ctx context.Context, registrationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
+	rsp, err := c.ActivatePluginWithBody(ctx, registrationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivatePluginResponse(rsp)
+}
+
+// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
+func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, registrationId string, body ActivatePluginJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
+	rsp, err := c.ActivatePlugin(ctx, registrationId, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -18241,7 +18324,7 @@ func (c *ClientWithResponses) GetQueueBacklogWithResponse(ctx context.Context, r
 // PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) PromoteVectorSpaceWithBodyWithResponse(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error) {
@@ -18255,7 +18338,7 @@ func (c *ClientWithResponses) PromoteVectorSpaceWithBodyWithResponse(ctx context
 // PromoteVectorSpaceWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+// Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
 func (c *ClientWithResponses) PromoteVectorSpaceWithResponse(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error) {
 	rsp, err := c.PromoteVectorSpace(ctx, vectorSpaceId, body, reqEditors...)
 	if err != nil {
@@ -19088,7 +19171,7 @@ func (c *ClientWithResponses) GetMatchWithResponse(ctx context.Context, matchId 
 
 // GetOperationWithResponse performs a GET /v0/operations/{operation_id} (the `GetOperation` operationId) request.
 //
-// Administrative progress only. This read schema does not specify every administrative command.
+// Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) GetOperationWithResponse(ctx context.Context, operationId string, reqEditors ...RequestEditorFn) (*GetOperationResponse, error) {
@@ -20101,12 +20184,12 @@ func ParseRollbackPipelinePlanResponse(rsp *http.Response) (*RollbackPipelinePla
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest PipelinePlan
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON200 = &dest
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -20115,6 +20198,19 @@ func ParseRollbackPipelinePlanResponse(rsp *http.Response) (*RollbackPipelinePla
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers RollbackPipelinePlanResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers202 = &headers
 	}
 
 	return response, nil
@@ -20233,12 +20329,12 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest PipelinePlan
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON200 = &dest
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -20247,6 +20343,19 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers ActivatePluginResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers202 = &headers
 	}
 
 	return response, nil
@@ -20385,12 +20494,12 @@ func ParsePromoteVectorSpaceResponse(rsp *http.Response) (*PromoteVectorSpaceRes
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest VectorSpacePromotion
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON200 = &dest
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -20399,6 +20508,19 @@ func ParsePromoteVectorSpaceResponse(rsp *http.Response) (*PromoteVectorSpaceRes
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers PromoteVectorSpaceResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers202 = &headers
 	}
 
 	return response, nil

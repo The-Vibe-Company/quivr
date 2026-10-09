@@ -73,7 +73,7 @@ func TestPluginRegistrationWithItsFixtures(t *testing.T) {
 		if checked["state"] != "validated" || checked["check"].(map[string]any)["certified"] != true {
 			t.Fatalf("%s registered with its fixtures: %v, want validated", p.id, checked)
 		}
-		plan := request(t, "POST", "/v0/admin/plugins/"+accepted["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+		plan := routingRequest(t, "POST", "/v0/admin/plugins/"+accepted["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 		serving := ""
 		for _, raw := range plan["roles"].([]any) {
 			if role := raw.(map[string]any); role["role"] == p.role {

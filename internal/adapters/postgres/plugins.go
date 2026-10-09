@@ -218,7 +218,7 @@ func recordPlan(ctx context.Context, tx pgx.Tx, source, previous string, roles [
 	for _, a := range append(append([]registry.Assignment{}, roles...), prior.Roles...) {
 		ids = append(ids, a.RegistrationID)
 	}
-	list, err := registrations(ctx, tx, `WHERE id=ANY($1)`, ids)
+	list, err := metadataRegistrations(ctx, tx, `WHERE id=ANY($1)`, ids)
 	if err != nil {
 		return "", err
 	}
@@ -386,7 +386,7 @@ func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (p
 	err = tx.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,CASE WHEN $1='ingestion' THEN COALESCE((SELECT plan_id FROM active_pipeline_plan),$4) ELSE $4 END)
  ON CONFLICT (kind,organization,work_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,pinned_at=now(),unavailable_attempts=0,stopped_at=NULL
  WHERE pipeline_plan_work.kind='connector_run' AND pipeline_plan_work.pinned_at<=now()-interval '`+connectorRunPinExpiry+`' RETURNING plan_id,stopped_at IS NOT NULL)
-	 SELECT * FROM pinned UNION ALL SELECT plan_id,stopped_at IS NOT NULL FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned, &stopped)
+	 SELECT plan_id, stopped_at IS NOT NULL OR `+routingWorkStoppedSQL+` FROM pipeline_plan_work w WHERE kind=$1 AND organization=$2 AND work_id=$3 AND NOT EXISTS(SELECT FROM pinned) UNION ALL SELECT * FROM pinned LIMIT 1`, kind, org, id, plan).Scan(&pinned, &stopped)
 	if err != nil {
 		return pinned, stopped, err
 	}
@@ -415,7 +415,7 @@ func (s PluginStore) CountUnavailable(ctx context.Context, kind, org, id string)
 // (registry.PinnedWorkStop); work that is not pinned is not stopped.
 func (s PluginStore) WorkStopped(ctx context.Context, kind, org, id string) (bool, error) {
 	var stopped bool
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 AND stopped_at IS NOT NULL)`, kind, org, id).Scan(&stopped)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pipeline_plan_work w WHERE kind=$1 AND organization=$2 AND work_id=$3 AND (stopped_at IS NOT NULL OR `+routingWorkStoppedSQL+`))`, kind, org, id).Scan(&stopped)
 	return stopped, err
 }
 

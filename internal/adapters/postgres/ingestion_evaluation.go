@@ -91,7 +91,7 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 		}
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id,role) VALUES($1,$2,$3,$4,'evaluation')
- ON CONFLICT(organization,version_id,generation_id,plugin_id) DO UPDATE SET segmentation_id=EXCLUDED.segmentation_id WHERE projection_coverage.role='evaluation' OR projection_coverage.segmentation_id=EXCLUDED.segmentation_id`, org, seg.VersionID, g.ID, seg.ID)
+ ON CONFLICT(organization,version_id,generation_id,plugin_id) DO UPDATE SET segmentation_id=EXCLUDED.segmentation_id WHERE `+"NOT "+effectiveCoverageSQL("projection_coverage")+` OR projection_coverage.segmentation_id=EXCLUDED.segmentation_id`, org, seg.VersionID, g.ID, seg.ID)
 	if err != nil {
 		return err
 	}
@@ -150,6 +150,16 @@ func (s IngestionEvaluationStore) prepareEvaluationAttempt(ctx context.Context, 
 // recordGenerationIngestion captures the served work's pinned source routing.
 // Existing recorded routes win; later optional dispatch cannot change them.
 func recordGenerationIngestion(ctx context.Context, tx pgx.Tx, id, plan string) error {
+	var known bool
+	if err := tx.QueryRow(ctx, `SELECT ingestion_routing IS NOT NULL FROM `+effectiveGenerationsSQL+` g WHERE id=$1`, id).Scan(&known); err != nil {
+		return err
+	}
+	if known {
+		return nil
+	}
+	if err := materializeRoutingGeneration(ctx, tx, id); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `UPDATE projection_generations g SET ingestion_routing=jsonb_build_object('default',COALESCE(
  (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=COALESCE(NULLIF($2,''),(SELECT plan_id FROM active_pipeline_plan)) AND rr.role IN ('ingestion-default','ingestion') AND EXISTS(SELECT 1 FROM jsonb_array_elements(g.spaces) sp WHERE sp->>'owner_plugin_id'=pr.plugin_id AND sp->>'role'='served') LIMIT 1),
  (SELECT sp->>'owner_plugin_id' FROM jsonb_array_elements(g.spaces) sp WHERE sp->>'id'=g.space_id),''),
@@ -161,7 +171,7 @@ func loadGenerationIngestion(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, g *content.Generation) error {
 	var raw []byte
-	if err := q.QueryRow(ctx, `SELECT ingestion_routing FROM projection_generations WHERE id=$1`, g.ID).Scan(&raw); err != nil {
+	if err := q.QueryRow(ctx, `SELECT ingestion_routing FROM `+effectiveGenerationsSQL+` WHERE id=$1`, g.ID).Scan(&raw); err != nil {
 		return err
 	}
 	if len(raw) > 0 {

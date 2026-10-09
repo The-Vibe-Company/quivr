@@ -34,12 +34,13 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 		// with stale statistics. Legacy engine spaces keep generation routing.
 		if c.OwnerPluginID != "" {
 			var present bool
-			err = database(ctx, s.Pool).QueryRow(ctx, spaceOwnerPresenceSQL, org, corpusID, g.ID, c.OwnerPluginID).Scan(&present)
+			err = database(ctx, s.Pool).QueryRow(ctx, spaceOwnerPresenceSQL, org, corpusID, g.ID, c.OwnerPluginID, c.ID).Scan(&present)
 			if err != nil {
 				return g, nil, err
 			}
 			presence := int64(0)
 			if present {
+				c.GenerationRole = content.SpaceServed
 				presence = 1
 			}
 			c.ServingSegments = &presence
@@ -65,7 +66,7 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 	return g, out, nil
 }
 
-const spaceOwnerPresenceSQL = `SELECT EXISTS(
+var spaceOwnerPresenceSQL = `SELECT EXISTS(
  SELECT 1 FROM records r
  JOIN LATERAL (
   SELECT v.* FROM record_versions v
@@ -73,8 +74,10 @@ const spaceOwnerPresenceSQL = `SELECT EXISTS(
  ) v ON v.record_id=r.id
  JOIN LATERAL (
   SELECT 1 FROM projection_coverage pc
+  JOIN ` + effectiveGenerationsSQL + ` selected_g ON selected_g.id=pc.generation_id
   WHERE (pc.organization,pc.version_id,pc.generation_id,pc.plugin_id)=(v.organization,v.id,$3,$4)
-  AND pc.role='served' OFFSET 0
+  AND ` + effectiveServingSQL("pc", "selected_g") + `
+  AND $5=` + selectedVectorSpaceSQL("pc", "selected_g") + ` OFFSET 0
  ) pc ON true
  WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
 

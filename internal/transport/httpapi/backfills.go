@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
@@ -79,34 +80,25 @@ func backfillToTransport(b *operations.Backfill) *transport.OperationBackfill {
 
 // promotionRequest is the promotion command.
 type promotionRequest struct {
-	Force bool `json:"force"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Force          bool   `json:"force"`
 }
 
 func (a *API) promoteSpace(w http.ResponseWriter, r *http.Request, scope corpus.Scope, space string) {
-	if a.Promotions == nil {
-		writeError(w, publicerr.NotFound, nil)
-		return
-	}
 	if space == "" {
 		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	var in promotionRequest
-	p, err := a.Promotions.Promote(r.Context(), scope, "", false, func() (string, bool, error) {
-		if !decodeInto(w, r, a.schemas["VectorSpacePromotionRequest"], &in) {
-			return "", false, errResponseWritten
-		}
-
-		return space, in.Force, nil
-	})
-	if errors.Is(err, errResponseWritten) {
+	{
+		command := routing.Command{Kind: routing.KindPromotion, Target: space}
+		a.requestRouting(w, r, scope, command, func() (routing.Command, error) {
+			if !decodeInto(w, r, a.schemas["VectorSpacePromotionRequest"], &in) {
+				return command, errResponseWritten
+			}
+			command.Force, command.Key = in.Force, in.IdempotencyKey
+			return command, nil
+		})
 		return
-	}
-	switch {
-	case err != nil:
-		writeError(w, err, publicerr.StorageUnavailable)
-	default:
-		send(w, 200, transport.VectorSpacePromotion{ServedSpaceId: p.Served, PreviousSpaceId: p.Previous, GenerationsSwitched: int(p.GenerationsSwitched),
-			CorporaIncomplete: int(p.CorporaIncomplete), SegmentsMissing: int(p.SegmentsMissing)})
 	}
 }
