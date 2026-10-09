@@ -9167,9 +9167,8 @@ components:
           enum:
           - exact
           - fast
-          default: exact
-          description: exact counts every current document now. fast lets Quivr answer within a few seconds from a stored
-            snapshot (as_of) or a uniform sample (approximate).
+          description: Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from
+            a stored snapshot (as_of) or a uniform sample (approximate).
     FacetField:
       type: object
       additionalProperties: false

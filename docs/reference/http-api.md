@@ -9935,7 +9935,7 @@ required:
 | `filter` | [`FacetFilter`](#facetfilter) |  |  |
 | `accepted_after` | string (date-time) |  | Inclusive current-Version acceptance-time lower bound, as in listing. |
 | `accepted_before` | string (date-time) |  | Exclusive current-Version acceptance-time upper bound, as in listing. |
-| `accuracy` | string |  | exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate). One of `exact`, `fast`. Default `exact`. |
+| `accuracy` | string |  | Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate). One of `exact`, `fast`. |
 
 Example `metadata_facets_request`:
 
@@ -10008,9 +10008,8 @@ properties:
   accuracy:
     type: string
     enum: [exact, fast]
-    default: exact
     description: >-
-      exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+      Absent or exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
 ```
 
 </details>
