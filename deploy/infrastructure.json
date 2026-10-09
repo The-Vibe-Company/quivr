@@ -1,0 +1,162 @@
+{
+  "services": {
+    "postgres": {
+      "image": "postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+      "environment": {
+        "QUIVR_POSTGRES_MAX_CONNECTIONS": "256",
+        "QUIVR_POSTGRES_WORK_MEM": "4MB",
+        "QUIVR_POSTGRES_RANDOM_PAGE_COST": "1.1",
+        "QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY": "200",
+        "QUIVR_POSTGRES_CHECKPOINT_TIMEOUT": "15min",
+        "QUIVR_POSTGRES_WAL_COMPRESSION": "lz4",
+        "QUIVR_POSTGRES_STAT_STATEMENTS_TRACK": "all",
+        "QUIVR_POSTGRES_JIT": "on",
+        "QUIVR_POSTGRES_SYNCHRONOUS_COMMIT": "on"
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "1073741824",
+            "cpus": "1"
+          }
+        }
+      }
+    },
+    "weaviate": {
+      "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.10@sha256:de371bb2e07604636915581d784ce182303f0046376a3dd23822936fa10acc56",
+      "environment": {
+        "AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED": "true",
+        "AUTOSCHEMA_ENABLED": "false",
+        "DEFAULT_VECTORIZER_MODULE": "none",
+        "PERSISTENCE_DATA_PATH": "/var/lib/weaviate",
+        "DEFAULT_QUANTIZATION": "rq-8",
+        "ASYNC_INDEXING": "false",
+        "PERSISTENCE_MEMTABLES_MAX_SIZE_MB": "200",
+        "RAFT_BOOTSTRAP_TIMEOUT": "600",
+        "GOMEMLIMIT": "1700MiB"
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "2147483648",
+            "cpus": "2"
+          }
+        }
+      }
+    }
+  },
+  "x-quivr": {
+    "profiles": {
+      "small": {},
+      "large": {
+        "weaviate": {
+          "environment": {
+            "ASYNC_INDEXING": "true",
+            "PERSISTENCE_MEMTABLES_MAX_SIZE_MB": "1024",
+            "GOMEMLIMIT": "27GiB",
+            "RAFT_BOOTSTRAP_TIMEOUT": "3600"
+          },
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "32000000000",
+                "cpus": "32"
+              }
+            }
+          },
+          "x-quivr-storage-budget-bytes": "500000000000"
+        },
+        "postgres": {
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "32000000000",
+                "cpus": "32"
+              }
+            }
+          },
+          "x-quivr-storage-budget-bytes": "500000000000",
+          "environment": {
+            "QUIVR_POSTGRES_MAX_CONNECTIONS": "500",
+            "QUIVR_POSTGRES_SHARED_BUFFERS": "10GB",
+            "QUIVR_POSTGRES_EFFECTIVE_CACHE_SIZE": "25GB",
+            "QUIVR_POSTGRES_MAINTENANCE_WORK_MEM": "1GB",
+            "QUIVR_POSTGRES_WORK_MEM": "16MB",
+            "QUIVR_POSTGRES_MAX_WAL_SIZE": "32GB",
+            "QUIVR_POSTGRES_MIN_WAL_SIZE": "4GB"
+          }
+        },
+        "api": {
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "32000000000",
+                "cpus": "32"
+              }
+            }
+          }
+        },
+        "worker": {
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "32000000000",
+                "cpus": "32"
+              }
+            }
+          }
+        },
+        "worker-bulk": {
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "32000000000",
+                "cpus": "32"
+              }
+            }
+          }
+        },
+        "autoscaler": {
+          "environment": {
+            "QUIVR_AUTOSCALER_BACKEND": "railway"
+          }
+        }
+      }
+    },
+    "autoscaler": {
+      "environment": {
+        "QUIVR_AUTOSCALER_QUEUE": "bulk",
+        "QUIVR_AUTOSCALER_MIN": "1",
+        "QUIVR_AUTOSCALER_MAX": "8",
+        "QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA": "20000",
+        "QUIVR_AUTOSCALER_INTERVAL": "30s",
+        "QUIVR_AUTOSCALER_DOWNSCALE_WINDOW": "5m",
+        "QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL": "2m",
+        "QUIVR_AUTOSCALER_REQUEST_TIMEOUT": "10s"
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "134217728",
+            "cpus": "0.25"
+          }
+        }
+      }
+    },
+    "build_images": {
+      "go": "golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61",
+      "autoscaler_runtime": "gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab"
+    },
+    "services": {
+      "api": {
+        "environment": {}
+      },
+      "worker": {
+        "environment": {}
+      },
+      "worker-bulk": {
+        "environment": {}
+      }
+    }
+  }
+}

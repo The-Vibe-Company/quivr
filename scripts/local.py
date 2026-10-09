@@ -18,6 +18,8 @@ import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, math, os, pathlib, re, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from deploy import infrastructure as infrastructure_settings
 GO=os.environ.get('GO','go')
 
 def run(args, **kwargs):
@@ -107,6 +109,12 @@ class Stack:
         self.statefile.write_text(json.dumps(self.state));self.statefile.chmod(0o600)
     def compose(self,*args,**kwargs):
         files=['-f',str(self.source/'deploy/compose/compose.yaml')]+(['-f',str(self.source/'deploy/compose/compose.macos.yaml')] if MACOS else [])
+        declaration=self.source/'deploy/infrastructure.json'
+        if declaration.exists():
+            overlay=infrastructure_settings.write_overlay(self.directory/'infrastructure.json',
+                os.environ.get('QUIVR_INFRASTRUCTURE_PROFILE','small'),
+                os.environ.get('QUIVR_INFRASTRUCTURE_OVERRIDES'),os.environ,declaration)
+            files+=['-f',str(overlay)]
         return run(['docker','compose','-p',self.name,*files,*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory),'QUIVR_MODEL_ROOT':str(MODEL)},**kwargs)
     def config(self):
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()

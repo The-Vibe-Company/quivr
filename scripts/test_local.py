@@ -36,6 +36,22 @@ class Isolation(unittest.TestCase):
         again = local.Stack(self.names[0])
         self.assertEqual(first.state['admin'], again.state['admin'])
 
+    def test_infrastructure_profile_and_overrides_reach_the_compose_launch(self):
+        stack = local.Stack(self.names[0])
+        override = stack.directory / 'installation.json'
+        override.write_text('{"services":{"weaviate":{"environment":{"GOMEMLIMIT":"3500MiB"},'
+                            '"deploy":{"resources":{"limits":{"memory":"4294967296"}}}}}}')
+        with mock.patch.dict(os.environ, {'QUIVR_INFRASTRUCTURE_PROFILE': 'large',
+                                        'QUIVR_INFRASTRUCTURE_OVERRIDES': str(override)}, clear=True), \
+                mock.patch('local.run') as launched:
+            stack.compose('up', '-d')
+        model = stack.directory / 'infrastructure.json'
+        self.assertIn(str(model), launched.call_args.args[0])
+        effective = json.loads(model.read_text())['services']['weaviate']
+        self.assertEqual(effective['environment']['ASYNC_INDEXING'], 'true')
+        self.assertEqual(effective['environment']['GOMEMLIMIT'], '3500MiB')
+        self.assertEqual(effective['deploy']['resources']['limits']['memory'], '4294967296')
+
     def test_reset_forgets_data_bound_state_only(self):
         stack = local.Stack(self.names[0])
         stack.state.update(scoped_id='corpus_1', worker_pid=123)
