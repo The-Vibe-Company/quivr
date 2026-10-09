@@ -69,7 +69,7 @@ func TestGenerationPurgeListingFailsClosed(t *testing.T) {
 		{"empty", `{"data":{"Get":{"QuivrTextV4":[]}}}`, true},
 		{"null", `{"data":{"Get":{"QuivrTextV4":null}}}`, false},
 		{"missing", `{"data":{"Get":{}}}`, false},
-		{"provider failure", `{"data":{"Get":{"QuivrTextV4":null}},"errors":[{"message":"query deadline exceeded"}]}`, false},
+		{"provider failure", `{"data":{"Get":{"QuivrTextV4":[]}},"errors":[{"message":"query deadline exceeded"}]}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -146,7 +146,7 @@ func TestPurgerLeavesFailedItemsForALaterSweep(t *testing.T) {
 			if interrupted {
 				wantDone, wantRecords, wantObjects = 0, 1, 2
 			}
-			if err == nil || done != wantDone || len(store.records) != wantRecords || store.records[0].item.VersionID != "v" || store.records[0].deleted != 2 || store.records[0].complete {
+			if err == nil || done != wantDone || len(store.records) != wantRecords || store.records[0].item.VersionID != "v" || store.records[0].deleted != 2 || store.records[0].complete || (!interrupted && store.records[1].item.VersionID != "w") {
 				t.Fatalf("sweep %d %v, records %+v", done, err, store.records)
 			}
 			if metrics.Objects[retrieval.PurgeVersion].Load() != wantObjects || metrics.Purges[retrieval.PurgeVersion].Load() != int64(wantDone) {
