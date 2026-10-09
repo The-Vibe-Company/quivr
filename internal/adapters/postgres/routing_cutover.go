@@ -37,7 +37,7 @@ func (s RoutingStore) cutoverRouting(ctx context.Context, tx pgx.Tx, w *routingW
  OR EXISTS(SELECT FROM routing_dirty_generations WHERE epoch=$1)`, w.id).Scan(&dirty); err != nil {
 		return false, err
 	}
-	if dirty {
+	if dirty && !w.settings.NoRoutingChange {
 		_, err := tx.Exec(ctx, `UPDATE routing_operations SET phase='reconcile' WHERE organization=$1 AND id=$2`, w.org, w.id)
 		return false, err
 	}
@@ -118,12 +118,14 @@ func (s RoutingStore) cutoverRouting(ctx context.Context, tx pgx.Tx, w *routingW
  OR EXISTS(SELECT FROM routing_dirty_generations WHERE epoch=$1)`, w.id).Scan(&dirty); err != nil {
 		return false, err
 	}
-	if dirty {
+	if dirty && !w.settings.NoRoutingChange {
 		return false, errRoutingDirty
 	}
 	// This is the only installation-wide routing publication: one pointer.
-	if _, err := tx.Exec(ctx, `INSERT INTO routing_switch_state(singleton,epoch) VALUES(true,$1) ON CONFLICT(singleton) DO UPDATE SET epoch=EXCLUDED.epoch`, w.id); err != nil {
-		return false, err
+	if !w.settings.NoRoutingChange {
+		if _, err := tx.Exec(ctx, `INSERT INTO routing_switch_state(singleton,epoch) VALUES(true,$1) ON CONFLICT(singleton) DO UPDATE SET epoch=EXCLUDED.epoch`, w.id); err != nil {
+			return false, err
+		}
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {

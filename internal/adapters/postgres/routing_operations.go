@@ -157,14 +157,16 @@ func (s RoutingStore) routingOperation(ctx context.Context, q querier, org, id s
 }
 
 type routingSettings struct {
-	Unchanged      bool                      `json:"unchanged,omitempty"`
-	Roles          []registry.Assignment     `json:"roles,omitempty"`
-	RegistrySpaces []content.RegisteredSpace `json:"registry_spaces,omitempty"`
-	Spaces         []content.RegisteredSpace `json:"spaces,omitempty"`
-	Routing        *content.IngestionRouting `json:"routing,omitempty"`
-	Owner          string                    `json:"owner,omitempty"`
-	PreviousSpace  string                    `json:"previous_space,omitempty"`
-	Retired        []string                  `json:"retired,omitempty"`
+	NoRoutingChange bool                      `json:"no_routing_change,omitempty"`
+	PreviousRouting *content.IngestionRouting `json:"previous_routing,omitempty"`
+	Unchanged       bool                      `json:"unchanged,omitempty"`
+	Roles           []registry.Assignment     `json:"roles,omitempty"`
+	RegistrySpaces  []content.RegisteredSpace `json:"registry_spaces,omitempty"`
+	Spaces          []content.RegisteredSpace `json:"spaces,omitempty"`
+	Routing         *content.IngestionRouting `json:"routing,omitempty"`
+	Owner           string                    `json:"owner,omitempty"`
+	PreviousSpace   string                    `json:"previous_space,omitempty"`
+	Retired         []string                  `json:"retired,omitempty"`
 }
 
 type routingWork struct {

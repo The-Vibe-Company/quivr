@@ -3,6 +3,8 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -327,6 +329,40 @@ func TestAsyncRoutingRollbackKeepsReadableGapAndRecoversBothVersions(t *testing.
 	if err != nil || stopped {
 		t.Fatalf("no-op rollback stopped active work: %v (%v)", stopped, err)
 	}
+	// A rollback restores exact registrations, including retained evaluation
+	// members. Discovery refusal must finish without publishing their plan.
+	unreachable := routingStore
+	unreachable.Registry.Reach = func(_ context.Context, r registry.Registration) error {
+		if r.ID == b.Registration {
+			return errors.New("returning registration unavailable")
+		}
+		return nil
+	}
+	activatedPlan, err := (postgres.OperationStore{Pool: pool}).Operation(ctx, scope.Organization, activated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected, err := unreachable.AcceptRouting(ctx, scope.Organization, routing.Command{Kind: routing.KindRollback, Target: activatedPlan.Admin.PlanID, Key: "unreachable-returning"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		progress, err := unreachable.StepRouting(ctx, scope.Organization, rejected.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if progress.Done {
+			break
+		}
+	}
+	rejectedResult, err := (postgres.OperationStore{Pool: pool}).Operation(ctx, scope.Organization, rejected.ID)
+	if err != nil || rejectedResult.State != "failed" || len(rejectedResult.Errors) != 1 || rejectedResult.Errors[0].Code != "plugin_unreachable" {
+		t.Fatalf("unreachable rollback published: %+v (%v)", rejectedResult, err)
+	}
+	stillActive, err := pluginsStore.ActivePlan(ctx)
+	if err != nil || stillActive.ID != activeBeforeNoop.ID {
+		t.Fatalf("unreachable rollback changed active plan: %+v (%v)", stillActive, err)
+	}
 	// An immutable registry conflict discovered at cutover is a terminal
 	// refusal. Earlier metadata writes in that transaction must roll back.
 	refusedStore := routingStore
@@ -369,4 +405,55 @@ func TestAsyncRoutingRollbackKeepsReadableGapAndRecoversBothVersions(t *testing.
 		t.Fatalf("refused cutover changed availability %+v: %v", status, err)
 	}
 
+	// A configuration reload can change the installation's default without
+	// rebuilding historical corpus routes. Activating that same owner must
+	// preserve the older route, even while new imports keep changing records.
+	if err = f.pins.ConfigureIngestion(plugins.IngestionRouting{Default: b.Manifest.ID, Evaluation: map[string][]string{"text/plain": {a.Manifest.ID}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pluginsStore.ApplyConfiguration(ctx, registry.FromPins(f.pins)); err != nil {
+		t.Fatal(err)
+	}
+	replacementPins, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: f.manifest, Endpoint: startIngestionFixture(t, ctx, f.manifest, "ingestion-split"), Spaces: map[string]string{"certified.ingestion-valid.small": "served", "certified.ingestion-valid.large": "evaluation"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := registry.FromPins(replacementPins).Registrations[0]
+	candidate.State = registry.StateRegistered
+	if _, _, err = pluginsStore.RegisterPlugin(ctx, candidate, "same-owner-replacement"); err != nil {
+		t.Fatal(err)
+	}
+	if err = pluginsStore.RecordCheck(ctx, candidate.ID, registry.CheckReport{Certified: true}); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := routingStore.AcceptRouting(ctx, scope.Organization, routing.Command{Kind: routing.KindActivation, Target: candidate.ID, Key: "historical-route"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := false
+	for step := 0; step < 200; step++ {
+		var phase string
+		if err = pool.QueryRow(ctx, `SELECT phase FROM routing_operations WHERE id=$1`, unchanged.ID).Scan(&phase); err != nil {
+			t.Fatal(err)
+		}
+		if phase == "cutover" {
+			accept(fmt.Sprintf("concurrent-metadata-import-%d", step), "Content arriving during metadata activation")
+		}
+		progress, err := routingStore.StepRouting(ctx, scope.Organization, unchanged.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if progress.Done {
+			finished = true
+			break
+		}
+	}
+	unchangedResult, err := (postgres.OperationStore{Pool: pool}).Operation(ctx, scope.Organization, unchanged.ID)
+	if err != nil || !finished || unchangedResult.State != "succeeded" {
+		t.Fatalf("unchanged owner activation under import %+v (finished=%v): %v", unchangedResult, finished, err)
+	}
+	historical, err := store.Generation(ctx, scope.Organization, c.ID)
+	if err != nil || historical.IngestionRouting == nil || historical.IngestionRouting.For("text/plain") != a.Manifest.ID || historical.SpaceID != g.SpaceID {
+		t.Fatalf("metadata activation rewrote historical route: %+v (%v)", historical, err)
+	}
 }

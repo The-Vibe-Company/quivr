@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
@@ -14,6 +15,8 @@ import (
 )
 
 func (s RoutingStore) prepareRouting(ctx context.Context, tx pgx.Tx, w *routingWork) error {
+	// Observation can retry preparation against a newer plan; discard the prior draft.
+	w.settings = routingSettings{NoRoutingChange: w.command.Kind != routing.KindPromotion}
 	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT epoch FROM routing_switch_state WHERE singleton),'')`).Scan(&w.previousEpoch); err != nil {
 		return err
 	}
@@ -60,9 +63,9 @@ func (s RoutingStore) prepareRouting(ctx context.Context, tx pgx.Tx, w *routingW
 			if w.targetPlan == "" {
 				return registry.ErrNoPreviousPlan
 			}
-			target, err := pipelinePlan(ctx, tx, w.targetPlan)
-			if err != nil {
-				return err
+			target, loadErr := pipelinePlan(ctx, tx, w.targetPlan)
+			if loadErr != nil {
+				return loadErr
 			}
 			list, err = metadataRegistrations(ctx, tx, `WHERE id IN (SELECT registration_id FROM pipeline_plan_roles WHERE plan_id=$1)`, target.ID)
 			if err != nil {
@@ -89,6 +92,12 @@ func (s RoutingStore) prepareRouting(ctx context.Context, tx pgx.Tx, w *routingW
 		if activation.Set != nil {
 			r := activation.Set.IngestionRouting()
 			w.settings.Routing = &content.IngestionRouting{Default: r.Default, Routes: r.Routes}
+			old, loadErr := planIngestionRouting(ctx, tx, active.ID)
+			if loadErr != nil {
+				return loadErr
+			}
+			w.settings.PreviousRouting = &old
+			w.settings.NoRoutingChange = old.Default == r.Default && maps.Equal(old.Routes, r.Routes)
 			if s.Registry.Spaces != nil {
 				w.settings.RegistrySpaces = s.Registry.Spaces(activation.Set)
 				w.settings.Spaces, err = retainedPromotions(ctx, tx, w.settings.RegistrySpaces, false)
@@ -131,7 +140,7 @@ func (s RoutingStore) observeRouting(ctx context.Context, tx pgx.Tx, w *routingW
 		_, err := tx.Exec(ctx, `UPDATE routing_operations SET phase='prepare' WHERE organization=$1 AND id=$2`, w.org, w.id)
 		return false, err
 	}
-	_, err := tx.Exec(ctx, `UPDATE routing_operations SET state='running',phase='generations',observing=true,updated_at=now() WHERE organization=$1 AND id=$2`, w.org, w.id)
+	_, err := tx.Exec(ctx, `UPDATE routing_operations SET state='running',phase='generations',observing=$3,updated_at=now() WHERE organization=$1 AND id=$2`, w.org, w.id, !w.settings.NoRoutingChange)
 	return false, err
 }
 
@@ -198,7 +207,7 @@ func (s RoutingStore) stageRoutingGenerations(ctx context.Context, tx pgx.Tx, w 
 					}
 				}
 			}
-		} else if g.routed && w.settings.Routing != nil {
+		} else if g.routed && w.settings.Routing != nil && !w.settings.NoRoutingChange {
 			if g.route == nil {
 				old, err := planIngestionRouting(ctx, tx, w.previousPlan)
 				if err != nil {
@@ -206,30 +215,42 @@ func (s RoutingStore) stageRoutingGenerations(ctx context.Context, tx pgx.Tx, w 
 				}
 				g.route = &old
 			}
+			next := changedIngestionRouting(*g.route, *w.settings.PreviousRouting, *w.settings.Routing)
+			nextRoute := &next
 			changedOwners := map[string]bool{}
-			if g.route.Default != w.settings.Routing.Default {
-				changedOwners[w.settings.Routing.Default] = true
+			if g.route.Default != nextRoute.Default {
+				changedOwners[nextRoute.Default] = true
+				changedOwners[g.route.Default] = true
 			}
 			for media := range g.route.Routes {
-				if g.route.For(media) != w.settings.Routing.For(media) {
-					changedOwners[w.settings.Routing.For(media)] = true
+				if g.route.For(media) != nextRoute.For(media) {
+					changedOwners[nextRoute.For(media)] = true
+					changedOwners[g.route.For(media)] = true
 				}
 			}
-			for media := range w.settings.Routing.Routes {
-				if g.route.For(media) != w.settings.Routing.For(media) {
-					changedOwners[w.settings.Routing.For(media)] = true
+			for media := range nextRoute.Routes {
+				if g.route.For(media) != nextRoute.For(media) {
+					changedOwners[nextRoute.For(media)] = true
+					changedOwners[g.route.For(media)] = true
 				}
 			}
 			if len(changedOwners) > 0 {
 				g.coverageRouted = true
 			}
 			for _, sp := range w.settings.Spaces {
+				if !changedOwners[sp.OwnerPluginID] {
+					continue
+				}
 				found := false
 				for i := range g.spaces {
 					if g.spaces[i].ID == sp.ID {
 						found = true
 						// Rollback retains outgoing named spaces for gap fallback.
-						if w.command.Kind != routing.KindRollback || sp.Role == content.SpaceServed {
+						needed := nextRoute.Default == sp.OwnerPluginID
+						for _, owner := range nextRoute.Routes {
+							needed = needed || owner == sp.OwnerPluginID
+						}
+						if (w.command.Kind != routing.KindRollback || sp.Role == content.SpaceServed) && !(needed && g.spaces[i].Role == content.SpaceServed && sp.Role != content.SpaceServed) {
 							g.spaces[i].Role = sp.Role
 						}
 					}
@@ -241,11 +262,11 @@ func (s RoutingStore) stageRoutingGenerations(ctx context.Context, tx pgx.Tx, w 
 					g.spaces = append(g.spaces, content.GenerationSpace{ID: sp.ID, Role: sp.Role, Metric: sp.Metric, OwnerPluginID: sp.OwnerPluginID})
 					found = true
 				}
-				if sp.Role == content.SpaceServed && sp.OwnerPluginID == w.settings.Routing.Default && found {
+				if sp.Role == content.SpaceServed && sp.OwnerPluginID == nextRoute.Default && found {
 					g.primary = sp.ID
 				}
 			}
-			g.route = w.settings.Routing
+			g.route = nextRoute
 		}
 		slices.SortStableFunc(g.spaces, func(a, b content.GenerationSpace) int {
 			if a.Role == content.SpaceServed && b.Role != content.SpaceServed {

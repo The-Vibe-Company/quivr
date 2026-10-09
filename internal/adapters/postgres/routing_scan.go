@@ -37,6 +37,9 @@ func (s RoutingStore) scanRoutingRecords(ctx context.Context, tx pgx.Tx, w *rout
 	phase := "scan"
 	if len(batch) < routingBatch {
 		phase = "reconcile"
+		if w.settings.NoRoutingChange {
+			phase = "cutover"
+		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE routing_operations SET phase=$3,cursor_organization=$4,cursor_record=$5,
  counters=jsonb_set(counters,'{records_scanned}',to_jsonb(COALESCE((counters->>'records_scanned')::bigint,0)+$6::bigint)) WHERE organization=$1 AND id=$2`, w.org, w.id, phase, w.cursorOrg, w.cursorRecord, len(batch))
@@ -45,13 +48,13 @@ func (s RoutingStore) scanRoutingRecords(ctx context.Context, tx pgx.Tx, w *rout
 
 func (s RoutingStore) countRoutingRecord(ctx context.Context, tx pgx.Tx, w *routingWork, r routingRecord) error {
 	var corpus, version, generation, media, primary string
-	var oldRoute, spaces []byte
-	err := tx.QueryRow(ctx, `SELECT r.corpus_id,v.id,g.id,COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing,o.spaces,o.space_id
+	var oldRoute, nextRoute, spaces []byte
+	err := tx.QueryRow(ctx, `SELECT r.corpus_id,v.id,g.id,COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing,o.ingestion_routing,o.spaces,o.space_id
  FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  JOIN `+effectiveGenerationsSQL+` g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  JOIN routing_generation_settings o ON (o.epoch,o.generation_id)=($3,g.id)
- WHERE r.organization=$1 AND r.id=$2 AND `+eligibleVersionPointSQL, r.org, r.id, w.id).Scan(&corpus, &version, &generation, &media, &oldRoute, &spaces, &primary)
+ WHERE r.organization=$1 AND r.id=$2 AND `+eligibleVersionPointSQL, r.org, r.id, w.id).Scan(&corpus, &version, &generation, &media, &oldRoute, &nextRoute, &spaces, &primary)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.replaceRoutingGap(ctx, tx, w, r, "", "", "", "", 0, "", "")
 	}
@@ -74,10 +77,16 @@ func (s RoutingStore) countRoutingRecord(ctx context.Context, tx pgx.Tx, w *rout
 		return s.preserveRoutingGap(ctx, tx, w, r, corpus, version)
 	}
 	if w.command.Kind != routing.KindPromotion {
-		if w.settings.Routing == nil || previous.For(media) == w.settings.Routing.For(media) {
+		var next content.IngestionRouting
+		if len(nextRoute) > 0 {
+			if err = json.Unmarshal(nextRoute, &next); err != nil {
+				return err
+			}
+		}
+		if w.settings.NoRoutingChange || w.settings.Routing == nil || previous.For(media) == next.For(media) {
 			return s.preserveRoutingGap(ctx, tx, w, r, corpus, version)
 		}
-		owner = w.settings.Routing.For(media)
+		owner = next.For(media)
 		space = ""
 		for _, sp := range w.settings.Spaces {
 			if sp.OwnerPluginID == owner && sp.Role == content.SpaceServed {
