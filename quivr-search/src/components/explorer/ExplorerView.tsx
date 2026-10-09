@@ -3,9 +3,10 @@ import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import { COMMON_TYPES, fieldLabel, type Corpus, type Exclusion, type Field } from "../../lib/corpora";
 import {
+  ageLabel,
   countLabel,
+  estimateLabel,
   fetchExplore,
-  fetchFacets,
   predicatesOf,
   rangeLabel,
   readState,
@@ -14,14 +15,14 @@ import {
   writeState,
   type ExplorePage,
   type ExplorerState,
-  type Facets,
   type Range,
 } from "../../lib/explore";
 import { EmptyState, InBar, Notice, type Bar } from "../ui";
-import { FacetColumn } from "./Facets";
+import { FacetColumn, FIRST } from "./Facets";
 import { Preview } from "./Preview";
 import { RecordPage } from "./RecordPage";
 import { Timeline } from "./Timeline";
+import { useFacetCounts, useNow } from "./useFacetCounts";
 import { byDate, WireList, WireSkeleton } from "./WireList";
 import "../../explorer.css";
 
@@ -81,10 +82,9 @@ export function ExplorerView({
   // drawn, by date and by rank: a later page putting a newer row on top
   // does not move it.
   const [lead, setLead] = useState<{ key: string; byDate?: string; byRank?: string } | null>(null);
-  // The counts, with the corpora and filters they were read for.
-  const [facets, setFacets] = useState<(Facets & { key: string }) | null>(null);
-  const [facetsError, setFacetsError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  // Whether the other common fields were opened: they are counted then.
+  const [moreOpen, setMoreOpen] = useState(false);
   const narrow = useSyncExternalStore(subscribeNarrow, () => narrowQuery().matches);
 
   useEffect(() => onState(writeState(state).toString()), [state, onState]);
@@ -139,19 +139,35 @@ export function ExplorerView({
     [state.selection, state.range, types],
   );
   const listKey = JSON.stringify([picked, predicates, state.q]);
-  const facetsKey = JSON.stringify([picked, predicates, state.window]);
   // The list's current reads: a filter or corpus change aborts the page of
   // "more" still on its way, which belongs to the list it leaves.
   const reads = useRef<AbortController | null>(null);
   // The list's own scroll, on a desktop.
   const scroller = useRef<HTMLDivElement>(null);
   const listBox = useRef<HTMLElement>(null);
-  // The corpora the facets were read for: others picked, their fields go at once.
-  const facetsFor = useRef("");
-
   // Filters restored from the address wait for the fields' types, unless
   // the corpora could not be read.
   const typed = corporaRead || !Object.keys(state.selection).length;
+  const single = picked.length === 1 ? corpora.find((c) => c.corpus_id === picked[0]) : undefined;
+  // The fields counted, each on its own: the timeline and the first common
+  // fields, a corpus's own when it is picked alone, the others once opened
+  // or filtered on.
+  const rest = COMMON_TYPES.map(([name]) => name).filter((name) => name !== TIMELINE_FIELD && !FIRST.includes(name));
+  const own = (single?.own || []).map((f) => f.name);
+  const countedFields = [
+    TIMELINE_FIELD,
+    ...FIRST,
+    ...own,
+    ...(moreOpen || rest.some((name) => state.selection[name]?.length) ? rest : []),
+  ];
+  const { counts, key: facetsKey, retry: retryCounts } = useFacetCounts({
+    corpora: picked,
+    predicates,
+    window: state.window,
+    fields: countedFields,
+    enabled: !record && typed,
+    onUnauthorized,
+  });
 
   useEffect(() => {
     if (record || !typed) return;
@@ -180,27 +196,6 @@ export function ExplorerView({
     return () => controller.abort();
     // The key holds the corpora, the predicates and the text.
   }, [listKey, attempt, record, typed, onUnauthorized]);
-
-  useEffect(() => {
-    if (record || !typed) return;
-    const controller = new AbortController();
-    const corporaKey = picked.join(",");
-    if (facetsFor.current !== corporaKey) {
-      facetsFor.current = corporaKey;
-      setFacets(null);
-    }
-    setFacetsError("");
-    fetchFacets(picked, predicates, state.window, controller.signal)
-      .then((data) => setFacets({ ...data, key: facetsKey }))
-      .catch((e) => {
-        if (controller.signal.aborted) return;
-        if (e instanceof APIError && e.status === 401) return onUnauthorized();
-        // The list still shows; the facets keep their last values.
-        setFacetsError(e instanceof Error ? e.message : "Les nombres ne s’affichent pas.");
-      });
-    return () => controller.abort();
-    // The key holds the corpora, the predicates and the span shown.
-  }, [facetsKey, attempt, record, typed, onUnauthorized]);
 
   const loadMore = () => {
     const controller = reads.current;
@@ -293,7 +288,6 @@ export function ExplorerView({
     narrow && by === "click" ? onRecord(id) : setState((s) => ({ ...s, selected: id }));
 
   const nameOf = (id?: string) => corpora.find((c) => c.corpus_id === id)?.name || id || "";
-  const single = picked.length === 1 ? corpora.find((c) => c.corpus_id === picked[0]) : undefined;
   const all = corpora.length > 0 && corpora.every((c) => picked.includes(c.corpus_id));
   // How many documents the corpora picked hold, once each is counted.
   const counted = corpora.filter((c) => picked.includes(c.corpus_id));
@@ -301,15 +295,25 @@ export function ExplorerView({
     counted.length === new Set(picked).size && counted.every((c) => c.documents !== undefined)
       ? counted.reduce((n, c) => n + c.documents!, 0)
       : undefined;
-  const fresh = facets?.key === facetsKey ? facets : null;
+  // The timeline's counts, and its total, for the filters shown.
+  const timelineCount = counts.get(TIMELINE_FIELD);
+  const fresh = timelineCount?.key === facetsKey ? timelineCount : undefined;
+  // Ages shown here and in the column are read again together.
+  const now = useNow(!!fresh?.as_of);
   // Only filters the requests carry show as active: a field of unknown type is not.
   const picks = Object.entries(state.selection)
     .filter(([field]) => types.has(field))
     .flatMap(([field, values]) => values.map((value) => ({ field, value })));
   const active = picks.length + (state.range ? 1 : 0);
-  // The corpora left out, as the list and the counts of the same filters report them.
-  const excluded = mergeExclusions([...(page?.excluded_corpora || []), ...(fresh?.excluded_corpora || [])]);
-  const timeline = facets?.fields.find((f) => f.field === TIMELINE_FIELD);
+  // The corpora left out, as the list and the common fields' counts of the
+  // same filters report them.
+  const excluded = mergeExclusions([
+    ...(page?.excluded_corpora || []),
+    ...[...counts]
+      .filter(([field, count]) => field.startsWith("metadata.") && count.key === facetsKey)
+      .flatMap(([, count]) => count.excluded_corpora || []),
+  ]);
+  const timeline = timelineCount?.fields?.[0];
   // A search keeps its rank on request; otherwise rows go by date.
   const byDay = !state.q || state.sort !== "relevance";
   const items = useMemo(() => (byDay ? byDate(page?.items || []) : page?.items || []), [page, byDay]);
@@ -325,7 +329,7 @@ export function ExplorerView({
       ? `${countLabel(documents)} document${documents > 1 ? "s" : ""}`
       : fresh?.total !== undefined
         ? // Counts go by publication date: without a range, undated documents are not counted.
-          `${countLabel(fresh.total)} document${fresh.total > 1 ? "s" : ""}${state.range ? "" : fresh.total > 1 ? " datés" : " daté"}`
+          `${estimateLabel(fresh.total, fresh.approximate)} document${fresh.total > 1 ? "s" : ""}${state.range ? "" : fresh.total > 1 ? " datés" : " daté"}${fresh.as_of && ageLabel(fresh.as_of, now) ? `, comptés ${ageLabel(fresh.as_of, now)}` : ""}`
         : "";
 
   if (record)
@@ -338,10 +342,12 @@ export function ExplorerView({
 
   const facetColumn = (
     <FacetColumn
-      facets={facets?.fields || null}
-      stale={(facets !== null && facets.key !== facetsKey) || (!facets && !facetsError)}
-      error={facetsError}
-      onRetry={() => setAttempt((n) => n + 1)}
+      counts={counts}
+      current={facetsKey}
+      fields={{ own, rest }}
+      more={countedFields.includes(rest[0])}
+      onMore={() => setMoreOpen(true)}
+      onRetry={retryCounts}
       single={single}
       excluded={status === "ready" ? excluded : []}
       corpora={corpora}
@@ -439,7 +445,12 @@ export function ExplorerView({
         {narrow && switcher}
         <Timeline
           facet={timeline}
-          stale={!fresh && !facetsError}
+          stale={!fresh}
+          approximate={timelineCount?.approximate}
+          asOf={fresh?.as_of}
+          error={timelineCount?.error || (fresh ? fresh.refineError : undefined)}
+          now={now}
+          onRetry={retryCounts}
           range={state.range}
           window={state.window}
           onRange={setRange}

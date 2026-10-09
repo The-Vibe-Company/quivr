@@ -261,10 +261,21 @@ export interface Engine {
   /**
    * What the facade answers the Explorer, set by a spec before the step that
    * reads it: the documents listed, by record id, three a page; the corpora
-   * a filter left out; the facets as counted. The facade's own filtering
-   * and counting are tested in server.test.mjs and explore.test.mjs.
+   * a filter left out; the facets as counted, each field asked alone (a
+   * field missing has no value), and as fast counts give a field when
+   * `fast` names other ones; the answers `hold` keeps back, by
+   * "field:accuracy", until their promise settles, and those `fail`
+   * refuses, by the same name. The facade's own
+   * filtering and counting are tested in server.test.mjs and explore.test.mjs.
    */
-  explorer: { listed: string[]; excluded?: Exclusion[]; facets: Omit<Facets, "excluded_corpora"> };
+  explorer: {
+    listed: string[];
+    excluded?: Exclusion[];
+    facets: Omit<Facets, "excluded_corpora">;
+    fast?: (field: string) => Omit<Facets, "excluded_corpora"> | undefined;
+    hold?: Map<string, Promise<void>>;
+    fail?: Set<string>;
+  };
   /** Sends the next incoming article on the live stream. */
   arrive: () => Article;
   /** Sends the next incoming article of the second corpus on the live stream. */
@@ -390,7 +401,20 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         ...excluded,
       });
     }
-    if (path === "/demo/explore/facets") return json(route, { ...explorer.facets, ...excluded });
+    if (path === "/demo/explore/facets") {
+      const field = url.searchParams.get("field") || "";
+      const accuracy = url.searchParams.get("accuracy") || "exact";
+      await explorer.hold?.get(`${field}:${accuracy}`);
+      if (explorer.fail?.has(`${field}:${accuracy}`))
+        return json(route, { message: "Les nombres sont momentanément indisponibles. Réessayez." }, 503);
+      const { fields, total, ...marks } = (accuracy === "fast" && explorer.fast?.(field)) || explorer.facets;
+      return json(route, {
+        ...marks,
+        fields: [fields.find((f) => f.field === field) || { field, type: "string", values: [] }],
+        ...(field === "metadata.published_at" && total !== undefined ? { total } : {}),
+        ...excluded,
+      });
+    }
     const explored = path.match(/^\/demo\/explore\/records\/([\w-]+)$/);
     if (explored) {
       const a = find(explored[1]);
