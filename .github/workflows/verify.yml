@@ -439,7 +439,7 @@ jobs:
         bash scripts/sign_image.sh "$IMAGE" sbom.spdx.json "$RUNNER_TEMP/image-check.key" "$RUNNER_TEMP/image-check.pub"
     - name: Pack bounded failure evidence
       if: failure()
-      run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
+      run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json scan-report.txt --output "${{ runner.temp }}/failure.tar.gz"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: failure()
       with:
@@ -496,6 +496,7 @@ jobs:
     env:
       MINTLIFY_TELEMETRY_DISABLED: '1'
 env:
+  DOCKER_BUILD_RECORD_UPLOAD: 'false'
   PIP_CONSTRAINT: ${{ github.workspace }}/scripts/ci-constraints.txt
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_RETRIES: '0'

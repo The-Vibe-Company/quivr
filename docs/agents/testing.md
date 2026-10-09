@@ -74,13 +74,10 @@ artifacts are for depth, not for finding the failure.
 
 ## In CI
 
-- Every PR runs guards (docs lint/denylist), Go/Python units and small-fixture
-  PostgreSQL adapters, including EXPLAIN-shape proofs.
-- One merge-base selector runs the affected contracts, SDKs, eval correctness,
-  stack parts, images and documentation site. Unknown inputs run the full suite.
-- `ci-full` opts into every lane. Main/releases run full verification on isolated stacks.
-- Aggregates accept irrelevant skips; selected failures, cancellations or skips fail.
-  Failure artifacts have byte/file caps and three-day retention. Success keeps summaries.
+- Every PR runs guards, Go/Python units and small-fixture PostgreSQL adapters, including EXPLAIN-shape proofs.
+- One merge-base selector runs affected contracts, SDKs, eval correctness, stack parts, images and docs; unknown inputs run the full suite.
+- `ci-full`, main and releases run full verification on isolated stacks.
+- Aggregates accept irrelevant skips; selected failures, cancellations or skips fail. Failure artifacts have byte/file caps and three-day retention; successful jobs keep summaries.
 - Measurements run locally; Weaviate upgrades and vector parity run nightly.
 
 Audit a whole subsystem with [campaign mode](../../.agents/skills/audit-tests-dev/CAMPAIGN.md):

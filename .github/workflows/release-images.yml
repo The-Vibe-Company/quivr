@@ -115,7 +115,7 @@ jobs:
       run: bash scripts/scan_image.sh "registry:$IMAGE"
     - name: Pack bounded scan failure evidence
       if: failure()
-      run: python3 scripts/ci_artifacts.py vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
+      run: python3 scripts/ci_artifacts.py vulnerabilities.json scan-report.txt --output "${{ runner.temp }}/failure.tar.gz"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: failure()
       with:
@@ -204,6 +204,7 @@ jobs:
           done < images.txt
         fi
 env:
+  DOCKER_BUILD_RECORD_UPLOAD: 'false'
   PIP_CONSTRAINT: ${{ github.workspace }}/scripts/ci-constraints.txt
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_RETRIES: '0'
