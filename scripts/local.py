@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """The local stack (make dev, make verify): host Go processes and isolated real dependencies."""
+import pathlib, sys
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 from prepare_tokenizer import prepare as prepare_tokenizer, requirements
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
@@ -17,8 +20,6 @@ import queue_workers
 import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, math, os, pathlib, re, secrets, signal, subprocess, sys, time, urllib.request, uuid
-ROOT=pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT))
 from deploy import infrastructure as infrastructure_settings
 GO=os.environ.get('GO','go')
 
@@ -146,7 +147,7 @@ class Stack:
             s['admin']:scope('org_a',['corpora:archive','corpora:rename','audit:read','corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write','connectors:admin','connector:push'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
-            s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
+            s['connector']:scope('org_c',['corpora:read','corpora:write','corpora:rename','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
             # The browser demo (scripts/demo.py) owns org_d: its connectors keep polling without touching acceptance Organizations.
             # Its keyword alerts need the monitoring rights to read Matches through the API;
@@ -578,7 +579,7 @@ def lifecycle_required():
     """Only CI with a known unchanged local.py may omit the expensive lifecycle proof."""
     base=os.environ.get('QUIVR_VERIFY_BASE')
     if not base:return True
-    changed=subprocess.run(['git','diff','--quiet',base,'HEAD','--','scripts/local.py'],cwd=ROOT)
+    changed=subprocess.run(['git','diff','--quiet',base,'HEAD','--','scripts/local.py','scripts/lifecycle.py','deploy/reset.py','deploy/reset_support.py','deploy/reset_storage.py','deploy/compose/reset.py','deploy/railway/reset.py'],cwd=ROOT)
     return changed.returncode!=0  # A missing/invalid base is uncertainty: run the proof.
 
 def parts():
@@ -693,8 +694,9 @@ def parts():
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
             # X webhook deliveries while the x-list plugin is down: 503 to X, then polling catches up.
             step('x_push_outage',lambda stack:verify_connector_x_push(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
-            # Last, since it activates them: pdf-text and the RSS connector registered with their own fixtures (THE-807).
+            # Certify pdf-text and RSS with their own fixtures before apply changes the RSS pin (THE-807).
             acceptance('plugin_own_fixtures','^TestPluginRegistrationWithItsFixtures$'),
+            acceptance('install_apply','^TestInstallApply$'),
             step('validate_captures',validate_captures)],
     }
 

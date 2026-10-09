@@ -105,5 +105,9 @@ func insertPublicationVersion(ctx context.Context, tx pgx.Tx, w content.Work, p 
 // identities and insert coverage before the journal fence; eligibility,
 // routing, currentness and public events still belong behind that fence.
 func insertEmbeddingCoverage(ctx context.Context, tx pgx.Tx, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) (int64, error) {
-	return insertCompactCoverage(ctx, tx, org, seg, g, artifacts)
+	inserted, err := insertCompactCoverage(ctx, tx, org, seg, g, artifacts)
+	if err != nil {
+		return inserted, err
+	}
+	return inserted, markRoutingVersion(ctx, tx, org, seg.VersionID)
 }

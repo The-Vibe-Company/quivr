@@ -97,7 +97,8 @@ INSERT INTO tombstones(organization,record_id) VALUES('example','target-4')`)
 		}
 		for _, owner := range []string{"example.owner", "example.evaluation", "example.absent"} {
 			var present bool
-			args := []any{"example", corpus, "generation", owner}
+			space := map[string]string{"example.owner": "served", "example.evaluation": "evaluation", "example.absent": "absent"}[owner]
+			args := []any{"example", corpus, "generation", owner, space}
 			if err := pool.QueryRow(ctx, spaceOwnerPresenceSQL, args...).Scan(&present); err != nil {
 				t.Fatal(err)
 			}

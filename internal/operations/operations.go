@@ -111,6 +111,16 @@ type Operation struct {
 	Backfill *Backfill
 	// Reprocess describes a quarantine reprocess; nil for other kinds.
 	Reprocess *Reprocess
+	// Admin describes an installation-wide routing command and its result.
+	Admin *Admin `json:"admin,omitempty"`
+}
+
+type Admin struct {
+	Target          string `json:"target,omitempty"`
+	PlanID          string `json:"plan_id,omitempty"`
+	PreviousPlanID  string `json:"previous_plan_id,omitempty"`
+	ServedSpaceID   string `json:"served_space_id,omitempty"`
+	PreviousSpaceID string `json:"previous_space_id,omitempty"`
 }
 
 // Reprocess is what a quarantine reprocess covers: the Versions of the
@@ -284,11 +294,22 @@ func (s Service) ConfigureRetrieval(ctx context.Context, scope corpus.Scope, cor
 
 // Read conceals Operations whose Corpus lies outside the caller's scope.
 func (s Service) Read(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
-	if err := scope.Require(corpus.ActionOperationsRead); err != nil {
-		return Operation{}, err
+	if !scope.Allows("plugins:admin") {
+		if err := scope.Require(corpus.ActionOperationsRead); err != nil {
+			return Operation{}, err
+		}
 	}
 	op, err := s.Store.Operation(ctx, scope.Organization, id)
 	if err != nil {
+		return Operation{}, err
+	}
+	if op.Admin != nil {
+		if err := scope.Require(corpus.ActionPluginRegistration); err != nil {
+			return Operation{}, err
+		}
+		return op, nil
+	}
+	if err := scope.Require(corpus.ActionOperationsRead); err != nil {
 		return Operation{}, err
 	}
 	if !scope.Contains(op.CorpusID) {

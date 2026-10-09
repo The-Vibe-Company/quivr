@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -107,7 +108,7 @@ func (s OperationStore) acceptCommandAttempt(ctx context.Context, org, kind, cor
 	var target *pin
 	if kind == operations.KindRetrievalConfiguration {
 		target = &pin{Retrieval: resolved}
-		if err = tx.QueryRow(ctx, `SELECT COALESCE(max(retrieval_version),1)+1 FROM projection_generations WHERE organization=$1 AND corpus_id=$2`, org, corpusID).Scan(&target.Version); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT COALESCE(max(retrieval_version),1)+1 FROM `+effectiveGenerationsSQL+` WHERE organization=$1 AND corpus_id=$2`, org, corpusID).Scan(&target.Version); err != nil {
 			return operations.Operation{}, err
 		}
 		if err = supersedeConfigurations(ctx, tx, org, corpusID); err != nil {
@@ -182,13 +183,16 @@ func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, ke
 	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,retrieval,retrieval_version,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
 SELECT $1,d.collection,d.profile_version,false,COALESCE(`+servedSpaceSQL+`,d.space_id),$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version),true,
  COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine'))),true,true,true
-FROM projection_generations d, projection_generations r, corpora c
+FROM `+effectiveGenerationsSQL+` d, projection_generations r, corpora c
 WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL("$2", "$3"), generation, org, corpusID, retrieval, version)
 	if err != nil {
 		return operations.Operation{}, err
 	}
 	if tag.RowsAffected() != 1 {
 		return operations.Operation{}, errors.New("default projection generation missing")
+	}
+	if err = markRoutingGeneration(ctx, tx, generation); err != nil {
+		return operations.Operation{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,previous_operation_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))`, org, id, kind, corpusID, key, canonical, generation, previous); err != nil {
 		return operations.Operation{}, err
@@ -356,7 +360,7 @@ func (s OperationStore) acceptRerunAttempt(ctx context.Context, org, sourceID, k
 	var target *pin
 	if source.Kind == operations.KindRetrievalConfiguration {
 		target = &pin{}
-		if err = tx.QueryRow(ctx, `SELECT retrieval,retrieval_version FROM projection_generations WHERE id=$1`, source.TargetGenerationID).Scan(&target.Retrieval, &target.Version); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT retrieval,retrieval_version FROM `+effectiveGenerationsSQL+` WHERE id=$1`, source.TargetGenerationID).Scan(&target.Retrieval, &target.Version); err != nil {
 			return operations.Operation{}, err
 		}
 	}
@@ -368,7 +372,11 @@ func (s OperationStore) acceptRerunAttempt(ctx context.Context, org, sourceID, k
 }
 
 func (s OperationStore) Operation(ctx context.Context, org, id string) (operations.Operation, error) {
-	return scanOperation(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+	op, err := scanOperation(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+	if errors.Is(err, corpus.ErrNotFound) {
+		return (RoutingStore{Pool: s.Pool}).routingOperation(ctx, database(ctx, s.Pool), org, id)
+	}
+	return op, err
 }
 
 // ClaimOperations leases a bounded batch of undispatched Operations. Locked
@@ -377,6 +385,27 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 	if limit <= 0 {
 		return nil, nil
 	}
+	adminRows, err := database(ctx, s.Pool).Query(ctx, `WITH claimed AS (
+ UPDATE routing_operation_outbox o SET lease_until=now()+interval '5 seconds'
+ FROM (SELECT organization,operation_id FROM routing_operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id,organization FOR UPDATE SKIP LOCKED LIMIT $1) pending
+ WHERE o.organization=pending.organization AND o.operation_id=pending.operation_id RETURNING o.organization,o.operation_id,o.trace_context)
+ SELECT c.organization,c.operation_id,p.kind,c.trace_context FROM claimed c JOIN routing_operations p ON (p.organization,p.id)=(c.organization,c.operation_id)`, min(limit, 4))
+	if err != nil {
+		return nil, err
+	}
+	admins, err := pgx.CollectRows(adminRows, func(row pgx.CollectableRow) (operations.Dispatch, error) {
+		var d operations.Dispatch
+		err := row.Scan(&d.Organization, &d.OperationID, &d.Kind, &d.TraceContext)
+		return d, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	limit -= len(admins)
+	if limit == 0 {
+		return admins, nil
+	}
+
 	rows, err := database(ctx, s.Pool).Query(ctx, `WITH claimed AS (
  UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds'
  FROM (SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id,organization FOR UPDATE SKIP LOCKED LIMIT $1) pending
@@ -387,7 +416,7 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 		return nil, err
 	}
 	defer rows.Close()
-	var batch []operations.Dispatch
+	batch := admins
 	for rows.Next() {
 		var d operations.Dispatch
 		if err = rows.Scan(&d.Organization, &d.OperationID, &d.Kind, &d.TraceContext); err != nil {
@@ -399,6 +428,10 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 }
 
 func (s OperationStore) OperationDispatched(ctx context.Context, d operations.Dispatch) error {
+	if routing.IsKind(d.Kind) {
+		_, err := database(ctx, s.Pool).Exec(ctx, `UPDATE routing_operation_outbox SET dispatched=true WHERE organization=$1 AND operation_id=$2`, d.Organization, d.OperationID)
+		return err
+	}
 	_, err := database(ctx, s.Pool).Exec(ctx, `UPDATE operation_outbox SET dispatched=true WHERE organization=$1 AND operation_id=$2`, d.Organization, d.OperationID)
 	return err
 }

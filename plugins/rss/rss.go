@@ -66,8 +66,6 @@ const (
 type feed struct {
 	// timeout overrides the request timeout (tests).
 	timeout time.Duration
-	// transport, when set, is the base HTTP transport (tests with TLS servers).
-	transport *http.Transport
 }
 
 // configuration is the plugin configuration an installer sets in the pin.
@@ -292,9 +290,6 @@ func (f feed) get(ctx context.Context, conf configuration, rawURL string, cred *
 		dialer.Control = refusePrivate
 	}
 	transport := &http.Transport{}
-	if f.transport != nil {
-		transport = f.transport.Clone()
-	}
 	transport.DialContext, transport.Proxy = dialer.DialContext, nil
 	transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout = timeout, timeout
 	transport.MaxIdleConns, transport.DisableKeepAlives = 1, true

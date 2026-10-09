@@ -89,7 +89,7 @@ func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org stri
 		return true, nil
 	}
 	var current string
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT COALESCE((SELECT segmentation_id FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4 AND role='served'),'')`, org, seg.VersionID, g.ID, owner).Scan(&current)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT COALESCE((SELECT pc.segmentation_id FROM projection_coverage pc WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND `+effectiveCoverageSQL("pc")+`),'')`, org, seg.VersionID, g.ID, owner).Scan(&current)
 	if err != nil || current == seg.ID {
 		return err == nil, err
 	}
@@ -104,7 +104,7 @@ func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org stri
 	var eligible, active, complete bool
 	err = readJournal(ctx, tx, org, `SELECT `+eligibleVersionSQL+` AND r.current_version_id=v.id,
  $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`, `+servedVectorsCompleteSQL+`,
- COALESCE((SELECT segmentation_id FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4 AND role='served'),'')
+ COALESCE((SELECT pc.segmentation_id FROM projection_coverage pc WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND `+effectiveCoverageSQL("pc")+`),'')
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID, owner}, &eligible, &active, &complete, &current)
 	if err != nil {
@@ -232,7 +232,7 @@ func prepareEnrichment(ctx context.Context, tx pgx.Tx, org string, seg content.S
 	var routing []byte
 	var sourceMediaType *string
 	guard := `SELECT r.id,r.corpus_id,` + eligibleVersionSQL + `,
- (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
+ (SELECT ingestion_routing FROM ` + effectiveGenerationsSQL + ` WHERE id=$3),
  (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  WHERE v.organization=$1 AND v.id=$2`
@@ -357,7 +357,7 @@ func prepareEnrichment(ctx context.Context, tx pgx.Tx, org string, seg content.S
 		var active bool
 		var current content.Generation
 		var spaces []byte
-		if err = tx.QueryRow(ctx, `SELECT id=`+routedGenerationSQL("$2", "$3")+`,space_id,spaces FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID, org, corpusID).Scan(&active, &current.SpaceID, &spaces); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT id=`+routedGenerationSQL("$2", "$3")+`,space_id,spaces FROM `+effectiveGenerationsSQL+` WHERE id=$1 FOR SHARE`, g.ID, org, corpusID).Scan(&active, &current.SpaceID, &spaces); err != nil {
 			return err
 		}
 		if current.Spaces, err = scanSpaces(spaces); err != nil {

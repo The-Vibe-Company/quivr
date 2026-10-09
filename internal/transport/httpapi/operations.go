@@ -32,6 +32,21 @@ func operationToTransport(op operations.Operation) transport.Operation {
 	if op.State == operations.StateSucceeded && op.ResultGenerationID != "" {
 		out.Result = &transport.ProjectionRebuildResult{ProjectionGenerationId: op.ResultGenerationID}
 	}
+	if op.Admin != nil {
+		out.Admin = &transport.OperationAdmin{Target: &op.Admin.Target}
+		if op.Admin.PlanID != "" {
+			out.Admin.PlanId = &op.Admin.PlanID
+		}
+		if op.Admin.PreviousPlanID != "" {
+			out.Admin.PreviousPlanId = &op.Admin.PreviousPlanID
+		}
+		if op.Admin.ServedSpaceID != "" {
+			out.Admin.ServedSpaceId = &op.Admin.ServedSpaceID
+		}
+		if op.Admin.PreviousSpaceID != "" {
+			out.Admin.PreviousSpaceId = &op.Admin.PreviousSpaceID
+		}
+	}
 	out.Backfill = backfillToTransport(op.Backfill)
 	out.QuarantineReprocess = reprocessToTransport(op.Reprocess)
 	return out

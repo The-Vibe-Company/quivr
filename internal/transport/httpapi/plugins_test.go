@@ -12,8 +12,10 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
@@ -26,8 +28,7 @@ type registryRows struct {
 	registration      registry.Registration
 	key               string
 	readID            string
-	activatedID       string
-	rollback          registry.RollbackRequest
+	commands          *routingCommands
 	limit             int
 }
 
@@ -55,21 +56,14 @@ func (m *registryRows) RegisterPlugin(_ context.Context, registration registry.R
 	m.registration, m.key = registration, key
 	return m.registrations[0], true, nil
 }
-func (m *registryRows) Activate(_ context.Context, id string, _ func(registry.Plan, map[string]registry.Registration, registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
-	m.activatedID = id
-	return *m.plan, nil
-}
 func (m *registryRows) PipelinePlans(_ context.Context, limit int) ([]registry.Plan, error) {
 	m.limit = limit
 	return []registry.Plan{*m.plan}, nil
 }
-func (m *registryRows) Rollback(_ context.Context, request registry.RollbackRequest, _ func(registry.Plan, registry.Plan, map[string]registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
-	m.rollback = request
-	return *m.plan, nil
-}
 
 const (
 	pluginOperator = "plugin-operator-token-0123456789abcdef012345"
+	operatorReader = "operator-reader-token-0123456789abcdef012345"
 	// Every other action of an Organization key, never plugins:admin.
 	organizationAdmin    = "organization-admin-token-0123456789abcdef01"
 	pluginObserver       = "observer-token-0123456789abcdef0123456789ab"
@@ -79,12 +73,21 @@ const (
 func pluginServer(t *testing.T, store registry.Store) *httptest.Server {
 	t.Helper()
 	keys := map[string]corpus.Scope{
+		operatorReader:       {Organization: "org_ops", Actions: []string{"operations:read"}, Corpora: []string{"*"}},
 		pluginOperator:       {Organization: "org_ops", Actions: []string{registry.Action}, Corpora: []string{"*"}},
 		organizationAdmin:    {Organization: "org_a", Actions: []string{"corpora:read", "corpora:write", "content:read", "content:write", "search:query", "changes:read", "monitoring:read", "monitoring:write", "connectors:read", "connectors:write", "projections:rebuild", "operations:read", "operations:write"}, Corpora: []string{"*"}},
 		pluginObserver:       {Organization: "org_o", Actions: []string{content.ObservabilityRead}, Corpora: []string{"*"}},
 		fencedPluginObserver: {Organization: "org_o", Actions: []string{content.ObservabilityRead}, Corpora: []string{"corpus_1"}},
 	}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithPlugins(registry.Service{Store: store}))
+	commands := &routingCommands{}
+	if rows, ok := store.(*registryRows); ok {
+		rows.commands = commands
+	}
+	options := []httpapi.Option{httpapi.WithPlugins(registry.Service{Store: store})}
+	if store != nil {
+		options = append(options, httpapi.WithRoutingOperations(routing.Service{Store: commands}), httpapi.WithOperations(operations.Service{Store: commands}))
+	}
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +253,7 @@ func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 	if res, body := operationCall(t, server, "GET", "/v0/admin/plugins/plans/plan_1", pluginOperator, "", ""); res.StatusCode != 200 || body["source"] != "activation" || body["plan_id"] != "plan_1" || store.readID != "plan_1" {
 		t.Fatalf("read a plan: %d %v", res.StatusCode, body)
 	}
-	if res, body := operationCall(t, server, "POST", "/v0/admin/plugins/plugin_registration_x/activate", pluginOperator, "application/json", "{}"); res.StatusCode != 200 || body["plan_id"] != "plan_1" || store.activatedID != "plugin_registration_x" {
+	if res, body := operationCall(t, server, "POST", "/v0/admin/plugins/plugin_registration_x/activate", pluginOperator, "application/json", "{}"); res.StatusCode != 202 || body["kind"] != "plugin_activation" || body["state"] != "queued" || res.Header.Get("Location") != "/v0/operations/operation_admin" || store.commands.command.Target != "plugin_registration_x" {
 		t.Fatalf("activate: %d %v", res.StatusCode, body)
 	}
 
@@ -260,11 +263,19 @@ func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 			t.Fatalf("rollback %s: %d %v, want 422 invalid_schema", invalid, res.StatusCode, body)
 		}
 	}
-	if res, body := operationCall(t, server, "POST", rollback, pluginOperator, "application/json", `{"idempotency_key":"r","plan_id":"plan_0","pinned_work":"stop"}`); res.StatusCode != 200 || body["plan_id"] != "plan_1" || body["previous_plan_id"] != "plan_0" {
+	if res, body := operationCall(t, server, "POST", rollback, pluginOperator, "application/json", `{"idempotency_key":"r","plan_id":"plan_0","pinned_work":"stop"}`); res.StatusCode != 202 || body["kind"] != "plugin_rollback" || res.Header.Get("Location") != "/v0/operations/operation_admin" {
 		t.Fatalf("rollback: %d %v, want the plan naming the one it replaced", res.StatusCode, body)
 	}
-	if store.rollback != (registry.RollbackRequest{Key: "r", Plan: "plan_0", PinnedWork: "stop"}) {
-		t.Fatalf("rollback inputs: %+v", store.rollback)
+	if store.commands.command != (routing.Command{Kind: routing.KindRollback, Key: "r", Target: "plan_0", PinnedWork: "stop"}) {
+		t.Fatalf("rollback inputs: %+v", store.commands.command)
+	}
+	for _, tc := range []struct {
+		token  string
+		status int
+	}{{pluginOperator, 200}, {operatorReader, 403}, {organizationAdmin, 404}} {
+		if res, body := operationCall(t, server, "GET", "/v0/operations/operation_admin", tc.token, "", ""); res.StatusCode != tc.status {
+			t.Fatalf("admin Operation access %d %v, want %d", res.StatusCode, body, tc.status)
+		}
 	}
 	for _, query := range []struct {
 		suffix string

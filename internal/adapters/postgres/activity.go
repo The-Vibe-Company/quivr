@@ -121,7 +121,7 @@ func (s ActivityStore) VersionActivity(ctx context.Context, org, versionID strin
 	}
 	err = s.Pool.QueryRow(ctx, `SELECT sg.provenance->>'plugin_id',coalesce(sg.provenance->>'plugin_version','') FROM projection_coverage pc
 JOIN segmentations sg ON (sg.organization,sg.id)=(pc.organization,pc.segmentation_id)
-WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=`+routedGenerationSQL("$1", "$3")+` AND pc.role='served' AND sg.provenance ? 'plugin_id'`, org, versionID, a.Source.CorpusID).Scan(&ref.ID, &ref.Version)
+WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=`+routedGenerationSQL("$1", "$3")+` AND `+effectiveCoverageSQL("pc")+` AND sg.provenance ? 'plugin_id'`, org, versionID, a.Source.CorpusID).Scan(&ref.ID, &ref.Version)
 	if err == nil {
 		a.Ingestion = &ref
 	} else if !errors.Is(err, pgx.ErrNoRows) {

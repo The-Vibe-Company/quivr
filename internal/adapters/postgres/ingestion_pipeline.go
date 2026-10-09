@@ -16,9 +16,9 @@ import (
 var ingestionPipelineGuardSQL = `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),` + recordGoneSQL + `,v.quarantined,v.baseline_ready,` + eligibleVersionSQL + `,
  $3=` + routedGenerationSQL("r.organization", "r.corpus_id") + `,
  (SELECT digest FROM segmentations WHERE organization=$1 AND id=$4 AND version_id=$2),
- (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
- (SELECT space_id FROM projection_generations WHERE id=$3),
- (SELECT spaces FROM projection_generations WHERE id=$3),
+ (SELECT ingestion_routing FROM ` + effectiveGenerationsSQL + ` WHERE id=$3),
+ (SELECT space_id FROM ` + effectiveGenerationsSQL + ` WHERE id=$3),
+ (SELECT spaces FROM ` + effectiveGenerationsSQL + ` WHERE id=$3),
  (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)),
  EXISTS(SELECT 1 FROM change_events WHERE organization=$1 AND event_id=$5)
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
@@ -173,7 +173,7 @@ func (group *journalGroup) pipeline(ctx context.Context, tx pgx.Tx) (bool, error
 		if e.Kind == content.CommitVectors {
 			// Evaluation snapshotting uses the fallback, so taking this generation's
 			// shared lock here cannot precede a same-group snapshot update.
-			writes.Queue(`SELECT id FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID)
+			writes.Queue(`SELECT id FROM `+effectiveGenerationsSQL+` WHERE id=$1 FOR SHARE`, g.ID)
 			writes.Queue(`UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, group.organization, seg.VersionID)
 			if !guard.emitted {
 				event("record.enrichment_available", content.StableID("enrichment", seg.ID, g.ID), seg.VersionID)

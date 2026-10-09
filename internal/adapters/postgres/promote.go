@@ -18,7 +18,7 @@ const carriesSQL = `(g.spaces_projected AND g.spaces @> jsonb_build_array(jsonb_
 // does not carry it), and those segments.
 var promotionGapSQL = `WITH routed AS (
  SELECT c.organization,c.id AS corpus_id,g.id AS generation_id,` + carriesSQL + ` AS carries
- FROM corpora c JOIN projection_generations g ON g.id=` + routedGenerationSQL("c.organization", "c.id") + `
+ FROM corpora c JOIN ` + effectiveGenerationsSQL + ` g ON g.id=` + routedGenerationSQL("c.organization", "c.id") + `
 ), gaps AS (
  SELECT rt.organization,rt.corpus_id FROM routed rt
  JOIN records r ON r.organization=rt.organization AND r.corpus_id=rt.corpus_id
@@ -99,6 +99,10 @@ WHERE `+carriesSQL+` AND (g.space_id=$2 OR g.spaces @> jsonb_build_array(jsonb_b
 // the replaced one. Otherwise the plugin's roles decide again and the
 // promotion is forgotten.
 func keepPromotion(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSpace) ([]content.RegisteredSpace, error) {
+	return retainedPromotions(ctx, tx, spaces, true)
+}
+
+func retainedPromotions(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSpace, prune bool) ([]content.RegisteredSpace, error) {
 	rows, err := tx.Query(ctx, `SELECT owner_plugin_id,served_space_id,previous_space_id FROM vector_space_promotions`)
 	if err != nil {
 		return nil, err
@@ -126,14 +130,17 @@ func keepPromotion(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSp
 	for _, p := range promotions {
 		si, sok := byID[p.served]
 		pi, pok := byID[p.previous]
+
 		// Retaining the owner solely for evaluation must not erase its model
 		// selection. Reapply it when that owner serves a source format again.
 		if sok && pok && out[si].OwnerPluginID == p.owner && out[pi].OwnerPluginID == p.owner && out[si].Role == content.SpaceEvaluation && out[pi].Role == content.SpaceEvaluation {
 			continue
 		}
 		if !sok || !pok || out[si].OwnerPluginID != p.owner || out[pi].OwnerPluginID != p.owner || out[si].Role != content.SpaceEvaluation || out[pi].Role != content.SpaceServed {
-			if _, err = tx.Exec(ctx, `DELETE FROM vector_space_promotions WHERE owner_plugin_id=$1`, p.owner); err != nil {
-				return nil, err
+			if prune {
+				if _, err = tx.Exec(ctx, `DELETE FROM vector_space_promotions WHERE owner_plugin_id=$1`, p.owner); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}

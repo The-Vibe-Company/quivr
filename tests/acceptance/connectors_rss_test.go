@@ -11,11 +11,10 @@ import (
 )
 
 // fakeFeed is a local RSS server the worker polls. It honours If-None-Match
-// and can be switched to an error status or a malformed body.
+// and serves a mutable feed body and ETag.
 type fakeFeed struct {
 	mu          sync.Mutex
 	body, etag  string
-	status      int
 	requests    int
 	notModified int
 	*httptest.Server
@@ -28,10 +27,6 @@ func newFakeFeed(t *testing.T, body string) *fakeFeed {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.requests++
-		if f.status != 0 {
-			w.WriteHeader(f.status)
-			return
-		}
 		if r.Header.Get("If-None-Match") == f.etag {
 			f.notModified++
 			w.WriteHeader(http.StatusNotModified)
@@ -45,10 +40,10 @@ func newFakeFeed(t *testing.T, body string) *fakeFeed {
 	return f
 }
 
-func (f *fakeFeed) serve(body, etag string, status int) {
+func (f *fakeFeed) serve(body, etag string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.body, f.etag, f.status = body, etag, status
+	f.body, f.etag = body, etag
 }
 
 func (f *fakeFeed) counts() (int, int) {
@@ -156,12 +151,12 @@ func TestConnectorRSSCollectsAFeedWithConditionalPolling(t *testing.T) {
 	}
 
 	// An edited item becomes a correction; the untouched item keeps one Version.
-	feed.serve(rssDocument(beta, strings.Replace(alpha, "Alpha &lt;b&gt;dispatch&lt;/b&gt; body.", "Alpha dispatch body, corrected.", 1)), `"2"`, 0)
+	feed.serve(rssDocument(beta, strings.Replace(alpha, "Alpha &lt;b&gt;dispatch&lt;/b&gt; body.", "Alpha dispatch body, corrected.", 1)), `"2"`)
 	byKey, events := recordsByKey(t, token, corpusID, cursor, map[string]int{"wire-alpha": 2})
 	rssCurrentVersion(t, token, byKey["wire-alpha"], func(v map[string]any) bool { return partText(v, "body") == "Alpha dispatch body, corrected." })
 
 	// Beta drops out of the feed: it is not withdrawn and never duplicated.
-	feed.serve(rssDocument(strings.Replace(alpha, "Alpha &lt;b&gt;dispatch&lt;/b&gt; body.", "Alpha dispatch body, corrected.", 1)), `"3"`, 0)
+	feed.serve(rssDocument(strings.Replace(alpha, "Alpha &lt;b&gt;dispatch&lt;/b&gt; body.", "Alpha dispatch body, corrected.", 1)), `"3"`)
 	feed.awaitPolls(t, 3)
 	betaRecord := request(t, "GET", "/v0/records/"+byKey["https://wire.example.org/beta"], token, nil, 200)
 	if betaRecord["withdrawn"] != false {
@@ -187,7 +182,7 @@ func TestConnectorRSSReportsSilenceDespiteSuccessfulPolls(t *testing.T) {
 	q := request(t, "POST", "/v0/connectors", token, rssConnector("rss-quiet", corpusID, "quiet", quiet.URL, 3), 201)
 	qid := q["connector_id"].(string)
 	recordsByKey(t, token, corpusID, cursor, map[string]int{"quiet-1": 1})
-	quiet.serve(rssDocument(`<item><guid>quiet-1</guid><title>Only item</title><description>Nothing new after this.</description></item>`), `"refetched"`, 0)
+	quiet.serve(rssDocument(`<item><guid>quiet-1</guid><title>Only item</title><description>Nothing new after this.</description></item>`), `"refetched"`)
 	silent := awaitHealth(t, token, qid, state("silent"))
 	if silent["health"].(map[string]any)["last_success_at"] == nil {
 		t.Fatalf("silent source must still report successful polls: %v", silent)
