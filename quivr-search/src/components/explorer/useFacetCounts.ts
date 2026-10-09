@@ -100,6 +100,8 @@ export function useFacetCounts({
     const over = (e: unknown) => {
       if (signal.aborted) return true;
       if (e instanceof APIError && e.status === 401) {
+        // Signed out: every read of this session stops.
+        s.controller.abort();
         onUnauthorized();
         return true;
       }

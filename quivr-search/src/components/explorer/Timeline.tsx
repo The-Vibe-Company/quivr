@@ -219,7 +219,10 @@ export function Timeline({
           ) : stale ? (
             "Comptage des dates…"
           ) : (
-            "Aucun document daté pour ces filtres."
+            <>
+              Aucun document daté pour ces filtres.
+              {asOf && ageLabel(asOf, now) && <span className="timeline-age"> Comptés {ageLabel(asOf, now)}.</span>}
+            </>
           )}
         </p>
         <div className="timeline-actions">

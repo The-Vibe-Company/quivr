@@ -207,9 +207,12 @@ test("a corpus's own fields are counted apart, 16 at a time, and only the common
 // engine for that field alone.
 test("one field is counted alone, once, fast when asked, and says how its counts were made", async () => {
   const sent = [];
+  // The timeline's counts are dated apart: the earliest instant dates them,
+  // though its text sorts after a later one's.
   const answers = [
     { as_of: "2026-10-09T05:00:00Z" },
-    { as_of: "2026-10-09T04:00:00Z", approximate: true, sample_fraction: 0.05 },
+    { as_of: "2026-10-09T04:00:00.500Z", approximate: true, sample_fraction: 0.05 },
+    { as_of: "2026-10-09T04:00:00Z" },
   ];
   const explorer = createExplorer({
     upstream: async (path, method, body) => {
@@ -231,6 +234,17 @@ test("one field is counted alone, once, fast when asked, and says how its counts
   const timeline = await ask({ field: date.name, accuracy: "fast", metadata: JSON.stringify(range) });
   assert.ok(sent.slice(1).every((b) => b.fields.length === 1 && b.fields[0].field === date.name && b.accuracy === "fast"));
   assert.deepEqual([timeline.total, timeline.as_of, timeline.approximate], [4, "2026-10-09T04:00:00Z", true]);
+  // A field asked alone names the corpora its count excluded.
+  const excluded = [{ corpus_id: "c1", fields: ["desk"] }];
+  const lone = createExplorer({
+    upstream: async (path, method, body) =>
+      path === "/v0/facets"
+        ? { status: 200, data: { items: body.fields.map((f) => ({ field: f.field, buckets: [] })), excluded_corpora: excluded } }
+        : { status: 200, data: { name: "Example corpus", effective_retrieval: { fields: [{ name: "desk", type: "string", roles: ["filter"], source_pointer: "/desk" }] } } },
+    picked: async () => ["c1"],
+    demo: () => "c1",
+  });
+  assert.deepEqual((await lone.facets(new URLSearchParams({ field: "desk" }))).excluded_corpora, excluded);
   // Exact counts carry no marker and send none.
   const exact = await ask({ field: "metadata.language" });
   assert.equal(sent.at(-1).accuracy, undefined);

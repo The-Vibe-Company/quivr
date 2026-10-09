@@ -45,7 +45,11 @@ export interface Facets {
   excluded_corpora?: Exclusion[];
   /** The dated documents every filter keeps. */
   total?: number;
-  /** When the engine's stored counts that answered were taken (RFC 3339). */
+  /**
+   * When the oldest of the corpora's stored counts that answered was taken
+   * (RFC 3339): each corpus's counts are exact as of its own, and refresh
+   * while they are read.
+   */
   as_of?: string;
   /** The counts are estimates from a sample of the documents. */
   approximate?: boolean;

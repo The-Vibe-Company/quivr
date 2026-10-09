@@ -340,7 +340,8 @@ export async function countFacets({ count, ids, fields, predicates, timeline, ac
       }));
       return { field: field.name, type: field.type, ...(interval ? { interval } : {}), values };
     }),
-    ...(all?.excluded_corpora?.length ? { excluded_corpora: all.excluded_corpora } : {}),
+    // A field asked alone names the corpora its own count excluded.
+    ...((all || others[0])?.excluded_corpora?.length ? { excluded_corpora: (all || others[0]).excluded_corpora } : {}),
     ...(timeline
       ? { total: years ? sum(years.items[0]?.buckets) : sum(buckets.get(timeline.field)) }
       : {}),
