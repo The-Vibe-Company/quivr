@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "deployment": "replace-with-your-installation-name",
+  "platform": "railway",
+  "project": "replace-with-your-project-id",
+  "environment": "replace-with-your-environment-id",
+  "dedicated": true,
+  "services": {
+    "api": "api",
+    "worker": "worker",
+    "worker-bulk": "worker-bulk",
+    "web": "web",
+    "postgres": "postgres",
+    "temporal": "temporal",
+    "seaweed": "seaweed",
+    "weaviate": "weaviate",
+    "tei": "tei"
+  }
+}

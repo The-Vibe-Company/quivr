@@ -1268,10 +1268,15 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   // A picked source narrows the total and the bars, not its own menu.
   const picked = (await stats({ buckets: bounds, sources: ["Revue technique"] })).data;
   assert.deepEqual([picked.total, picked.buckets, picked.sources], [120, [0, 120], all.sources]);
-  // Counting again reads memory only: no call reaches the core.
-  const calls = JSON.stringify(core.calls());
+  // Cached counts do not reload data; corpus-existence checks may still reach the core.
+  const dataCalls = () => Object.fromEntries(
+    Object.entries(core.calls()).filter(([route]) => route !== "/v0/corpora/demo"),
+  );
+  const calls = dataCalls();
+  // Force corpus revalidation without waiting for its cache to expire.
+  await get("/demo/session");
   await stats({ buckets: bounds, alerts: ["sub_arch"] });
-  assert.equal(JSON.stringify(core.calls()), calls);
+  assert.deepEqual(dataCalls(), calls);
 
   // Topics come from every title of the period, the older ones included.
   const period = new URLSearchParams({ after: bounds[2], before: bounds[0] });

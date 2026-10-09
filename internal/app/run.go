@@ -913,6 +913,9 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) {
 			changes.Pruner{Audit: auditStore, AuditRetentionMonths: auditMonths, Store: journal, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
 		})
+		loops.Go(func(ctx context.Context) {
+			processing.IngestionPageSweeper{Store: baseline, Content: contents, Batch: 100}.Run(ctx)
+		})
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
 		loops.Go(func(ctx context.Context) {

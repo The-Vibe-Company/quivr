@@ -60,7 +60,7 @@ type PurgeStore interface {
 	ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]PurgeItem, error)
 	// RecordPurge adds deleted objects to the item's record and releases its
 	// lease; complete marks it purged so it is never claimed again.
-	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool) error
+	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool, limit int) (bool, error)
 }
 
 // PurgeProjection deletes scoped projection objects in bounded batches.
@@ -206,7 +206,8 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		// Save confirmed progress even on partial failure/cancellation. The bounded
 		// cleanup context retains the managed process shutdown budget.
 		checkpoint, finish := lifecycle.CleanupContext(ctx, 5*time.Second)
-		recordErr := p.Store.RecordPurge(checkpoint, item, deleted, complete)
+		var recordErr error
+		complete, recordErr = p.Store.RecordPurge(checkpoint, item, deleted, complete, batch)
 		finish()
 		if recordErr != nil {
 			return completed, errors.Join(failure, recordErr)

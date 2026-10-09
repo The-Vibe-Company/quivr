@@ -265,11 +265,12 @@ class Infrastructure(unittest.TestCase):
             calls.append(args)
             if args[0] == 'ps':
                 self.assertIn('label=com.docker.compose.project=fixture', args)
-                return 'database' if args[-1].endswith('postgres') else ''
+                return {'postgres': 'database', 'temporal': 'workflow', 'seaweed': 'objects'}.get(args[-1].rsplit('=', 1)[1], '')
             if args[0] == 'inspect':
+                service = {'database': 'postgres', 'workflow': 'temporal', 'objects': 'seaweed'}[args[1]]
                 return json.dumps([{'Config': {
                     'Image': settings['postgres']['image'], 'Env': ['POSTGRES_PASSWORD=private'],
-                    'Labels': {'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'postgres'}},
+                    'Labels': {'com.docker.compose.project': 'fixture', 'com.docker.compose.service': service}},
                     'State': {'Running': True}, 'HostConfig': {'Memory': 1073741824, 'NanoCpus': 1000000000}}])
             if args[0] == 'exec':
                 return ('{"settings":{"random_page_cost":"1.1","effective_io_concurrency":"200"},"pg_stat_statements":true,"statistics_preloaded":true}\n327680\n__memory=1073741824\n__cpus=1\n'
@@ -285,6 +286,9 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(observed['postgres', 'filesystem_capacity', 'minimum_bytes']['status'], 'drift')
         self.assertNotIn('private', json.dumps(result))
         self.assertEqual({args[0] for args in calls}, {'ps', 'inspect', 'exec'})
+        for service, identifier in (('temporal', 'workflow'), ('seaweed', 'objects')):
+            self.assertEqual(adapter.configured(service)['environment'], {})
+            self.assertEqual(adapter.containers[service], identifier)
         storage_bytes = 600000000000
         result = adapter.check(settings)
         capacity = next(row for row in result['observations']

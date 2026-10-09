@@ -54,11 +54,11 @@ class Railway:
         self.targets = {}
         self.instances = {}
 
-    def api(self, query, variables):
+    def api(self, query, variables, object_result=False):
         response = json.loads(self.run(['api', query, '--variables', json.dumps(variables)]))
         if response.get('errors') or not isinstance(response.get('data'), dict):
             raise RuntimeError('Railway API rejected the infrastructure request')
-        if query.lstrip().startswith('mutation') and any(value is not True for value in response['data'].values()):
+        if query.lstrip().startswith('mutation') and not object_result and any(value is not True for value in response['data'].values()):
             raise RuntimeError('Railway API did not acknowledge the infrastructure update')
         return response['data']
 
