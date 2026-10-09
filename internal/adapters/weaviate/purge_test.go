@@ -228,8 +228,22 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 type lostPurgeReply struct{ next http.RoundTripper }
 
 func (f lostPurgeReply) RoundTrip(r *http.Request) (*http.Response, error) {
+	var request struct {
+		DryRun bool `json:"dryRun"`
+	}
+	if r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		r.Body.Close()
+		if err = json.Unmarshal(body, &request); err != nil {
+			return nil, err
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
 	res, err := f.next.RoundTrip(r)
-	if err == nil && r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" {
+	if err == nil && r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" && !request.DryRun {
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
 		return nil, errors.New("injected lost purge response")

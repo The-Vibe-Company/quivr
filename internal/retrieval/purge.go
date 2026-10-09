@@ -24,6 +24,12 @@ const (
 // at it when it died finish first.
 const DefaultPurgeGrace = time.Hour
 
+// Purge requests and the complete sweep stay below the five-minute item lease.
+const (
+	DefaultPurgeTimeout = time.Minute
+	MaximumPurgeTimeout = 2 * time.Minute
+)
+
 // PurgeItem is one claimed purge. Collections name the physical collections
 // its objects may live in.
 type PurgeItem struct {
@@ -107,6 +113,8 @@ type Purger struct {
 	Interval   time.Duration
 	Batch      int
 	Metrics    *PurgeMetrics
+	// RequestTimeout reserves enough sweep time for selection and one delete.
+	RequestTimeout time.Duration
 }
 
 // Run sweeps until ctx ends.
@@ -134,7 +142,14 @@ func (p Purger) Run(ctx context.Context) {
 // Sweep notices newly dead items, then purges at most Batch items whose grace
 // period elapsed. It reports how many items it completed.
 func (p Purger) Sweep(ctx context.Context) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	requestTimeout := p.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = DefaultPurgeTimeout
+	}
+	requestTimeout = min(requestTimeout, MaximumPurgeTimeout)
+	// One shared deadline covers notice, all leased items/collections and requests.
+	// At the maximum: 255s work + one 5s cleanup < the 300s item lease.
+	ctx, cancel := context.WithTimeout(ctx, 2*requestTimeout+15*time.Second)
 	defer cancel()
 	batch, grace := p.Batch, p.Grace
 	if batch <= 0 {
@@ -159,8 +174,14 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 	completed := 0
 	var failure error
 	for _, item := range items {
+		if ctx.Err() != nil {
+			return completed, errors.Join(failure, ctx.Err())
+		}
 		deleted, complete, remaining := 0, true, 0
 		for _, collection := range item.Collections {
+			if err = ctx.Err(); err != nil {
+				break
+			}
 			var r PurgeResult
 			if item.Kind == PurgeGeneration {
 				r, err = p.Projection.PurgeGeneration(ctx, collection, item.Organization, item.CorpusID, item.GenerationID)
