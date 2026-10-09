@@ -29,23 +29,12 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			c.GenerationRole = content.SpaceServed
 		}
 		// Owner presence preserves independent evaluation routing without a
-		// segment count. Lateral point lookups prevent stale planner statistics
-		// from rescanning every projection for each Record. Legacy engine spaces
-		// keep generation routing.
+		// segment count. Start at this Corpus's Records; correlated point reads
+		// keep an absent owner from scanning another Corpus's coverage, even
+		// with stale statistics. Legacy engine spaces keep generation routing.
 		if c.OwnerPluginID != "" {
 			var present bool
-			err = database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(
- SELECT 1 FROM projection_coverage pc
- JOIN LATERAL (
-  SELECT v.* FROM record_versions v
-  WHERE (v.organization,v.id)=(pc.organization,pc.version_id) OFFSET 0
- ) v ON true
- JOIN LATERAL (
-  SELECT r.* FROM records r
-  WHERE (r.organization,r.id)=(v.organization,v.record_id) OFFSET 0
- ) r ON r.current_version_id=v.id
- WHERE pc.organization=$1 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND pc.role='served'
- AND r.corpus_id=$2 AND `+eligibleVersionSQL+`)`, org, corpusID, g.ID, c.OwnerPluginID).Scan(&present)
+			err = database(ctx, s.Pool).QueryRow(ctx, spaceOwnerPresenceSQL, org, corpusID, g.ID, c.OwnerPluginID).Scan(&present)
 			if err != nil {
 				return g, nil, err
 			}
@@ -64,12 +53,7 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			continue
 		}
 		var present bool
-		err = database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(
- SELECT 1 FROM records r JOIN LATERAL (
-  SELECT v.* FROM record_versions v
-  WHERE (v.organization,v.id)=(r.organization,r.current_version_id) OFFSET 0
- ) v ON true
- WHERE r.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`)`, org, corpusID).Scan(&present)
+		err = database(ctx, s.Pool).QueryRow(ctx, corpusEligibilityPresenceSQL, org, corpusID).Scan(&present)
 		if err != nil {
 			return g, nil, err
 		}
@@ -80,3 +64,23 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 	}
 	return g, out, nil
 }
+
+const spaceOwnerPresenceSQL = `SELECT EXISTS(
+ SELECT 1 FROM records r
+ JOIN LATERAL (
+  SELECT v.* FROM record_versions v
+  WHERE (v.organization,v.id)=(r.organization,r.current_version_id) OFFSET 0
+ ) v ON v.record_id=r.id
+ JOIN LATERAL (
+  SELECT 1 FROM projection_coverage pc
+  WHERE (pc.organization,pc.version_id,pc.generation_id,pc.plugin_id)=(v.organization,v.id,$3,$4)
+  AND pc.role='served' OFFSET 0
+ ) pc ON true
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
+
+const corpusEligibilityPresenceSQL = `SELECT EXISTS(
+ SELECT 1 FROM records r JOIN LATERAL (
+  SELECT v.* FROM record_versions v
+  WHERE (v.organization,v.id)=(r.organization,r.current_version_id) OFFSET 0
+ ) v ON true
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
