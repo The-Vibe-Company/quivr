@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/The-Vibe-Company/quivr/sdks/go v0.0.0
 	github.com/mmcdole/gofeed v1.5.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (

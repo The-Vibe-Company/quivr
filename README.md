@@ -60,7 +60,7 @@ A single `quivr` binary provides the `api`, `worker` and `migrate` commands.
 
 ## Quickstart
 
-Requirements (Linux x86_64, or macOS on Apple Silicon for `make dev`): Go 1.27.1, Docker with Compose v2, Python 3 with `venv`,
+Requirements (Linux x86_64, or macOS on Apple Silicon for `make dev`): Go 1.27.2, Docker with Compose v2, Python 3 with `venv`,
 Node.js 22+ and `jq`. The first run downloads pinned images and the E5 model (~1 GB).
 
 ```bash

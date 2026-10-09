@@ -28,11 +28,15 @@ const embeddingArtifactsRelation = `(SELECT o.organization,encode(e.artifact_sha
 
 // Arguments are trusted SQL expressions; callers use LATERAL for another FROM
 // item's keys so coverage work remains bounded to the requested segments.
+// Keep numeric-key seeks behind their parent lookups even while small-table
+// statistics still describe an empty installation.
 func embeddingCoverageForSegmentSQL(organization, segment string) string {
 	return `(SELECT o.organization,k.segment_id,cc.generation_id,encode(e.artifact_sha256,'hex') AS artifact_id,sp.space_id
  FROM storage_organizations o
- JOIN storage_segments k ON k.organization_id=o.id
- JOIN compact_embeddings e ON (e.organization_id,e.segment_id)=(k.organization_id,k.id)
+ CROSS JOIN LATERAL (SELECT k.organization_id,k.id,k.segment_id FROM storage_segments k
+  WHERE k.organization_id=o.id AND k.segment_id=` + segment + ` OFFSET 0) k
+ CROSS JOIN LATERAL (SELECT e.* FROM compact_embeddings e
+  WHERE (e.organization_id,e.segment_id)=(k.organization_id,k.id) OFFSET 0) e
  JOIN compact_embedding_coverage cc ON (cc.organization_id,cc.file_id)=(e.organization_id,e.file_id)
  JOIN storage_spaces sp ON sp.id=e.space_id
  WHERE o.organization=` + organization + ` AND k.segment_id=` + segment + `
