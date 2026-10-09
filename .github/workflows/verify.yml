@@ -285,6 +285,22 @@ jobs:
         env:
           # A missing base (including a first push) runs lifecycle by default.
           QUIVR_VERIFY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Inspect verification artifact trees
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          for root in Path('.scratch').glob('quivr-verify-*'):
+              files = directories = symlinks = depth = 0
+              for current, children, names in os.walk(root, followlinks=False):
+                  files += len(names)
+                  directories += len(children)
+                  depth = max(depth, len(Path(current).relative_to(root).parts) + bool(names))
+                  symlinks += sum((Path(current) / name).is_symlink() for name in children + names)
+              print(json.dumps(dict(root=root.name, files=files, directories=directories,
+                                    maximum_depth=depth, symlinks=symlinks)))
+          PY
       - uses: actions/upload-artifact@v7
         id: verification-artifact
         if: always()
