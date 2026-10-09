@@ -50,6 +50,7 @@ var recordObservationSQL = [...]string{
  AND NOT EXISTS(SELECT FROM tombstones t WHERE (t.organization,t.record_id)=(k.organization,k.record_id)),false))
  AND q.ctid=ANY(ARRAY(SELECT locked.ctid FROM (` + queueObservationKeysSQL + `) ids
  JOIN LATERAL (SELECT ctid FROM queue_enrichment_records p WHERE (p.organization,p.record_id)=(ids.organization,ids.record_id) LIMIT 1) locked ON true))`,
+	markRoutingRecordsSQL,
 }
 
 func queueRecordObservations(batch *pgx.Batch, organizations, records []string) {

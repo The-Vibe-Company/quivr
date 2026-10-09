@@ -12,6 +12,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/routing"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
@@ -199,6 +200,8 @@ func (r *Runtime) operationIntents() IntentSource {
 		for _, d := range batch {
 			name, queue := rebuildWorkflowName, workqueue.TaskQueue(workqueue.Bulk)
 			switch d.Kind {
+			case routing.KindPromotion, routing.KindActivation, routing.KindRollback:
+				name = routingWorkflowName
 			case operations.KindBackfill:
 				name = backfillWorkflowName
 			case operations.KindQuarantineReprocess:

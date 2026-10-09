@@ -907,8 +907,7 @@ paths:
   /v0/operations/{operation_id}:
     get:
       operationId: getOperation
-      description: Administrative progress only. This read schema does not specify every administrative
-        command.
+      description: Follow administrative progress. Corpus Operations require operations:read and matching Corpus grants. vector_space_promotion, plugin_activation and plugin_rollback require plugins:admin in the Organization that requested them; they carry admin and have no corpus_id.
       responses:
         '200':
           description: Successful response
@@ -931,8 +930,10 @@ paths:
         schema:
           type: string
           minLength: 1
-      x-required-permissions:
-      - operations:read
+      x-required-permissions: []
+      x-conditional-permissions:
+        corpus_operations: [operations:read]
+        admin_operations: [plugins:admin]
   /v0/corpora:
     post:
       operationId: createCorpus
@@ -2910,21 +2911,7 @@ paths:
   /v0/admin/plugins/{registration_id}/activate:
     post:
       operationId: activatePlugin
-      description: Make a validated registration serve every role it declares, as a new immutable Pipeline
-        Plan that api and worker follow without restarting; the previous plan stays readable. Every other
-        version of the same plugin leaves the plan, and so does every registration whose roles it takes
-        over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per
-        media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension
-        namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409
-        registration_not_validated for a registration that is not validated or inactive. Activating the
-        registration that is already active promotes its evaluation source formats to served, retaining the
-        previous owner for evaluation; it returns the active plan when there is nothing to promote.
-        The target must answer discovery with its exact manifest digest, including for an unchanged
-        activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes.
-        Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the
-        Subscription Versions created or edited from then on. Every Subscription Version keeps the version
-        it recorded, which keeps judging it and stays draining while Subscriptions pin it, until
-        migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+      description: Prepare and activate a validated registration as a background Operation. Provider discovery and installation-wide coverage validation run before publication. Work already started keeps its recorded plan. An unchanged activation still validates discovery. Follow Location until the Operation succeeds or fails; admin.plan_id names the resulting immutable Pipeline Plan. Requires plugins:admin.
       x-required-permissions:
       - plugins:admin
       parameters:
@@ -2934,16 +2921,26 @@ paths:
         schema:
           type: string
           minLength: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PluginActivationRequest'
       responses:
-        '200':
-          description: Successful response
+        '202':
+          description: Accepted background Operation.
+          headers:
+            Location:
+              description: Follow this Operation with GET.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PipelinePlan'
+                $ref: '#/components/schemas/Operation'
         default:
-          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown
-            registration, 409 registration_not_validated, plugin_conflict or plugin_unreachable, 503 storage unavailable.
+          description: Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation.
           content:
             application/json:
               schema:
@@ -3067,14 +3064,7 @@ paths:
   /v0/admin/spaces/{vector_space_id}/promote:
     post:
       operationId: promoteVectorSpace
-      description: Make a registered evaluation space the one search uses, in one call, for the whole
-        deployment. Coverage must be complete, that is every Corpus's routed generation carries the space
-        with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the
-        Corpora and segments it misses in the message, unless force is true. Every generation that carries
-        the space and served the previous one serves it from then on, the default one included, so new
-        Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors,
-        so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin
-        still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+      description: Prepare a deployment-wide vector space promotion as a background Operation. Coverage is checked in bounded batches while imports continue. Incomplete coverage fails the Operation with coverage_incomplete unless force is true. The final switch changes routing atomically. The previous space retains its vectors and can be promoted again. Follow Location; admin.served_space_id and admin.previous_space_id describe the successful switch. Requires plugins:admin.
       x-required-permissions:
       - plugins:admin
       parameters:
@@ -3091,16 +3081,19 @@ paths:
             schema:
               $ref: '#/components/schemas/VectorSpacePromotionRequest'
       responses:
-        '200':
-          description: Successful response
+        '202':
+          description: Accepted background Operation.
+          headers:
+            Location:
+              description: Follow this Operation with GET.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VectorSpacePromotion'
+                $ref: '#/components/schemas/Operation'
         default:
-          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404
-            unknown space, 409 coverage_incomplete, 422 invalid_schema or not_evaluation_space (a retired
-            space), 503 storage unavailable.
+          description: Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation.
           content:
             application/json:
               schema:
@@ -3410,22 +3403,7 @@ paths:
   /v0/admin/plugins/plan/rollback:
     post:
       operationId: rollbackPipelinePlan
-      description: Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source
-        rollback that api and worker follow without restarting. The default target is the plan the active
-        one replaced; plan_id names another one. Registrations the rollback brings back serve again, even
-        when they were draining or inactive. Registrations it takes out drain, or stop with
-        pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409
-        plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that
-        pin it, whatever pinned_work says, as after an activation.
-        Every plugin it brings back must answer discovery at its endpoint with its manifest's digest.
-        Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan
-        changes. Restore that registration's exact build at its endpoint, or activate the current registration
-        of the previous ingestion owner to restore its evaluated source formats while retaining the newer build.
-        Historical plans are never rewritten to follow a redeployed build.
-        409 no_previous_plan when there is no earlier plan to return to. A rollback to the active
-        plan's roles returns the active plan. The same idempotency key with the same request returns the
-        plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already
-        produced is rewritten. Requires plugins:admin.
+      description: Restore an earlier immutable Pipeline Plan through a background Operation. plan_id defaults to the plan the active one replaced. Returning registrations must answer discovery with their exact manifest digest. Coverage gaps do not prevent rollback; affected records retain their outgoing owner and space until background recovery completes the returning projection. pinned_work chooses drain or stop for outgoing work; pinned Subscription Versions keep their evaluators. Follow Location; admin.plan_id names the new rollback plan. Requires plugins:admin.
       x-required-permissions:
       - plugins:admin
       requestBody:
@@ -3435,16 +3413,19 @@ paths:
             schema:
               $ref: '#/components/schemas/PipelinePlanRollbackRequest'
       responses:
-        '200':
-          description: Successful response
+        '202':
+          description: Accepted background Operation.
+          headers:
+            Location:
+              description: Follow this Operation with GET.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PipelinePlan'
+                $ref: '#/components/schemas/Operation'
         default:
-          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404
-            unknown plan, 409 idempotency_conflict, no_previous_plan, plugin_conflict, plugin_unreachable or
-            registration_not_validated, 422 invalid_schema, 503 storage unavailable.
+          description: Structured admission error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown target, 409 idempotency_conflict, 422 invalid_schema or invalid target, 503 storage unavailable. Discovery, plan compatibility and coverage failures are reported in the accepted Operation.
           content:
             application/json:
               schema:
@@ -4712,6 +4693,29 @@ components:
       - size_bytes
       - sha256
       - media_type
+    PluginActivationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+    OperationAdmin:
+      type: object
+      additionalProperties: false
+      description: Routing command target and successful cutover result. Administrative Operations have no corpus_id and require plugins:admin to follow. Their kinds are vector_space_promotion, plugin_activation and plugin_rollback.
+      properties:
+        target:
+          type: string
+        plan_id:
+          type: string
+        previous_plan_id:
+          type: string
+        served_space_id:
+          type: string
+        previous_space_id:
+          type: string
     Operation:
       type: object
       additionalProperties: false
@@ -4755,6 +4759,8 @@ components:
           minLength: 1
         result:
           $ref: '#/components/schemas/ProjectionRebuildResult'
+        admin:
+          $ref: '#/components/schemas/OperationAdmin'
         backfill:
           $ref: '#/components/schemas/OperationBackfill'
         quarantine_reprocess:
@@ -4774,6 +4780,10 @@ components:
         A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters
         versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with
         skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
+        vector_space_promotion, plugin_activation and plugin_rollback carry admin, with no corpus_id.
+        Their counters records_scanned, versions_missing and segments_missing describe the preflight;
+        required_missing excludes gaps retained from an earlier rollback. Success publishes routing;
+        rollback recovery continues in the background after success.
       if:
         properties:
           kind:
@@ -5556,6 +5566,10 @@ components:
       type: object
       additionalProperties: false
       properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
         force:
           type: boolean
           default: false

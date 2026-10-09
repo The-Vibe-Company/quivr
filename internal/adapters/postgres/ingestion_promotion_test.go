@@ -30,9 +30,23 @@ func (*rebuildPublication) Search(context.Context, []retrieval.Route, corpus.Sco
 // This storage lifecycle owns route cutover, concurrent old-plan publication
 // and rollback. The existing evaluation owner owns optional call isolation;
 // here its shared contract fixture supplies genuinely different owner cuts.
-func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+type ingestionOwnerFixture struct {
+	manifest, aEndpoint string
+	pins                *plugins.PinSet
+	pool                *pgxpool.Pool
+	pluginsStore        postgres.PluginStore
+	oldPlan             registry.Plan
+	live                *plugins.Live
+	store               fixtureContentStores
+	contents            content.Service
+	scope               corpus.Scope
+	corpus              corpus.Corpus
+	registryService     registry.Service
+	a, b                *plugins.Pin
+}
+
+func newIngestionOwnerFixture(t *testing.T, ctx context.Context) ingestionOwnerFixture {
+	t.Helper()
 	pool := scratchDatabase(t, ctx)
 	manifest := "../../../tests/plugin-contract/ingestion-valid/quivr-plugin.yaml"
 	aEndpoint := startIngestionFixture(t, ctx, hashEmbedder, "ingestion-valid")
@@ -82,10 +96,19 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	operator := corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}
 	registryService := registry.Service{Store: pluginsStore, Spaces: app.Config{}.DeploymentSpaces}
 	a := original.IngestionFor("text/plain")
 	b := original.EvaluationFor("text/plain")[0]
+	return ingestionOwnerFixture{manifest, aEndpoint, pins, pool, pluginsStore, oldPlan, live, store, contents, scope, c, registryService, a, b}
+}
+
+func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	f := newIngestionOwnerFixture(t, ctx)
+	pool, pluginsStore, oldPlan, live, store, contents, scope, c, registryService, a, b := f.pool, f.pluginsStore, f.oldPlan, f.live, f.store, f.contents, f.scope, f.corpus, f.registryService, f.a, f.b
+	manifest, aEndpoint, pins := f.manifest, f.aEndpoint, f.pins
+	operator := corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}
 	pin := func(receipt content.Receipt) context.Context {
 		t.Helper()
 		if _, _, err := pluginsStore.PinWork(ctx, plugins.WorkIngestion, scope.Organization, receipt.ID, oldPlan.ID); err != nil {

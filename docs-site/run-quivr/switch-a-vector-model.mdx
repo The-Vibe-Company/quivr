@@ -348,22 +348,14 @@ In words: run both models, fill existing documents, compare, then switch and upd
 ```bash
 curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/$REGISTRATION_ID/activate" \
   -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
-  | jq '{plan_id, routes: [.roles[] | select(.role | startswith("ingestion-route:")) |
-      {role, plugin_id}]}'
+  | jq '{operation_id, state, admin}'
 ```
 
-For the example's three source formats, expect this output (plan id replaced):
-
-```json
-{"plan_id":"<new plan id>","routes":[
- {"role":"ingestion-route:application/pdf","plugin_id":"hosted.embed"},
- {"role":"ingestion-route:text/html","plugin_id":"hosted.embed"},
- {"role":"ingestion-route:text/plain","plugin_id":"hosted.embed"}]}
-```
+The response is `202 Accepted` with an Operation and a `Location` header. [Follow the Operation](/run-quivr/upgrade-a-plugin#steps) with your operator key. After success, `admin.plan_id` identifies the plan to inspect with `GET /v0/admin/plugins/plans/{plan_id}`.
 
 This switches every source format that names this plugin as an evaluation owner, moving its segments and vectors together. Its primary space must be carried by every Corpus's index across every Organization, including empty Corpora. Every current document routed to the candidate must have all its candidate segments and primary vectors.
 
-Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged; an unreachable candidate returns `409 plugin_unreachable`. Repeating activation returns the same plan. The previous owner becomes an evaluation owner for those formats and continues filling new documents asynchronously. If a configuration change leaves an existing Corpus serving another owner, new documents also fill the active plan's default or source-route owner. Keep these plugins reachable and check coverage before returning to either model.
+Missing coverage fails the Operation with `coverage_incomplete` and leaves the plan unchanged; an unreachable candidate fails it with `plugin_unreachable`. Retrying with the same idempotency key returns the same Operation. The previous owner becomes an evaluation owner for those formats and continues filling new documents asynchronously. If a configuration change leaves an existing Corpus serving another owner, new documents also fill the active plan's default or source-route owner. Keep these plugins reachable and check coverage before returning to either model.
 
 **Same owner, another space:** follow [Fill a new vector space](/run-quivr/backfill-a-vector-space), which ends with a space promotion. That API allows `force` as an explicit exception for incomplete coverage; documents without vectors then disappear from semantic results until filled. Registration activation has no force option.
 
@@ -414,20 +406,20 @@ Inspect every Corpus's coverage. Submit a new document and confirm the new model
 
 ## Roll back
 
-Keep the previous plugin reachable with its expected build, and keep its evaluation coverage filling new documents. A missing vector or owner projection can block rollback; backfill the returning owner first. Do not stop it while work or alerts still pin it.
+Keep the previous plugin reachable with its expected build, and keep its evaluation coverage filling new documents. Rollback accepts missing vectors or owner projections and starts background recovery. Affected documents retain their exact outgoing projection and encoder until recovery completes. Do not stop it while work or alerts still pin it.
 
 For an owner switch, return to the saved plan, using a new key for this rollback attempt:
 
 ```bash
 curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" \
   -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" -H "Content-Type: application/json" \
-  -d @- <<EOF | jq '{plan_id, source, roles}'
+  -d @- <<EOF | jq '{operation_id, state, admin}'
 {"idempotency_key":"undo-model-switch-$BASE_PLAN_ID","plan_id":"$BASE_PLAN_ID",
  "pinned_work":"drain"}
 EOF
 ```
 
-Use `drain` for sound output; [use `stop` for bad output or hangs](/run-quivr/upgrade-a-plugin#roll-back). The same key and body replay this rollback. Keep the explicit target: another untargeted rollback can return to the plan you just left. Unreachable builds return `409 plugin_unreachable`; missing owner coverage returns `409 plugin_conflict`. Its message names the owner, space and number of missing documents, and points to `POST /v0/admin/backfills`. It also reports missing index generations: even an empty Corpus must carry the returning space. Find the returning owner's registration with `GET /v0/admin/plugins` and read each Corpus's coverage to locate gaps. Use the [backfill procedure](/run-quivr/backfill-a-vector-space) for that registration and space in each affected Corpus, wait for complete coverage, then retry. Historical gaps and failed optional calls still need this recovery.
+Use `drain` for sound output; [use `stop` for bad output or hangs](/run-quivr/upgrade-a-plugin#roll-back). The same key and body replay this rollback. Keep the explicit target: another untargeted rollback can return to the plan you just left. Unreachable returning builds fail the Operation with `plugin_unreachable` and leave the plan unchanged. Follow its `Location` until success before inspecting `admin.plan_id`. During recovery, keep the outgoing build available for queries against documents still using its vectors. Lexical reads remain available if that outgoing encoder fails; hybrid search degrades and semantic search reports the failure.
 
 For a same-owner space switch, promote the returned `previous_space_id` back with the space-promotion request. It needs complete coverage too. Immediately after either rollback, [move meaning alerts](/run-quivr/move-meaning-alerts#after-a-rollback) again to the restored space; the earlier migrations do not reverse themselves.
 
@@ -476,3 +468,5 @@ Preserve the served routes and remaining owners' pins throughout cleanup. Stored
 - [Fill a new vector space](/run-quivr/backfill-a-vector-space) for estimates and Operation controls.
 - [Plugin lifecycle](/run-quivr/upgrade-a-plugin#plugin-lifecycle) for draining work and deciding when a plugin can stop.
 - [Move meaning alerts to a new vector model](/run-quivr/move-meaning-alerts) for the alert migration after a switch.
+
+A refused space promotion appears as `state: failed` with `coverage_incomplete` in `errors[0].code` on the accepted Operation. The served space stays unchanged.

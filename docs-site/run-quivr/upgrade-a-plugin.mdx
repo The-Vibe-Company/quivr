@@ -50,7 +50,7 @@ In words:
 1. Registration queues a check. Passing gives `validated`; failing gives `rejected`. Register a fixed build with a new key.
 2. Activation puts the registration in the plan as `active`. Serving and evaluation are roles, separate from this state. Promoting an evaluation owner checks complete coverage first.
 3. A version removed from the plan is `draining` while work or Subscriptions still pin it. Old alert rules keep producing evaluations for those Subscriptions. With neither left, it reads `inactive`; it can skip draining when there is nothing to finish.
-4. A draining or inactive registration can be activated again, or restored by rollback. Rollback requires the registrations it brings back to be reachable with the expected build. Changing the ingestion plugin that serves a source format also needs complete coverage of its primary vectors for every current document revision. Refusal leaves the plan unchanged.
+4. A draining or inactive registration can be activated again, or restored by rollback. Rollback requires the registrations it brings back to be reachable with the expected build. Activation of another ingestion owner needs complete primary-vector coverage for every current document revision. Rollback accepts coverage gaps and starts recovery while retaining the outgoing searchable data.
 
 Each API and worker process polls for plan changes using `plugin_plan_poll`, 2 seconds by default. That is a polling interval, not a guarantee that a switch finishes in 2 seconds. Check the active plan and watch work after switching.
 
@@ -131,10 +131,18 @@ Capture the UTC time immediately before activation, so the quarantine check belo
 ```bash
 export SWITCHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins/$REGISTRATION_ID/activate" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
-  | jq '{plan_id, roles: [.roles[] | {role, plugin_id, version}]}'
+  | jq '{operation_id, state, admin}'
 ```
 
-The answer is the new Pipeline Plan: every role in the deployment and the plugin that fills it. Your registration holds the roles selected by its manifest and settings; ingestion source routes decide which plugin serves each source format and which plugins evaluate it. The previous version of the same plugin leaves the plan, and so does a plugin whose roles it takes over entirely, here `core.ingest`.
+The API returns `202 Accepted` with an Operation, the record of the background task, and a `Location` header. Imports continue while Quivr checks coverage. Read that location with the same operator key (these admin Operations require `plugins:admin`, without `operations:read`) until `state` is `succeeded` or `failed`:
+
+```bash
+export OPERATION_ID=<the operation_id above>
+curl -s "$QUIVR_API_URL/v0/operations/$OPERATION_ID" \
+  -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" | jq '{state, counters, errors, admin}'
+```
+
+A failed Operation lists its reason in `errors`; the plan stays unchanged. On success, `admin.plan_id` names the resulting plan. Read `GET /v0/admin/plugins/plans/{plan_id}` to inspect every role in the deployment and the plugin that fills it. Your registration holds the roles selected by its manifest and settings; ingestion source routes decide which plugin serves each source format and which plugins evaluate it. The previous version of the same plugin leaves the plan, and so does a plugin whose roles it takes over entirely, here `core.ingest`.
 
 </Step>
 <Step title="Watch the old version drain">
@@ -185,16 +193,16 @@ If the new version misbehaves, request a return to the previous plan. Choose wha
 ```bash
 curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
   -H "Content-Type: application/json" -d '{"idempotency_key": "rollback-acme-embedder-0.1.0", "pinned_work": "stop"}' \
-  | jq '{source, previous_plan_id, roles: [.roles[] | {role, plugin_id, version}]}'
+  | jq '{operation_id, state, admin}'
 ```
 
 ```json
-{"source": "rollback", "previous_plan_id": "plan_…", "roles": [{"role": "ingestion:core.ingest", "plugin_id": "core.ingest", "version": "…"}, "…"]}
+{"operation_id": "operation_…", "state": "queued", "admin": {"target": ""}}
 ```
 
-The answer is a new plan whose roles are the previous plan's, and `previous_plan_id` names the plan you left. To return to the plan you saved before the upgrade, add its `plan_id` to the request. A second rollback without a target can return to the bad plan you just left. Retry with the same `idempotency_key` and body to replay the original rollback; a new request needs an explicit target if you want to stay on the saved plan.
+The answer is `202 Accepted` and an Operation. Follow its `Location` as above. Once it succeeds, `admin.plan_id` names a new plan with the returning roles, and `admin.previous_plan_id` names the plan you left. To return to the plan you saved before the upgrade, add its `plan_id` to the request. A second rollback without a target can return to the bad plan you just left. Retry with the same `idempotency_key` and body to replay the original rollback; a new request needs an explicit target if you want to stay on the saved plan.
 
-The API and worker follow a rollback as they follow an activation. Canonical Parts, the normalized pieces of each document, are retained. For a change of ingestion owner, the plugin serving a source format, rollback checks the returning plugin and complete primary-vector coverage on every current Version (stored document revision) before switching its segments and vectors together. If evaluation failed to fill that owner on new Versions, backfill it first; an incomplete rollback leaves the plan unchanged.
+The API and worker follow a rollback as they follow an activation. Canonical Parts, the normalized pieces of each document, are retained. For a change of ingestion owner, the plugin serving a source format, rollback checks the returning plugin before switching. Missing vectors do not prevent rollback. Each affected Version (stored document revision) keeps its exact outgoing segments, vector space and query encoder while background work builds the returning projection. Complete returning coverage replaces that fallback; partial coverage leaves it readable. Keep the outgoing build reachable during recovery. If its encoder is unavailable, lexical search remains available and hybrid search uses its degraded result; semantic search reports the encoder failure.
 
 `pinned_work` decides what happens to work pinned to the version you left. For an ingestion owner switch, `stop` also stops outgoing receipts for the affected source formats when their owner remains an evaluation member:
 
@@ -207,7 +215,7 @@ With `stop`, a Version waiting for text is quarantined with `pinned_plan_stopped
 
 After `stop`, [reprocess quarantined Versions](/run-quivr/reprocess-quarantined-versions) through the restored plan. Stop the bad plugin process only once it reads `inactive`; alerts keep their rule pins and need [migration](/run-quivr/upgrade-an-alert-rule) separately.
 
-Quivr first checks that every plugin the rollback brings back still answers at its address. If one does not, or a different build answers, the call is refused with `409 plugin_unreachable`, naming the plugin and the cause, and the plan stays as it was. Start the plugin again, then retry. A rollback that would break one of the rules under [Limits](#limits) is refused like an activation.
+Quivr first checks that every plugin the rollback brings back still answers at its address. If one does not, or a different build answers, the Operation fails with `plugin_unreachable`, and the plan stays as it was. Start the plugin again, then retry. A rollback that would break one of the rules under [Limits](#limits) is refused like an activation.
 
 `GET /v0/admin/plugins/plans` lists the latest plans, newest first. Each plan shows what recorded it (`source`: `configuration`, `activation` or `rollback`) and the plan it replaced.
 
@@ -217,7 +225,7 @@ A plugin in startup configuration can keep an operator activation when its build
 
 The earlier registration and plans stay exact. Work already started stays on its earlier build; keep that build reachable until its `pinned_work` reaches zero. Use the separate-address upgrade steps above when work must drain during deployment.
 
-A saved rollback plan may name the replaced build, even as an evaluation member. Quivr refuses that rollback with `409 plugin_unreachable` until the exact build runs again at its recorded endpoint. To restore the previous ingestion owner while keeping the new build installed, activate that owner's current evaluation registration from `GET /v0/admin/plugins`: select its `plugin_id` with `state: active`, then use its `registration_id` in the activation call above. Its evaluated source formats become served again, subject to [complete coverage](/run-quivr/backfill-a-vector-space). For example, activating the current `core.ingest` registration reverses a promotion to another embedding owner. The newer owner remains available for evaluation.
+A saved rollback plan may name the replaced build, even as an evaluation member. The rollback Operation fails with `plugin_unreachable` until the exact build runs again at its recorded endpoint. To restore the previous ingestion owner while keeping the new build installed, activate that owner's current evaluation registration from `GET /v0/admin/plugins`: select its `plugin_id` with `state: active`, then use its `registration_id` in the activation call above. Its evaluated source formats become served again, subject to [complete coverage](/run-quivr/backfill-a-vector-space). For example, activating the current `core.ingest` registration reverses a promotion to another embedding owner. The newer owner remains available for evaluation.
 
 ## Tune embedding throughput
 
@@ -269,9 +277,9 @@ Receipts already pinned to the previous recipe keep that pin. If their results a
 | --- | --- |
 | Documents are quarantined after the switch | Inspect their reasons, roll back if the new plugin caused them, then reprocess through the restored plan. |
 | Old version stays `draining` | Work or Subscriptions still pin it. Keep it running; migrate alerts if appropriate. Never terminate pinned work by hand in Temporal. |
-| `409 registration_not_validated` | Read `check.checks`, fix the build or fixtures, and register with a new key. |
-| `409 plugin_unreachable` on activation or rollback | Restore the exact registered build, or activate the current registration of the owner you want. |
-| `409 plugin_conflict` on owner switch or rollback | Backfill missing owner coverage, or correct the conflicting routes and settings; the plan stays unchanged. |
+| Operation error `registration_not_validated` | Read `check.checks`, fix the build or fixtures, and register with a new key. |
+| Operation error `plugin_unreachable` | Restore the exact registered build, or activate the current registration of the owner you want. |
+| Operation error `coverage_incomplete` or `plugin_conflict` | For activation, backfill missing coverage. Correct conflicting routes or settings before retrying. Rollback accepts coverage gaps. |
 
 ## Promote an evaluation plugin
 

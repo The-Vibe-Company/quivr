@@ -76,12 +76,14 @@ curl -s -X POST "$QUIVR_API_URL/v0/admin/spaces/acme.embedder.large@1/promote" -
 ```
 
 ```json
-{"served_space_id": "acme.embedder.large@1", "previous_space_id": "acme.embedder.base@1", "generations_switched": 3, "corpora_incomplete": 0, "segments_missing": 0}
+{"operation_id": "operation_…", "kind": "vector_space_promotion", "state": "queued", "counters": {}, "errors": [], "admin": {"target": "acme.embedder.large@1"}}
 ```
 
-A promotion applies to this space's owner across the deployment. Other plugins keep their served spaces. It is refused with `409 coverage_incomplete` while some Corpus has current documents segmented by this owner without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the documents without a vector drop out of semantic results until a backfill fills them.
+The promotion returns `202 Accepted` and an Operation with a `Location` header. Read `GET /v0/operations/{operation_id}` with `plugins:admin` until it succeeds or fails. Imports continue during the coverage check. On success, `admin.served_space_id` names the selected space and `admin.previous_space_id` names the one it replaced.
 
-Right after the promotion, [move meaning alerts](/run-quivr/move-meaning-alerts) to the new space: alerts that match by vector meaning return `not_ready` until you do.
+A promotion applies to this space's owner across the deployment. Other plugins keep their served spaces. Its Operation fails with `coverage_incomplete` while some Corpus has current documents segmented by this owner without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the documents without a vector drop out of semantic results until a backfill fills them.
+
+After the promotion Operation succeeds, [move meaning alerts](/run-quivr/move-meaning-alerts) to the new space: alerts that match by vector meaning return `not_ready` until you do.
 
 </Step>
 </Steps>
@@ -101,7 +103,7 @@ To change the plugin that produces segments and vectors, follow [Try and switch 
 
 ## Go back to the previous model
 
-Promote the former space the same way. It stayed an evaluation space and kept its vectors, so search uses it again at once. Then [move meaning alerts](/run-quivr/move-meaning-alerts#after-a-rollback) back to it. A promotion survives restarts, activations and rollbacks while the ingestion plugin enables both spaces. Once a plugin version stops declaring one of them, its own `spaces` settings decide again.
+Promote the former space the same way. It stayed an evaluation space and kept its vectors, so search uses it again after the promotion Operation succeeds. Then [move meaning alerts](/run-quivr/move-meaning-alerts#after-a-rollback) back to it. A promotion survives restarts, activations and rollbacks while the ingestion plugin enables both spaces. Once a plugin version stops declaring one of them, its own `spaces` settings decide again.
 
 ## How a backfill runs
 

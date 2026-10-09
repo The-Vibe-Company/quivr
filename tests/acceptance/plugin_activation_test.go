@@ -101,7 +101,7 @@ func TestPluginActivation(t *testing.T) {
 	if mismatched["state"] != "rejected" || check == nil || check["certified"] != false || !failing["discovery"] {
 		t.Fatalf("a plugin built from another manifest: %v, want rejected with the discovery check failing", mismatched)
 	}
-	refused := request(t, "POST", "/v0/admin/plugins/"+mismatched["registration_id"].(string)+"/activate", operator, map[string]any{}, 409)
+	refused := routingRequest(t, "POST", "/v0/admin/plugins/"+mismatched["registration_id"].(string)+"/activate", operator, map[string]any{}, 409)
 	if refused["code"] != "registration_not_validated" {
 		t.Fatalf("activating a rejected registration: %v", refused)
 	}
@@ -111,11 +111,11 @@ func TestPluginActivation(t *testing.T) {
 		t.Fatalf("the 0.2.0 build: %v, want validated", validated)
 	}
 	request(t, "GET", "/v0/admin/plugins", admin, nil, 403)
-	request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", admin, map[string]any{}, 403)
+	routingRequest(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", admin, map[string]any{}, 403)
 	// The receipt resolves in the processing's first step, which pins the
 	// plan; its segmentation then waits on the frozen 0.1.0.
 	awaitReceipt(t, request(t, "POST", "/v0/records", admin, inFlightCommand(t), 202)["receipt_id"].(string))
-	plan := request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	plan := routingRequest(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	if planRoles(plan)["ingestion:core.ingest"] != planRoles(before)["ingestion:core.ingest"] {
 		t.Fatalf("hash activation changed core ingestion: %v", plan)
 	}
@@ -233,7 +233,7 @@ func TestPinnedWorkStarts(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	rollback := registrationAt(t, operator, "0.1.0", b)
-	plan := request(t, "POST", "/v0/admin/plugins/"+rollback["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	plan := routingRequest(t, "POST", "/v0/admin/plugins/"+rollback["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	if planRoles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("activating 0.1.0 again: %v", plan)
 	}

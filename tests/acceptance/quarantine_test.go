@@ -107,10 +107,10 @@ func TestQuarantineReprocessNormalization(t *testing.T) {
 	if checked := awaitCheck(t, operator, "/v0/admin/plugins/"+registration["registration_id"].(string)); checked["state"] != "validated" {
 		t.Fatalf("the fixed normalizer: %v", checked)
 	}
-	request(t, "POST", "/v0/admin/plugins/"+registration["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/"+registration["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	// The harness restores its own pins afterwards: leave the plan they seeded.
 	t.Cleanup(func() {
-		request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "fixed-normalizer-back-" + run}, 200)
+		routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "fixed-normalizer-back-" + run}, 200)
 	})
 	body, done := reprocess(t, backfiller, "quarantine-fixed-"+run, corpusID, "normalizer_failed", 1)
 	if done["state"] != "succeeded" || counter(done, "versions_recovered") != 1 {
@@ -237,9 +237,9 @@ func TestQuarantineRenormalizesIngestion(t *testing.T) {
 	if checked := awaitCheck(t, operator, "/v0/admin/plugins/"+registration["registration_id"].(string)); (checked["state"] != "validated" && checked["state"] != "inactive") || checked["check"].(map[string]any)["certified"] != true {
 		t.Fatalf("fixed normalizer validation %v", checked)
 	}
-	request(t, "POST", "/v0/admin/plugins/"+registration["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	routingRequest(t, "POST", "/v0/admin/plugins/"+registration["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	t.Cleanup(func() {
-		request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "restart-rollback-" + run}, 200)
+		routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "restart-rollback-" + run}, 200)
 	})
 
 	// The default still segments the old output after the fixed plugin is active.
