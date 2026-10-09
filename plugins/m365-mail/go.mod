@@ -1,11 +1,11 @@
 module github.com/The-Vibe-Company/quivr/plugins/m365-mail
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/The-Vibe-Company/quivr/sdks/go v0.0.0
 	github.com/The-Vibe-Company/quivr/tests/fakes v0.0.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (

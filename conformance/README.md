@@ -10,7 +10,7 @@ Use Python 3.12 or newer and install the pinned tooling:
 python3 -m pip install -r conformance/requirements.txt
 ```
 
-For an isolated stack, use Go 1.27.1, Docker with Compose v2, make, and Linux x86_64 or macOS arm64. See the [local harness guide](../docs/quivr-v2-local-harness.md). It allocates separate ports and containers, uses local fake external services and E5 embeddings, and attempts to remove every owned process and volume when finished. Teardown failures mark the run as an error and are included in both reports. It downloads pinned dependencies and model files; it needs no paid provider key.
+For an isolated stack, use Go 1.27.2, Docker with Compose v2, make, and Linux x86_64 or macOS arm64. See the [local harness guide](../docs/quivr-v2-local-harness.md). It allocates separate ports and containers, uses local fake external services and E5 embeddings, and attempts to remove every owned process and volume when finished. Teardown failures mark the run as an error and are included in both reports. It downloads pinned dependencies and model files; it needs no paid provider key.
 
 ## Add a case
 
