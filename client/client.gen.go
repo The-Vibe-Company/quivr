@@ -2254,7 +2254,7 @@ type FacetRequest struct {
 	// AcceptedBefore Exclusive current-Version acceptance-time upper bound, as in listing.
 	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
 
-	// Accuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies.
+	// Accuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of), a uniform sample (approximate), or an exact count that ended within about a second (neither marker). The 25-second request deadline still applies.
 	Accuracy  *FacetRequestAccuracy `json:"accuracy,omitempty"`
 	CorpusIds []string              `json:"corpus_ids"`
 
@@ -2265,7 +2265,7 @@ type FacetRequest struct {
 	Filter *FacetFilter `json:"filter,omitempty"`
 }
 
-// FacetRequestAccuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of) or a uniform sample (approximate). The 25-second request deadline still applies.
+// FacetRequestAccuracy Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually within a few seconds, from stored snapshots (as_of), a uniform sample (approximate), or an exact count that ended within about a second (neither marker). The 25-second request deadline still applies.
 type FacetRequestAccuracy string
 
 // FacetResponse defines model for FacetResponse.
