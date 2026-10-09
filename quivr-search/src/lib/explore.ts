@@ -45,7 +45,18 @@ export interface Facets {
   excluded_corpora?: Exclusion[];
   /** The dated documents every filter keeps. */
   total?: number;
+  /**
+   * When the oldest of the corpora's stored counts that answered was taken
+   * (RFC 3339): each corpus's counts are exact as of its own, and refresh
+   * while they are read.
+   */
+  as_of?: string;
+  /** The counts are estimates from a sample of the documents. */
+  approximate?: boolean;
 }
+
+/** How exactly a count is wanted: quickly, possibly stored or estimated, or exactly. */
+export type Accuracy = "fast" | "exact";
 
 /** A predicate on a field, as the engine takes it. */
 export interface MetadataFilter {
@@ -252,20 +263,22 @@ export const fetchExplore = (
     signal,
   );
 
-// The engine may take 25 s per count, and the facade chains a few.
+// One field's counts. An exact count may take the engine 25 s, and the
+// facade chains a few; a fast one answers within seconds.
 export const fetchFacets = (
   corpora: string[],
   predicates: MetadataFilter[],
   window: Range | undefined,
+  { field, accuracy }: { field: string; accuracy: Accuracy },
   signal?: AbortSignal,
 ) => {
   const bounds = window && rangeBounds(window);
   return request<Facets>(
-    `/demo/explore/facets?${query(corpora, predicates, bounds ? { window: `${bounds.gte},${bounds.lte}` } : {})}`,
+    `/demo/explore/facets?${query(corpora, predicates, { field, accuracy, ...(bounds ? { window: `${bounds.gte},${bounds.lte}` } : {}) })}`,
     undefined,
     signal,
     "GET",
-    90000,
+    accuracy === "fast" ? 30000 : 90000,
   );
 };
 
@@ -306,6 +319,27 @@ export function rangeLabel({ from, to }: Range) {
 
 /** "12 400" for a count. */
 export const countLabel = (n: number) => n.toLocaleString("fr-FR");
+
+/** The earliest of instants written in RFC 3339, compared as instants. */
+export const earliest = (instants: string[]) =>
+  instants.filter((t) => !Number.isNaN(Date.parse(t))).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+
+/** A count, marked "≈" when it is an estimate. */
+export const estimateLabel = (n: number, approximate?: boolean) => `${approximate ? "≈ " : ""}${countLabel(n)}`;
+
+/**
+ * How long ago stored counts were taken: "à l’instant", "il y a 4 min",
+ * "il y a 2 h"; nothing for a date that cannot be read.
+ */
+export function ageLabel(asOf: string, now = Date.now()) {
+  const taken = Date.parse(asOf);
+  if (Number.isNaN(taken)) return "";
+  const minutes = Math.floor((now - taken) / 60000);
+  if (minutes < 1) return "à l’instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `il y a ${hours} h` : `le ${new Date(asOf).toLocaleDateString("fr-FR")}`;
+}
 
 const languages = new Intl.DisplayNames(["fr"], { type: "language", fallback: "code" });
 
