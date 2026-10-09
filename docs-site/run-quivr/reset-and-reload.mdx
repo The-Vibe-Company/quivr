@@ -51,6 +51,10 @@ Both confirmation inputs are required. Reset stops writers, terminates running w
 
 If Railway acknowledges a stop but leaves instances running after 30 seconds, reset removes that recorded deployment and verifies shutdown before replacing volumes. Restore redeploys the original recorded artifact, including a removed deployment.
 
+Attaching a Railway volume can start one or more deployments automatically. Reset observes the attached service for 10 seconds, removes those new deployments and waits for shutdown. A deployment on another service or after that window aborts the reset. Keep deployment automation stopped throughout maintenance.
+
+On Railway, check `volume_sizes` in the preview and result. Preview shows each old volume's `old_sizeMB`; `replacement_sizeMB` is `null` until the replacement exists. The result reports both measured sizes and marks `shrunk: true` when capacity decreased. Replacement volumes use Railway's default capacity, so dashboard increases on the old volumes are lost. **Grow the replacement data volumes in the Railway dashboard before applying sources or importing data.** Railway has no API or CLI command to resize them. The infrastructure `check` also reports `filesystem_capacity` drift when capacity is below your declared storage budget.
+
 ### 3. Preview and apply sources
 
 Use the same API address and organization key on every replay. The private journal binds to both and stores resource IDs, creation intents and keyed credential digests. It contains no credential values. Back up this journal with your private declaration.
