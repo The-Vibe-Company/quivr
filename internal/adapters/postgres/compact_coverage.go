@@ -51,14 +51,15 @@ func insertCompactCoverage(ctx context.Context, tx pgx.Tx, org string, seg conte
 		// Serialize per-file bitmap updates before reading the old mask, so
 		// counter deltas also remain correct under concurrent backfills.
 		var rows int
-		if err := tx.QueryRow(ctx, `SELECT row_count FROM embedding_files WHERE id=$1 FOR UPDATE`, fileID).Scan(&rows); err != nil {
+		var organizationID int64
+		if err := tx.QueryRow(ctx, `SELECT organization_id,row_count FROM embedding_files WHERE id=$1 FOR UPDATE`, fileID).Scan(&organizationID, &rows); err != nil {
 			return 0, err
 		}
 		if len(mask) != (rows+7)/8 {
 			return 0, content.ErrInvalid
 		}
 		var previous []byte
-		err := tx.QueryRow(ctx, `SELECT covered FROM compact_embedding_coverage WHERE file_id=$1 AND generation_id=$2`, fileID, g.ID).Scan(&previous)
+		err := tx.QueryRow(ctx, `SELECT covered FROM compact_embedding_coverage WHERE organization_id=$1 AND file_id=$2 AND generation_id=$3`, organizationID, fileID, g.ID).Scan(&previous)
 		if err != nil && err != pgx.ErrNoRows {
 			return 0, err
 		}

@@ -1460,7 +1460,12 @@ paths:
         are then returned chronologically; empty date buckets are omitted. Histograms require day, month or year on datetime
         fields; interval on another type is invalid_query. Counts are independent of search and listing reads and can change
         with ingestion. No text query or ranking is applied. Each API process admits at most 8 active facet requests; excess
-        work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.'
+        work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.
+        With accuracy fast, counts may instead come from each Corpus''s stored snapshot, exact as of the response''s as_of
+        and refreshed in the background while it is read, when the request has no predicate or only whole UTC days of the
+        single date field it counts; otherwise from an exact count that ends within about a second, or else estimates scaled
+        from a uniform sample of the Corpora''s Records, marked approximate with their sample_fraction. Exact responses carry
+        neither as_of nor approximate.'
       requestBody:
         required: true
         content:
@@ -9157,6 +9162,14 @@ components:
           type: string
           format: date-time
           description: Exclusive current-Version acceptance-time upper bound, as in listing.
+        accuracy:
+          type: string
+          enum:
+          - exact
+          - fast
+          description: 'Absent or exact counts every current document now. fast is best effort: Quivr may answer sooner, usually
+            within a few seconds, from stored snapshots (as_of), a uniform sample (approximate), or an exact count that ended
+            within about a second (neither marker). The 25-second request deadline still applies.'
     FacetField:
       type: object
       additionalProperties: false
@@ -9194,6 +9207,22 @@ components:
           maxItems: 16
           items:
             $ref: '#/components/schemas/CorpusExclusion'
+        as_of:
+          type: string
+          format: date-time
+          description: Fast requests only. Counts come from stored per-Corpus snapshots, each exact when it was taken; this
+            is the oldest snapshot's time. Changes since a Corpus's snapshot are missing from its counts, and newer snapshots
+            of other Corpora include their later changes.
+        approximate:
+          type: boolean
+          description: Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
+        sample_fraction:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          exclusiveMaximum: 1
+          x-go-type: float64
+          description: Share of the Corpora's Records counted when approximate.
     Facet:
       type: object
       additionalProperties: false

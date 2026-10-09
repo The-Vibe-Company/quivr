@@ -47,7 +47,9 @@ func catalogRange(q content.RecordQuery, args *[]any) string {
 		(*args)[1] = q.CorpusIDs
 		where = "records.organization=$1 AND records.corpus_id=ANY($2::text[])"
 	}
-	where += " AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=records.organization AND c.id=records.corpus_id AND c.archived)"
+	// A scalar primary-key lookup prevents an archive anti-join from estimating
+	// that almost no Records survive when the tiny corpus table lacks statistics.
+	where += " AND NOT coalesce((SELECT c.archived FROM corpora c WHERE c.organization=records.organization AND c.id=records.corpus_id),false)"
 	where += catalogMetadata(q, args)
 	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
 		where += " AND current_accepted_at IS NOT NULL"

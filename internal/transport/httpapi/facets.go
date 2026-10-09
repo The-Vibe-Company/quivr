@@ -37,14 +37,15 @@ func (a *API) countFacets(w http.ResponseWriter, r *http.Request, scope corpus.S
 			Metadata []corpus.MetadataFilter `json:"metadata"`
 			Sources  []string                `json:"source_namespaces"`
 		} `json:"filter"`
-		After  *string `json:"accepted_after"`
-		Before *string `json:"accepted_before"`
+		After    *string `json:"accepted_after"`
+		Before   *string `json:"accepted_before"`
+		Accuracy string  `json:"accuracy"`
 	}
 	if json.Unmarshal(encoded, &wire) != nil {
 		writeError(w, publicerr.InvalidSchema, nil)
 		return
 	}
-	q := content.FacetQuery{Records: content.RecordQuery{CorpusIDs: wire.CorpusIDs}, Fields: wire.Fields}
+	q := content.FacetQuery{Records: content.RecordQuery{CorpusIDs: wire.CorpusIDs}, Fields: wire.Fields, Fast: wire.Accuracy == "fast"}
 	if wire.Filter != nil {
 		q.Records.Metadata = wire.Filter.Metadata
 		q.SourceNamespaces = wire.Filter.Sources
@@ -88,7 +89,7 @@ func (a *API) countFacets(w http.ResponseWriter, r *http.Request, scope corpus.S
 		return
 	}
 	var excluded []corpus.CorpusExclusion
-	items, err := a.Content.CountFacets(ctx, scope, q, func() (content.FacetQuery, error) {
+	counts, err := a.Content.CountFacets(ctx, scope, q, func() (content.FacetQuery, error) {
 		var err error
 		q, excluded, err = a.facetRoutes(ctx, scope, q)
 		return q, err
@@ -97,10 +98,18 @@ func (a *API) countFacets(w http.ResponseWriter, r *http.Request, scope corpus.S
 		writeError(w, err, publicerr.ContentUnavailable)
 		return
 	}
+	if counts.AsOf != nil {
+		utc := counts.AsOf.UTC()
+		counts.AsOf = &utc
+	}
+	// Exact counts carry neither marker, so their answer is unchanged.
 	send(w, 200, struct {
-		Items    []content.Facet              `json:"items"`
-		Excluded *[]transport.CorpusExclusion `json:"excluded_corpora,omitempty"`
-	}{items, exclusionsToTransport(excluded)})
+		Items          []content.Facet              `json:"items"`
+		Excluded       *[]transport.CorpusExclusion `json:"excluded_corpora,omitempty"`
+		AsOf           *time.Time                   `json:"as_of,omitempty"`
+		Approximate    bool                         `json:"approximate,omitempty"`
+		SampleFraction float64                      `json:"sample_fraction,omitempty"`
+	}{counts.Items, exclusionsToTransport(excluded), counts.AsOf, counts.SampleFraction > 0, counts.SampleFraction})
 }
 
 func (a *API) facetRoutes(ctx context.Context, scope corpus.Scope, q content.FacetQuery) (content.FacetQuery, []corpus.CorpusExclusion, error) {
@@ -121,6 +130,12 @@ func (a *API) facetRoutes(ctx context.Context, scope corpus.Scope, q content.Fac
 		declared := map[string]corpus.Field{}
 		for _, f := range corpus.FilterFields(g.Fields) {
 			declared[f.Name] = f
+		}
+		var snapshot []content.FacetField
+		if q.Fast {
+			for _, f := range corpus.FilterFields(g.Fields) {
+				snapshot = append(snapshot, content.FacetField{Field: f.Name, Type: f.Type})
+			}
 		}
 		absent := map[string]bool{}
 		for _, f := range missing {
@@ -155,6 +170,12 @@ func (a *API) facetRoutes(ctx context.Context, scope corpus.Scope, q content.Fac
 			q.Fields[i].Type = typ
 		}
 		q.Records.FilterRoutes = append(q.Records.FilterRoutes, content.CatalogFilterRoute{CorpusID: id, GenerationID: g.ID, Filters: filters})
+		if q.Fast {
+			if q.Declared == nil {
+				q.Declared = map[string][]content.FacetField{}
+			}
+			q.Declared[id] = snapshot
+		}
 	}
 	return q, excluded, nil
 }
