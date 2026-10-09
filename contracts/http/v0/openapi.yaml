@@ -556,6 +556,12 @@ paths:
         and listing reads and can change with ingestion. No text query or ranking is applied.
         Each API process admits at most 8 active facet requests; excess work returns retryable
         503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.
+        With accuracy fast, counts may instead come from each Corpus's stored snapshot, exact
+        as of the response's as_of and refreshed in the background while it is read, when the
+        request has no predicate or only whole UTC days of the single date field it counts;
+        otherwise from an exact count that ends within about 2 seconds, or else estimates
+        scaled from a uniform sample of the Corpora's Records, marked approximate with their
+        sample_fraction. Exact responses carry neither as_of nor approximate.
       requestBody:
         required: true
         content:
@@ -7710,6 +7716,13 @@ components:
           type: string
           format: date-time
           description: Exclusive current-Version acceptance-time upper bound, as in listing.
+        accuracy:
+          type: string
+          enum: [exact, fast]
+          default: exact
+          description: >-
+            exact counts every current document now. fast lets Quivr answer within a few
+            seconds from a stored snapshot (as_of) or a uniform sample (approximate).
     FacetField:
       type: object
       additionalProperties: false
@@ -7742,6 +7755,22 @@ components:
           maxItems: 16
           items:
             $ref: '#/components/schemas/CorpusExclusion'
+        as_of:
+          type: string
+          format: date-time
+          description: >-
+            Fast requests only. The counts are those of stored snapshots, exact when the oldest
+            was taken at this time; documents accepted or withdrawn since are not reflected.
+        approximate:
+          type: boolean
+          description: Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
+        sample_fraction:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          exclusiveMaximum: 1
+          x-go-type: float64
+          description: Share of the Corpora's Records counted when approximate.
     Facet:
       type: object
       additionalProperties: false

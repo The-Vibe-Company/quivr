@@ -271,6 +271,21 @@ filters. If all selected Corpora are excluded, each requested field has empty
 [countFacets reference](https://docs.quivr.thevibecompany.co/api-reference/facets/count-facets) lists the bounds
 and errors.
 
+Exact counts read every current document, so they slow down as a corpus grows:
+on a million documents they can take longer than the 25-second limit. Add
+`"accuracy": "fast"` when a quick answer matters more than an exact one, as in a
+filter sidebar. Quivr then says how it counted:
+
+| Response | Meaning |
+| --- | --- |
+| `as_of` | Exact counts stored for each Corpus at that time. Quivr keeps them for requests without a filter, or with only whole UTC days of the date field being counted (a timeline). Reading them refreshes them in the background, so changes since `as_of` show up a few minutes later. |
+| `approximate: true` and `sample_fraction` | Estimates scaled from that share of the Records, returned when an exact count would take more than about a second. Values that are frequent are estimated closely; rare values may be missed or off. |
+| Neither | Exact counts, as without `accuracy`. |
+
+Show estimates and stored counts as such, for example "≈ 1,200" or "counted
+4 minutes ago". If you need exact numbers, request them again without
+`accuracy`.
+
 ## Cite a result
 
 Each hit carries what a citation needs:

@@ -441,6 +441,24 @@ func (e FacetFieldInterval) Valid() bool {
 	}
 }
 
+// Defines values for FacetRequestAccuracy.
+const (
+	Exact FacetRequestAccuracy = "exact"
+	Fast  FacetRequestAccuracy = "fast"
+)
+
+// Valid indicates whether the value is a known member of the FacetRequestAccuracy enum.
+func (e FacetRequestAccuracy) Valid() bool {
+	switch e {
+	case Exact:
+		return true
+	case Fast:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FieldMappingAnalyzer.
 const (
 	Folded      FieldMappingAnalyzer = "folded"
@@ -2235,7 +2253,10 @@ type FacetRequest struct {
 
 	// AcceptedBefore Exclusive current-Version acceptance-time upper bound, as in listing.
 	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
-	CorpusIds      []string   `json:"corpus_ids"`
+
+	// Accuracy exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+	Accuracy  *FacetRequestAccuracy `json:"accuracy,omitempty"`
+	CorpusIds []string              `json:"corpus_ids"`
 
 	// Fields Distinct logical metadata field names, in response order.
 	Fields []FacetField `json:"fields"`
@@ -2244,10 +2265,21 @@ type FacetRequest struct {
 	Filter *FacetFilter `json:"filter,omitempty"`
 }
 
+// FacetRequestAccuracy exact counts every current document now. fast lets Quivr answer within a few seconds from a stored snapshot (as_of) or a uniform sample (approximate).
+type FacetRequestAccuracy string
+
 // FacetResponse defines model for FacetResponse.
 type FacetResponse struct {
+	// Approximate Fast requests only; present and true when counts are estimates scaled from a uniform sample of Records.
+	Approximate *bool `json:"approximate,omitempty"`
+
+	// AsOf Fast requests only. The counts are those of stored snapshots, exact when the oldest was taken at this time; documents accepted or withdrawn since are not reflected.
+	AsOf            *time.Time         `json:"as_of,omitempty"`
 	ExcludedCorpora *[]CorpusExclusion `json:"excluded_corpora,omitempty"`
 	Items           []Facet            `json:"items"`
+
+	// SampleFraction Share of the Corpora's Records counted when approximate.
+	SampleFraction *float64 `json:"sample_fraction,omitempty"`
 }
 
 // FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
