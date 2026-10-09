@@ -57,6 +57,8 @@ func catalogRange(q content.RecordQuery, args *[]any) string {
 }
 
 func catalogPredicates(q content.RecordQuery, args *[]any, corpusSQL string) string {
+	// The scalar primary-key lookup preserves the ordered plan even without
+	// corpus statistics. A bound corpus needs only one archive check per page.
 	where := " AND NOT COALESCE((SELECT c.archived FROM corpora c WHERE c.organization=$1 AND c.id=" + corpusSQL + "),false)"
 	where += catalogMetadata(q, args)
 	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
