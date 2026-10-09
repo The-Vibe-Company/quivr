@@ -23,6 +23,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
 | [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists. |
 | [`quivr mcp`](#quivr-mcp) | a running server | Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile. |
+| [`quivr apply`](#quivr-apply) | a running server | Preview or apply a private sources declaration through the public API. |
 
 ## Engine commands {#engine-commands}
 
@@ -263,5 +264,39 @@ Exit codes:
   0  the client closed the connection, and every request was answered
   1  unexpected failure, or requests still unanswered a minute after stdin closed
   2  invalid arguments, or a missing or malformed API URL
+  130  interrupted
+```
+
+### quivr apply {#quivr-apply}
+
+Preview or apply a private sources declaration through the public API.
+
+`quivr apply --help` prints:
+
+```text
+quivr apply -f sources.json [--state-file journal.json] [--confirm]
+  -api-key string
+        API key sent as a bearer token (default $QUIVR_API_KEY)
+  -api-url string
+        Quivr API base URL (default $QUIVR_API_URL)
+  -confirm
+        execute the displayed changes (default: preview only)
+  -f string
+        JSON sources declaration
+  -operator-key-env string
+        environment reference for plugin administration (default "QUIVR_OPERATOR_KEY")
+  -state-file string
+        private replay journal (default <declaration>.state.json)
+This command needs a running Quivr server. It reads the server address from
+QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key
+override them. It talks to the server only through its public HTTP API.
+
+Exit codes:
+  0  success
+  1  unexpected failure
+  2  invalid arguments, or a missing or malformed API URL
+  3  API key rejected, or not allowed on a requested resource (401, 403)
+  4  request rejected as invalid (400, 404, 409, 422)
+  5  server unreachable or unavailable (connection error, timeout, 5xx)
   130  interrupted
 ```

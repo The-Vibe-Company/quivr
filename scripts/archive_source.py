@@ -3,46 +3,16 @@
 Only seeds the source dependency. Acceptance reads ingestion, checkpoints,
 versions and original bytes through the public Quivr API.
 """
-import datetime
 import gzip
-import hashlib
-import hmac
 import io
 import json
 import pathlib
 import tarfile
-import urllib.parse
-import urllib.request
 import zipfile
 import uuid
 
 
-def s3_request(endpoint, access, secret, method, path, body=b''):
-    """Small SigV4 client for fixture PUTs, with no credential logging."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    stamp, day = now.strftime('%Y%m%dT%H%M%SZ'), now.strftime('%Y%m%d')
-    host = urllib.parse.urlsplit(endpoint).netloc
-    uri = urllib.parse.quote(path, safe='/')
-    digest = hashlib.sha256(body).hexdigest()
-    headers = f'host:{host}\nx-amz-content-sha256:{digest}\nx-amz-date:{stamp}\n'
-    signed = 'host;x-amz-content-sha256;x-amz-date'
-    canonical = '\n'.join((method, uri, '', headers, signed, digest))
-    scope = f'{day}/us-east-1/s3/aws4_request'
-    message = '\n'.join(('AWS4-HMAC-SHA256', stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()))
-    key = ('AWS4' + secret).encode()
-    for value in (day, 'us-east-1', 's3', 'aws4_request'):
-        key = hmac.new(key, value.encode(), hashlib.sha256).digest()
-    signature = hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
-    request = urllib.request.Request(endpoint + uri, data=body, method=method, headers={
-        'x-amz-date': stamp, 'x-amz-content-sha256': digest,
-        'Authorization': f'AWS4-HMAC-SHA256 Credential={access}/{scope}, SignedHeaders={signed}, Signature={signature}'})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read()
-    except Exception:
-        # An HTTP exception's request may include capabilities. Surface only
-        # the dependency action, never the signed request or credential.
-        raise RuntimeError(f'Synthetic S3 source {method} failed') from None
+from deploy.reset_storage import s3_request
 
 
 def archive_bytes(members, kind):

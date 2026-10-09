@@ -17,6 +17,9 @@ Answer four questions. A missing answer means the test is not ready.
 4. Does it need a hook that production code does not need (an export, a flag, an
    injection point)? Then test at the real boundary instead.
 
+Apply the [test-audit authoring gate](../../.agents/skills/audit-tests-dev/SKILL.md#authoring-gate):
+a junk-pattern match requires an independent contract under its retention bar.
+
 Reject a test that compares a value with itself, restates the source, copies a
 fixture or list it then checks, or asserts behaviour that a fake produces. Fake
 the network or the dependency, never the behaviour under test. A bug fix comes
@@ -76,6 +79,6 @@ artifacts are for depth, not for finding the failure.
 - The full verification runs in parallel parts, each with its own stack.
 - Measurements run nightly, and on pull requests that change what they measure.
 
-The method for pruning existing tests area by area is the test-audit campaign
-used in THE-737: a per-test ledger, one owner per contract, and one deliberate
-mutation per kept contract.
+Audit a whole subsystem with [campaign mode](../../.agents/skills/audit-tests-dev/CAMPAIGN.md):
+baseline every file, ledger every declaration, name keepers, and verify preserved
+contracts with mutations before hand-back.
