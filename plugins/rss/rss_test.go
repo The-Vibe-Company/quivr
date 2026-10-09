@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -385,14 +386,23 @@ func TestSendsDepositedHTTPCredentials(t *testing.T) {
 	}
 }
 
+var tlsRootsOnce sync.Once
+
 func TestNeverDowngradesACredentialToPlainHTTP(t *testing.T) {
 	plain := newFeedServer(t, testdata(t, "rss2.xml"))
 	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, plain.URL, http.StatusFound)
 	}))
 	defer secure.Close()
-	f := feed{transport: secure.Client().Transport.(*http.Transport).Clone()}
-	if _, err := rssFetch(t, f, cfg(secure.URL), `{"token":"tok-test"}`, nil); errorOf(err).Code != "insecure_redirect" {
+	// Trust httptest's static certificate through the default TLS verifier.
+	// Fallback roots persist for this test process; once also supports -count.
+	t.Setenv("GODEBUG", os.Getenv("GODEBUG")+",x509usefallbackroots=1")
+	tlsRootsOnce.Do(func() {
+		roots := x509.NewCertPool()
+		roots.AddCert(secure.Certificate())
+		x509.SetFallbackRoots(roots)
+	})
+	if _, err := rssFetch(t, feed{}, cfg(secure.URL), `{"token":"tok-test"}`, nil); errorOf(err).Code != "insecure_redirect" {
 		t.Fatalf("downgrade followed: %v", err)
 	}
 	if len(plain.auth) != 0 {
@@ -492,6 +502,8 @@ func TestBoundsTheCheckpointBytes(t *testing.T) {
 	if n := len(cp(page)); n > maxCheckpointBytes {
 		t.Fatalf("checkpoint %d bytes", n)
 	}
+	// A 304 would hide pruning that discarded the current feed's revisions.
+	srv.set(testdata(t, "rss2.xml"), `"v2"`)
 	again, err := rssFetch(t, feed{}, cfg(srv.URL, `,"honor_ttl":false`), "", cp(page))
 	if err != nil || len(again.Items) != 0 {
 		t.Fatalf("the current feed's revisions were dropped: %v %d items", err, len(again.Items))
