@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -22,7 +21,7 @@ func (d PluginDeriver) segmentAndEmbed(ctx context.Context, org, corpusID string
 	if !ok {
 		return nil, errors.New("durable ingestion page storage unavailable")
 	}
-	inputKey, err := ingestionPageInputKey(v, spaces)
+	inputKey, err := content.IngestionPageInputKey(v, spaces)
 	if err != nil {
 		return nil, err
 	}
@@ -125,26 +124,9 @@ func (d PluginDeriver) completePages(ctx context.Context, org string, v content.
 	if !ok {
 		return errors.New("durable ingestion page storage unavailable")
 	}
-	key, err := ingestionPageInputKey(v, spaces)
+	key, err := content.IngestionPageInputKey(v, spaces)
 	if err != nil {
 		return err
 	}
 	return store.DeleteIngestionPages(ctx, org, v.ID, d.descriptor.Recipe, key)
-}
-
-func ingestionPageInputKey(v content.Version, spaces []string) (string, error) {
-	keys := slices.Clone(spaces)
-	slices.Sort(keys)
-	// A normalization restart can replace Parts under the same Version ID
-	// before a complete segmentation exists. Bind the durable namespace to
-	// the exact source Manifest as well as spaces, so old in-flight calls and
-	// committed pages cannot supply vectors for replacement content.
-	raw, err := json.Marshal(struct {
-		Spaces []string         `json:"spaces"`
-		Source content.Manifest `json:"source"`
-	}{keys, v.Manifest})
-	if err != nil {
-		return "", err
-	}
-	return content.Hash(raw), nil
 }

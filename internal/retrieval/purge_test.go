@@ -39,12 +39,12 @@ func (s *fakePurgeStore) ClaimPurges(_ context.Context, grace, _ time.Duration, 
 	return s.items, nil
 }
 
-func (s *fakePurgeStore) RecordPurge(ctx context.Context, item retrieval.PurgeItem, deleted int, complete bool) error {
+func (s *fakePurgeStore) RecordPurge(ctx context.Context, item retrieval.PurgeItem, deleted int, complete bool, _ int) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	s.records = append(s.records, recorded{item, deleted, complete})
-	return nil
+	return complete, nil
 }
 
 type fakePurgeProjection struct {

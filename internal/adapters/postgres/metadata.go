@@ -14,10 +14,36 @@ func (s RecordStore) SaveProjectionMetadata(ctx context.Context, org, versionID,
 	if err != nil {
 		return err
 	}
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// Cancellation, version retirement and route cutover share this fence.
+	// A publish delayed in the external projection cannot revive SQL metadata
+	// for an abandoned generation after its purge has become terminal.
+	// Prepared ingestion publishes before materialization, so its accepted
+	// revision, rather than record_versions, supplies the reserved identity.
+	var writable bool
+	if err = readJournal(ctx, tx, org, `SELECT EXISTS(
+ SELECT 1 FROM accepted_revisions a JOIN records r ON(r.organization,r.id)=(a.organization,a.record_id)
+ WHERE a.organization=$1 AND a.version_id=$2 AND NOT `+recordGoneSQL+`
+ AND (a.version_id=r.current_version_id OR a.version_id=r.desired_version_id)
+ AND ($3=`+routedGenerationSQL("r.organization", "r.corpus_id")+` OR EXISTS(
+  SELECT 1 FROM operations o WHERE o.organization=r.organization AND o.corpus_id=r.corpus_id
+   AND o.target_generation_id=$3 AND o.state NOT IN ('succeeded','failed','canceled'))))`, []any{org, versionID, generationID}, &writable); err != nil {
+		return err
+	}
+	if !writable {
+		return tx.Commit(ctx)
+	}
 	// Each generation pins immutable mappings and Version input. Repeating a
 	// publish repeats exactly these values, including when a plugin adds vectors.
-	_, err = database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_metadata(organization,version_id,generation_id,data) VALUES($1,$2,$3,$4) ON CONFLICT(organization,version_id,generation_id) DO UPDATE SET data=EXCLUDED.data`, org, versionID, generationID, raw)
-	return err
+	_, err = tx.Exec(ctx, `INSERT INTO projection_metadata(organization,version_id,generation_id,data) VALUES($1,$2,$3,$4) ON CONFLICT(organization,version_id,generation_id) DO UPDATE SET data=EXCLUDED.data`, org, versionID, generationID, raw)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // catalogMetadata applies predicates before ORDER BY/LIMIT and uses the same
