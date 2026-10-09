@@ -42,7 +42,7 @@ class Isolation(unittest.TestCase):
         override.write_text('{"services":{"weaviate":{"environment":{"GOMEMLIMIT":"3500MiB"},'
                             '"deploy":{"resources":{"limits":{"memory":"4294967296"}}}}}}')
         with mock.patch.dict(os.environ, {'QUIVR_INFRASTRUCTURE_PROFILE': 'large',
-                                        'QUIVR_INFRASTRUCTURE_OVERRIDES': str(override)}), \
+                                        'QUIVR_INFRASTRUCTURE_OVERRIDES': str(override)}, clear=True), \
                 mock.patch('local.run') as launched:
             stack.compose('up', '-d')
         model = stack.directory / 'infrastructure.json'

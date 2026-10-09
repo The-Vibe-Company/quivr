@@ -16,11 +16,20 @@ for root in /sys/fs/cgroup /sys/fs/cgroup/memory; do
         cgroup_directory=${cgroup_directory%/*}
     done
 done
-# cgroup v1 may keep CPU quotas on a separate mount.
-if [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then
-    awk 'NR==1 {quota=$1} NR==2 && quota>0 && $1>0 {print "__cpus=" quota/$1}' \
-        /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us
-fi
+# cgroup v1 CPU quotas can use a separate or combined mount and nested groups.
+relative=$(awk -F: '$2 ~ /(^|,)cpu(,|$)/ {print $3; exit}' /proc/self/cgroup)
+for root in /sys/fs/cgroup/cpu /sys/fs/cgroup/cpu,cpuacct; do
+    cgroup_directory="$root$relative"
+    [ -d "$cgroup_directory" ] || cgroup_directory=$root
+    while [ -d "$cgroup_directory" ]; do
+        if [ -r "$cgroup_directory/cpu.cfs_quota_us" ] && [ -r "$cgroup_directory/cpu.cfs_period_us" ]; then
+            awk 'NR==1 {quota=$1} NR==2 && quota>0 && $1>0 {print "__cpus=" quota/$1}' \
+                "$cgroup_directory/cpu.cfs_quota_us" "$cgroup_directory/cpu.cfs_period_us"
+        fi
+        [ "$cgroup_directory" != "$root" ] || break
+        cgroup_directory=${cgroup_directory%/*}
+    done
+done
 
 # Filesystem capacity is observed separately from allocated-volume quota.
 if [ -n "${directory:-}" ] && [ -d "$directory" ]; then

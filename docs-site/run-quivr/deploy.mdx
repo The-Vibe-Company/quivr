@@ -49,7 +49,6 @@ host processes. For example:
 
 ```sh
 export QUIVR_INFRASTRUCTURE_PROFILE=large
-export QUIVR_INFRASTRUCTURE_OVERRIDES=.scratch/installation.json
 make dev
 ```
 
@@ -57,13 +56,16 @@ To render the same overlay for a direct Compose launch, append it after the base
 
 ```sh
 python3 deploy/infrastructure.py render --profile large \
-  --overrides .scratch/installation.json --output .scratch/infrastructure.json
+  --output .scratch/infrastructure.json
 docker compose -f deploy/compose/compose.yaml \
   -f .scratch/infrastructure.json config
 ```
 
 Direct Compose requires `QUIVR_DB_PASSWORD`, `QUIVR_LOCAL_ROOT` (with `s3.json`)
 and `QUIVR_MODEL_ROOT` (the prepared model directory). `make dev` supplies them.
+
+Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule
+maintenance and verify readiness before continuing.
 
 The [deployment settings guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md)
 covers Railway `preview`, `apply`, `initialize-monitoring` and `check`, including the
@@ -75,7 +77,9 @@ resetting existing replica counts; for PostgreSQL it selects
 `deploy/railway/postgres.Dockerfile` and clears the Railway image source. For an existing
 installation, run `railway up --project ID --environment ID --service POSTGRES_SERVICE_ID --detach`
 from the repository root; a newly provisioned installation can use the deploy helper. This
-selection changes no replica count. Then initialize monitoring and check active values;
+selection changes no replica count. For large, redeploy Weaviate and each changed API, worker,
+worker-bulk and, if present, autoscaler with the explicit commands in the shared guide; existing
+replica counts remain unchanged. Then initialize monitoring and check active values;
 startup command-line settings take precedence over existing `ALTER SYSTEM` values after restart.
 
 ## The configuration file

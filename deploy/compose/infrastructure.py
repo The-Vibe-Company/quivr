@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from deploy import infrastructure as infra
 
 
-def execute(args):
-    result = subprocess.run(['docker', *args], capture_output=True, text=True, timeout=180)
+def execute(args, environ=None):
+    result = subprocess.run(['docker', *args], capture_output=True, text=True, timeout=180, env=environ)
     if result.returncode:
         raise RuntimeError('Docker command failed; check the selected project privately')
     return result.stdout
@@ -100,9 +100,22 @@ class Compose:
         return infra.report(rows)
 
     def apply(self, overlay):
+        # Reuse the selected local stack's credentials; never create or rotate them.
+        directory = infra.ROOT / '.scratch' / self.project
+        environment = dict(os.environ)
+        if not environment.get('QUIVR_DB_PASSWORD'):
+            statefile = directory / 'state.json'
+            if not statefile.exists():
+                raise RuntimeError('selected local project state is missing')
+            password = json.loads(statefile.read_text()).get('password')
+            if not isinstance(password, str) or not password:
+                raise RuntimeError('selected local project state has no database password')
+            environment['QUIVR_DB_PASSWORD'] = password
+        environment.setdefault('QUIVR_LOCAL_ROOT', str(directory))
+        environment.setdefault('QUIVR_MODEL_ROOT', str(infra.ROOT / '.scratch/e5-model'))
         # Only infrastructure services; never scale workers or alter unrelated services.
         self.run(['compose', '--project-name', self.project, '-f', str(infra.ROOT / 'deploy/compose/compose.yaml'),
-                  '-f', str(overlay), 'up', '-d', 'postgres', 'weaviate'])
+                  '-f', str(overlay), 'up', '-d', 'postgres', 'weaviate'], environ=environment)
 
     def initialize_monitoring(self):
         self.configured('postgres')

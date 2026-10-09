@@ -116,7 +116,7 @@ Object storage grows with raw content, parts and vector files. Measure physical 
 
 Use a disk guard to pause connectors before a volume fills, for example at 85% used. This is an operator policy, not a built-in Quivr threshold. Leave room for already accepted work, WAL and cleanup. Check how every volume grows before importing; some platforms require a manual console operation.
 
-The [shared infrastructure profile](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md) plans 500,000,000,000 bytes (500 GB decimal) each for PostgreSQL and Weaviate. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden; checks report filesystem capacity against that minimum and do not resize volumes or verify shared filesystem quotas.
+The [shared large profile](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md) declares a 500,000,000,000-byte (500 GB decimal) planning budget for each PostgreSQL and Weaviate service. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden; checks report filesystem capacity against that minimum and do not resize volumes or verify shared filesystem quotas.
 
 ## Efficient ingestion
 

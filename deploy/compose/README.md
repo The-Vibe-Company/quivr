@@ -68,11 +68,14 @@ including on macOS; direct Compose uses a rendered overlay for non-default setti
 The Compose adapter manages PostgreSQL and Weaviate only; API and worker processes stay
 native host processes.
 
-Use the Compose adapter for an existing project:
+Use the Compose adapter to apply settings for an existing `make dev` project. Launch a fresh
+local project with `make dev`; external Compose projects provide `QUIVR_DB_PASSWORD` through the environment.
+If it is unset, `apply` reuses the selected `.scratch/PROJECT/state.json` password, supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately, and never creates or rotates credentials:
 
 ```sh
-python3 deploy/compose/infrastructure.py check --project PROJECT --profile small
+python3 deploy/compose/infrastructure.py apply --project PROJECT --profile small
 python3 deploy/compose/infrastructure.py initialize-monitoring --project PROJECT --profile small
+python3 deploy/compose/infrastructure.py check --project PROJECT --profile small
 ```
 
 `check` reports configured and active values plus filesystem capacity against a declared

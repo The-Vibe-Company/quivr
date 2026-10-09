@@ -1,9 +1,7 @@
 # Shared infrastructure settings
 
-`deploy/infrastructure.json` is the source of truth for portable Compose and Railway
-settings. It contains no credentials or deployment selectors. `small` is the
-conservative default; `large` is an unbenchmarked operational starting point for
-object-heavy imports, not a capacity promise.
+`deploy/infrastructure.json` is the source of truth for portable Compose and Railway settings. It contains no credentials or deployment selectors.
+`small` is the conservative default; `large` is an unbenchmarked operational starting point for object-heavy imports, not a capacity promise.
 
 ## Profiles
 
@@ -18,22 +16,18 @@ Both profiles keep the pinned images and PostgreSQL tuning; bytes are decimal un
 | worker-bulk | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | Autoscaler | 134,217,728 (128 MiB) / 0.25 | 134,217,728 (128 MiB) / 0.25 |
 
-Large PostgreSQL and Weaviate planning budgets are 500,000,000,000 bytes (500 GB decimal) each. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden;
-the capacity report does not resize volumes or verify shared filesystem quotas.
+Large PostgreSQL and Weaviate planning budgets are 500,000,000,000 bytes (500 GB decimal) each. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden; the capacity report does not resize volumes or verify shared filesystem quotas.
 
-The large profile sets Weaviate `ASYNC_INDEXING=true`, `PERSISTENCE_MEMTABLES_MAX_SIZE_MB=1024`, `GOMEMLIMIT=27GiB` and
-`RAFT_BOOTSTRAP_TIMEOUT=3600`; these unbenchmarked settings may let object writes precede
-vector visibility, and memtable memory multiplies across active buckets and shards.
+The large profile sets Weaviate `ASYNC_INDEXING=true`, `PERSISTENCE_MEMTABLES_MAX_SIZE_MB=1024`, `GOMEMLIMIT=27GiB` and `RAFT_BOOTSTRAP_TIMEOUT=3600`; these unbenchmarked settings
+may let object writes precede vector visibility, and memtable memory multiplies across active buckets and shards.
 
 `GOMEMLIMIT` is a soft Go runtime budget, not an RSS cap. Keep RQ-8, schema disabled and the `none` vectorizer; choose measured limits before increasing a profile.
 
 ## Declared settings
 
-Every environment key below can be changed under `services.SERVICE.environment` in
-an override file within resolver validation rules. Resource limits use `services.SERVICE.deploy.resources.limits`;
-Weaviate image overrides require a digest. PostgreSQL and autoscaler image changes
-use the declaration's build pins and generation; per-installation image overrides
-for those built services are rejected. [PostgreSQL sizing](compose/README.md) covers derived memory/WAL values and their overrides.
+Every environment key below can be changed under `services.SERVICE.environment` in an override file within resolver validation rules. Resource limits use `services.SERVICE.deploy.resources.limits`;
+Weaviate image overrides require a digest. PostgreSQL and autoscaler image changes use the declaration's build pins and generation; per-installation image overrides for those built services are rejected.
+[PostgreSQL sizing](compose/README.md) covers derived memory/WAL values and their overrides.
 
 | Service / setting | Default and rationale |
 | --- | --- |
@@ -59,11 +53,9 @@ for those built services are rejected. [PostgreSQL sizing](compose/README.md) co
 | `QUIVR_AUTOSCALER_INTERVAL` / `QUIVR_AUTOSCALER_REQUEST_TIMEOUT` | 30s / 10s; bound polling and API waits. |
 | `QUIVR_AUTOSCALER_DOWNSCALE_WINDOW` / `QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL` | 5m / 2m; avoid oscillation and repeated deployment restarts. |
 
-PostgreSQL keeps mmap dynamic shared memory, preloaded statistics, I/O timing and JIT;
-`synchronous_commit=on` preserves acknowledged-write durability. Its initialization
-creates `pg_stat_statements`; monitoring setup for existing volumes uses the same
-idempotent script. Autoscaler credentials, URLs and target IDs stay external. Declaration
-`x-quivr.build_images` pins its build/runtime bases and keeps generated artifacts in sync.
+PostgreSQL keeps mmap dynamic shared memory, preloaded statistics, I/O timing and JIT; `synchronous_commit=on` preserves acknowledged-write durability. Its initialization
+creates `pg_stat_statements`; monitoring setup for existing volumes uses the same idempotent script. Autoscaler credentials, URLs and target IDs stay external.
+Declaration `x-quivr.build_images` pins its build/runtime bases and keeps generated artifacts in sync.
 
 ## Override and render
 
@@ -73,16 +65,14 @@ An override is a JSON object with only a `services` object. Put environment valu
 {"services":{"postgres":{"x-quivr-storage-budget-bytes":"500000000000"},"weaviate":{"x-quivr-storage-budget-bytes":"500000000000","environment":{"PERSISTENCE_MEMTABLES_MAX_SIZE_MB":"512"}}}}
 ```
 
-The resolver validates names, values, limits and immutable image digests. Use the same
-resolved profile and override for launch and checking. Render an ignored Compose overlay:
+The resolver validates names, values, limits and immutable image digests. Use the same resolved profile and override for launch and checking. Render an ignored Compose overlay:
 
 ```sh
 python3 deploy/infrastructure.py render --profile large \
   --output .scratch/infrastructure.json
 ```
 
-Add `--overrides FILE` when needed. `make dev` reads `QUIVR_INFRASTRUCTURE_PROFILE` and
-`QUIVR_INFRASTRUCTURE_OVERRIDES`, then resolves an ignored overlay on Linux and macOS.
+Add `--overrides FILE` when needed. `make dev` reads `QUIVR_INFRASTRUCTURE_PROFILE` and `QUIVR_INFRASTRUCTURE_OVERRIDES`, then resolves an ignored overlay on Linux and macOS.
 The raw Compose file extends declaration defaults directly; append the rendered overlay
 last for a large profile or override. Run `make infrastructure-check` after declaration changes to keep
 generated PostgreSQL and autoscaler artifacts in sync.
@@ -91,7 +81,8 @@ generated PostgreSQL and autoscaler artifacts in sync.
 
 The Compose adapter exposes `preview`, `apply`, `check`, and `initialize-monitoring`; it
 manages PostgreSQL and Weaviate only, while API and worker processes stay native hosts.
-`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json`:
+`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json`.
+Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
 
 ```sh
 python3 deploy/compose/infrastructure.py preview \
@@ -110,6 +101,9 @@ adapter plan, then apply variables and limits without changing existing replicas
 services start at one. Deploy changed services (include API, worker and worker-bulk for
 large), initialize monitoring, then check the active deployment:
 
+Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule
+maintenance and verify readiness before continuing.
+
 For PostgreSQL, apply/provision selects `deploy/railway/postgres.Dockerfile` and clears Railway's image source in that environment;
 it only stages the switch. For an existing installation, run `railway up --project ID --environment ID --service POSTGRES_SERVICE_ID --detach`
 from the repository root; a newly provisioned installation can use the existing helper. This explicit selection changes no replica count.
@@ -122,6 +116,12 @@ python3 deploy/railway/infrastructure.py apply \
   --project-id ID --environment-id ID --profile large
 railway up --project ID --environment ID \
   --service POSTGRES_SERVICE_ID --detach
+# Large: restart changed application services; rebuild with railway up for code/build-pin changes.
+railway redeploy --project ID --environment ID --service WEAVIATE_SERVICE_ID --from-source --yes
+railway redeploy --project ID --environment ID --service API_SERVICE_ID --yes
+railway redeploy --project ID --environment ID --service WORKER_SERVICE_ID --yes
+railway redeploy --project ID --environment ID --service WORKER_BULK_SERVICE_ID --yes
+railway redeploy --project ID --environment ID --service AUTOSCALER_SERVICE_ID --yes
 python3 deploy/railway/infrastructure.py initialize-monitoring \
   --project-id ID --environment-id ID --profile large
 python3 deploy/railway/infrastructure.py check \

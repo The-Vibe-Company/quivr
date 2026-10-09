@@ -107,6 +107,17 @@ class Infrastructure(unittest.TestCase):
                 override.write_text(json.dumps({'services': {role: {'image': 'registry/image@sha256:' + 'a' * 64}}}))
                 with self.assertRaisesRegex(ValueError, 'image overrides'):
                     infra.resolve(overrides=override)
+            for key, value in (
+                ('QUIVR_POSTGRES_MEMORY_MB', '64'), ('QUIVR_POSTGRES_VOLUME_MB', '0'),
+                ('QUIVR_POSTGRES_MAX_CONNECTIONS', '262144'), ('QUIVR_POSTGRES_WORK_MEM', '1GiB'),
+                ('QUIVR_POSTGRES_WORK_MEM', '0MB'), ('QUIVR_POSTGRES_MAX_WAL_SIZE', '16MB'),
+                ('QUIVR_POSTGRES_MIN_WAL_SIZE', '16MB'), ('QUIVR_POSTGRES_MIN_WAL_SIZE', '64GB'), ('QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY', '1001'),
+                ('QUIVR_POSTGRES_RANDOM_PAGE_COST', '10000000001'),
+                ('QUIVR_POSTGRES_CHECKPOINT_TIMEOUT', '29s'), ('QUIVR_POSTGRES_CHECKPOINT_TIMEOUT', '2h')):
+                with self.subTest(key=key, value=value):
+                    override.write_text(json.dumps({'services': {'postgres': {'environment': {key: value}}}}))
+                    with self.assertRaisesRegex(ValueError, 'invalid infrastructure value'):
+                        infra.resolve(overrides=override)
             for invalid_image in (None, 123, [], 'registry/image:mutable'):
                 override.write_text(json.dumps({'services': {'weaviate': {'image': invalid_image}}}))
                 with self.assertRaisesRegex(ValueError, 'immutable digest'):
@@ -314,6 +325,42 @@ class Infrastructure(unittest.TestCase):
             services = json.loads((output / 'report.json').read_text())['versions']['services']
             self.assertEqual(services['postgres'], declared['postgres']['image'])
             self.assertEqual(services['weaviate'], declared['weaviate']['image'])
+
+    def test_v1_cpu_probe_reads_nested_combined_mount_and_parent_limits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mount = root / 'cgroup/cpu,cpuacct'
+            child = mount / 'parent/child'
+            child.mkdir(parents=True)
+            for path, quota in ((child, '400000'), (child.parent, '200000')):
+                (path / 'cpu.cfs_quota_us').write_text(quota)
+                (path / 'cpu.cfs_period_us').write_text('100000')
+            membership = root / 'membership'
+            membership.write_text('3:cpu,cpuacct:/parent/child\n')
+            script = infra.runtime_script('api').replace('/sys/fs/cgroup', str(root / 'cgroup')).replace(
+                '/proc/self/cgroup', str(membership))
+            result = subprocess.run(['sh', '-c', script], capture_output=True, text=True, timeout=5, check=True)
+            self.assertEqual(infra.observed_resources(result.stdout.splitlines())['cpus'], '2')
+
+    def test_compose_apply_loads_selected_local_state_without_exported_variables(self):
+        from deploy.compose import infrastructure as compose_module
+        Compose = compose_module.Compose
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(directory)
+            project = root / '.scratch/selected'
+            project.mkdir(parents=True)
+            (project / 'state.json').write_text('{"password":"fixture-password"}')
+            run = Mock(return_value='')
+            with patch.object(compose_module.infra, 'ROOT', root):
+                Compose('selected', run=run).apply(project / 'infrastructure.json')
+            environment = run.call_args.kwargs['environ']
+            self.assertEqual(environment['QUIVR_DB_PASSWORD'], 'fixture-password')
+            self.assertEqual(environment['QUIVR_LOCAL_ROOT'], str(project))
+            self.assertEqual(environment['QUIVR_MODEL_ROOT'], str(root / '.scratch/e5-model'))
+            self.assertEqual(run.call_args.args[0][-4:], ['up', '-d', 'postgres', 'weaviate'])
+            with patch.object(compose_module.infra, 'ROOT', root):
+                with self.assertRaisesRegex(RuntimeError, 'local project state'):
+                    Compose('missing', run=run).apply(root / 'overlay.json')
 
     def test_runtime_capacity_probe_keeps_the_database_directory(self):
         with tempfile.TemporaryDirectory() as directory:

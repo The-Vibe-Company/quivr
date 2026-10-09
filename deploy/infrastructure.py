@@ -48,7 +48,7 @@ def merge(original, override):
     return result
 
 
-def validate(services):
+def validate(services, resolved=False):
     if not isinstance(services, dict) or set(services) - KEYS.keys():
         raise ValueError('unsupported infrastructure service')
     for name, service in services.items():
@@ -71,6 +71,13 @@ def validate(services):
         for key, value in environment.items():
             if safe_environment(key, value) == '<invalid>':
                 raise ValueError('invalid infrastructure value')
+        if name == 'postgres' and environment.get('QUIVR_POSTGRES_MIN_WAL_SIZE'):
+            maximum = environment.get('QUIVR_POSTGRES_MAX_WAL_SIZE')
+            if maximum or resolved:
+                capacity = int(environment.get('QUIVR_POSTGRES_VOLUME_MB', 327680))
+                maximum_mb = memory_bytes(maximum) // 1048576 if maximum else min(32768, max(64, capacity // 10))
+                if memory_bytes(environment['QUIVR_POSTGRES_MIN_WAL_SIZE']) // 1048576 > maximum_mb:
+                    raise ValueError('invalid infrastructure value')
         deployment = service.get('deploy', {})
         if set(deployment) - {'resources'} or set(deployment.get('resources', {})) - {'limits'}:
             raise ValueError('unsupported infrastructure resource field')
@@ -113,7 +120,7 @@ def resolve(profile='small', overrides=None, environ=None, declaration_path=DECL
     storage = services['postgres'].get('x-quivr-storage-budget-bytes')
     if storage:
         services['postgres']['environment'].setdefault('QUIVR_POSTGRES_VOLUME_MB', str(int(storage) // 1048576))
-    validate(services)
+    validate(services, resolved=True)
     return services
 
 
@@ -222,7 +229,26 @@ def safe_environment(name, value):
     if value is None:
         return None
     value = str(value)
-    if name in ('ASYNC_INDEXING', 'AUTOSCHEMA_ENABLED', 'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED'):
+    if name in ('QUIVR_POSTGRES_MEMORY_MB', 'QUIVR_POSTGRES_VOLUME_MB',
+                'QUIVR_POSTGRES_MAX_CONNECTIONS', 'QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY'):
+        bounds = {'QUIVR_POSTGRES_MEMORY_MB': (128, 999999999999),
+                  'QUIVR_POSTGRES_VOLUME_MB': (1, 999999999999),
+                  'QUIVR_POSTGRES_MAX_CONNECTIONS': (1, 262143),
+                  'QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY': (0, 1000)}
+        low, high = bounds[name]
+        valid = bool(re.fullmatch(r'[0-9]{1,12}', value)) and low <= int(value) <= high
+    elif name in ('QUIVR_POSTGRES_SHARED_BUFFERS', 'QUIVR_POSTGRES_EFFECTIVE_CACHE_SIZE',
+                  'QUIVR_POSTGRES_WORK_MEM', 'QUIVR_POSTGRES_MAINTENANCE_WORK_MEM',
+                  'QUIVR_POSTGRES_MAX_WAL_SIZE', 'QUIVR_POSTGRES_MIN_WAL_SIZE'):
+        valid = bool(re.fullmatch(r'[1-9][0-9]{0,11}(kB|MB|GB|TB)', value))
+        if valid and name in ('QUIVR_POSTGRES_MAX_WAL_SIZE', 'QUIVR_POSTGRES_MIN_WAL_SIZE'):
+            valid = 32 <= memory_bytes(value) // 1048576 <= 2147483647
+    elif name == 'QUIVR_POSTGRES_RANDOM_PAGE_COST':
+        valid = bool(re.fullmatch(r'[0-9]{1,12}(\.[0-9]{1,6})?', value)) and Decimal(value) <= Decimal('1e10')
+    elif name == 'QUIVR_POSTGRES_CHECKPOINT_TIMEOUT':
+        match = re.fullmatch(r'([1-9][0-9]{0,11})(s|min|h)', value)
+        valid = bool(match) and 30 <= int(match[1]) * {'s': 1, 'min': 60, 'h': 3600}[match[2]] <= 3600
+    elif name in ('ASYNC_INDEXING', 'AUTOSCHEMA_ENABLED', 'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED'):
         valid = value in ('true', 'false')
     elif name == 'DEFAULT_QUANTIZATION':
         valid = value in ('rq-8', 'none', 'rq-1', 'pq', 'bq', 'sq')

@@ -26,7 +26,7 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 | tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
 
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
-Redeploying a volume-backed service can interrupt requests. No public dependency domains are needed.
+Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule maintenance and verify readiness before continuing. No public dependency domains are needed.
 
 ## Apply shared infrastructure settings
 
@@ -45,7 +45,7 @@ railway up --project ID --environment ID \
 ```
 
 The environment-scoped apply/provision step switches PostgreSQL from an image source to `deploy/railway/postgres.Dockerfile` and clears `source.image`; it only stages that change.
-For an existing installation, run `railway up` from the repository root; a newly provisioned installation can use the repository deploy helper. This explicit selection changes no replica count.
+For an existing installation, run `railway up` from the repository root; a newly provisioned installation can use the repository deploy helper. This explicit selection changes no replica count. For large, redeploy Weaviate and each changed API, worker, worker-bulk or autoscaler from source with the explicit commands in the [shared guide](../infrastructure.md); replica counts remain unchanged.
 On restart, startup command-line settings take precedence over existing `ALTER SYSTEM` values in `postgresql.auto.conf`.
 
 After deploying PostgreSQL and any other changed services, initialize the statistics
