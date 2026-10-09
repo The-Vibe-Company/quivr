@@ -49,6 +49,26 @@ type applyRun struct {
 	activations   map[string]bool
 }
 
+// The public activation endpoint acquired an optional request body in newer
+// clients. Keep this command compatible with both generated client versions.
+func activateApply(ctx context.Context, cl any, id, key string) (*http.Response, error) {
+	if current, ok := cl.(interface {
+		ActivatePluginWithBody(context.Context, string, string, io.Reader, ...client.RequestEditorFn) (*http.Response, error)
+	}); ok {
+		body, err := json.Marshal(map[string]string{"idempotency_key": key})
+		if err != nil {
+			return nil, err
+		}
+		return current.ActivatePluginWithBody(ctx, id, "application/json", strings.NewReader(string(body)))
+	}
+	if legacy, ok := cl.(interface {
+		ActivatePlugin(context.Context, string, ...client.RequestEditorFn) (*http.Response, error)
+	}); ok {
+		return legacy.ActivatePlugin(ctx, id)
+	}
+	return nil, fmt.Errorf("public plugin activation client is unavailable")
+}
+
 func (a *applyRun) change(format string, args ...any) {
 	a.changes = append(a.changes, fmt.Sprintf(format, args...))
 }
@@ -345,7 +365,7 @@ func (a *applyRun) execute() error {
 		}
 		if registration.State != client.PluginRegistrationStateActive || a.activations[p.Key] {
 			// Accept asynchronous activation Operations as well as the earlier plan response.
-			_, _, err := readApply[json.RawMessage](a.operator.ActivatePlugin(a.ctx, e.ID))
+			_, _, err := readApply[json.RawMessage](activateApply(a.ctx, a.operator.ClientInterface, e.ID, j.digest(map[string]string{"activate_registration": e.ID})))
 			if err != nil {
 				return err
 			}
