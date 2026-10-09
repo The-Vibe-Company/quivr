@@ -1,0 +1,91 @@
+---
+title: Reset and reload an installation
+description: Rebuild a dedicated installation from private declarations without manual database or connector setup.
+keywords: [reset, installation, sources, declarations, idempotency]
+---
+Reset a dedicated installation, then recreate its collections (Corpora) and source connectors from a private JSON declaration.
+
+## Prerequisites
+
+- A checkout of the same Quivr revision your installation runs, Python 3.12+ (`python3 --version`), and the built `quivr` binary (`quivr --version`).
+- For Compose, the running `make dev` Stack from this checkout and Docker Compose (`docker compose version`). Use its project name from `.scratch/`. Standalone Compose layouts and externally managed API processes are unsupported.
+- For Railway, the [checked-in deployment layout](/run-quivr/deploy), Railway CLI with `railway api` and `railway ssh`, and an account/workspace `RAILWAY_API_TOKEN` with operator access to every environment. Unset project-scoped `RAILWAY_TOKEN`; it cannot prove project-wide volume isolation. Every service must use one stable, redeployable artifact; stop deployment automation during maintenance.
+- Four data volumes dedicated to this installation: PostgreSQL, Temporal, Weaviate and SeaweedFS. The object store must contain only the engine's `quivr-content` bucket. Source archives belong in a separate store.
+- `QUIVR_API_URL` and `QUIVR_API_KEY` for one organization, with `corpora:read`, `corpora:write`, `corpora:rename`, `connectors:read` and `connectors:write`. Install the required connector providers; credential deposits need the installation's credential encryption key.
+- If you declare plugins, `QUIVR_OPERATOR_KEY` with `plugins:admin`. Run the plugin hosts before applying; this command registers and activates them through the public API.
+
+Reset deletes documents, vectors, blobs, connector credentials and PostgreSQL state, and terminates running workflows in the default Temporal namespace. It preserves installation credentials, infrastructure settings and cached model files. Keep your declarations, secrets and replay journal outside the public repository.
+
+## Steps
+
+### 1. Prepare private declarations
+
+Copy [the neutral sources example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/sources.json) outside your checkout. Replace the feed URL, source bucket and prefixes. The example lists an RSS feed and an object-storage archive; its placeholders do not point at working sources.
+
+Corpora use stable `idempotency_key` values and `name`. A connector's `corpus` references one of those keys. Each connector declares its own key, `source_namespace`, `kind`, nonsecret `config`, `work_queue` (`live` by default, or `bulk`) and `schedule.interval_seconds`. An omitted interval uses the installed kind's default.
+
+Put credential **environment variable names** in `credential_env`; load their values into your shell privately. Alternatively, set `credential_file` to a private `0600` JSON object matching the kind's credential schema. Existing credentials are not overwritten: the public replacement API has no conditional version fence. Use an explicit public rotation procedure, or reload after reset. Relative paths resolve beside the declaration. Never put secret values in the declaration, URLs or plugin configuration.
+
+A Corpus may select an existing `retrieval_profile` by name at creation. Apply refuses later profile changes; use the [plugin upgrade procedure](/run-quivr/upgrade-a-plugin) for those changes.
+
+Optional `plugins` entries contain `idempotency_key`, `endpoint`, `manifest_file`, and nonsecret `configuration`. They accept `fixture_files` (fixture name to local path), `routes`, `kinds` and `spaces` from the [public registration API](/api-reference/overview). Manifests and fixtures resolve beside the declaration. Conflicting declared plugin roles are refused before writes; a changed registration needs a new key. Plugin host secrets stay in the host environment.
+
+Copy either [the Compose installation example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.compose.json) or [the Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.railway.json). Set your deployment name and selectors. `dedicated: true` asserts exclusive use of all four selected data volumes. Compose verifies project/service volume labels and refuses additional container attachments. Railway also verifies that no other environment attaches them; it refuses incomplete or unreadable ownership checks. Declare every Railway service with a supported role, including `autoscaler` when present.
+
+### 2. Preview and reset
+
+The following commands are examples requiring your private declarations and deployment access. Preview reads deployment state without stopping services:
+
+```sh
+python3 deploy/reset.py -f /private/installation.json
+```
+
+Inspect the selected deployment, volume IDs, writer services and storage counts. Execute only after typing the declared deployment name exactly:
+
+```sh
+python3 deploy/reset.py -f /private/installation.json \
+  --confirm --deployment-name 'your declared deployment name'
+```
+
+Both confirmation inputs are required. Reset stops writers, terminates running workflows, replaces the four data volumes, applies startup migrations and restarts writers. Compose reports deleted volumes and storage counts. Railway restores the same deployed artifacts and reports detached old volumes whose deletion was acknowledged; provider retention can delay physical deletion.
+
+### 3. Preview and apply sources
+
+Use the same API address and organization key on every replay. The private journal binds to both and stores resource IDs, creation intents and keyed credential digests. It contains no credential values. Back up this journal with your private declaration.
+
+These commands are examples requiring your API access and source credentials:
+
+```sh
+quivr apply -f /private/sources.json \
+  --state-file /private/sources.state.json
+```
+
+Preview prints additions, name and schedule changes, and redacted credential differences. Confirm the displayed changes:
+
+```sh
+quivr apply -f /private/sources.json \
+  --state-file /private/sources.state.json --confirm
+```
+
+Keep the same journal after reset: missing resources are recreated and connectors receive the new Corpus IDs. Applying an unchanged declaration again prints `No changes.` and makes no remote writes.
+
+## Check it worked
+
+Reset checks that replacement blob and vector stores are empty before returning. Railway also checks the migrated database has no Corpora. After apply, list your Corpora and connectors through the public API; source import continues on their declared schedules. An unchanged confirmed apply must print `No changes.`.
+
+## Troubleshooting
+
+| Symptom | Cause and action |
+| --- | --- |
+| Unsupported change | Connector kind, config, Corpus, namespace and queue have no public in-place update API. Removal, credential changes and retrieval profile updates require explicit public lifecycle procedures. Apply refuses the entire preview before writing. |
+| Lifecycle or credential drift | Archived Corpora, paused or disabled connectors, and credential rotations outside the journal require deliberate reconciliation through the public API. |
+| API request failed | Apply is not atomic. Earlier actions may have succeeded. Keep the journal and original declaration/secret values for pending actions, then rerun. |
+| Journal binding or permission error | Keep the original API address and organization key, use private regular files and avoid simultaneous applies. API key rotation needs a deliberately new journal; retain the old one for audit. |
+| Reset incomplete | Writers may remain stopped. Keep the private reset checkpoint (`installation.json.reset-state.json` on Railway, Stack `reset-state.json` on Compose) and inspect it before recovery. Incomplete resets refuse blind replay. |
+| Other buckets or shared volume | Move source archives outside the installation data volumes. Use a dedicated installation; reset never deletes a shared volume. |
+
+## Next
+
+- [Connect sources](/guides/connectors)
+- [Run a large import](/run-quivr/run-a-large-import)
+- [CLI reference](/reference/cli)

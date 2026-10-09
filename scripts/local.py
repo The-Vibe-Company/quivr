@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """The local stack (make dev, make verify): host Go processes and isolated real dependencies."""
+import pathlib, sys
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 from prepare_tokenizer import prepare as prepare_tokenizer, requirements
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
@@ -17,8 +20,6 @@ import queue_workers
 import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, math, os, pathlib, re, secrets, signal, subprocess, sys, time, urllib.request, uuid
-ROOT=pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT))
 from deploy import infrastructure as infrastructure_settings
 GO=os.environ.get('GO','go')
 
@@ -576,7 +577,7 @@ def lifecycle_required():
     """Only CI with a known unchanged local.py may omit the expensive lifecycle proof."""
     base=os.environ.get('QUIVR_VERIFY_BASE')
     if not base:return True
-    changed=subprocess.run(['git','diff','--quiet',base,'HEAD','--','scripts/local.py'],cwd=ROOT)
+    changed=subprocess.run(['git','diff','--quiet',base,'HEAD','--','scripts/local.py','scripts/lifecycle.py','deploy/reset.py','deploy/reset_support.py','deploy/reset_storage.py','deploy/compose/reset.py','deploy/railway/reset.py'],cwd=ROOT)
     return changed.returncode!=0  # A missing/invalid base is uncertainty: run the proof.
 
 def parts():
@@ -693,6 +694,7 @@ def parts():
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
             # X webhook deliveries while the x-list plugin is down: 503 to X, then polling catches up.
             step('x_push_outage',lambda stack:verify_connector_x_push(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
+            acceptance('install_apply','^TestInstallApply$'),
             # Last, since it activates them: pdf-text and the RSS connector registered with their own fixtures (THE-807).
             acceptance('plugin_own_fixtures','^TestPluginRegistrationWithItsFixtures$'),
             step('validate_captures',validate_captures)],

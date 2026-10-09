@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "corpora": [
+    {"idempotency_key": "example.install-reload.articles", "name": "Articles"}
+  ],
+  "connectors": [
+    {
+      "idempotency_key": "example.install-reload.feed",
+      "corpus": "example.install-reload.articles",
+      "source_namespace": "public-feed",
+      "kind": "rss",
+      "config": {"url": "https://example.org/feed.xml", "honor_ttl": true},
+      "work_queue": "live",
+      "schedule": {"interval_seconds": 300}
+    },
+    {
+      "idempotency_key": "example.install-reload.archive",
+      "corpus": "example.install-reload.articles",
+      "source_namespace": "archive",
+      "kind": "object_storage_archive",
+      "config": {
+        "bucket": "replace-with-your-source-bucket",
+        "prefix": "archives/",
+        "region": "us-east-1",
+        "media_type": "text/plain"
+      },
+      "work_queue": "bulk",
+      "schedule": {"interval_seconds": 3600},
+      "credential_env": {
+        "access_key_id": "ARCHIVE_ACCESS_KEY_ID",
+        "secret_access_key": "ARCHIVE_SECRET_ACCESS_KEY"
+      }
+    }
+  ]
+}

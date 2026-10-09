@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "deployment": "replace-with-your-installation-name",
+  "platform": "compose",
+  "project": "replace-with-your-stack-project",
+  "dedicated": true
+}
