@@ -1,8 +1,12 @@
 package retrieval_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +61,7 @@ func (p *fakePurgeProjection) PurgeVersion(_ context.Context, collection, org, v
 func (p *fakePurgeProjection) call(key string) (retrieval.PurgeResult, error) {
 	p.calls = append(p.calls, key)
 	if key == p.fail {
-		return retrieval.PurgeResult{}, errors.New("projection unavailable")
+		return retrieval.PurgeResult{}, errors.New("projection unavailable: context deadline exceeded; token=private-value")
 	}
 	if r, ok := p.results[key]; ok {
 		return r, nil
@@ -106,22 +110,36 @@ func TestPurgerSweepIsBoundedAndRecordsOutcomes(t *testing.T) {
 	}
 }
 
-// A projection failure leaves its item unrecorded, so its lease expires and a
-// later sweep repeats the idempotent delete; the other items still proceed and
-// the sweep reports the failure.
+// A failure after one collection checkpoints its confirmed successes as
+// incomplete; other items proceed, and a later sweep can resume.
 func TestPurgerLeavesFailedItemsForALaterSweep(t *testing.T) {
+	var output bytes.Buffer
+	logger, err := logging.New(&output, logging.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	store := &fakePurgeStore{items: []retrieval.PurgeItem{
-		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "v", Collections: []string{"C1", "C2"}},
+		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "v", Collections: []string{"C1", "C2"}, NoticedAt: time.Now().Add(-2 * time.Hour)},
 		{Organization: "o", Kind: retrieval.PurgeVersion, VersionID: "w", Collections: []string{"C1"}},
 	}}
-	projection := &fakePurgeProjection{fail: "version/C2/o/v"}
+	projection := &fakePurgeProjection{fail: "version/C2/o/v", results: map[string]retrieval.PurgeResult{"version/C1/o/v": {Deleted: 2, RemainingAtLeast: 3}}}
 	metrics := retrieval.NewPurgeMetrics()
 	done, err := retrieval.Purger{Store: store, Projection: projection, Metrics: metrics}.Sweep(context.Background())
-	if err == nil || done != 1 || len(store.records) != 1 || store.records[0].item.VersionID != "w" {
+	if err == nil || done != 1 || len(store.records) != 2 || store.records[0].item.VersionID != "v" || store.records[0].deleted != 2 || store.records[0].complete || store.records[1].item.VersionID != "w" {
 		t.Fatalf("sweep %d %v, records %+v", done, err, store.records)
 	}
 	if metrics.Objects[retrieval.PurgeVersion].Load() != 4 || metrics.Purges[retrieval.PurgeVersion].Load() != 1 {
 		t.Fatalf("metrics objects %d purges %d", metrics.Objects[retrieval.PurgeVersion].Load(), metrics.Purges[retrieval.PurgeVersion].Load())
+	}
+	var exposition bytes.Buffer
+	metrics.Write(&exposition)
+	if !strings.Contains(output.String(), "context deadline exceeded") || strings.Contains(output.String(), "private-value") ||
+		!strings.Contains(exposition.String(), `quivr_projection_purge_failures_total{kind="version"} 1`) ||
+		!strings.Contains(exposition.String(), `quivr_projection_purge_remaining_objects_lower_bound{kind="version"} 3`) || metrics.Oldest[retrieval.PurgeVersion].Load() < 7200 {
+		t.Fatalf("purge diagnostics: logs %s metrics %s", output.String(), exposition.String())
 	}
 	if store.grace != retrieval.DefaultPurgeGrace || store.claimLimit != 100 {
 		t.Fatalf("defaults grace %s batch %d", store.grace, store.claimLimit)
