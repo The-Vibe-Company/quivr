@@ -387,3 +387,74 @@ func TestZipDirectoryBoundsAndBufferedDeflate(t *testing.T) {
 		}
 	})
 }
+
+// Page cut ownership: a repeated source identity ends a page even when the
+// byte budget and requested batch size have room. Distinct 30 KiB members
+// cross 1 MiB on one page; cached source bytes do not enter the JSON response.
+func TestArchiveReportsPageCuts(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		repeat bool
+		want   int
+		cut    string
+	}{
+		{"distinct_members_cross_one_mebibyte", false, 40, "archive_end"},
+		{"corrections_cut_at_repeated_key", true, 31, "record_key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			tw := tar.NewWriter(gz)
+			for i := 0; i < 40; i++ {
+				key := i
+				position := 12
+				if tc.repeat && i == 31 {
+					key = 0
+					position = 3
+				}
+				name := fmt.Sprintf("urn:example:ITEM%d-%d.xml", key, position)
+				body := bytes.Repeat([]byte("x"), 30<<10)
+				if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body))}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tw.Write(body); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gz.Close(); err != nil {
+				t.Fatal(err)
+			}
+			srv := objectServer(t, buf.Bytes())
+			source := NewArchiveConnector()
+			defer source.Close()
+			req := fetchRequest(t, srv.URL, nil, `,"record_key_pattern":"urn:example:(ITEM[0-9]+)-","source_position_pattern":"-([0-9]+)\\.xml$"`)
+			var config map[string]any
+			if err := json.Unmarshal(req.Connector.Config, &config); err != nil {
+				t.Fatal(err)
+			}
+			config["batch_size"] = 500
+			req.Connector.Config, _ = json.Marshal(config)
+			page, err := source.Fetch(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			diagnostic := page.Diagnostics
+			if len(page.Items) != tc.want || diagnostic["page_cut"] != tc.cut || diagnostic["page_bytes"] != int64(tc.want*(30<<10)) {
+				t.Fatalf("page items=%d diagnostic=%v, want %d/%s", len(page.Items), diagnostic, tc.want, tc.cut)
+			}
+			if tc.repeat {
+				req.Checkpoint, _ = json.Marshal(page.Checkpoint)
+				next, err := source.Fetch(context.Background(), req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(next.Items) != 9 || next.Items[0].RecordKey != "ITEM0" || next.Items[0].SourcePosition != "3" {
+					t.Fatalf("pending correction lost: %+v", next)
+				}
+			}
+		})
+	}
+}
