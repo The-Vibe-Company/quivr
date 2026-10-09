@@ -1,4 +1,4 @@
-FROM golang:1.27.1-bookworm AS build
+FROM golang:1.27.2-bookworm AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY cmd/quivr-autoscaler ./cmd/quivr-autoscaler
