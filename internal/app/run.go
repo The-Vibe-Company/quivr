@@ -128,6 +128,8 @@ type Config struct {
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
+	// ProjectionPurgeTimeout bounds each index cleanup request, worker only.
+	ProjectionPurgeTimeout string `json:"projection_purge_timeout"`
 	// MigrationWait is how long the worker waits at startup for migrations
 	// the api has not applied yet before it exits (Go duration, default 5m;
 	// 0s exits at once; worker only).
@@ -153,6 +155,18 @@ type RetrievalConfig struct {
 	Profiles map[string]string `json:"profiles"`
 	// CoverageRefresh paces background snapshots (Go duration, default 10s).
 	CoverageRefresh string `json:"coverage_refresh"`
+}
+
+func (cfg Config) purgeTimeout() (time.Duration, error) {
+	timeout := retrieval.DefaultPurgeTimeout
+	if cfg.ProjectionPurgeTimeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(cfg.ProjectionPurgeTimeout)
+		if err != nil || timeout <= 0 || timeout > retrieval.MaximumPurgeTimeout {
+			return 0, badConfig(configInvalid, "projection_purge_timeout", "projection_purge_timeout must be a positive duration no greater than 120s")
+		}
+	}
+	return timeout, nil
 }
 
 func (c RetrievalConfig) coverageRefresh() (time.Duration, error) {
@@ -414,6 +428,10 @@ func Run(command string, args ...string) error {
 	if cfg.ChangePrune.AllowShortRetention {
 		slog.Warn("change_prune.allow_short_retention is enabled: pruning may remove change events before API cursors expire; this can cause data loss for consumers", "retention", prune.Retention, "change_retention", retention)
 	}
+	purgeTimeout, err := cfg.purgeTimeout()
+	if err != nil {
+		return err
+	}
 	purgeGrace := retrieval.DefaultPurgeGrace
 	if cfg.ProjectionPurgeGrace != "" {
 		if purgeGrace, err = time.ParseDuration(cfg.ProjectionPurgeGrace); err != nil || purgeGrace <= 0 {
@@ -538,6 +556,7 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
 		if contract {
@@ -900,7 +919,7 @@ func Run(command string, args ...string) error {
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
 		loops.Go(func(ctx context.Context) {
-			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, Interval: time.Second, Batch: 4, Metrics: purgeMetrics}.Run(ctx)
+			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, RequestTimeout: purgeTimeout, Interval: time.Second, Batch: 4, Metrics: purgeMetrics}.Run(ctx)
 		})
 		loops.Go(func(ctx context.Context) {
 			for ctx.Err() == nil {
