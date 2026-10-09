@@ -23,6 +23,8 @@ from load_report import distribution, markdown, request_summary
 from load_scenarios import read
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from deploy import infrastructure
 SCENARIOS = ROOT / 'tests/load/scenarios'
 TIMEOUT = 5
 POLL = .1
@@ -542,9 +544,10 @@ def main(argv=None):
               'status': 'failed', 'machine': machine(), 'revision': output(['git', 'rev-parse', 'HEAD']),
               'dirty': bool(output(['git', 'status', '--porcelain'])), 'runs': []}
     import yaml
+    shared = infrastructure.resolve(environ={})
     report['versions'] = {'python': platform.python_version(), 'go': output([os.environ.get('GO', 'go'), 'version']),
         'docker': output(['docker', '--host', docker_host, 'version', '--format', '{{.Server.Version}}']),
-        'services': {k: v['image'] for k, v in yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())['services'].items()
+        'services': {k: (shared[k] if k in shared else v)['image'] for k, v in yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())['services'].items()
                      if k != 'tei'}, 'plugin': 'load.fake@0.1.0',
         'plugin_sha256': hashlib.sha256((ROOT / 'tests/fakes/load-plugin/main.go').read_bytes()).hexdigest()}
     report['source_sha256'] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()

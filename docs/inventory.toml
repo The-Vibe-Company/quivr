@@ -62,6 +62,7 @@ excluded = [
 
 [pages]
 "deploy/compose/README.md" = { audience = "functional", kind = "guide", summary = "size PostgreSQL connections and memory for imports" }
+"deploy/infrastructure.md" = { audience = "functional", kind = "guide", summary = "resolve shared profiles, apply deployment settings and check drift" }
 "AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
 "CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
 "README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
@@ -128,6 +129,7 @@ excluded = [
 # Maximum number of lines per page, in path order.
 [budgets]
 "deploy/compose/README.md" = 85
+"deploy/infrastructure.md" = 155
 "deploy/modal/README.md" = 100
 "conformance/README.md" = 125
 "docs/eval-private-working.md" = 90

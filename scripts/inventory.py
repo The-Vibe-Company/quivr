@@ -9,6 +9,8 @@ evaluation-stage notice list, not a legal review or a production certification.
 """
 import json, os, pathlib, platform, re, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from deploy import infrastructure
 
 # Declared supported platform of the local harness and CI. Nothing else is claimed.
 PLATFORM = 'linux/amd64'
@@ -36,6 +38,7 @@ def classify(text):
 def images():
     """Container images pinned by digest in the Compose file and the contract generator."""
     found = re.findall(r'image:\s*(\S+)', (ROOT / 'deploy/compose/compose.yaml').read_text())
+    found += [spec['image'] for spec in infrastructure.resolve(environ={}).values() if 'image' in spec]
     found += re.findall(r'(openapitools/openapi-generator-cli:\S+@sha256:[0-9a-f]+)', (ROOT / 'scripts/contracts.sh').read_text())
     return [{'image': i, 'pinned_by_digest': '@sha256:' in i, 'licence': 'see upstream image; not inventoried'} for i in dict.fromkeys(found)]
 

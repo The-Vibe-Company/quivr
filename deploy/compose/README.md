@@ -47,6 +47,10 @@ the mount reports shared host capacity; free space does not determine the budget
 Override sizes with `QUIVR_POSTGRES_MAX_WAL_SIZE` and `QUIVR_POSTGRES_MIN_WAL_SIZE`
 (positive integers with the memory units above, at least 32 MiB; minimum ≤ maximum).
 The script also sets `checkpoint_timeout=15min` and `wal_compression=lz4`.
+The shared declaration keeps JIT on, accepts only `synchronous_commit=on` for durable
+acknowledgements, and tracks all statements in `pg_stat_statements`.
+On restart, startup command-line options take precedence over existing `ALTER SYSTEM`
+values in `postgresql.auto.conf`.
 
 Larger WAL budgets and longer intervals reduce checkpoint pressure and repeated
 full-page images, but consume more disk and can lengthen crash recovery. LZ4
@@ -56,24 +60,26 @@ archiving can exceed it. Keep disk headroom for WAL and growing tables/indexes;
 monitor free space and requested checkpoints. [PostgreSQL WAL settings](https://www.postgresql.org/docs/17/runtime-config-wal.html)
 describe these trade-offs. Restart PostgreSQL after changing budgets.
 
-## Verify startup
+## Apply and verify shared settings
 
-The script sets `dynamic_shared_memory_type=mmap`, preloads `pg_stat_statements`,
-enables I/O timing and retains JIT. Fresh databases install the statistics extension.
-Command-line tuning overrides existing `ALTER SYSTEM` values in `postgresql.auto.conf`.
-`synchronous_commit`, `fsync` and `full_page_writes` stay on: a faster asynchronous
-commit can lose acknowledged writes after a crash, so it is not the template default.
+The [shared infrastructure guide](../infrastructure.md) owns profiles, overrides and
+the Compose and Railway apply/check sequence. `make dev` resolves the selected profile,
+including on macOS; direct Compose uses a rendered overlay for non-default settings.
+The Compose adapter manages PostgreSQL and Weaviate only; API and worker processes stay
+native host processes.
 
-From a SQL connection, inspect actual values and their source:
+Use the Compose adapter to apply settings for an existing `make dev` project. Launch a fresh
+local project with `make dev`; external Compose projects provide `QUIVR_DB_PASSWORD` through the environment.
+If it is unset, `apply` reuses the selected `.scratch/PROJECT/state.json` password, supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately, and never creates or rotates credentials:
 
-```sql
-SELECT name, setting, unit, source FROM pg_settings
-WHERE name IN ('max_connections', 'shared_buffers', 'effective_cache_size',
-              'work_mem', 'maintenance_work_mem', 'dynamic_shared_memory_type',
-              'shared_preload_libraries', 'track_io_timing', 'jit',
-              'max_wal_size', 'min_wal_size', 'checkpoint_timeout', 'wal_compression',
-              'synchronous_commit', 'fsync', 'full_page_writes');
+```sh
+python3 deploy/compose/infrastructure.py apply --project PROJECT --profile small
+python3 deploy/compose/infrastructure.py initialize-monitoring --project PROJECT --profile small
+python3 deploy/compose/infrastructure.py check --project PROJECT --profile small
 ```
 
-The source should be `command line`. Existing databases need
-`CREATE EXTENSION IF NOT EXISTS pg_stat_statements` once to expose statistics views.
+`check` reports configured and active values plus filesystem capacity against a declared
+`x-quivr-storage-budget-bytes` minimum. It does not resize volumes or verify shared
+filesystem quotas. A missing runtime observation is unknown; it is never treated as a
+match. Run `make infrastructure-check` after changing the declaration so generated
+PostgreSQL artifacts stay in sync.

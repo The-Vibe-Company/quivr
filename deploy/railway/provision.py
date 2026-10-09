@@ -6,37 +6,82 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from deploy import infrastructure
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVICES = json.loads((Path(__file__).parent / 'services.json').read_text())
+
+
+def load_services(profile='small', overrides=None):
+    services = json.loads((Path(__file__).parent / 'services.json').read_text())
+    for name, shared in infrastructure.resolve(profile, overrides).items():
+        if name not in services:
+            continue
+        services[name].setdefault('variables', {}).update(shared['environment'])
+        limits = shared.get('deploy', {}).get('resources', {}).get('limits')
+        if limits:
+            services[name]['limits'] = limits
+        if name == 'weaviate':
+            services[name]['image'] = shared['image']
+    return services
+
+
+SERVICES = load_services()
+
+
+def deployment_config(spec, new):
+    config = {'restartPolicyType': 'ON_FAILURE', 'restartPolicyMaxRetries': 10}
+    # Existing replicas belong to the autoscaler/operator, including regional counts.
+    if new and 'replicas' in spec:
+        config['numReplicas'] = spec['replicas']
+    if 'dockerfile' in spec:
+        config['dockerfilePath'] = f"deploy/railway/{spec['dockerfile']}.Dockerfile"
+        if spec['dockerfile'] == 'postgres':
+            config['source'] = {'image': None}
+    if 'healthcheck' in spec:
+        config.update(healthcheckPath=spec['healthcheck'], healthcheckTimeout=180)
+    return config
 
 
 def cli(*args, stdin=None):
     result = subprocess.run(['railway', *args], cwd=ROOT, input=stdin, text=True, capture_output=True)
     if result.returncode:
-        # CLI diagnostics can contain values; retain them locally, never echo credentials.
-        path = ROOT / '.scratch' / 'railway-command-error.log'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(result.stderr + '\n' + result.stdout)
-        path.chmod(0o600)
+        # CLI diagnostics can contain credentials; never log or echo them.
         raise RuntimeError('Railway command failed: ' + ' '.join(args[:2]))
+    if args[0] == 'api':
+        response = json.loads(result.stdout)
+        if response.get('errors') or not isinstance(response.get('data'), dict):
+            raise RuntimeError('Railway API rejected the provisioning request')
+        if args[1].startswith('mutation') and any(value is not True for value in response['data'].values()):
+            raise RuntimeError('Railway API did not acknowledge the provisioning update')
     return result.stdout
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--project-id', required=True)
+    parser.add_argument('--environment-id', required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--profile', default='small')
+    parser.add_argument('--overrides', type=Path)
     args = parser.parse_args()
+    services = load_services(args.profile, args.overrides)
     project = json.loads(cli('status', '--json'))
     if project['id'] != args.project_id or project['name'] != 'quivr-v2-demo':
         raise SystemExit('Link the dedicated quivr-v2-demo project first.')
+    environments = project.get('environments', {}).get('edges', [])
+    if args.environment_id not in {edge['node']['id'] for edge in environments}:
+        raise SystemExit('Select an environment in the linked project.')
     existing = {s['name']: s for s in json.loads(cli('service', 'list', '--json'))}
     print('Project:', project['id'])
-    for name, spec in SERVICES.items():
+    for name, spec in services.items():
         print(name, 'persistent ' + spec['volume'] if 'volume' in spec else 'stateless', spec.get('dockerfile', 'pinned image'))
     if not args.apply:
         return
+    cli('environment', args.environment_id)
+    existing = {s['name']: s for s in json.loads(cli('service', 'list', '--json'))}
     os.umask(0o077)
     directory = ROOT / '.scratch' / 'railway' / args.project_id
     directory.mkdir(parents=True, exist_ok=True)
@@ -64,7 +109,7 @@ def main():
     }
     volumes = json.loads(cli('volume', 'list', '--json')).get('volumes', [])
     state = {}
-    for name, spec in SERVICES.items():
+    for name, spec in services.items():
         service = existing.get(name) or json.loads(cli('add', '--service', name, '--json'))
         sid = service['id']
         state[name] = sid
@@ -82,15 +127,15 @@ def main():
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
         for key, value in variables.items():
             cli('variable', 'set', key, '--stdin', '--skip-deploys', '--service', sid, stdin=value)
-        config = {'restartPolicyType': 'ON_FAILURE', 'restartPolicyMaxRetries': 10}
-        if 'replicas' in spec:
-            config['numReplicas'] = spec['replicas']
-        if 'dockerfile' in spec:
-            config.update(dockerfilePath=f"deploy/railway/{spec['dockerfile']}.Dockerfile")
-        if 'healthcheck' in spec:
-            config.update(healthcheckPath=spec['healthcheck'], healthcheckTimeout=180)
-        query = 'mutation($id:String!,$input:ServiceInstanceUpdateInput!){serviceInstanceUpdate(serviceId:$id,input:$input)}'
-        cli('api', query, '--variables', json.dumps({'id': sid, 'input': config}))
+        config = deployment_config(spec, new=name not in existing)
+        query = 'mutation($id:String!,$environment:String!,$input:ServiceInstanceUpdateInput!){serviceInstanceUpdate(serviceId:$id,environmentId:$environment,input:$input)}'
+        cli('api', query, '--variables', json.dumps({'id': sid, 'environment': args.environment_id, 'input': config}))
+        if 'limits' in spec:
+            limits = spec['limits']
+            query = 'mutation($input:ServiceInstanceLimitsUpdateInput!){serviceInstanceLimitsUpdate(input:$input)}'
+            cli('api', query, '--variables', json.dumps({'input': {
+                'serviceId': sid, 'environmentId': args.environment_id,
+                'memoryGB': int(limits['memory']) / 1e9, 'vCPUs': float(limits['cpus'])}}))
         print('Configured', name, sid, flush=True)
     (directory / 'services.json').write_text(json.dumps(state, indent=2))
     print('Credentials retained only in', secretfile, '(0600). Deploy dependencies, then API, workers and web.')

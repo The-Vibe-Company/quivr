@@ -7,6 +7,8 @@ case "${1:-}" in
     ''|-*) ;;
     *) exec docker-entrypoint.sh "$@" ;;
 esac
+# Generated deployment defaults are shared with Compose and the platform adapter.
+. "$(dirname "$0")/defaults.sh"
 
 fail() { echo "Invalid PostgreSQL startup setting: $1" >&2; exit 1; }
 positive() {
@@ -85,6 +87,29 @@ min_wal=${QUIVR_POSTGRES_MIN_WAL_SIZE:-${wal}MB}
 min_wal_mb=$(wal_mb "$min_wal") || fail QUIVR_POSTGRES_MIN_WAL_SIZE
 [ "$min_wal_mb" -ge 32 ] && [ "$min_wal_mb" -le "$max_wal_mb" ] || fail QUIVR_POSTGRES_MIN_WAL_SIZE
 
+awk -v value="$QUIVR_POSTGRES_RANDOM_PAGE_COST" 'BEGIN {
+    exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value >= 0 && value <= 1e10)
+}' || fail QUIVR_POSTGRES_RANDOM_PAGE_COST
+awk -v value="$QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY" 'BEGIN {
+    exit !(value ~ /^[0-9]+$/ && value >= 0 && value <= 1000)
+}' || fail QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY
+awk -v value="$QUIVR_POSTGRES_CHECKPOINT_TIMEOUT" 'BEGIN {
+    if (value !~ /^[1-9][0-9]*(s|min|h)$/) exit 1
+    unit=value; sub(/^[0-9]+/, "", unit)
+    seconds=value * (unit=="h" ? 3600 : unit=="min" ? 60 : 1)
+    exit !(seconds >= 30 && seconds <= 3600)
+}' || fail QUIVR_POSTGRES_CHECKPOINT_TIMEOUT
+case "$QUIVR_POSTGRES_JIT" in
+    on|off) ;; *) fail QUIVR_POSTGRES_JIT ;;
+esac
+[ "$QUIVR_POSTGRES_SYNCHRONOUS_COMMIT" = on ] || fail QUIVR_POSTGRES_SYNCHRONOUS_COMMIT
+case "$QUIVR_POSTGRES_STAT_STATEMENTS_TRACK" in
+    none|top|all) ;; *) fail QUIVR_POSTGRES_STAT_STATEMENTS_TRACK ;;
+esac
+case "$QUIVR_POSTGRES_WAL_COMPRESSION" in
+    off|on|pglz|lz4|zstd) ;; *) fail QUIVR_POSTGRES_WAL_COMPRESSION ;;
+esac
+
 # Values stay separate argv entries; never evaluate operator input as shell.
 set -- postgres \
     -c "max_connections=$connections" \
@@ -95,9 +120,13 @@ set -- postgres \
     -c dynamic_shared_memory_type=mmap \
     -c shared_preload_libraries=pg_stat_statements \
     -c track_io_timing=on \
+    -c "pg_stat_statements.track=$QUIVR_POSTGRES_STAT_STATEMENTS_TRACK" \
+    -c "random_page_cost=$QUIVR_POSTGRES_RANDOM_PAGE_COST" \
+    -c "effective_io_concurrency=$QUIVR_POSTGRES_EFFECTIVE_IO_CONCURRENCY" \
     -c "max_wal_size=$max_wal" -c "min_wal_size=$min_wal" \
-    -c checkpoint_timeout=15min -c wal_compression=lz4 \
-    -c jit=on \
-    -c synchronous_commit=on -c fsync=on -c full_page_writes=on \
+    -c "checkpoint_timeout=$QUIVR_POSTGRES_CHECKPOINT_TIMEOUT" \
+    -c "wal_compression=$QUIVR_POSTGRES_WAL_COMPRESSION" \
+    -c "jit=$QUIVR_POSTGRES_JIT" \
+    -c "synchronous_commit=$QUIVR_POSTGRES_SYNCHRONOUS_COMMIT" -c fsync=on -c full_page_writes=on \
     "$@"
 exec docker-entrypoint.sh "$@"
