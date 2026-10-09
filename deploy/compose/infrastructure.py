@@ -49,7 +49,7 @@ class Compose:
         if image and not re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}', image):
             image = '<unverified>'
         return {'environment': {key: infra.safe_environment(key, variables.get(key) or None)
-                                for key in infra.KEYS[name]}, 'image': image, 'limits': limits}
+                                for key in infra.KEYS.get(name, ())}, 'image': image, 'limits': limits}
 
     def runtime(self, name):
         if name not in self.containers:
