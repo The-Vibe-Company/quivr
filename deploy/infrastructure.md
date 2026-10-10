@@ -11,6 +11,7 @@ Both profiles keep the pinned images and PostgreSQL tuning; bytes are decimal un
 | --- | ---: | ---: |
 | PostgreSQL | 1,073,741,824 / 1 | 32,000,000,000 / 32 |
 | Weaviate | 2,147,483,648 / 2 | 32,000,000,000 / 32 |
+| Index warm-up | 134,217,728 (128 MiB) / 0.25 | 134,217,728 (128 MiB) / 0.25 |
 | API | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | worker (live) | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | worker-bulk | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
@@ -44,6 +45,8 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | `PERSISTENCE_MEMTABLES_MAX_SIZE_MB` | 200 in small, 1024 in large; fewer flushes consume more bucket/shard memory and recovery work. |
 | `GOMEMLIMIT` | 1700MiB in small / 27GiB in large; leave headroom below the service limit. |
 | `RAFT_BOOTSTRAP_TIMEOUT` | 600 seconds small / 3600 large; allow a populated index time to recover at startup. |
+| Index warm-up `QUIVR_INDEX_WARMUP_INTERVAL` | 60s between bounded passes, starting immediately; 1s–1h accepted. |
+| `QUIVR_INDEX_WARMUP_REQUEST_TIMEOUT` / `QUIVR_INDEX_WARMUP_PASS_TIMEOUT` | 30s per request / 120s per pass; maximum 2min / 10min. These do not change user search deadlines. |
 | `AUTOSCHEMA_ENABLED` / `DEFAULT_VECTORIZER_MODULE` | false / none; the engine owns schema and embeddings. |
 | `PERSISTENCE_DATA_PATH` | /var/lib/weaviate; match the persistent volume mount. |
 | `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED` | true; private-network example access, never expose this port publicly. |
@@ -56,6 +59,12 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 PostgreSQL keeps mmap dynamic shared memory, preloaded statistics, I/O timing and JIT; `synchronous_commit=on` preserves acknowledged-write durability. Its initialization
 creates `pg_stat_statements`; monitoring setup for existing volumes uses the same idempotent script. Autoscaler credentials, URLs and target IDs stay external.
 Declaration `x-quivr.build_images` pins its build/runtime bases and keeps generated artifacts in sync.
+
+## Index warm-up
+
+Compose and Railway run one `index-warmup` companion. It discovers populated HNSW named indexes and active tenants, samples at most 32 objects per scope (collection or active tenant) per pass, and sends one `nearVector` per sampled space plus one BM25 probe. It calls no model provider and never activates inactive tenants. Discovery includes candidate indexes as well as served spaces; sparse spaces are found by rotating sample pages.
+The immediate pass covers startup; repeated passes cover import completion and idle periods without an operator command. Requests run serially; errors retry on the next pass. A pass has a 120s deadline and a 60s wait afterwards, so the next pass starts within 180s of the previous start. If a pass cannot visit every scope, subsequent passes resume round-robin. This bounds attempts, not recovery under sustained I/O or memory pressure; inspect `errors`, `pending_scopes` and `missing_vectors` in the companion's JSON logs. See [cold-index sizing](../docs-site/run-quivr/scale-quivr.mdx#cold-index-search).
+The private `WEAVIATE_URL` comes from the deployment; set `WEAVIATE_API_KEY` on the companion if index authentication is enabled. No content, vectors or credentials are logged. For an existing Railway installation, provision the new companion before applying settings, then deploy it from `deploy/railway/index-warmup.Dockerfile`. Keep one replica. Compose `apply` builds and starts it with the index; `make dev` includes it automatically.
 
 ## Override and render
 
@@ -80,7 +89,7 @@ generated PostgreSQL and autoscaler artifacts in sync.
 ## Apply and verify
 
 The Compose adapter exposes `preview`, `apply`, `check`, and `initialize-monitoring`; it
-manages PostgreSQL and Weaviate only, while API and worker processes stay native hosts.
+manages PostgreSQL, Weaviate and index warm-up, while API and worker processes stay native hosts.
 `apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json`.
 Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
 
@@ -118,6 +127,7 @@ railway up --project ID --environment ID \
   --service POSTGRES_SERVICE_ID --detach
 # Large: restart changed application services; rebuild with railway up for code/build-pin changes.
 railway redeploy --project ID --environment ID --service WEAVIATE_SERVICE_ID --from-source --yes
+railway up --project ID --environment ID --service INDEX_WARMUP_SERVICE_ID --detach
 railway redeploy --project ID --environment ID --service API_SERVICE_ID --yes
 railway redeploy --project ID --environment ID --service WORKER_SERVICE_ID --yes
 railway redeploy --project ID --environment ID --service WORKER_BULK_SERVICE_ID --yes
@@ -128,7 +138,7 @@ python3 deploy/railway/infrastructure.py check \
   --project-id ID --environment-id ID --profile large
 ```
 
-The Railway adapter targets PostgreSQL and Weaviate by default; large adds API, worker and
+The Railway adapter targets PostgreSQL, Weaviate and index warm-up by default; large adds API, worker and
 worker-bulk with their 32,000,000,000-byte/32-vCPU limits. Without `--service`, an existing
 uniquely named `autoscaler` is included automatically, never created or replica-reset.
 Repeated `--service ROLE=NAME_OR_ID` is an exact replacement for defaults. `apply` does not

@@ -71,10 +71,11 @@ class Compose:
 
     def check(self, services, runtime=True):
         rows = []
-        for name in ('postgres', 'weaviate'):
+        for name in ('postgres', 'weaviate', 'index-warmup'):
             spec = services[name]
             state = self.configured(name)
-            infra.observation(rows, name, 'configured', 'image', spec['image'], state.get('image'))
+            if spec.get('image'):
+                infra.observation(rows, name, 'configured', 'image', spec['image'], state.get('image'))
             for key, value in spec['environment'].items():
                 # Empty/defaulted PostgreSQL settings are reported through SQL below.
                 actual = state.get('environment', {}).get(key)
@@ -115,7 +116,7 @@ class Compose:
         environment.setdefault('QUIVR_MODEL_ROOT', str(infra.ROOT / '.scratch/e5-model'))
         # Only infrastructure services; never scale workers or alter unrelated services.
         self.run(['compose', '--project-name', self.project, '-f', str(infra.ROOT / 'deploy/compose/compose.yaml'),
-                  '-f', str(overlay), 'up', '-d', 'postgres', 'weaviate'], environ=environment)
+                  '-f', str(overlay), 'up', '-d', 'postgres', 'weaviate', 'index-warmup'], environ=environment)
 
     def initialize_monitoring(self):
         self.configured('postgres')

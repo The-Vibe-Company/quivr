@@ -108,6 +108,18 @@ Compare `usage.phases.index_query_ms` with traces using [Diagnose slow searches 
 
 Quivr keeps durable vector artifacts in object storage independently of Weaviate. A supported Corpus rebuild can reuse those vectors when text and recipe match, reducing provider work. **Example recovery:** an index rebuild reused all stored vectors with zero provider calls. Preserve durable content, artifacts and metadata; an index wipe is not a routine scaling action.
 
+### Cold-index search
+
+An idle index can have fast warm queries and still exceed search's deadline on its first request. A restart rebuilds in-process vector caches; memory pressure can reclaim the operating system's file cache. A large import also leaves flushes and compaction competing with reads. A zero vector queue does not prove that this maintenance has finished. Search retains its hard deadline and can return `search_unavailable` while these costs exceed its budget.
+
+The shared deployment runs an `index-warmup` companion in Compose and Railway. It starts immediately and repeats after a 60-second wait between passes. Each pass sends a bounded `nearVector` probe for each named space found in sampled objects, plus a BM25 probe using sampled searchable text. It discovers newly populated indexes after imports, skips inactive tenants, and includes candidate indexes. It calls no embedding provider. The [shared infrastructure guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md#index-warm-up) owns its settings and installation steps.
+
+The defaults allow 30 seconds per warm-up request and 120 seconds per pass. A scope is one collection, or one active tenant within a collection. Passes never overlap; a pass that exhausts its budget resumes at later scopes next time. With these defaults the next pass starts within 180 seconds of the previous start, but this is an attempt bound. Warm-up cannot guarantee cache residency or a successful search while the working set exceeds RAM or storage remains saturated. The companion's JSON logs count failed requests (`errors`), unvisited scopes (`pending_scopes`) and vectors missing from the sample (`missing_vectors`). Check actual engine searches in lexical, semantic and hybrid modes after restart, idle time and import completion; direct index timings exclude encoding, routing and result loading.
+
+Budget RAM for the HNSW graph, compressed vectors, full-vector rescoring, active memtables, runtime overhead and file cache together. Compare anonymous process memory with reclaimable file-cache memory; low process memory does not mean the data needed by the first query is resident. Startup prefill on eagerly loaded shards is already synchronous in the pinned Weaviate version. Setting that flag alone does not warm BM25 pages or prevent later cache reclamation.
+
+Volume capacity and CPU count do not determine sustained random-read IOPS or bandwidth. Check the volume's limits and observed `io.pressure`, read latency, file-cache size and major page faults. Leave I/O headroom for compaction after an import, and measure the recovery window on your index size and storage class. If warm-up keeps failing, reduce import contention or increase memory and storage throughput; repeated warming cannot make an oversized working set fit. A small local warm-up smoke measurement verifies the mechanism, not multi-million-document cold latency.
+
 ### Tokenizer helpers
 
 A tokenizer counts and cuts model inputs. A configured local tokenizer uses persistent helper processes; concurrent requests can queue behind too few helpers. **Example observations:** a serialized helper left short documents waiting 1.5–55 seconds; a pool cut a 16-request microbenchmark from 378 to 133 ms.
@@ -254,7 +266,7 @@ Start with one bulk slot per replica: at most 16 ingestion documents per process
 | Object storage | 2 GB/h × 29.6 h ≈ 59.2 GB growth, plus existing objects, versions, backups and delayed cleanup. |
 | Raw vector payload | 6.4M × 768 × 4 bytes = 19.66 GB; RQ-8 codes alone ≈ 4.92 GB before graph/runtime. |
 | Index memory | 6.4 × 2.4 GB = 15.36 GB steady; about 30.72 GB for two comparable generations, plus transient overhead. |
-| Index allocation | Illustrative 40 GiB service; `GOMEMLIMIT` at 85% = 34 GiB, provided measured startup/rebuild peaks fit. |
+| Index allocation | Illustrative 40 GiB service; `GOMEMLIMIT` at 85% = 34 GiB, provided measured startup/rebuild peaks and a separate cold-query file-cache allowance fit. |
 | Tokenizer memory | Four helpers × 440 MiB ≈ 1.72 GiB per plugin process; five such processes ≈ 8.59 GiB, before startup/headroom. |
 
 The database reserve is a planning assumption, not a claim that every rebuild duplicates its whole database. Likewise, compressed vector RAM does not predict index disk, which retains full-precision data. Measure rebuild and cleanup peaks; older retained generations or a second space can exceed the two-generation allowance. Slowdowns extend object-storage growth time. Put a disk guard below your unsafe threshold and confirm volume expansion before starting.

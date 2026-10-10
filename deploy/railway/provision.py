@@ -38,7 +38,7 @@ def deployment_config(spec, new):
         config['numReplicas'] = spec['replicas']
     if 'dockerfile' in spec:
         config['dockerfilePath'] = f"deploy/railway/{spec['dockerfile']}.Dockerfile"
-        if spec['dockerfile'] == 'postgres':
+        if spec['dockerfile'] in ('postgres', 'index-warmup'):
             config['source'] = {'image': None}
     if 'healthcheck' in spec:
         config.update(healthcheckPath=spec['healthcheck'], healthcheckTimeout=180)

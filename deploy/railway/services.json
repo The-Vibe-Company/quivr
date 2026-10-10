@@ -24,6 +24,11 @@
       "CLUSTER_HOSTNAME": "quivr-demo"
     }
   },
+  "index-warmup": {
+    "dockerfile": "index-warmup",
+    "replicas": 1,
+    "variables": {"WEAVIATE_URL": "http://weaviate.railway.internal:8080"}
+  },
   "tei": {
     "dockerfile": "tei",
     "healthcheck": "/health",
