@@ -5,8 +5,10 @@ const assert = require('node:assert/strict');
 const models = require(path.resolve(process.argv[2], 'dist/models'));
 const cases = JSON.parse(fs.readFileSync(path.join(__dirname, '../examples.json'), 'utf8'));
 for (const c of cases) {
-  const value = models[c.schema + 'FromJSON'](c.value);
-  const output = JSON.parse(JSON.stringify(models[c.schema + 'ToJSON'](value)));
+  // The generator renames Error to avoid JavaScript's built-in Error class.
+  const name = c.schema === 'Error' ? 'ModelError' : c.schema;
+  const value = models[name + 'FromJSON'](c.value);
+  const output = JSON.parse(JSON.stringify(models[name + 'ToJSON'](value)));
   // Generated Date objects normalize zero milliseconds to .000Z. Compare the
   // known transport timestamps as instants; leave plugin JSON entirely untouched.
   const timestampPaths = {
