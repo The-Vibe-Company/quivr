@@ -28,9 +28,6 @@ func TestMetadataCatalogIndexedPageWork(t *testing.T) {
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureIndexes(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
 	seedQueueCorpus(t, ctx, pool, "example")
 	exec := func(sql string) {
 		t.Helper()
@@ -48,6 +45,21 @@ func TestMetadataCatalogIndexedPageWork(t *testing.T) {
  'one',record_key::int%100=0,'ten',record_key::int%10=0,'half',record_key::int%2=0,'same',record_key::int%2=0,'repeated',record_key::int%200=0,
  'tags',CASE WHEN record_key::int%2000=0 THEN '["rare","rare"]'::jsonb ELSE '["common"]'::jsonb END,
  'date',CASE WHEN record_key::int%2000=0 THEN '2026-10-02T00:00:00.000Z' ELSE '2026-10-01T00:00:00.000Z' END) FROM records`)
+	// Bulk-load the query fixture before synchronization is installed. The
+	// bootstrap owner below exercises real publication and replacement; replaying
+	// that row-wise write path 50,000 times does not strengthen these plan checks.
+	exec(`INSERT INTO projection_metadata_filter_values
+ (organization,corpus_id,generation_id,version_id,field,value,date_epoch_ms)
+ SELECT DISTINCT pm.organization,'corpus',pm.generation_id,pm.version_id,entry.key,member.value,
+ CASE WHEN entry.key='date' THEN CASE WHEN member.value='"2026-10-02T00:00:00.000Z"'::jsonb
+ THEN 1790899200000::bigint ELSE 1790812800000::bigint END END
+ FROM projection_metadata pm CROSS JOIN LATERAL jsonb_each(pm.data) entry
+ CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(entry.value)='array'
+ THEN entry.value ELSE jsonb_build_array(entry.value) END) member`)
+	exec(`UPDATE projection_metadata SET filter_indexed=true`)
+	if err := EnsureIndexes(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
 	exec("ANALYZE")
 	trace := &metadataPageTrace{}
 	cfg := pool.Config()
