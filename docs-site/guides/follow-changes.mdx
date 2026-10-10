@@ -341,10 +341,15 @@ Records without a current Version appear last in an unbounded date listing;
 either time bound excludes them.
 
 Use [Count records](https://docs.quivr.thevibecompany.co/api-reference/records/count-records), `GET /v0/records/count`,
-with the same Corpus and time bounds to get an exact `count` without listing pages.
+with the same Corpus and at least one time bound to get an exact `count` without listing pages.
 It uses the listing's inclusion rules for withdrawn and undated Records, and
 needs the same `content:read` permission and Corpus scope. The count is an
-independent read, so it can change between listing requests.
+independent read, so it can change between listing requests. Exact queries have a
+two-second budget; `422 record_count_too_broad` is nonretryable: narrow the time window.
+An unbounded count of more than 10,000 Records returns the stored catalog total
+with `approximate: true`, without scanning the corpus. Unbounded counts up to 10,000 are exact.
+Responses include `observed_at` and `complete`; `complete: false` means historical
+initialization has not finished, so a stored total is partial.
 
 The [CLI](/reference/cli#quivr-records) exposes these reads as `quivr records`:
 `--corpus` selects the Corpus, `--order accepted_at_desc` selects newest first,
@@ -352,9 +357,48 @@ The [CLI](/reference/cli#quivr-records) exposes these reads as `quivr records`:
 continues one page at a time. It prints the API JSON; list pages include the next cursor when another page exists.
 Use `--limit` to select 1 to 100 Records per page. Use `--count` with the Corpus
 and optional bounds to count; omit `--order`, `--page-cursor` and `--limit`.
-Count responses contain only `count`, without a continuation cursor.
+Count responses contain `count`, `observed_at`, `approximate` and `complete`, without a continuation cursor.
 ID order remains the default for the rebuild procedure above.
 
+
+### Read document totals
+
+`GET /v0/corpora/{corpus_id}/stats` returns running `total` and `catalog_total`
+with an `observed_at` snapshot time, under the same `content:read` permission and Corpus grant.
+`total` counts current Versions whose baseline is ready for word search, excluding quarantined,
+withdrawn Records and Records with a permanent withdrawal fence (a tombstone). `catalog_total` counts Record identities,
+including pending and withdrawn Records, matching the catalog listing. An archived
+Corpus is refused. `undated_total` and `catalog_undated_total` account for Records
+without a current acceptance time; they do not appear in the histogram.
+
+Add `include=histogram,sources` for both breakdowns, or choose either.
+Histogram entries use `start`, `count` and `catalog_count`; source entries also
+name `namespace` and `connector_id`. The [statistics reference](https://docs.quivr.thevibecompany.co/api-reference/corpora/get-corpus-stats) defines the full response. Histograms
+use current-Version acceptance time: a correction moves the document to its new
+bucket when it becomes current. `resolution=day` (default) groups UTC days;
+`resolution=hour` returns UTC hours. For local days, request hours and sum between
+local midnights converted to UTC. **Only whole-hour timezone offsets are supported**;
+half-hour and quarter-hour offsets cannot be reconstructed exactly. Compute each
+midnight separately when daylight-saving time changes. Bounds must fall on UTC
+hour boundaries; `accepted_after` is inclusive and `accepted_before` exclusive.
+
+History defaults to the full occupied date range, including documents older than
+a year. Each page covers at most 10,000 intervals. Missing buckets within the
+returned `from`/`to` interval mean zero as of that response; they say nothing about
+other intervals. Source pages list lifetime totals by Source Namespace and connector
+instance, including an explicit `unknown` connector for historical documents or
+public submissions without trusted connector attribution. `source_limit` defaults
+to 100, maximum 1,000. Bounds affect history only, not totals or sources.
+
+Follow `histogram.next_page_cursor` using `histogram_cursor`, or
+`sources.next_page_cursor` using `sources_cursor`, repeating all original options. A series omits its cursor on
+the last page. Changing scope, Corpus or
+options returns `409 cursor_scope_changed`; malformed cursors return
+`422 invalid_cursor`. Each response is internally consistent, but pages have
+independent `observed_at` times and can change under writes. Check `complete`
+before treating missing history as final: `complete: false` and `approximate: true`
+mark partial historical initialization. Operators enable it after upgrading all
+writers, following [Initialize document totals](/run-quivr/upgrade-quivr#initialize-document-totals).
 
 ## What the notices mean
 

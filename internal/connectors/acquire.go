@@ -662,7 +662,7 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 			manifest = &m
 		}
 	}
-	c := content.Command{Key: key, Source: source, Revision: revision, Position: item.Position, Content: item.Content, Manifest: manifest, Extensions: item.Extensions, Provenance: map[string]any{"producer": inst.ID, "producer_version": inst.Kind + "/" + ConnectorVersion}}
+	c := content.Command{ConnectorInstanceID: inst.ID, Key: key, Source: source, Revision: revision, Position: item.Position, Content: item.Content, Manifest: manifest, Extensions: item.Extensions, Provenance: map[string]any{"producer": inst.ID, "producer_version": inst.Kind + "/" + ConnectorVersion}}
 	if c.Manifest != nil {
 		c.Content = content.Text{Kind: "manifest"}
 	}

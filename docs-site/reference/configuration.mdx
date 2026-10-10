@@ -14,6 +14,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | --- | --- | --- |
 | `worker` | no | Queues and processing slots per worker process. See [Worker queues](#worker-queues). |
 | `queue_observation` | no | Shared backlog refresh pacing. `queue_observation.refresh_interval` is a Go duration from `1s` to `60s`, default `15s`. Use the same value in every API and worker process. |
+| `corpus_stats` | no | `bootstrap_enabled` (`corpus_stats.bootstrap_enabled`) is a boolean, default `false`. Enable resumable initialization of historical document totals only after every previous API and worker has stopped; see [Initialize document totals](/run-quivr/upgrade-quivr#initialize-document-totals). |
 | `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=verify-full` |
 | `postgres` | no | Connection pool sizing per process. See [PostgreSQL connections](#postgresql-connections). |
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |

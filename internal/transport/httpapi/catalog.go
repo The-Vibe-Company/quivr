@@ -231,12 +231,12 @@ func (a *API) countRecords(w http.ResponseWriter, r *http.Request, s corpus.Scop
 	if !ok {
 		return
 	}
-	count, err := a.Content.CountRecords(r.Context(), s, corpusID, query)
+	count, err := a.Content.RecordCount(r.Context(), s, corpusID, query)
 	if err != nil {
 		writeError(w, err, publicerr.ContentUnavailable)
 		return
 	}
-	send(w, 200, transport.RecordCount{Count: count})
+	send(w, 200, count)
 }
 
 func catalogFilterScope(q content.RecordQuery) string {

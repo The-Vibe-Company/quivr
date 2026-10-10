@@ -14,7 +14,7 @@ const queueObservationKeysSQL = `SELECT organization,record_id FROM unnest($1::t
 
 // recordObservationSQL maintains one Record's queue observation from its
 // canonical state. Each statement takes (organizations, records).
-var recordObservationSQL = [...]string{
+var recordObservationSQL = append([]string{
 	`INSERT INTO queue_enrichment_records(organization,record_id)
  SELECT DISTINCT organization,record_id FROM (` + queueObservationKeysSQL + `) k ORDER BY organization,record_id
  ON CONFLICT DO NOTHING`,
@@ -51,7 +51,7 @@ var recordObservationSQL = [...]string{
  AND q.ctid=ANY(ARRAY(SELECT locked.ctid FROM (` + queueObservationKeysSQL + `) ids
  JOIN LATERAL (SELECT ctid FROM queue_enrichment_records p WHERE (p.organization,p.record_id)=(ids.organization,ids.record_id) LIMIT 1) locked ON true))`,
 	markRoutingRecordsSQL,
-}
+}, corpusRecordObservationSQL...)
 
 func queueRecordObservations(batch *pgx.Batch, organizations, records []string) {
 	for _, sql := range recordObservationSQL {

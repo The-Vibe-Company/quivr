@@ -13,6 +13,7 @@ type Submitter struct {
 }
 
 func (s Submitter) Accept(ctx context.Context, c Command) (Receipt, error) {
+	c.ConnectorInstanceID = ""
 	return s.service.accept(ctx, s.scope, c, s.scope.Allows("content:read"))
 }
 

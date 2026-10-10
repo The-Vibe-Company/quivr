@@ -321,6 +321,24 @@ func (e ConnectorPushStatsOutcome) Valid() bool {
 	}
 }
 
+// Defines values for CorpusStatsHistogramResolutionSeconds.
+const (
+	N3600  CorpusStatsHistogramResolutionSeconds = 3600
+	N86400 CorpusStatsHistogramResolutionSeconds = 86400
+)
+
+// Valid indicates whether the value is a known member of the CorpusStatsHistogramResolutionSeconds enum.
+func (e CorpusStatsHistogramResolutionSeconds) Valid() bool {
+	switch e {
+	case N3600:
+		return true
+	case N86400:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -422,19 +440,19 @@ func (e EvaluationRetirementOutcome) Valid() bool {
 
 // Defines values for FacetFieldInterval.
 const (
-	Day   FacetFieldInterval = "day"
-	Month FacetFieldInterval = "month"
-	Year  FacetFieldInterval = "year"
+	FacetFieldIntervalDay   FacetFieldInterval = "day"
+	FacetFieldIntervalMonth FacetFieldInterval = "month"
+	FacetFieldIntervalYear  FacetFieldInterval = "year"
 )
 
 // Valid indicates whether the value is a known member of the FacetFieldInterval enum.
 func (e FacetFieldInterval) Valid() bool {
 	switch e {
-	case Day:
+	case FacetFieldIntervalDay:
 		return true
-	case Month:
+	case FacetFieldIntervalMonth:
 		return true
-	case Year:
+	case FacetFieldIntervalYear:
 		return true
 	default:
 		return false
@@ -1410,6 +1428,24 @@ func (e GetTopQueriesParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for GetCorpusStatsParamsResolution.
+const (
+	GetCorpusStatsParamsResolutionDay  GetCorpusStatsParamsResolution = "day"
+	GetCorpusStatsParamsResolutionHour GetCorpusStatsParamsResolution = "hour"
+)
+
+// Valid indicates whether the value is a known member of the GetCorpusStatsParamsResolution enum.
+func (e GetCorpusStatsParamsResolution) Valid() bool {
+	switch e {
+	case GetCorpusStatsParamsResolutionDay:
+		return true
+	case GetCorpusStatsParamsResolutionHour:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListRecordsParamsOrder.
 const (
 	AcceptedAtDesc ListRecordsParamsOrder = "accepted_at_desc"
@@ -1965,6 +2001,55 @@ type CorpusRequest struct {
 
 	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
+}
+
+// CorpusStats defines model for CorpusStats.
+type CorpusStats struct {
+	Approximate         bool   `json:"approximate"`
+	CatalogTotal        int64  `json:"catalog_total"`
+	CatalogUndatedTotal int64  `json:"catalog_undated_total"`
+	Complete            bool   `json:"complete"`
+	CorpusId            string `json:"corpus_id"`
+
+	// FirstCatalogHour First occupied catalog UTC hour; not the exact first acceptance time. Absent for an undated or empty corpus.
+	FirstCatalogHour *time.Time            `json:"first_catalog_hour,omitempty"`
+	Histogram        *CorpusStatsHistogram `json:"histogram,omitempty"`
+
+	// LastCatalogHour Last occupied catalog UTC hour; not the exact last acceptance time.
+	LastCatalogHour *time.Time          `json:"last_catalog_hour,omitempty"`
+	ObservedAt      time.Time           `json:"observed_at"`
+	Sources         *CorpusStatsSources `json:"sources,omitempty"`
+	Total           int64               `json:"total"`
+	UndatedTotal    int64               `json:"undated_total"`
+}
+
+// CorpusStatsHistogram defines model for CorpusStatsHistogram.
+type CorpusStatsHistogram struct {
+	From  time.Time `json:"from"`
+	Items []struct {
+		CatalogCount int64     `json:"catalog_count"`
+		Count        int64     `json:"count"`
+		Start        time.Time `json:"start"`
+	} `json:"items"`
+	NextPageCursor    *string                               `json:"next_page_cursor,omitempty"`
+	ResolutionSeconds CorpusStatsHistogramResolutionSeconds `json:"resolution_seconds"`
+	To                time.Time                             `json:"to"`
+}
+
+// CorpusStatsHistogramResolutionSeconds defines model for CorpusStatsHistogram.ResolutionSeconds.
+type CorpusStatsHistogramResolutionSeconds int
+
+// CorpusStatsSources defines model for CorpusStatsSources.
+type CorpusStatsSources struct {
+	Items []struct {
+		CatalogCount int64 `json:"catalog_count"`
+
+		// ConnectorId Trusted accepting connector instance, or the explicit unknown bucket for historical/public submissions.
+		ConnectorId string `json:"connector_id"`
+		Count       int64  `json:"count"`
+		Namespace   string `json:"namespace"`
+	} `json:"items"`
+	NextPageCursor *string `json:"next_page_cursor,omitempty"`
 }
 
 // CountPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
@@ -2945,7 +3030,10 @@ type Record struct {
 
 // RecordCount defines model for RecordCount.
 type RecordCount struct {
-	Count int64 `json:"count"`
+	Approximate *bool      `json:"approximate,omitempty"`
+	Complete    *bool      `json:"complete,omitempty"`
+	Count       int64      `json:"count"`
+	ObservedAt  *time.Time `json:"observed_at,omitempty"`
 }
 
 // RecordPage defines model for RecordPage.
@@ -3887,6 +3975,27 @@ type ListCorporaParams struct {
 	IncludeArchived *bool `form:"include_archived,omitempty" json:"include_archived,omitempty"`
 }
 
+// GetCorpusStatsParams defines parameters for GetCorpusStats.
+type GetCorpusStatsParams struct {
+	// Include Comma-separated histogram and/or sources; omit for totals only.
+	Include *string `form:"include,omitempty" json:"include,omitempty"`
+
+	// Resolution Histogram grouping. Requires include=histogram.
+	Resolution *GetCorpusStatsParamsResolution `form:"resolution,omitempty" json:"resolution,omitempty"`
+
+	// AcceptedAfter Inclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+	AcceptedBefore  *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
+	HistogramCursor *string    `form:"histogram_cursor,omitempty" json:"histogram_cursor,omitempty"`
+	SourcesCursor   *string    `form:"sources_cursor,omitempty" json:"sources_cursor,omitempty"`
+	SourceLimit     *int       `form:"source_limit,omitempty" json:"source_limit,omitempty"`
+}
+
+// GetCorpusStatsParamsResolution defines parameters for GetCorpusStats.
+type GetCorpusStatsParamsResolution string
+
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
 type ListDeliveryAttemptsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -4618,6 +4727,9 @@ type ServerInterface interface {
 
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(w http.ResponseWriter, r *http.Request, corpusId string)
+
+	// (GET /v0/corpora/{corpus_id}/stats)
+	GetCorpusStats(w http.ResponseWriter, r *http.Request, corpusId string, params GetCorpusStatsParams)
 
 	// (POST /v0/corpora/{corpus_id}/unarchive)
 	UnarchiveCorpus(w http.ResponseWriter, r *http.Request, corpusId string)
@@ -5402,6 +5514,18 @@ func (siw *ServerInterfaceWrapper) ConfigureRetrieval(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) GetCorpusStats(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+	var params GetCorpusStatsParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCorpusStats(w, r, corpusId, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 func (siw *ServerInterfaceWrapper) UnarchiveCorpus(w http.ResponseWriter, r *http.Request) {
 	corpusId := string(r.PathValue("corpus_id"))
 
@@ -5949,6 +6073,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records", wrapper.ListRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records", wrapper.IngestRecord)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/facets", wrapper.CountFacets)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/stats", wrapper.GetCorpusStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records/count", wrapper.CountRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/batch", wrapper.IngestBatch)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/withdrawals", wrapper.WithdrawRecord)
@@ -9035,6 +9160,56 @@ func (response ConfigureRetrievaldefaultJSONResponse) VisitConfigureRetrievalRes
 	return err
 }
 
+type GetCorpusStatsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Params      GetCorpusStatsParams
+}
+
+type GetCorpusStatsResponseObject interface {
+	VisitGetCorpusStatsResponse(w http.ResponseWriter) error
+}
+
+// GetCorpusStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetCorpusStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetCorpusStatsResponseFunc) VisitGetCorpusStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type GetCorpusStats200JSONResponse CorpusStats
+
+func (response GetCorpusStats200JSONResponse) VisitGetCorpusStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCorpusStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetCorpusStatsdefaultJSONResponse) VisitGetCorpusStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type UnarchiveCorpusRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest *http.Request
@@ -11286,6 +11461,9 @@ type StrictServerInterface interface {
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(ctx context.Context, request ConfigureRetrievalRequestObject) (ConfigureRetrievalResponseObject, error)
 
+	// (GET /v0/corpora/{corpus_id}/stats)
+	GetCorpusStats(ctx context.Context, request GetCorpusStatsRequestObject) (GetCorpusStatsResponseObject, error)
+
 	// (POST /v0/corpora/{corpus_id}/unarchive)
 	UnarchiveCorpus(ctx context.Context, request UnarchiveCorpusRequestObject) (UnarchiveCorpusResponseObject, error)
 
@@ -13007,6 +13185,35 @@ func (sh *strictHandler) ConfigureRetrieval(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ConfigureRetrievalResponseObject); ok {
 		if err := validResponse.VisitConfigureRetrievalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCorpusStats operation middleware
+func (sh *strictHandler) GetCorpusStats(w http.ResponseWriter, r *http.Request, corpusId string, params GetCorpusStatsParams) {
+	var request GetCorpusStatsRequestObject
+
+	request.CorpusId = corpusId
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCorpusStats(ctx, request.(GetCorpusStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCorpusStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCorpusStatsResponseObject); ok {
+		if err := validResponse.VisitGetCorpusStatsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

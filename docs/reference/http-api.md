@@ -30,6 +30,16 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/records/{record_id}`](#get-v0recordsrecord_id) | `getRecord` | `content:read` |
 | [`GET /v0/records/{record_id}/versions/{version_id}`](#get-v0recordsrecord_idversionsversion_id) | `getVersion` | `content:read` |
 | [`POST /v0/facets`](#post-v0facets) | `countFacets` | `content:read` |
+| [`GET /v0/corpora/{corpus_id}/stats`](#get-v0corporacorpus_idstats) | `getCorpusStats` | `content:read` |
+| [`POST /v0/corpora`](#post-v0corpora) | `createCorpus` | `corpora:write` |
+| [`GET /v0/corpora`](#get-v0corpora) | `listCorpora` | `corpora:read` |
+| [`GET /v0/corpora/{corpus_id}`](#get-v0corporacorpus_id) | `getCorpus` | `corpora:read` |
+| [`PATCH /v0/corpora/{corpus_id}`](#patch-v0corporacorpus_id) | `renameCorpus` | `corpora:rename` |
+| [`POST /v0/corpora/{corpus_id}/archive`](#post-v0corporacorpus_idarchive) | `archiveCorpus` | `corpora:archive` |
+| [`POST /v0/corpora/{corpus_id}/unarchive`](#post-v0corporacorpus_idunarchive) | `unarchiveCorpus` | `corpora:archive` |
+| [`PUT /v0/corpora/{corpus_id}/retrieval`](#put-v0corporacorpus_idretrieval) | `configureRetrieval` | `corpora:write`, `operations:write` |
+| [`GET /v0/corpora/{corpus_id}/vector-spaces`](#get-v0corporacorpus_idvector-spaces) | `listVectorSpaces` | `corpora:read` |
+| [`POST /v0/corpora/{corpus_id}/rebuilds`](#post-v0corporacorpus_idrebuilds) | `rebuildCorpusProjection` | `projections:rebuild` |
 | [`GET /v0/ingestion-receipts/{receipt_id}`](#get-v0ingestion-receiptsreceipt_id) | `getReceipt` | `content:read` |
 | [`POST /v0/uploads`](#post-v0uploads) | `createUpload` | `blobs:write` |
 | [`POST /v0/uploads/{upload_id}/confirm`](#post-v0uploadsupload_idconfirm) | `confirmUpload` | `blobs:write` |
@@ -40,15 +50,6 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/operations/{operation_id}/rerun`](#post-v0operationsoperation_idrerun) | `rerunOperation` | `operations:write` |
 | [`POST /v0/operations/{operation_id}/pause`](#post-v0operationsoperation_idpause) | `pauseOperation` | `operations:write` |
 | [`POST /v0/operations/{operation_id}/resume`](#post-v0operationsoperation_idresume) | `resumeOperation` | `operations:write` |
-| [`POST /v0/corpora`](#post-v0corpora) | `createCorpus` | `corpora:write` |
-| [`GET /v0/corpora`](#get-v0corpora) | `listCorpora` | `corpora:read` |
-| [`GET /v0/corpora/{corpus_id}`](#get-v0corporacorpus_id) | `getCorpus` | `corpora:read` |
-| [`PATCH /v0/corpora/{corpus_id}`](#patch-v0corporacorpus_id) | `renameCorpus` | `corpora:rename` |
-| [`POST /v0/corpora/{corpus_id}/archive`](#post-v0corporacorpus_idarchive) | `archiveCorpus` | `corpora:archive` |
-| [`POST /v0/corpora/{corpus_id}/unarchive`](#post-v0corporacorpus_idunarchive) | `unarchiveCorpus` | `corpora:archive` |
-| [`PUT /v0/corpora/{corpus_id}/retrieval`](#put-v0corporacorpus_idretrieval) | `configureRetrieval` | `corpora:write`, `operations:write` |
-| [`GET /v0/corpora/{corpus_id}/vector-spaces`](#get-v0corporacorpus_idvector-spaces) | `listVectorSpaces` | `corpora:read` |
-| [`POST /v0/corpora/{corpus_id}/rebuilds`](#post-v0corporacorpus_idrebuilds) | `rebuildCorpusProjection` | `projections:rebuild` |
 | [`GET /v0/changes`](#get-v0changes) | `pollChanges` | `changes:read` |
 | [`GET /v0/changes/stream`](#get-v0changesstream) | `streamChanges` | `changes:read` |
 | [`POST /v0/saved-queries`](#post-v0saved-queries) | `createSavedQuery` | `monitoring:write` |
@@ -184,7 +185,7 @@ List authorized canonical Records from one or several Corpora. Without metadata 
 
 Operation `countRecords`. Requires `content:read`.
 
-Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+Count of one Corpus's authorized Records. Time-bounded counts are exact within a two-second query budget; larger windows return non-retryable 422 record_count_too_broad and require narrower bounds. Unbounded counts probe at most 10001 identities: up to 10000 are exact, larger Corpora return stored catalog totals with approximate=true. complete=false means initialization has not finished; incomplete zeros must not be presented as empty. observed_at names the independent read snapshot. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
 
 **Parameters**
 
@@ -286,6 +287,209 @@ Exact document counts for projected metadata fields across authorized Corpora. U
 | --- | --- | --- |
 | `200` | `application/json` [`FacetResponse`](#facetresponse) | Bounded document counts and excluded Corpus explanations. |
 | `default` | `application/json` [`Error`](#error) | Structured error; malformed_json, invalid_schema, request_too_large, unsupported_media_type, invalid_query, forbidden, not_found, metadata_filter_unavailable or content_unavailable. |
+
+### Corpora
+
+#### `GET /v0/corpora/{corpus_id}/stats`
+
+Operation `getCorpusStats`. Requires `content:read`.
+
+Running eligible-document and catalog totals from transactional aggregates. Eligible documents have a current baseline-ready, non-quarantined Version and no withdrawal or tombstone. Catalog membership includes withdrawn and unready Record identities. Counts are independent of projection generations. All requested fields share one database snapshot at observed_at. complete=false and approximate=true mean historical initialization has not finished; partial zeros are not certified empty. Archived Corpora return 409 corpus_archived. Default reads return totals only. Include histogram and/or sources explicitly. History uses the CURRENT Version's acceptance time, stored in UTC hours; a correction moves its Record to the new hour. Day resolution groups UTC days. Local days can be reconstructed exactly only for whole-hour UTC offsets. Fractional-hour offsets require finer data and must not be labelled exact. History has no lifetime cutoff: each page covers at most 10000 consecutive buckets, with missing buckets zero only within its covered interval at observed_at when complete=true. Boundary days may be clipped by the requested time range. Consume histogram.next_page_cursor with histogram_cursor and repeat the original parameters. Sources use namespace plus trusted connector identity; historical and public submissions have connector_id unknown. Source counts are lifetime totals regardless of histogram bounds. Consume sources.next_page_cursor with sources_cursor. Each continuation is an independent snapshot; concurrent corrections can change earlier pages, so multiple pages are not one census. Cursors bind Corpus, authorization scope and every query option.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+| `include` | query | string |  | Comma-separated histogram and/or sources; omit for totals only. |
+| `resolution` | query | string |  | Histogram grouping. Requires include=histogram. One of `day`, `hour`. Default `day`. |
+| `accepted_after` | query | string (date-time) |  | Inclusive histogram bound, RFC 3339 at a UTC-hour boundary. |
+| `accepted_before` | query | string (date-time) |  | Exclusive histogram bound, RFC 3339 at a UTC-hour boundary. |
+| `histogram_cursor` | query | string |  | Minimum length `1`. |
+| `sources_cursor` | query | string |  | Minimum length `1`. |
+| `source_limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `1000`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`CorpusStats`](#corpusstats) | Totals and any requested series. |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/corpora`
+
+Operation `createCorpus`. Requires `corpora:write`.
+
+Explicit Corpus creation. Same creation route-family key and canonical request replays the same Corpus. Requires corpora:write.
+
+**Request body** (required): `application/json` [`CorpusRequest`](#corpusrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `201` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/corpora`
+
+Operation `listCorpora`. Requires `corpora:read`.
+
+Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a Change Cursor or a Record page cursor (either is 422 invalid_cursor).
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `page_cursor` | query | string |  | Minimum length `1`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
+| `include_archived` | query | boolean |  | Include archived corpora; false by default. Bound into the page cursor. Default `false`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`CorpusPage`](#corpuspage) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/corpora/{corpus_id}`
+
+Operation `getCorpus`. Requires `corpora:read`.
+
+Read effective resolved configuration.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `PATCH /v0/corpora/{corpus_id}`
+
+Operation `renameCorpus`. Requires `corpora:rename`.
+
+Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`CorpusRenameRequest`](#corpusrenamerequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/corpora/{corpus_id}/archive`
+
+Operation `archiveCorpus`. Requires `corpora:archive`.
+
+Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Explicitly scoped search, catalog and feed requests return 409 corpus_archived; direct record, version and document-timeline reads return 404 not_found until restoration. Keeps canonical data and connector enabled state.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/corpora/{corpus_id}/unarchive`
+
+Operation `unarchiveCorpus`. Requires `corpora:archive`.
+
+Restore an archived corpus and make its retained data visible again.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `PUT /v0/corpora/{corpus_id}/retrieval`
+
+Operation `configureRetrieval`. Requires `corpora:write`, `operations:write`.
+
+Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`ConfigUpdate`](#configupdate)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `202` | `application/json` [`Operation`](#operation) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/corpora/{corpus_id}/vector-spaces`
+
+Operation `listVectorSpaces`. Requires `corpora:read`.
+
+The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`VectorSpaceList`](#vectorspacelist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 503 dependency unavailable. |
+
+#### `POST /v0/corpora/{corpus_id}/rebuilds`
+
+Operation `rebuildCorpusProjection`. Requires `projections:rebuild`.
+
+Durably commit a projection_rebuild Operation and dispatch intent before returning. Rebuild the requested Corpus from canonical text and durable artifacts, then activate its validated logical generation. Same Organization + Corpus + rebuild route + idempotency key and canonical request returns the same Operation, including after terminal completion; changed request conflicts. HTTP does not wait for reconstruction. Retries/restarts keep identity and target generation. Preserve other Corpora when physical storage is shared. Normal ingestion/withdrawal guards still apply. Live evaluation schema migrations remain a separate mechanism. Activation follows acceptance order, so a rebuild accepted before one that already activated for the same Corpus and retrieval configuration fails with operation_superseded instead of replacing it.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string (uri-reference). Authorized Operation read URL. | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency unavailable. |
 
 ### Ingestion receipts
 
@@ -488,183 +692,6 @@ Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is 
 | --- | --- | --- |
 | `202` | `application/json` [`Operation`](#operation) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 403 without operations:write or the permission of the command that created the Operation (plugins:admin for a backfill), 404 unknown Operation, 422 unsupported_operation_kind for a kind that cannot pause, 503 storage unavailable. |
-
-### Corpora
-
-#### `POST /v0/corpora`
-
-Operation `createCorpus`. Requires `corpora:write`.
-
-Explicit Corpus creation. Same creation route-family key and canonical request replays the same Corpus. Requires corpora:write.
-
-**Request body** (required): `application/json` [`CorpusRequest`](#corpusrequest)
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `201` | `application/json` [`Corpus`](#corpus) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `GET /v0/corpora`
-
-Operation `listCorpora`. Requires `corpora:read`.
-
-Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a Change Cursor or a Record page cursor (either is 422 invalid_cursor).
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
-| `include_archived` | query | boolean |  | Include archived corpora; false by default. Bound into the page cursor. Default `false`. |
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`CorpusPage`](#corpuspage) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `GET /v0/corpora/{corpus_id}`
-
-Operation `getCorpus`. Requires `corpora:read`.
-
-Read effective resolved configuration.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `PATCH /v0/corpora/{corpus_id}`
-
-Operation `renameCorpus`. Requires `corpora:rename`.
-
-Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Request body** (required): `application/json` [`CorpusRenameRequest`](#corpusrenamerequest)
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `POST /v0/corpora/{corpus_id}/archive`
-
-Operation `archiveCorpus`. Requires `corpora:archive`.
-
-Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Explicitly scoped search, catalog and feed requests return 409 corpus_archived; direct record, version and document-timeline reads return 404 not_found until restoration. Keeps canonical data and connector enabled state.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `POST /v0/corpora/{corpus_id}/unarchive`
-
-Operation `unarchiveCorpus`. Requires `corpora:archive`.
-
-Restore an archived corpus and make its retained data visible again.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `PUT /v0/corpora/{corpus_id}/retrieval`
-
-Operation `configureRetrieval`. Requires `corpora:write`, `operations:write`.
-
-Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Request body** (required): `application/json` [`ConfigUpdate`](#configupdate)
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `202` | `application/json` [`Operation`](#operation) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
-
-#### `GET /v0/corpora/{corpus_id}/vector-spaces`
-
-Operation `listVectorSpaces`. Requires `corpora:read`.
-
-The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `200` | `application/json` [`VectorSpaceList`](#vectorspacelist) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 503 dependency unavailable. |
-
-#### `POST /v0/corpora/{corpus_id}/rebuilds`
-
-Operation `rebuildCorpusProjection`. Requires `projections:rebuild`.
-
-Durably commit a projection_rebuild Operation and dispatch intent before returning. Rebuild the requested Corpus from canonical text and durable artifacts, then activate its validated logical generation. Same Organization + Corpus + rebuild route + idempotency key and canonical request returns the same Operation, including after terminal completion; changed request conflicts. HTTP does not wait for reconstruction. Retries/restarts keep identity and target generation. Preserve other Corpora when physical storage is shared. Normal ingestion/withdrawal guards still apply. Live evaluation schema migrations remain a separate mechanism. Activation follows acceptance order, so a rebuild accepted before one that already activated for the same Corpus and retrieval configuration fails with operation_superseded instead of replacing it.
-
-**Parameters**
-
-| Name | In | Type | Required | Description |
-| --- | --- | --- | --- | --- |
-| `corpus_id` | path | string | yes | Minimum length `1`. |
-
-**Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
-
-**Responses**
-
-| Status | Body | Description |
-| --- | --- | --- |
-| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string (uri-reference). Authorized Operation read URL. | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency unavailable. |
 
 ### Changes
 
@@ -8086,11 +8113,139 @@ required:
 
 </details>
 
+### `CorpusStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `corpus_id` | string | yes |  |
+| `total` | integer (int64) | yes | Minimum `0`. |
+| `catalog_total` | integer (int64) | yes | Minimum `0`. |
+| `undated_total` | integer (int64) | yes | Minimum `0`. |
+| `catalog_undated_total` | integer (int64) | yes | Minimum `0`. |
+| `first_catalog_hour` | string (date-time) |  | First occupied catalog UTC hour; not the exact first acceptance time. Absent for an undated or empty corpus. |
+| `last_catalog_hour` | string (date-time) |  | Last occupied catalog UTC hour; not the exact last acceptance time. |
+| `observed_at` | string (date-time) | yes |  |
+| `approximate` | boolean | yes |  |
+| `complete` | boolean | yes |  |
+| `histogram` | [`CorpusStatsHistogram`](#corpusstatshistogram) |  |  |
+| `sources` | [`CorpusStatsSources`](#corpusstatssources) |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [corpus_id, total, catalog_total, undated_total, catalog_undated_total, observed_at, approximate, complete]
+properties:
+  corpus_id: {type: string}
+  total: {type: integer, format: int64, minimum: 0}
+  catalog_total: {type: integer, format: int64, minimum: 0}
+  undated_total: {type: integer, format: int64, minimum: 0}
+  catalog_undated_total: {type: integer, format: int64, minimum: 0}
+  first_catalog_hour:
+    type: string
+    format: date-time
+    description: First occupied catalog UTC hour; not the exact first acceptance time. Absent for an undated or empty corpus.
+  last_catalog_hour:
+    type: string
+    format: date-time
+    description: Last occupied catalog UTC hour; not the exact last acceptance time.
+  observed_at: {type: string, format: date-time}
+  approximate: {type: boolean}
+  complete: {type: boolean}
+  histogram: {$ref: '#/components/schemas/CorpusStatsHistogram'}
+  sources: {$ref: '#/components/schemas/CorpusStatsSources'}
+```
+
+</details>
+
+### `CorpusStatsHistogram`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `resolution_seconds` | integer | yes | One of `3600`, `86400`. |
+| `items` | array of object | yes | At most `10000` items. |
+| `items[].start` | string (date-time) | yes |  |
+| `items[].count` | integer (int64) | yes | Minimum `0`. |
+| `items[].catalog_count` | integer (int64) | yes | Minimum `0`. |
+| `next_page_cursor` | string |  | Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [from, to, resolution_seconds, items]
+properties:
+  from: {type: string, format: date-time}
+  to: {type: string, format: date-time}
+  resolution_seconds: {type: integer, enum: [3600, 86400]}
+  items:
+    type: array
+    maxItems: 10000
+    items:
+      type: object
+      additionalProperties: false
+      required: [start, count, catalog_count]
+      properties:
+        start: {type: string, format: date-time}
+        count: {type: integer, format: int64, minimum: 0}
+        catalog_count: {type: integer, format: int64, minimum: 0}
+  next_page_cursor: {type: string, minLength: 1}
+```
+
+</details>
+
+### `CorpusStatsSources`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of object | yes | At most `1000` items. |
+| `items[].namespace` | string | yes |  |
+| `items[].connector_id` | string | yes | Trusted accepting connector instance, or the explicit unknown bucket for historical/public submissions. |
+| `items[].count` | integer (int64) | yes | Minimum `0`. |
+| `items[].catalog_count` | integer (int64) | yes | Minimum `0`. |
+| `next_page_cursor` | string |  | Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [items]
+properties:
+  items:
+    type: array
+    maxItems: 1000
+    items:
+      type: object
+      additionalProperties: false
+      required: [namespace, connector_id, count, catalog_count]
+      properties:
+        namespace: {type: string}
+        connector_id:
+          type: string
+          description: Trusted accepting connector instance, or the explicit unknown bucket for historical/public submissions.
+        count: {type: integer, format: int64, minimum: 0}
+        catalog_count: {type: integer, format: int64, minimum: 0}
+  next_page_cursor: {type: string, minLength: 1}
+```
+
+</details>
+
 ### `RecordCount`
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `count` | integer (int64) | yes | Minimum `0`. |
+| `observed_at` | string (date-time) |  |  |
+| `approximate` | boolean |  |  |
+| `complete` | boolean |  |  |
 
 <details>
 <summary>Full schema</summary>
@@ -8103,6 +8258,9 @@ properties:
     type: integer
     format: int64
     minimum: 0
+  observed_at: {type: string, format: date-time}
+  approximate: {type: boolean}
+  complete: {type: boolean}
 required:
   - count
 ```

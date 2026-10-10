@@ -321,6 +321,24 @@ func (e ConnectorPushStatsOutcome) Valid() bool {
 	}
 }
 
+// Defines values for CorpusStatsHistogramResolutionSeconds.
+const (
+	N3600  CorpusStatsHistogramResolutionSeconds = 3600
+	N86400 CorpusStatsHistogramResolutionSeconds = 86400
+)
+
+// Valid indicates whether the value is a known member of the CorpusStatsHistogramResolutionSeconds enum.
+func (e CorpusStatsHistogramResolutionSeconds) Valid() bool {
+	switch e {
+	case N3600:
+		return true
+	case N86400:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -422,19 +440,19 @@ func (e EvaluationRetirementOutcome) Valid() bool {
 
 // Defines values for FacetFieldInterval.
 const (
-	Day   FacetFieldInterval = "day"
-	Month FacetFieldInterval = "month"
-	Year  FacetFieldInterval = "year"
+	FacetFieldIntervalDay   FacetFieldInterval = "day"
+	FacetFieldIntervalMonth FacetFieldInterval = "month"
+	FacetFieldIntervalYear  FacetFieldInterval = "year"
 )
 
 // Valid indicates whether the value is a known member of the FacetFieldInterval enum.
 func (e FacetFieldInterval) Valid() bool {
 	switch e {
-	case Day:
+	case FacetFieldIntervalDay:
 		return true
-	case Month:
+	case FacetFieldIntervalMonth:
 		return true
-	case Year:
+	case FacetFieldIntervalYear:
 		return true
 	default:
 		return false
@@ -1410,6 +1428,24 @@ func (e GetTopQueriesParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for GetCorpusStatsParamsResolution.
+const (
+	GetCorpusStatsParamsResolutionDay  GetCorpusStatsParamsResolution = "day"
+	GetCorpusStatsParamsResolutionHour GetCorpusStatsParamsResolution = "hour"
+)
+
+// Valid indicates whether the value is a known member of the GetCorpusStatsParamsResolution enum.
+func (e GetCorpusStatsParamsResolution) Valid() bool {
+	switch e {
+	case GetCorpusStatsParamsResolutionDay:
+		return true
+	case GetCorpusStatsParamsResolutionHour:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListRecordsParamsOrder.
 const (
 	AcceptedAtDesc ListRecordsParamsOrder = "accepted_at_desc"
@@ -1965,6 +2001,55 @@ type CorpusRequest struct {
 
 	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
+}
+
+// CorpusStats defines model for CorpusStats.
+type CorpusStats struct {
+	Approximate         bool   `json:"approximate"`
+	CatalogTotal        int64  `json:"catalog_total"`
+	CatalogUndatedTotal int64  `json:"catalog_undated_total"`
+	Complete            bool   `json:"complete"`
+	CorpusId            string `json:"corpus_id"`
+
+	// FirstCatalogHour First occupied catalog UTC hour; not the exact first acceptance time. Absent for an undated or empty corpus.
+	FirstCatalogHour *time.Time            `json:"first_catalog_hour,omitempty"`
+	Histogram        *CorpusStatsHistogram `json:"histogram,omitempty"`
+
+	// LastCatalogHour Last occupied catalog UTC hour; not the exact last acceptance time.
+	LastCatalogHour *time.Time          `json:"last_catalog_hour,omitempty"`
+	ObservedAt      time.Time           `json:"observed_at"`
+	Sources         *CorpusStatsSources `json:"sources,omitempty"`
+	Total           int64               `json:"total"`
+	UndatedTotal    int64               `json:"undated_total"`
+}
+
+// CorpusStatsHistogram defines model for CorpusStatsHistogram.
+type CorpusStatsHistogram struct {
+	From  time.Time `json:"from"`
+	Items []struct {
+		CatalogCount int64     `json:"catalog_count"`
+		Count        int64     `json:"count"`
+		Start        time.Time `json:"start"`
+	} `json:"items"`
+	NextPageCursor    *string                               `json:"next_page_cursor,omitempty"`
+	ResolutionSeconds CorpusStatsHistogramResolutionSeconds `json:"resolution_seconds"`
+	To                time.Time                             `json:"to"`
+}
+
+// CorpusStatsHistogramResolutionSeconds defines model for CorpusStatsHistogram.ResolutionSeconds.
+type CorpusStatsHistogramResolutionSeconds int
+
+// CorpusStatsSources defines model for CorpusStatsSources.
+type CorpusStatsSources struct {
+	Items []struct {
+		CatalogCount int64 `json:"catalog_count"`
+
+		// ConnectorId Trusted accepting connector instance, or the explicit unknown bucket for historical/public submissions.
+		ConnectorId string `json:"connector_id"`
+		Count       int64  `json:"count"`
+		Namespace   string `json:"namespace"`
+	} `json:"items"`
+	NextPageCursor *string `json:"next_page_cursor,omitempty"`
 }
 
 // CountPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
@@ -2945,7 +3030,10 @@ type Record struct {
 
 // RecordCount defines model for RecordCount.
 type RecordCount struct {
-	Count int64 `json:"count"`
+	Approximate *bool      `json:"approximate,omitempty"`
+	Complete    *bool      `json:"complete,omitempty"`
+	Count       int64      `json:"count"`
+	ObservedAt  *time.Time `json:"observed_at,omitempty"`
 }
 
 // RecordPage defines model for RecordPage.
@@ -3886,6 +3974,27 @@ type ListCorporaParams struct {
 	// IncludeArchived Include archived corpora; false by default. Bound into the page cursor.
 	IncludeArchived *bool `form:"include_archived,omitempty" json:"include_archived,omitempty"`
 }
+
+// GetCorpusStatsParams defines parameters for GetCorpusStats.
+type GetCorpusStatsParams struct {
+	// Include Comma-separated histogram and/or sources; omit for totals only.
+	Include *string `form:"include,omitempty" json:"include,omitempty"`
+
+	// Resolution Histogram grouping. Requires include=histogram.
+	Resolution *GetCorpusStatsParamsResolution `form:"resolution,omitempty" json:"resolution,omitempty"`
+
+	// AcceptedAfter Inclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+	AcceptedBefore  *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
+	HistogramCursor *string    `form:"histogram_cursor,omitempty" json:"histogram_cursor,omitempty"`
+	SourcesCursor   *string    `form:"sources_cursor,omitempty" json:"sources_cursor,omitempty"`
+	SourceLimit     *int       `form:"source_limit,omitempty" json:"source_limit,omitempty"`
+}
+
+// GetCorpusStatsParamsResolution defines parameters for GetCorpusStats.
+type GetCorpusStatsParamsResolution string
 
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
 type ListDeliveryAttemptsParams struct {
@@ -4960,6 +5069,11 @@ type ClientInterface interface {
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrieval(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetCorpusStats performs a GET /v0/corpora/{corpus_id}/stats (the `GetCorpusStats` operationId) request.
+	//
+	// Running eligible-document and catalog totals from transactional aggregates. Eligible documents have a current baseline-ready, non-quarantined Version and no withdrawal or tombstone. Catalog membership includes withdrawn and unready Record identities. Counts are independent of projection generations. All requested fields share one database snapshot at observed_at. complete=false and approximate=true mean historical initialization has not finished; partial zeros are not certified empty. Archived Corpora return 409 corpus_archived. Default reads return totals only. Include histogram and/or sources explicitly. History uses the CURRENT Version's acceptance time, stored in UTC hours; a correction moves its Record to the new hour. Day resolution groups UTC days. Local days can be reconstructed exactly only for whole-hour UTC offsets. Fractional-hour offsets require finer data and must not be labelled exact. History has no lifetime cutoff: each page covers at most 10000 consecutive buckets, with missing buckets zero only within its covered interval at observed_at when complete=true. Boundary days may be clipped by the requested time range. Consume histogram.next_page_cursor with histogram_cursor and repeat the original parameters. Sources use namespace plus trusted connector identity; historical and public submissions have connector_id unknown. Source counts are lifetime totals regardless of histogram bounds. Consume sources.next_page_cursor with sources_cursor. Each continuation is an independent snapshot; concurrent corrections can change earlier pages, so multiple pages are not one census. Cursors bind Corpus, authorization scope and every query option.
+	GetCorpusStats(ctx context.Context, corpusId string, params *GetCorpusStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UnarchiveCorpus performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
 	//
 	// Restore an archived corpus and make its retained data visible again.
@@ -5091,7 +5205,7 @@ type ClientInterface interface {
 
 	// CountRecords performs a GET /v0/records/count (the `CountRecords` operationId) request.
 	//
-	// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+	// Count of one Corpus's authorized Records. Time-bounded counts are exact within a two-second query budget; larger windows return non-retryable 422 record_count_too_broad and require narrower bounds. Unbounded counts probe at most 10001 identities: up to 10000 are exact, larger Corpora return stored catalog totals with approximate=true. complete=false means initialization has not finished; incomplete zeros must not be presented as empty. observed_at names the independent read snapshot. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
 	CountRecords(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// WithdrawRecordWithBody performs a POST /v0/records/withdrawals (the `WithdrawRecord` operationId) request,
@@ -6518,6 +6632,21 @@ func (c *Client) ConfigureRetrieval(ctx context.Context, corpusId string, body C
 	return c.Client.Do(req)
 }
 
+// GetCorpusStats performs a GET /v0/corpora/{corpus_id}/stats (the `GetCorpusStats` operationId) request.
+//
+// Running eligible-document and catalog totals from transactional aggregates. Eligible documents have a current baseline-ready, non-quarantined Version and no withdrawal or tombstone. Catalog membership includes withdrawn and unready Record identities. Counts are independent of projection generations. All requested fields share one database snapshot at observed_at. complete=false and approximate=true mean historical initialization has not finished; partial zeros are not certified empty. Archived Corpora return 409 corpus_archived. Default reads return totals only. Include histogram and/or sources explicitly. History uses the CURRENT Version's acceptance time, stored in UTC hours; a correction moves its Record to the new hour. Day resolution groups UTC days. Local days can be reconstructed exactly only for whole-hour UTC offsets. Fractional-hour offsets require finer data and must not be labelled exact. History has no lifetime cutoff: each page covers at most 10000 consecutive buckets, with missing buckets zero only within its covered interval at observed_at when complete=true. Boundary days may be clipped by the requested time range. Consume histogram.next_page_cursor with histogram_cursor and repeat the original parameters. Sources use namespace plus trusted connector identity; historical and public submissions have connector_id unknown. Source counts are lifetime totals regardless of histogram bounds. Consume sources.next_page_cursor with sources_cursor. Each continuation is an independent snapshot; concurrent corrections can change earlier pages, so multiple pages are not one census. Cursors bind Corpus, authorization scope and every query option.
+func (c *Client) GetCorpusStats(ctx context.Context, corpusId string, params *GetCorpusStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCorpusStatsRequest(c.Server, corpusId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // UnarchiveCorpus performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
 //
 // Restore an archived corpus and make its retained data visible again.
@@ -6879,7 +7008,7 @@ func (c *Client) IngestBatch(ctx context.Context, body IngestBatchJSONRequestBod
 
 // CountRecords performs a GET /v0/records/count (the `CountRecords` operationId) request.
 //
-// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+// Count of one Corpus's authorized Records. Time-bounded counts are exact within a two-second query budget; larger windows return non-retryable 422 record_count_too_broad and require narrower bounds. Unbounded counts probe at most 10001 identities: up to 10000 are exact, larger Corpora return stored catalog totals with approximate=true. complete=false means initialization has not finished; incomplete zeros must not be presented as empty. observed_at names the independent read snapshot. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
 func (c *Client) CountRecords(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCountRecordsRequest(c.Server, params)
 	if err != nil {
@@ -10316,6 +10445,139 @@ func NewConfigureRetrievalRequestWithBody(server string, corpusId string, conten
 	return req, nil
 }
 
+// NewGetCorpusStatsRequest constructs an http.Request for the GetCorpusStats method
+func NewGetCorpusStatsRequest(server string, corpusId string, params *GetCorpusStatsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/stats", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Include != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include", *params.Include, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Resolution != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "resolution", *params.Resolution, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AcceptedAfter != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_after", *params.AcceptedAfter, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AcceptedBefore != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_before", *params.AcceptedBefore, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HistogramCursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "histogram_cursor", *params.HistogramCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SourcesCursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sources_cursor", *params.SourcesCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SourceLimit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "source_limit", *params.SourceLimit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewUnarchiveCorpusRequest constructs an http.Request for the UnarchiveCorpus method
 func NewUnarchiveCorpusRequest(server string, corpusId string) (*http.Request, error) {
 	var err error
@@ -12816,6 +13078,13 @@ type ClientWithResponsesInterface interface {
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrievalWithResponse(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfigureRetrievalResponse, error)
 
+	// GetCorpusStatsWithResponse performs a GET /v0/corpora/{corpus_id}/stats (the `GetCorpusStats` operationId) request.
+	//
+	// Running eligible-document and catalog totals from transactional aggregates. Eligible documents have a current baseline-ready, non-quarantined Version and no withdrawal or tombstone. Catalog membership includes withdrawn and unready Record identities. Counts are independent of projection generations. All requested fields share one database snapshot at observed_at. complete=false and approximate=true mean historical initialization has not finished; partial zeros are not certified empty. Archived Corpora return 409 corpus_archived. Default reads return totals only. Include histogram and/or sources explicitly. History uses the CURRENT Version's acceptance time, stored in UTC hours; a correction moves its Record to the new hour. Day resolution groups UTC days. Local days can be reconstructed exactly only for whole-hour UTC offsets. Fractional-hour offsets require finer data and must not be labelled exact. History has no lifetime cutoff: each page covers at most 10000 consecutive buckets, with missing buckets zero only within its covered interval at observed_at when complete=true. Boundary days may be clipped by the requested time range. Consume histogram.next_page_cursor with histogram_cursor and repeat the original parameters. Sources use namespace plus trusted connector identity; historical and public submissions have connector_id unknown. Source counts are lifetime totals regardless of histogram bounds. Consume sources.next_page_cursor with sources_cursor. Each continuation is an independent snapshot; concurrent corrections can change earlier pages, so multiple pages are not one census. Cursors bind Corpus, authorization scope and every query option.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetCorpusStatsWithResponse(ctx context.Context, corpusId string, params *GetCorpusStatsParams, reqEditors ...RequestEditorFn) (*GetCorpusStatsResponse, error)
+
 	// UnarchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
 	//
 	// Restore an archived corpus and make its retained data visible again.
@@ -12979,7 +13248,7 @@ type ClientWithResponsesInterface interface {
 
 	// CountRecordsWithResponse performs a GET /v0/records/count (the `CountRecords` operationId) request.
 	//
-	// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+	// Count of one Corpus's authorized Records. Time-bounded counts are exact within a two-second query budget; larger windows return non-retryable 422 record_count_too_broad and require narrower bounds. Unbounded counts probe at most 10001 identities: up to 10000 are exact, larger Corpora return stored catalog totals with approximate=true. complete=false means initialization has not finished; incomplete zeros must not be presented as empty. observed_at names the independent read snapshot. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	CountRecordsWithResponse(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*CountRecordsResponse, error)
@@ -16025,6 +16294,54 @@ func (r ConfigureRetrievalResponse) ContentType() string {
 	return ""
 }
 
+type GetCorpusStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *CorpusStats
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetCorpusStatsResponse) GetJSON200() *CorpusStats {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetCorpusStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetCorpusStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCorpusStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCorpusStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetCorpusStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type UnarchiveCorpusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -19052,6 +19369,19 @@ func (c *ClientWithResponses) ConfigureRetrievalWithResponse(ctx context.Context
 	return ParseConfigureRetrievalResponse(rsp)
 }
 
+// GetCorpusStatsWithResponse performs a GET /v0/corpora/{corpus_id}/stats (the `GetCorpusStats` operationId) request.
+//
+// Running eligible-document and catalog totals from transactional aggregates. Eligible documents have a current baseline-ready, non-quarantined Version and no withdrawal or tombstone. Catalog membership includes withdrawn and unready Record identities. Counts are independent of projection generations. All requested fields share one database snapshot at observed_at. complete=false and approximate=true mean historical initialization has not finished; partial zeros are not certified empty. Archived Corpora return 409 corpus_archived. Default reads return totals only. Include histogram and/or sources explicitly. History uses the CURRENT Version's acceptance time, stored in UTC hours; a correction moves its Record to the new hour. Day resolution groups UTC days. Local days can be reconstructed exactly only for whole-hour UTC offsets. Fractional-hour offsets require finer data and must not be labelled exact. History has no lifetime cutoff: each page covers at most 10000 consecutive buckets, with missing buckets zero only within its covered interval at observed_at when complete=true. Boundary days may be clipped by the requested time range. Consume histogram.next_page_cursor with histogram_cursor and repeat the original parameters. Sources use namespace plus trusted connector identity; historical and public submissions have connector_id unknown. Source counts are lifetime totals regardless of histogram bounds. Consume sources.next_page_cursor with sources_cursor. Each continuation is an independent snapshot; concurrent corrections can change earlier pages, so multiple pages are not one census. Cursors bind Corpus, authorization scope and every query option.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetCorpusStatsWithResponse(ctx context.Context, corpusId string, params *GetCorpusStatsParams, reqEditors ...RequestEditorFn) (*GetCorpusStatsResponse, error) {
+	rsp, err := c.GetCorpusStats(ctx, corpusId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCorpusStatsResponse(rsp)
+}
+
 // UnarchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
 //
 // Restore an archived corpus and make its retained data visible again.
@@ -19353,7 +19683,7 @@ func (c *ClientWithResponses) IngestBatchWithResponse(ctx context.Context, body 
 
 // CountRecordsWithResponse performs a GET /v0/records/count (the `CountRecords` operationId) request.
 //
-// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+// Count of one Corpus's authorized Records. Time-bounded counts are exact within a two-second query budget; larger windows return non-retryable 422 record_count_too_broad and require narrower bounds. Unbounded counts probe at most 10001 identities: up to 10000 are exact, larger Corpora return stored catalog totals with approximate=true. complete=false means initialization has not finished; incomplete zeros must not be presented as empty. observed_at names the independent read snapshot. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) CountRecordsWithResponse(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*CountRecordsResponse, error) {
@@ -21860,6 +22190,39 @@ func ParseConfigureRetrievalResponse(rsp *http.Response) (*ConfigureRetrievalRes
 			return nil, err
 		}
 		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCorpusStatsResponse parses an HTTP response from a GetCorpusStatsWithResponse call
+func ParseGetCorpusStatsResponse(rsp *http.Response) (*GetCorpusStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCorpusStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest CorpusStats
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
