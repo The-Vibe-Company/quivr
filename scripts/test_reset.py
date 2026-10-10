@@ -76,7 +76,7 @@ class RailwayIsolation(unittest.TestCase):
     def test_reset_removes_unresponsive_deployment_and_restores_recorded_artifacts(self):
         from deploy.reset import main
         from deploy.railway.infrastructure import Railway
-        roles = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk',
+        roles = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk', 'index-warmup',
                  'postgres', 'temporal', 'seaweed', 'weaviate', 'tei')
         scenarios = [(failure, ()) for failure in (None, 'preview', 'stop', 'remove', 'quiescence', 'restore')]
         scenarios += [(None, delays) for delays in ((0,), (4,), (4, 8), (4, 5))]
@@ -171,6 +171,9 @@ class RailwayIsolation(unittest.TestCase):
                     elif 'deploymentRedeploy(' in query:
                         identifier = variables['id']
                         role = identifier.removesuffix('-original')
+                        if role == 'index-warmup':
+                            self.assertTrue({'weaviate', 'api'} <= set(redeployed),
+                                'warm-up restored before its dependencies')
                         if role == 'web' and failure == 'restore':
                             raise RuntimeError('provider-secret-payload')
                         redeployed[role] = identifier
@@ -216,8 +219,11 @@ class RailwayIsolation(unittest.TestCase):
                         self.fail('unexpected Railway request: ' + query)
                     return json.dumps({'data': data})
                 declaration = Path(directory) / 'installation.json'
-                declaration.write_text(json.dumps({'version': 1, 'deployment': 'isolated-install',
-                    'platform': 'railway', 'project': 'project', 'environment': 'target', 'dedicated': True}))
+                spec = {'version': 1, 'deployment': 'isolated-install', 'platform': 'railway',
+                    'project': 'project', 'environment': 'target', 'dedicated': True}
+                if failure != 'preview':
+                    spec['services'] = {role: role for role in roles}
+                declaration.write_text(json.dumps(spec))
                 output, errors = io.StringIO(), io.StringIO()
                 with patch('deploy.railway.reset.Railway', side_effect=lambda p, e: Railway(p, e, run=transport)), \
                      patch('deploy.reset_support.time.monotonic', side_effect=lambda: clock[0]), \
@@ -227,9 +233,11 @@ class RailwayIsolation(unittest.TestCase):
                     os.environ.pop('RAILWAY_TOKEN', None)
                     result = main(['-f', str(declaration)] + ([] if failure == 'preview' else
                                   ['--confirm', '--deployment-name', 'isolated-install']))
+                self.assertEqual(result, 0 if failure in (None, 'preview') else 1, errors.getvalue())
                 if failure == 'preview':
                     self.assertEqual(result, 0, errors.getvalue())
                     scope = json.loads(output.getvalue())['scope']
+                    self.assertIn('index-warmup', scope['writers'])
                     self.assertEqual(scope['volume_sizes']['postgres'], {'old_sizeMB': 65536, 'replacement_sizeMB': None})
                     self.assertIn('unknown until created', scope['replacement_capacity'])
                     self.assertFalse(Path(str(declaration) + '.reset-state.json').exists())
@@ -266,6 +274,9 @@ class RailwayIsolation(unittest.TestCase):
                     if failure != 'restore':
                         self.assertEqual(deleted, [])
                         self.assertEqual(redeployed, {})
+                    else:
+                        self.assertTrue(deployments['index-warmup-restored']['deploymentStopped'],
+                            'failed restore left warm-up reading the index')
                 if failure == 'stop':
                     self.assertEqual(removed, [], 'API errors must not trigger removal')
                 else:

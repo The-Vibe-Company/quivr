@@ -26,7 +26,8 @@ ATTACH = '''mutation($volumeId:String!,$environmentId:String!,$input:VolumeInsta
  volumeInstanceUpdate(volumeId:$volumeId,environmentId:$environmentId,input:$input)}'''
 DELETE = 'mutation($volumeId:String!){volumeDelete(volumeId:$volumeId)}'
 MOUNTS = {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data', 'weaviate': '/var/lib/weaviate'}
-WRITERS = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk')
+# The warm-up reader must also quiesce before index volumes change.
+WRITERS = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk', 'index-warmup')
 STARTING = ('QUEUED', 'WAITING', 'INITIALIZING', 'BUILDING', 'DEPLOYING')
 
 
@@ -295,7 +296,7 @@ class RailwayReset:
                 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c ' + shlex.quote(query)))
             if count.strip() != '0':
                 raise RuntimeError('replacement database is not empty')
-            for role in ('worker', 'worker-bulk', 'web', 'autoscaler'):
+            for role in ('index-warmup', 'worker', 'worker-bulk', 'web', 'autoscaler'):
                 if role in self.deployments:
                     self.restore(role, checkpoint)
             checkpoint.save('complete')
