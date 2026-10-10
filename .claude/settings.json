@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "armada hook session-start 2>/dev/null || true",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
