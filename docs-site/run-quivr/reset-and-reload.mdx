@@ -49,6 +49,12 @@ python3 deploy/reset.py -f /private/installation.json \
 
 Both confirmation inputs are required. Reset stops writers, terminates running workflows, replaces the four data volumes, applies startup migrations and restarts writers. Compose reports deleted volumes and storage counts. Railway restores the same deployed artifacts and reports detached old volumes whose deletion was acknowledged; provider retention can delay physical deletion.
 
+If Railway acknowledges a stop but leaves instances running after 30 seconds, reset removes that recorded deployment and verifies shutdown before replacing volumes. Restore redeploys the original recorded artifact, including a removed deployment.
+
+Attaching a Railway volume can start one or more deployments automatically. Reset observes the attached service for 10 seconds, removes those new deployments and waits for shutdown. A deployment on another service or after that window aborts the reset. Keep deployment automation stopped throughout maintenance.
+
+On Railway, check `volume_sizes` in the preview and result. Preview shows each old volume's `old_sizeMB`; `replacement_sizeMB` is `null` until the replacement exists. The result reports both measured sizes and marks `shrunk: true` when capacity decreased. Replacement volumes use Railway's default capacity, so dashboard increases on the old volumes are lost. **Grow the replacement data volumes in the Railway dashboard before applying sources or importing data.** Railway has no API or CLI command to resize them. The infrastructure `check` also reports `filesystem_capacity` drift when capacity is below your declared storage budget.
+
 ### 3. Preview and apply sources
 
 Use the same API address and organization key on every replay. The private journal binds to both and stores resource IDs, creation intents and keyed credential digests. It contains no credential values. Back up this journal with your private declaration.
@@ -81,7 +87,7 @@ Reset checks that replacement blob and vector stores are empty before returning.
 | Lifecycle or credential drift | Archived Corpora, paused or disabled connectors, and credential rotations outside the journal require deliberate reconciliation through the public API. |
 | API request failed | Apply is not atomic. Earlier actions may have succeeded. Keep the journal and original declaration/secret values for pending actions, then rerun. |
 | Journal binding or permission error | Keep the original API address and organization key, use private regular files and avoid simultaneous applies. API key rotation needs a deliberately new journal; retain the old one for audit. |
-| Reset incomplete | Writers may remain stopped. Keep the private reset checkpoint (`installation.json.reset-state.json` on Railway, Stack `reset-state.json` on Compose) and inspect it before recovery. Incomplete resets refuse blind replay. |
+| Reset incomplete | Railway names the failing checkpoint phase and service role or condition without provider diagnostics. Some writers may remain stopped. Keep the private reset checkpoint (`installation.json.reset-state.json` on Railway, Stack `reset-state.json` on Compose) and inspect it before recovery. Incomplete resets refuse blind replay. |
 | Other buckets or shared volume | Move source archives outside the installation data volumes. Use a dedicated installation; reset never deletes a shared volume. |
 
 ## Next

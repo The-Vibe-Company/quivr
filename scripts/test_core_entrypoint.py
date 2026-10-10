@@ -425,6 +425,22 @@ class CoreEntrypointTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'QUIVR_REBUILD_CONCURRENCY'):
                 core_entrypoint.build_config({**ENV, 'QUIVR_REBUILD_CONCURRENCY': bad})
 
+    def test_connector_min_interval_environment_translation(self):
+        for role in ('api', 'worker'):
+            env = {**ENV, 'QUIVR_ROLE': role}
+            with self.subTest(role=role):
+                self.assertNotIn('connector_min_interval', core_entrypoint.build_config(env))
+            # Parsing and positive-duration validation belong to the engine.
+            for value, expected in [('10s', '10s'), (' 1m30s ', '1m30s'),
+                                    ('invalid', 'invalid'), ('0s', '0s'), ('-1s', '-1s')]:
+                with self.subTest(role=role, value=value):
+                    config = core_entrypoint.build_config({**env, 'QUIVR_CONNECTOR_MIN_INTERVAL': value})
+                    self.assertEqual(config.get('connector_min_interval'), expected)
+            for value in ('', ' '):
+                with self.subTest(role=role, value=value), self.assertRaisesRegex(
+                        ValueError, 'QUIVR_CONNECTOR_MIN_INTERVAL must be a positive duration'):
+                    core_entrypoint.build_config({**env, 'QUIVR_CONNECTOR_MIN_INTERVAL': value})
+
     def test_pinned_manifests_are_the_repository_plugins(self):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()

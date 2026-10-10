@@ -53,13 +53,13 @@
           "environment": {
             "ASYNC_INDEXING": "true",
             "PERSISTENCE_MEMTABLES_MAX_SIZE_MB": "1024",
-            "GOMEMLIMIT": "27GiB",
+            "GOMEMLIMIT": "16GiB",
             "RAFT_BOOTSTRAP_TIMEOUT": "3600"
           },
           "deploy": {
             "resources": {
               "limits": {
-                "memory": "32000000000",
+                "memory": "64000000000",
                 "cpus": "32"
               }
             }

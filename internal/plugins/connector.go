@@ -45,6 +45,7 @@ const (
 	CodeAttachmentsUnsupported           = "attachments_unsupported"
 	CodeSubmissionConcurrencyUnsupported = "submission_concurrency_unsupported"
 	CodeAttachmentOnlyUnsupported        = "attachment_only_unsupported"
+	CodeOrderedRecordsUnsupported        = "ordered_records_unsupported"
 	// CodeAttachmentTooLarge: an exact attachment size above the effective
 	// attachments.max_bytes.
 	CodeAttachmentTooLarge = "attachment_too_large"
@@ -125,14 +126,15 @@ type ConnectorAttachment struct {
 
 // ConnectorPage is a decoded valid fetch response.
 type ConnectorPage struct {
-	SubmissionConcurrency int             `json:"submission_concurrency,omitempty"`
-	Items                 []ConnectorItem `json:"items"`
-	Checkpoint            json.RawMessage `json:"checkpoint"`
-	More                  bool            `json:"more"`
-	Reads                 int64           `json:"reads,omitempty"`
-	Diagnostics           json.RawMessage `json:"diagnostics,omitempty"`
-	Notice                string          `json:"notice,omitempty"`
-	NotDue                bool            `json:"not_due,omitempty"`
+	SubmissionConcurrency   int             `json:"submission_concurrency,omitempty"`
+	AllowRepeatedRecordKeys *bool           `json:"allow_repeated_record_keys,omitempty"`
+	Items                   []ConnectorItem `json:"items"`
+	Checkpoint              json.RawMessage `json:"checkpoint"`
+	More                    bool            `json:"more"`
+	Reads                   int64           `json:"reads,omitempty"`
+	Diagnostics             json.RawMessage `json:"diagnostics,omitempty"`
+	Notice                  string          `json:"notice,omitempty"`
+	NotDue                  bool            `json:"not_due,omitempty"`
 	// Push is a push kind's report on its push channel (Plugin API 0.5).
 	Push *ConnectorPushStatus `json:"push,omitempty"`
 }
@@ -142,7 +144,8 @@ type ConnectorPage struct {
 // before it accepts any item: the response bound, the response schema
 // (unknown fields are rejected), the declared max_items and
 // max_checkpoint_bytes, the diagnostics bound, not_due coherence against the request's checkpoint,
-// then per item: exactly one of content and withdraw, unique Record Keys,
+// then per item: exactly one of content and withdraw, unique Record Keys unless
+// the page opts into ordered revisions,
 // attachments only beside a Manifest, the engine's structural Manifest rules
 // with the attachments as Parts, no Blob Parts, and extensions only in
 // namespaces and schema versions the manifest declares.
@@ -165,6 +168,10 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 	var issues []Issue
 	if page.SubmissionConcurrency != 0 && !ResolveAPI(api).Speaks(FeatureConnectorSubmissionConcurrency) {
 		issues = append(issues, Issue{Code: CodeSubmissionConcurrencyUnsupported, Path: "/submission_concurrency", Message: "submission_concurrency requires Plugin API " + FeatureSince(FeatureConnectorSubmissionConcurrency)})
+	}
+	ordered := ResolveAPI(api).Speaks(FeatureConnectorOrderedRecords)
+	if page.AllowRepeatedRecordKeys != nil && !ordered {
+		issues = append(issues, Issue{Code: CodeOrderedRecordsUnsupported, Path: "/allow_repeated_record_keys", Message: "allow_repeated_record_keys requires Plugin API " + FeatureSince(FeatureConnectorOrderedRecords)})
 	}
 	if limit := ConnectorMaxItems(m); len(page.Items) > limit {
 		issues = append(issues, Issue{Code: CodeTooManyItems, Path: "/items",
@@ -189,19 +196,19 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 		}
 	}
 	issues = append(issues, pushStatusIssues(page.Push, m)...)
-	return append(issues, checkItems(ctx, page.Items, m)...)
+	return append(issues, checkItems(ctx, page.Items, m, ordered && page.AllowRepeatedRecordKeys != nil && *page.AllowRepeatedRecordKeys)...)
 }
 
-// checkItems judges the items of a fetch page or a delivery: unique Record
-// Keys, attachments only when the manifest declares them and within their
+// checkItems judges every item of a fetch page or a delivery: unique Record
+// Keys unless fetch explicitly enables ordered revisions, attachments only when the manifest declares them and within their
 // size cap, then each item's content and extensions.
-func checkItems(ctx context.Context, items []ConnectorItem, m *Manifest) []Issue {
+func checkItems(ctx context.Context, items []ConnectorItem, m *Manifest, allowRepeated bool) []Issue {
 	var issues []Issue
 	validator := newDeclaredExtensions(m)
 	seen := map[string]int{}
 	for i, item := range items {
 		path := fmt.Sprintf("/items/%d", i)
-		if first, dup := seen[item.RecordKey]; dup {
+		if first, dup := seen[item.RecordKey]; dup && !allowRepeated {
 			issues = append(issues, Issue{Code: CodeDuplicateRecordKey, Path: path + "/record_key",
 				Message: fmt.Sprintf("Record Key %q is also item %d of this page; return each item once per page", item.RecordKey, first)})
 			continue

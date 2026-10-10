@@ -155,5 +155,5 @@ func CheckReceiveOutput(ctx context.Context, raw []byte, m *Manifest) []Issue {
 			d.Items[i].Attachments = nil
 		}
 	}
-	return append(issues, checkItems(ctx, d.Items, m)...)
+	return append(issues, checkItems(ctx, d.Items, m, false)...)
 }

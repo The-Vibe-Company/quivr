@@ -2,6 +2,7 @@
 """Preview/apply managed settings, or report drift without changing a deployment."""
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 import shlex
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from deploy import infrastructure as infra
 
 PROJECT = '''query($id:String!){project(id:$id){
+  subscriptionPlanLimit
   environments(first:100){edges{node{id}} pageInfo{hasNextPage}}
   services(first:100){edges{node{id name}} pageInfo{hasNextPage}}}}'''
 INSTANCE = '''query($serviceId:String!,$environmentId:String!){
@@ -43,9 +45,17 @@ def limits(value):
     result = {}
     for field, key in (('memoryBytes', 'memory'), ('cpu', 'cpus')):
         number = value.get(field)
-        if isinstance(number, (float, int)) and not isinstance(number, bool) and number > 0:
+        if positive_number(number):
             result[key] = str(int(number)) if key == 'memory' else str(number)
     return result
+
+
+def positive_number(value):
+    return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
+
+class ProviderCapError(RuntimeError):
+    """Safe local preflight diagnostics, never raw provider error text."""
 
 
 class Railway:
@@ -53,6 +63,7 @@ class Railway:
         self.project, self.environment, self.run = project, environment, run
         self.targets = {}
         self.instances = {}
+        self.provider = {}
 
     def api(self, query, variables, object_result=False):
         response = json.loads(self.run(['api', query, '--variables', json.dumps(variables)]))
@@ -64,6 +75,10 @@ class Railway:
 
     def select(self, selectors, include_autoscaler=False):
         project = self.api(PROJECT, {'id': self.project})['project']
+        plan = project.get('subscriptionPlanLimit')
+        self.provider = plan.get('containers', {}) if isinstance(plan, dict) else {}
+        if not isinstance(self.provider, dict):
+            self.provider = {}
         environments = project['environments']
         services = project['services']
         if environments.get('pageInfo', {}).get('hasNextPage') or services.get('pageInfo', {}).get('hasNextPage'):
@@ -155,15 +170,47 @@ class Railway:
             infra.observation(rows, name, 'configured', key, value, state['limits'].get(key))
         return rows
 
+    def provider_rows(self, services):
+        rows, errors = [], []
+        for name in self.targets:
+            desired = services[name].get('deploy', {}).get('resources', {}).get('limits', {})
+            for field, key, scale, unit in (('memoryBytes', 'memory', 1e9, 'GB'), ('cpu', 'cpus', 1, 'vCPU')):
+                cap = self.provider.get(field)
+                known = positive_number(cap) and (key != 'memory' or int(cap) == cap)
+                value = desired.get(key)
+                status = 'unknown' if not known else 'match'
+                if not known:
+                    errors.append(f'{name}: Railway provider {key} cap is unknown; no settings applied.')
+                elif value is not None and float(value) > cap:
+                    status = 'drift'
+                    errors.append(f'{name}: requested {float(value) / scale:g} {unit} exceeds Railway provider cap '
+                                  f'{cap / scale:g} {unit}; use --overrides to lower {key}. No settings applied.')
+                rows.append({'service': name, 'scope': 'provider_cap', 'setting': key,
+                             'expected': value, 'observed': (str(int(cap)) if key == 'memory' else str(cap))
+                             if known else None, 'status': status})
+            for field in ('volumeIopsLimit', 'volumeBpsLimit'):
+                cap = self.provider.get(field)
+                rows.append({'service': name, 'scope': 'provider_volume', 'setting': field,
+                             'expected': None, 'observed': cap if positive_number(cap) else None,
+                             'status': 'info'})
+        return rows, errors
+
     def preview(self, services):
-        rows = []
+        rows, errors = self.provider_rows(services)
         for name in self.targets:
             rows.extend(self.configured_rows(name, services[name], self.configured(name)))
-        return infra.report(rows)
+        result = infra.report(rows)
+        if errors:
+            result['errors'] = errors
+        return result
 
     def apply(self, services):
+        _, errors = self.provider_rows(services)
+        if errors:
+            raise ProviderCapError('\n'.join(errors))
+        states = {name: self.configured(name) for name in self.targets}
         for name in self.targets:
-            spec, state = services[name], self.configured(name)
+            spec, state = services[name], states[name]
             for key, value in spec.get('environment', {}).items():
                 if state['environment'].get(key) != value:
                     self.run(['variable', 'set', key, '--stdin', '--skip-deploys', *self.flags(name)], stdin=value)
@@ -244,6 +291,9 @@ def main():
         result = adapter.check(services) if args.command == 'check' else adapter.preview(services)
         print(json.dumps(result, indent=2))
         return {'match': 0, 'drift': 1, 'unknown': 2}[result['status']]
+    except ProviderCapError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except (RuntimeError, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired):
         print('Infrastructure request failed; verify the declaration, selectors, authentication and private service access.', file=sys.stderr)
         return 2

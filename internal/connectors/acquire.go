@@ -477,44 +477,60 @@ type submissionResult struct {
 }
 
 // submitConcurrentPage drains in-flight submissions before Run records a
-// failure or commits a checkpoint. A failed page is replayed with the same
-// idempotency keys. Repeated Record Keys retain serial ordering even for an
-// internal connector; plugin pages already reject duplicates at admission.
+// failure or commits a checkpoint. Opted-in pages submit each record's items
+// in source order; only independent records may run concurrently. Legacy
+// internal pages with repeated keys retain whole-page serial submission.
 func (a Acquirer) submitConcurrentPage(ctx context.Context, org string, rc runContext, page Page) []submissionResult {
 	workers := min(page.SubmissionConcurrency, MaxSubmissionConcurrency, len(page.Items))
 	if workers <= 1 {
 		return nil
 	}
-	seen := make(map[string]bool, len(page.Items))
-	for _, item := range page.Items {
-		if seen[item.RecordKey] {
+	chains := make([][]int, 0, len(page.Items))
+	byKey := make(map[string]int, len(page.Items))
+	for index, item := range page.Items {
+		chain, repeated := byKey[item.RecordKey]
+		if repeated && !page.AllowRepeatedRecordKeys {
 			return nil
 		}
-		seen[item.RecordKey] = true
+		if !repeated {
+			chain = len(chains)
+			byKey[item.RecordKey] = chain
+			chains = append(chains, nil)
+		}
+		chains[chain] = append(chains[chain], index)
 	}
 	results := make([]submissionResult, len(page.Items))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	next, stopped := 0, false
-	for range workers {
+	for range min(workers, len(chains)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for {
 				mu.Lock()
-				if stopped || next == len(page.Items) {
+				if stopped || next == len(chains) {
 					mu.Unlock()
 					return
 				}
-				index := next
+				chain := chains[next]
 				next++
 				mu.Unlock()
-				size, receipt, err := a.submit(ctx, org, rc, page.Items[index])
-				results[index] = submissionResult{size: size, receipt: receipt, err: err}
-				if submissionStopsPage(err) {
+				for _, index := range chain {
 					mu.Lock()
-					stopped = true
+					stop := stopped
 					mu.Unlock()
+					if stop {
+						return
+					}
+					size, receipt, err := a.submit(ctx, org, rc, page.Items[index])
+					results[index] = submissionResult{size: size, receipt: receipt, err: err}
+					if submissionStopsPage(err) {
+						mu.Lock()
+						stopped = true
+						mu.Unlock()
+						return
+					}
 				}
 			}
 		}()

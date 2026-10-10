@@ -533,10 +533,25 @@ def _stage_evidence(report: dict, worker: dict, provider: dict | None) -> dict:
     }
 
 
+def _connector_config(fixture, batch_size, concurrency):
+    config = {**fixture["config"], "batch_size": batch_size}
+    if concurrency is not None:
+        config["concurrency"] = concurrency
+    return config
+
+
+def _acquisition_rates(members, commands, seconds):
+    return {
+        "accepted_members_per_second": round(members / seconds, 2) if seconds else 0,
+        "accepted_commands_per_second": round(commands / seconds, 2) if seconds else 0,
+        "traversed_members_per_second": round(members / seconds, 2) if seconds else 0,
+    }
+
+
 def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | None = None) -> dict:
     directory = stack.directory
     # Fresh bytes prevent repeated runs from measuring verified-Blob cache hits.
-    private = seed(stack, bucket="synthetic-archive-" + run, count=args.items, marker=run)
+    private = seed(stack, bucket="synthetic-archive-" + run, count=args.items, marker=args.source_marker or run, fixture=args.fixture)
     fixture = json.loads(private.read_text())
     token = stack.state["demo"]
     base = f"http://127.0.0.1:{stack.state['api_port']}"
@@ -563,7 +578,7 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
     )["corpus_id"]
     path = "/v0/changes?" + urllib.parse.urlencode({"corpus_id": corpus, "limit": 100})
     cursor = api("GET", path)["next_cursor"]
-    config = {**fixture["config"], "batch_size": args.batch_size, "concurrency": args.concurrency}
+    config = _connector_config(fixture, args.batch_size, args.concurrency)
     before_rollups = _rollup_snapshot(api)
     run_started_wall = _now()
     started = time.monotonic()
@@ -592,7 +607,9 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
     accepted_events = set()
     samples = []
     expected = fixture["members_total"]
-    expected_records = expected - 1
+    expected_records = fixture["expected"]["unique_records"]
+    expected_commands = fixture["expected"]["unique_commands"]
+    acquisition_only = args.fixture == "corrections"
     health = {}
     failure = None
     try:
@@ -623,7 +640,7 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
                 if not page["has_more"]:
                     break
             elapsed = time.monotonic() - started
-            if accepted_at is None and done == expected and len(accepted_events) == expected:
+            if accepted_at is None and done == expected and len(accepted_events) == expected_commands:
                 accepted_at = elapsed
             if materialized_at is None and len(seen_materialized) >= expected_records:
                 materialized_at = elapsed
@@ -643,7 +660,7 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
             )
             if health.get("last_error"):
                 raise RuntimeError("Archive measurement source failure: " + health["last_error"]["code"])
-            if accepted_at is not None and ready_at is not None and enriched_at is not None:
+            if accepted_at is not None and (acquisition_only or (ready_at is not None and enriched_at is not None)):
                 break
             time.sleep(0.2)
     except Exception as error:
@@ -672,7 +689,7 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
         bottleneck = "acquisition: source reading, Upload Session transfer/verification and durable submission; compare concurrency runs"
     elif ready_at is not None and accepted_at is not None and ready_at > accepted_at:
         bottleneck = "processing after durable acceptance: normalization, segmentation and search publication"
-    status = "complete" if accepted_at and ready_at and enriched_at else "timed_out"
+    status = "complete" if accepted_at and (acquisition_only or (ready_at and enriched_at)) else "timed_out"
     if failure:
         status = "failed"
     report = {
@@ -680,28 +697,33 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
         "corpus_id": corpus,
         "connector_id": connector,
         "run_id": run,
-        "fresh_source_bytes": True,
-        "source_marker": run,
+        "fresh_source_bytes": args.source_marker is None,
+        "source_marker": args.source_marker or run,
         "source_fixture_path": str(private.resolve()),
         "members": expected,
         "unique_records": expected_records,
         "batch_size": args.batch_size,
-        "concurrency": args.concurrency,
+        "concurrency": config.get("concurrency", 1),
+        "requested_concurrency": args.concurrency,
         "timeout_seconds": args.timeout,
         "workload": {
             "kind": "synthetic object-storage archive",
-            "requested_filler_members": args.items,
-            "revision_members": 3,
+            "fixture": args.fixture,
+            "requested_items": args.items,
+            "archive_sha256": fixture["archive_sha256"],
+            "expected": fixture["expected"],
             "members": expected,
             "unique_records": expected_records,
-            "source_bytes_unique_per_run": True,
-            "source_marker": run,
+            "source_bytes_unique_per_run": args.source_marker is None,
+            "comparison_policy": "Use isolated stacks or Organizations with identical source_marker for a cold before/after comparison; same-Organization repeats may reuse verified Blobs.",
+            "source_marker": args.source_marker or run,
         },
         "hardware": _hardware_metadata(),
         "accepted_seconds": accepted_at,
         "searchable_seconds": ready_at,
         "enriched_seconds": enriched_at,
-        "accepted_members_per_second": round(accepted_rate, 2),
+        **_acquisition_rates(expected, expected_commands, accepted_at),
+        "expected_unique_commands": expected_commands,
         "searchable_records_per_second": round(ready_rate, 2),
         "enriched_records_per_second": round(enriched_rate, 2),
         "finish_times_seconds": {
@@ -716,10 +738,12 @@ def _measure_archive(args, stack: Stack, run: str, provider_log: pathlib.Path | 
         "enriched_records": len(seen_enriched),
         "public_event_contract": {
             "accepted": "record.accepted",
+            "accepted_members_per_second": "legacy alias for traversed_members_per_second; includes replayed source members",
             "materialized": "record.materialized",
             "searchable": "record.retrieval_ready",
             "enriched": "record.enrichment_available",
-            "enrichment_required_before_finish": True,
+            "enrichment_required_before_finish": not acquisition_only,
+            "readiness_milestones": "informational record-level events; do not establish final-version readiness" if acquisition_only else "required record-level events",
             "currentness_and_replay_oracle": "owned by the public API and archive acceptance tests; this measurement only counts public events",
         },
         "target_accepted_members_per_second": 50,
@@ -882,13 +906,17 @@ def _run_hosted_fake(args, stack: Stack, run: str) -> dict:
     return measurement
 
 
-def main(argv=None):
+def _arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack", required=True, help="Running local stack name under .scratch/")
     parser.add_argument("--hosted-fake", action="store_true", help="Measure hosted.embed through the loopback fake")
     parser.add_argument("--items", type=int, default=None, help="Synthetic unique filler members, plus three revisions")
     parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--concurrency", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=None,
+                        help="Explicit 1..32 override; omitted uses the plugin default (32 with --hosted-fake)")
+    parser.add_argument("--fixture", choices=("simple", "corrections"), default="simple",
+                        help="simple: items plus three revisions; corrections: items total across 31 keys, including replay and older position")
+    parser.add_argument("--source-marker", help="Fixed payload seed for identical bytes on isolated before/after stacks")
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--provider-latency-ms", type=int, default=500)
     parser.add_argument(
@@ -906,25 +934,32 @@ def main(argv=None):
     hosted_defaults = args.hosted_fake
     args.items = 5000 if args.items is None else args.items
     args.batch_size = (500 if hosted_defaults else 100) if args.batch_size is None else args.batch_size
-    args.concurrency = (32 if hosted_defaults else 8) if args.concurrency is None else args.concurrency
+    args.concurrency = 32 if hosted_defaults and args.concurrency is None else args.concurrency
     args.timeout = (1200 if hosted_defaults else 600) if args.timeout is None else args.timeout
     if (
         not re.fullmatch(r"[a-z0-9-]+", args.stack)
         or args.items < 1
         or not 1 <= args.batch_size <= 1000
-        or not 1 <= args.concurrency <= 32
+        or (args.concurrency is not None and not 1 <= args.concurrency <= 32)
+        or (args.fixture == "corrections" and args.items < 4)
+        or (args.source_marker is not None and not re.fullmatch(r"[a-zA-Z0-9-]{1,64}", args.source_marker))
         or args.timeout < 1
         or args.provider_latency_ms < 0
         or args.batch_wait_ms is not None
         and not 0 <= args.batch_wait_ms <= 100
     ):
         parser.error("invalid stack, item count, batch size, concurrency, timeout, provider latency or batch wait")
+    return args
+
+
+def main(argv=None):
+    args = _arguments(argv)
     directory = pathlib.Path(__file__).resolve().parents[1] / ".scratch" / args.stack
     if not (directory / "config.json").exists():
-        parser.error("start the named local stack first")
+        raise SystemExit("start the named local stack first")
     stack = Stack(args.stack)
     if args.hosted_fake and not _running(stack):
-        parser.error("the named local stack must be running")
+        raise SystemExit("the named local stack must be running")
     run = uuid.uuid4().hex[:12]
     if args.hosted_fake:
         return _run_hosted_fake(args, stack, run)

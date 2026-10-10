@@ -1,24 +1,30 @@
 """Public CLI/lifecycle coverage for the archive measurement modes.
 
-The tests own two contracts: the normal command keeps its historical defaults,
-and the hosted-fake command performs one measurement while restoring the local
-stack even when that measurement cannot start. External helpers are fakes; the
+The tests own the public defaults and fixture counts, and the hosted-fake
+command performing one measurement while restoring the local stack even when
+that measurement cannot start. External helpers are fakes; the
 tests observe the report and stack lifecycle rather than helper call shapes.
 """
 
 import contextlib
+import hashlib
+import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import types
 import unittest
 from unittest import mock
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, unquote
+from unittest.mock import patch
 
 import measure_archive
+import archive_source
 
 
 class Startup(unittest.TestCase):
@@ -128,12 +134,14 @@ class MeasureArchiveCLITest(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def _seed(self, stack, bucket, count, marker):
+    def _seed(self, stack, bucket, count, marker, fixture="simple"):
         path = stack.directory / "archive-source.json"
         path.write_text(json.dumps({
             "config": {"bucket": bucket, "media_type": "text/plain"},
             "credential": {"access_key_id": "fixture-access", "secret_access_key": "fixture-secret"},
             "members_total": 2,
+            "expected": {"unique_records": 1, "unique_commands": 2},
+            "archive_sha256": {},
         }) + "\n")
         return path
 
@@ -184,12 +192,13 @@ class MeasureArchiveCLITest(unittest.TestCase):
                 stack_context.enter_context(patcher)
             return measure_archive.main(argv)
 
-    def test_base_cli_keeps_existing_measurement_defaults(self):
+    def test_base_cli_keeps_plugin_default_concurrency(self):
         report = self._run(["--stack", "demo", "--items", "2"], _ArchiveAPI())
 
         self.assertEqual(report["status"], "complete")
         self.assertEqual(report["batch_size"], 100)
-        self.assertEqual(report["concurrency"], 8)
+        self.assertEqual(report["concurrency"], 1)
+        self.assertIsNone(report["requested_concurrency"])
         self.assertEqual(report["timeout_seconds"], 600)
         self.assertNotIn("hosted_fake", report)
 
@@ -220,6 +229,61 @@ class MeasureArchiveCLITest(unittest.TestCase):
             self.assertEqual(path.read_text(), value)
             self.assertEqual(path.stat().st_mode & 0o777, self.modes[name])
         self.assertEqual(self.stack.events, ["stop", "start", "stop", "start"])
+
+
+class ArchiveMeasurement(unittest.TestCase):
+    def test_omitted_and_explicit_concurrency(self):
+        fixture = {'config': {'bucket': 'example-archives', 'prefix': 'inbox/'}}
+        for value in (None, 1, 8):
+            with self.subTest(concurrency=value):
+                argv = ['--stack', 'local', '--fixture', 'corrections', '--items', '2000']
+                if value is not None:
+                    argv += ['--concurrency', str(value)]
+                args = measure_archive._arguments(argv)
+                config = measure_archive._connector_config(fixture, args.batch_size, args.concurrency)
+                expected = {'bucket': 'example-archives', 'prefix': 'inbox/', 'batch_size': 100}
+                if value is not None:
+                    expected['concurrency'] = value
+                self.assertEqual(config, expected)
+
+    def test_rate_labels_preserve_members_and_distinguish_unique_commands(self):
+        self.assertEqual(measure_archive._acquisition_rates(4, 3, 2), {
+            'accepted_members_per_second': 2.0,
+            'accepted_commands_per_second': 1.5,
+            'traversed_members_per_second': 2.0})
+        self.assertEqual(measure_archive._acquisition_rates(4, 3, None), {
+            'accepted_members_per_second': 0,
+            'accepted_commands_per_second': 0,
+            'traversed_members_per_second': 0})
+
+    def test_corrections_fixture_expected_commands_and_positions(self):
+        # Exercise the seeder's actual compressed source bytes. Only S3 is faked;
+        # an independent archive reader counts identities rather than trusting
+        # a count produced by the fixture builder.
+        with tempfile.TemporaryDirectory() as directory:
+            stack = types.SimpleNamespace(directory=pathlib.Path(directory))
+            (stack.directory / 'config.json').write_text(json.dumps({'s3': {
+                'endpoint': 'http://storage.example', 'access_key': 'synthetic-reader',
+                'secret_key': 'synthetic-secret'}}))
+            uploads = []
+            with patch('archive_source.s3_request', side_effect=lambda *args: uploads.append(args)):
+                private = archive_source.seed(stack, count=6, marker='fixed', fixture='corrections')
+            fixture = json.loads(private.read_text())
+            body = uploads[-1][-1]
+            with tarfile.open(fileobj=io.BytesIO(body), mode='r:gz') as archive:
+                members = [(unquote(m.name), archive.extractfile(m).read()) for m in archive]
+            self.assertEqual(len(members), 6)
+            self.assertEqual(members[0], members[-2])
+            self.assertTrue(all(len(data) == 30 << 10 for _, data in members))
+            commands = {(name, hashlib.sha256(data).hexdigest()) for name, data in members}
+            self.assertEqual(len(commands), 5)
+            self.assertEqual(fixture['expected'], {
+                'unique_commands': 5, 'unique_records': 4,
+                'current_positions': {'STORY0': '1', 'STORY1': '2', 'STORY2': '3', 'STORY3': '4'},
+                'versions_per_key': {'STORY0': 2, 'STORY1': 1, 'STORY2': 1, 'STORY3': 1}})
+            self.assertEqual(fixture['members_total'], 6)
+            self.assertEqual(fixture['archive_sha256']['2026-01.tar.gz'], hashlib.sha256(body).hexdigest())
+            self.assertEqual(re.search(r'-([0-9]+)\.xml$', members[-1][0]).group(1), '0')
 
 
 if __name__ == "__main__":

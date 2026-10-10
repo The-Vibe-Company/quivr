@@ -276,7 +276,7 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 
 ## Search index compression
 
-`vector_index` sets how Weaviate stores each vector space's vectors. Every space uses an HNSW index. `quantization` is `rq-8` (the default, 8-bit rotational quantization), `rq-1` (1-bit, the smallest) or `none` (full precision). A compressed index keeps the full-precision vectors on disk and rescores its best candidates with them. `rescore_limit` sets how many candidates are rescored; omitted or `0`, it keeps Weaviate's default (20 at 8 bits, 512 at 1 bit). `vector_index.spaces` overrides the setting for one space, by its declared id or its full `<id>@<version>` key. An omitted field of an override takes the deployment's value; an override to `none` drops the deployment's `rescore_limit`. An invalid value, or a `rescore_limit` with `none`, refuses startup.
+`vector_index` sets how Weaviate stores each vector space's vectors. Every space uses an HNSW index. `quantization` is `rq-8` (the default, 8-bit rotational quantization), `rq-1` (1-bit, the smallest) or `none` (full precision). A compressed index keeps the full-precision vectors on disk and rescores its best candidates with them. `rescore_limit` sets the minimum number of candidates to fetch for full-precision rescoring. With RQ-8, omitted or `0` disables rescoring to avoid extra disk reads; a positive value enables it. With RQ-1, omitted or `0` keeps Weaviate's default of 512. `vector_index.spaces` overrides the setting for one space, by its declared id or its full `<id>@<version>` key. An omitted field of an override takes the deployment's value; an override to `none` drops the deployment's `rescore_limit`. An invalid value, or a `rescore_limit` with `none`, refuses startup.
 
 ```json
 {
@@ -289,7 +289,7 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 }
 ```
 
-The setting is part of each generation. A change never alters an existing index: it applies to new Corpora, and to an existing Corpus once you rebuild it. Start the rebuild with `POST /v0/corpora/{corpus_id}/rebuilds` and a body containing a new `idempotency_key`, using a key with `projections:rebuild`. Follow the returned Operation with `GET /v0/operations/{operation_id}`, using `operations:read`. The Corpus keeps serving its previous generation until the rebuild activates.
+The setting is part of each generation. Changing the recorded setting applies to new Corpora, and to an existing Corpus once you rebuild it. The zero RQ-8 default is reconciled in place on existing compressed indexes: the deployment schema bootstrap (`quivr migrate`) updates the built-in legacy vector, and the first search or vector write using a generation updates its named vectors (the separate indexes for its spaces). No rebuild is needed for that default update; explicit positive limits and RQ-1 settings are preserved. Start the rebuild with `POST /v0/corpora/{corpus_id}/rebuilds` and a body containing a new `idempotency_key`, using a key with `projections:rebuild`. Follow the returned Operation with `GET /v0/operations/{operation_id}`, using `operations:read`. The Corpus keeps serving its previous generation until the rebuild activates.
 
 ## Webhook destinations
 

@@ -96,11 +96,11 @@ then apply and redeploy; avoid a separate set of hand-edited service variables:
 | Variable | Purpose |
 | --- | --- |
 | `RAFT_BOOTSTRAP_TIMEOUT` | Seconds allowed to bootstrap/rejoin while loading the database. The pinned 1.39.10 default is **600 s**; increase it if index loading needs longer, and allow the deployment's startup deadline to cover it. |
-| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Choose about 80–90% of the service memory to leave headroom; this does not bound total RSS or make an oversized index fit. |
+| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Budget the Go runtime separately from index file cache: the large profile uses `16GiB` within 64 GB. This does not bound total RSS. |
 
 The [pinned configuration source](https://github.com/weaviate/weaviate/blob/v1.39.10/usecases/config/environment.go)
 still honors deprecated `HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE`; leave it unset so
-shard loading determines prefill behavior. `ASYNC_INDEXING_BATCH_SIZE` was removed.
+shard loading determines prefill behavior. Startup prefill does not keep BM25 and object pages resident after idle periods. The [shared memory profile](../infrastructure.md#profiles) reserves file-cache room; verify RAM and random-read IOPS for your data. `ASYNC_INDEXING_BATCH_SIZE` was removed.
 The 1.38–1.39 release-note review found no required Quivr schema migration:
 1.39.1's auto-schema named-vector default does not apply because Quivr disables
 auto-schema and declares named vectors explicitly. See [memory sizing](https://docs.weaviate.io/weaviate/concepts/resources).
@@ -147,6 +147,7 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 `observability:read` and `queues:read`; the web app never gets administration or queue grants. Use it from inside the deployment
 (`railway ssh --service api`, port 8080) to rebuild a Corpus projection, to follow documents through
 their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role. `QUIVR_DEMO_CORE_INGEST=0` on api, worker and worker-bulk drops the E5 `core.ingest` plugin: set it only after every Corpus has been rebuilt onto the hosted space and `core.ingest` pinned work has drained to zero, since generations still serving E5 need it for semantic queries. `QUIVR_REBUILD_CONCURRENCY` on worker sets how many Versions a rebuild step covers in parallel (1–256, default 8); raise it when a large Corpus rebuild is slow while PostgreSQL and Weaviate stay idle.
+`QUIVR_CONNECTOR_MIN_INTERVAL` sets the connector polling floor (positive Go duration, default `30s`); set the same value, for example `10s`, on api and every worker (including worker-bulk). Invalid values fail startup.
 `QUIVR_QUEUE_KEY` adds a distinct, read-only queue key for the [autoscaler](autoscaler/README.md). `QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read`, which turns on the web app's read-only **Admin** tab (live flow of documents, timelines, throughput).
 
 ## Core plugins and the rebuild after THE-777

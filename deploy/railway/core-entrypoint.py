@@ -300,6 +300,11 @@ def build_config(env):
     # address (x_list webhook mode); without it they only poll.
     if env.get('QUIVR_PUBLIC_URL', '').strip():
         config['public_url'] = env['QUIVR_PUBLIC_URL'].strip()
+    if 'QUIVR_CONNECTOR_MIN_INTERVAL' in env:
+        interval = env['QUIVR_CONNECTOR_MIN_INTERVAL'].strip()
+        if not interval:
+            raise ValueError('QUIVR_CONNECTOR_MIN_INTERVAL must be a positive duration')
+        config['connector_min_interval'] = interval  # The engine validates Go durations.
     # Optional: Versions a rebuild step covers in parallel (1-256, engine default 8).
     concurrency = env.get('QUIVR_REBUILD_CONCURRENCY', '').strip()
     if concurrency:
