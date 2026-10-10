@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.request
 import uuid
+import ci_dependencies
 import connector_plugin
 import demo_perf
 import fake_feeds
@@ -41,10 +42,10 @@ def main():
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        run(['npm', 'ci', '--prefix', 'quivr-search'])
+        ci_dependencies.run_dependency(['npm', 'ci', '--prefix', 'quivr-search'])
         run(['npm', 'run', 'build', '--prefix', 'quivr-search'])
         if isolated:
-            run(['quivr-search/node_modules/.bin/playwright', 'install', 'chromium'])
+            ci_dependencies.run_dependency(['quivr-search/node_modules/.bin/playwright', 'install', 'chromium'])
         # The Alertes tab needs the alerts plugin, whatever QUIVR_ALERTS says. Described
         # alerts are judged by the fake System One server in verification, by TypeSafe
         # in `make demo` when TYPESAFE_API_KEY is set, and are not offered otherwise.

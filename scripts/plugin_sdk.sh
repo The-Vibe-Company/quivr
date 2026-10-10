@@ -29,8 +29,31 @@ mkdir -p "$work"
 "$PYTHON" sdks/python/scripts/generate.py --check
 
 test -x "$work/venv/bin/python" || "$PYTHON" -m venv "$work/venv"
-# Pin runtime dependencies to the versions the contract checks already use.
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt -e sdks/python
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  python3 "$root/scripts/ci_dependencies.py" --cwd "$root" -- "$work/venv/bin/pip" install -q \
+    --disable-pip-version-check --require-hashes -r "$root/scripts/ci-requirements-sdk.txt"
+  python3 "$root/scripts/ci_dependencies.py" --cwd "$root" -- "$work/venv/bin/pip" install -q \
+    --disable-pip-version-check --no-deps --no-build-isolation -e "$root/sdks/python"
+else
+  # Pin runtime dependencies to the versions the contract checks already use.
+  "$work/venv/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt -e sdks/python
+fi
+
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  for module in "$root" "$root/plugins/core-ingest"; do
+    python3 "$root/scripts/ci_dependencies.py" --cwd "$module" -- "$GO" mod download
+  done
+  export GOPROXY=off
+fi
+
+install_plugin() {
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    python3 "$root/scripts/ci_dependencies.py" --cwd "$root" -- "$work/venv/bin/pip" install -q \
+      --disable-pip-version-check --no-deps --no-build-isolation -e "$1"
+  else
+    "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e "$1"
+  fi
+}
 "$work/venv/bin/python" -W error::ResourceWarning "$root/scripts/check.py" --unittest sdks/python/tests
 
 "$GO" build -o "$work/quivr" ./cmd/quivr
@@ -136,7 +159,7 @@ echo "quivr plugin test certified the Python static source: $work/python-static-
 # The reference plugin plugins/pdf-text: unit tests (including fixture
 # reproducibility) and Contract Runner certification. CI uploads the report.
 cd "$root/plugins/pdf-text"
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+install_plugin "$PWD"
 python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/pdf-text-inspect.log"
 "$quivr" plugin test --report "$work/pdf-text-contract-report.json" . > "$work/pdf-text-contract.log" 2>&1 || { cat "$work/pdf-text-contract.log"; exit 1; }
@@ -146,7 +169,7 @@ echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-repo
 # NewsML-G2 owns field mapping/safety in its invocation tests; the Contract
 # Runner independently certifies both routed media types and deterministic replay.
 cd "$root/plugins/newsml-g2"
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+install_plugin "$PWD"
 python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/newsml-g2-inspect.log"
 "$quivr" plugin test --fixture fixtures/sample.json --fixture fixtures/message.json --fixture fixtures/multi-item.json --fixture fixtures/oversized-header.json --report "$work/newsml-g2-contract-report.json" . > "$work/newsml-g2-contract.log" 2>&1 || { cat "$work/newsml-g2-contract.log"; exit 1; }
@@ -159,7 +182,7 @@ echo "quivr plugin test certified plugins/newsml-g2: $work/newsml-g2-contract-re
 # evidence, described alerts against the fake System One server), a replayed
 # fixture and Contract Runner certification of both kinds. CI uploads the report.
 cd "$root/plugins/alerts"
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+install_plugin "$PWD"
 python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/alerts-inspect.log"
 "$quivr" plugin dev --fixture fixtures/sample.json > "$work/alerts-response.json" 2> "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
@@ -180,7 +203,7 @@ grep -q "^CERTIFIED" "$work/alerts-contract.log" || { cat "$work/alerts-contract
 echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.json"
 
 cd "$root/plugins/jev-rerank"
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+install_plugin "$PWD"
 python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/jev-rerank-inspect.log"
 env -u TYPESAFE_API_KEY -u TYPESAFE_API_URL "$quivr" plugin test --report "$work/jev-rerank-contract-report.json" . > "$work/jev-rerank-contract.log" 2>&1 || { cat "$work/jev-rerank-contract.log"; exit 1; }

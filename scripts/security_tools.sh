@@ -16,7 +16,7 @@ case "$tool" in
 esac
 archive=$(mktemp)
 trap 'rm -f "$archive"' EXIT
-curl --fail --location --silent --show-error --retry 3 --max-time 180 \
+curl --fail --location --silent --show-error --retry 1 --max-time 180 \
   "https://github.com/anchore/$tool/releases/download/v$version/${tool}_${version}_linux_amd64.tar.gz" \
   --output "$archive"
 if ! printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status; then

@@ -240,11 +240,10 @@ To measure hosted embedding without calling a paid provider, use the loopback
 fake on the same local stack:
 
 ```bash
-python3 scripts/measure_archive_hosted.py --stack demo --items 5000 \
-  --batch-size 500 --concurrency 32 --provider-latency-ms 500
+make measure-archive args='--hosted-fake --stack demo --items 5000 --batch-size 500 --concurrency 32 --provider-latency-ms 500'
 ```
 
-The helper temporarily pins `hosted.embed`, then restores the stack configuration
+The command temporarily pins `hosted.embed`, then restores the stack configuration
 and processes. It records provider batch sizes and latency alongside the archive
 measurement under `.scratch/demo/`. Compare with `--batch-wait-ms 0` to disable
 cross-Version batching, keeping hardware, source settings and fake latency equal.

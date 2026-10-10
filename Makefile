@@ -51,7 +51,7 @@ measure-backfill:
 # outside api restarts (THE-786); not part of verify.
 measure-upgrade:
 	GO=$(GO) python3 scripts/measure_upgrade.py
-# Synthetic archive throughput on an existing stack: make measure-archive args='--stack <name>'. Outside CI.
+# Synthetic archive throughput on an existing stack; add --hosted-fake for loopback provider measurements. Outside CI.
 measure-archive:
 	GO=$(GO) python3 scripts/measure_archive.py $(args)
 # Search quality on public evaluation sets (THE-775, docs/agents/evaluation.md); not part of verify.

@@ -1,0 +1,5 @@
+{
+  "name": "quivr-ci-tools",
+  "private": true,
+  "dependencies": {"mint": "4.2.952"}
+}

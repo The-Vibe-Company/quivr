@@ -24,12 +24,12 @@ func quantiles(samples []time.Duration) (time.Duration, time.Duration) {
 // that it lives in this plugin, loaded once (THE-675, THE-777): its start, the
 // token check of one query, and one embed_query through the SDK up to the
 // point where TEI is called. It only logs: numbers are evidence, not a
-// threshold, so it runs in the measurement lane
-// (.github/workflows/measure-adapters.yml), never in make verify.
+// threshold, so it runs locally with an explicit measurement opt-in,
+// never in make verify.
 func TestTokenizerQueryCost(t *testing.T) {
 	path := os.Getenv("QUIVR_CORE_INGEST_CONFIG")
 	if os.Getenv("QUIVR_MEASURE") == "" || path == "" {
-		t.Skip("measurement: set QUIVR_MEASURE=1 and QUIVR_CORE_INGEST_CONFIG (measure-adapters workflow)")
+		t.Skip("measurement: set QUIVR_MEASURE=1 and QUIVR_CORE_INGEST_CONFIG (local measurement)")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

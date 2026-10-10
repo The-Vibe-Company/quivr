@@ -1,8 +1,8 @@
 name: Release vulnerability scan
-on:
+'on':
   schedule:
-    - cron: '17 4 * * *'
-  workflow_dispatch:
+  - cron: 17 4 * * *
+  workflow_dispatch: null
 permissions:
   contents: read
   packages: read
@@ -17,26 +17,26 @@ jobs:
       matrix: ${{ steps.images.outputs.matrix }}
       release: ${{ steps.images.outputs.release }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-      - id: images
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" | jq 'add // []' > releases.json
-          release=$(python3 scripts/release_scan.py release < releases.json)
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-          if [ -z "$release" ]; then
-            echo 'No completed alpha image release to scan yet.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          gh release download "$release" --repo "$GITHUB_REPOSITORY" --pattern images.txt
-          echo "matrix=$(python3 scripts/release_scan.py matrix --repository "$GITHUB_REPOSITORY" < images.txt)" >> "$GITHUB_OUTPUT"
-          echo "Scanning every immutable image from $release." >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: 3.12.15
+    - id: images
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" | jq 'add // []' > releases.json
+        release=$(python3 scripts/release_scan.py release < releases.json)
+        echo "release=$release" >> "$GITHUB_OUTPUT"
+        if [ -z "$release" ]; then
+          echo 'No completed alpha image release to scan yet.' >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        gh release download "$release" --repo "$GITHUB_REPOSITORY" --pattern images.txt
+        echo "matrix=$(python3 scripts/release_scan.py matrix --repository "$GITHUB_REPOSITORY" < images.txt)" >> "$GITHUB_OUTPUT"
+        echo "Scanning every immutable image from $release." >> "$GITHUB_STEP_SUMMARY"
   scan:
     needs: prepare
     if: needs.prepare.outputs.release != ''
@@ -46,28 +46,34 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install checksum-verified scanner
-        env:
-          TOOLS_DIR: ${{ runner.temp }}/security-tools
-        run: |
-          bash scripts/security_tools.sh grype "$TOOLS_DIR"
-          echo "$TOOLS_DIR" >> "$GITHUB_PATH"
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Reject critical vulnerabilities with an available fix
-        env:
-          IMAGE: ${{ matrix.image }}
-          GRYPE_CHECK_FOR_APP_UPDATE: false
-        run: bash scripts/scan_image.sh "registry:$IMAGE"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: vulnerabilities-${{ matrix.name }}
-          path: vulnerabilities.json
-          if-no-files-found: warn
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Install checksum-verified scanner
+      env:
+        TOOLS_DIR: ${{ runner.temp }}/security-tools
+      run: |
+        bash scripts/security_tools.sh grype "$TOOLS_DIR"
+        echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+    - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Reject critical vulnerabilities with an available fix
+      env:
+        IMAGE: ${{ matrix.image }}
+        GRYPE_CHECK_FOR_APP_UPDATE: false
+      run: bash scripts/scan_image.sh "registry:$IMAGE"
+    - name: Pack bounded failure evidence
+      if: failure()
+      run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: failure()
+      id: failure-artifact
+      with:
+        name: vulnerabilities-${{ matrix.name }}
+        path: ${{ runner.temp }}/failure.tar.gz
+        if-no-files-found: ignore
+        retention-days: 3
+        compression-level: 0

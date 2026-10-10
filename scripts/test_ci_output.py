@@ -235,14 +235,6 @@ class Contract(unittest.TestCase):
             self.assertEqual(report['failures'], [])
 
 
-class Parts(unittest.TestCase):
-    def test_ci_runs_every_part_of_make_verify(self):
-        workflow = (local.ROOT / '.github/workflows/verify.yml').read_text()
-        matrix = re.search(r'^\s+part: \[(.*)\]$', workflow, re.M).group(1)
-        self.assertEqual([p.strip() for p in matrix.split(',')], list(local.parts()) + [local.DEMO])
-        quick = re.search(r'^\s+group: \[(.*)\]$', workflow, re.M).group(1)
-        self.assertEqual([g.strip() for g in quick.split(',')], quickcheck.CI_GROUPS)
-
 
 if __name__ == '__main__':
     unittest.main()

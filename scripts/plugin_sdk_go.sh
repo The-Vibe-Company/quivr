@@ -22,7 +22,25 @@ work="$PWD/.scratch/plugin-sdk"
 mkdir -p "$work"
 
 test -x "$work/venv-go/bin/python" || python3 -m venv "$work/venv-go"
-"$work/venv-go/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt PyYAML
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  python3 "$root/scripts/ci_dependencies.py" --cwd "$root" -- "$work/venv-go/bin/pip" install -q \
+    --disable-pip-version-check --require-hashes -r "$root/scripts/ci-requirements-sdk.txt"
+else
+  "$work/venv-go/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt PyYAML
+fi
+
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  for module in "$root" "$root/sdks/go"; do
+    python3 "$root/scripts/ci_dependencies.py" --cwd "$module" -- "$GO" mod download
+  done
+  for mod in "$root"/plugins/*/go.mod; do
+    [ -e "$mod" ] || continue
+    module=$(dirname "$mod")
+    python3 "$root/scripts/ci_dependencies.py" --cwd "$module" -- "$GO" mod download
+  done
+  export GOPROXY=off
+fi
+
 python3 sdks/go/scripts/sync_schemas.py --check
 (cd sdks/go && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")
 

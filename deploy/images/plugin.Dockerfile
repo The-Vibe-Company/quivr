@@ -26,9 +26,11 @@ USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/plugin"]
 
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-build
+FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS python-build
 WORKDIR /src
 COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
+COPY scripts/ci-constraints.txt /tmp/ci-constraints.txt
+ENV PIP_CONSTRAINT=/tmp/ci-constraints.txt
 COPY sdks/python ./sdks/python
 COPY plugins ./plugins
 ARG PLUGIN
@@ -38,7 +40,7 @@ RUN python -m venv /opt/venv \
  && mkdir /out && cp "plugins/${PLUGIN}/quivr-plugin.yaml" /out/quivr-plugin.yaml \
  && /opt/venv/bin/pip uninstall -y pip setuptools wheel
 
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS tokenizer
+FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS tokenizer
 WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
@@ -47,19 +49,17 @@ RUN python scripts/prepare_tokenizer.py \
  && .scratch/tokenizer/venv/bin/pip uninstall -y pip setuptools wheel
 
 # Hosted models supply their own tokenizer.json through a read-only mount.
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS hosted-tokenizer
+FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS hosted-tokenizer
 COPY third_party/tokenizer/requirements-linux-x86_64.txt /tmp/tokenizer-requirements.txt
 RUN python -m venv /opt/tokenizer \
  && /opt/tokenizer/bin/pip install --no-cache-dir --only-binary=:all: --no-deps --require-hashes -r /tmp/tokenizer-requirements.txt \
  && /opt/tokenizer/bin/pip uninstall -y pip setuptools wheel
 
 # The interpreter is required at runtime; package installers and headers are not.
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-runtime
-# Apply Debian security fixes newer than the pinned interpreter image before
-# removing package managers. Every Python plugin and core-ingest shares this.
-RUN apt-get update \
- && apt-get upgrade -y --no-install-recommends \
- && rm -rf /var/lib/apt/lists/* \
+FROM python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS python-runtime
+# Security fixes come from reviewed base-digest updates. The current vulnerability
+# database still gates every built image; avoid moving apt inputs in required CI.
+RUN rm -rf /var/lib/apt/lists/* \
       /usr/local/lib/python3.12/site-packages/pip* \
       /usr/local/lib/python3.12/site-packages/setuptools* \
       /usr/local/lib/python3.12/site-packages/pkg_resources* \
