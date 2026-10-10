@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/changes"
@@ -417,4 +418,129 @@ func TestStreamCheckpointsInvisiblePositions(t *testing.T) {
 	if got, ok := resumed.next(t); !ok || got.event != "change" || !strings.Contains(got.data, `"id":"visible"`) {
 		t.Fatalf("want next visible change after checkpoint, got %+v", got)
 	}
+}
+
+// Owns stream scheduling at the HTTP boundary. The dependency returns either
+// invisible journal progress or a visible backlog; virtual time proves the
+// query budget without a clock injection hook or wall-clock polling.
+func TestStreamPacesEmptyReadsAndDrainsVisibleBacklog(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		behind bool
+		delay  time.Duration
+	}{
+		{"behind", true, 0},
+		{"caught up", false, 0},
+		{"slow caught up", false, 500 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				journal := &pacedJournal{behind: tc.behind, delay: tc.delay}
+				key := []byte("cursor-key-0123456789abcdef0123456789")
+				scope := corpus.Scope{Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}}
+				feed := changes.Service{Journal: journal, Key: key}
+				handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{feedReader: scope}, key, httpapi.WithChanges(feed, 250*time.Millisecond))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				req := httptest.NewRequest("GET", "/v0/changes/stream?corpus_id=corpus_a", nil).WithContext(ctx)
+				req.Header.Set("Authorization", "Bearer "+feedReader)
+				response := httptest.NewRecorder()
+				done := make(chan struct{})
+				go func() { defer close(done); handler.ServeHTTP(response, req) }()
+				// At most four reads per virtual second after the initial read.
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				reads, _, _ := journal.snapshot()
+				if len(reads) < 2 || len(reads) > 9 {
+					t.Fatalf("empty stream made %d reads in 2s of virtual time, want 2..9", len(reads))
+				}
+				for i := 1; i < len(reads); i++ {
+					if gap := reads[i].Sub(reads[i-1]); gap < 250*time.Millisecond+tc.delay {
+						t.Fatalf("empty read gap %s, want at least poll+read delay %s", gap, 250*time.Millisecond+tc.delay)
+					}
+				}
+				// Finish any slow read, then make the next read find 201 visible
+				// events. Three pages must drain at the same virtual instant.
+				journal.mu.Lock()
+				journal.delay, journal.visible = 0, 201
+				journal.mu.Unlock()
+				time.Sleep(time.Second)
+				synctest.Wait()
+				_, visibleReads, remaining := journal.snapshot()
+				if remaining != 0 || len(visibleReads) != 3 ||
+					!visibleReads[0].Equal(visibleReads[1]) || !visibleReads[1].Equal(visibleReads[2]) {
+					t.Fatalf("visible backlog did not drain immediately: remaining=%d page times=%v", remaining, visibleReads)
+				}
+				cancel()
+				synctest.Wait()
+				select {
+				case <-done:
+				default:
+					t.Fatal("stream did not stop when canceled during the poll wait")
+				}
+				if response.Code != 200 || !strings.Contains(response.Body.String(), "event: checkpoint") ||
+					strings.Count(response.Body.String(), "event: change\n") != 201 {
+					t.Fatalf("stream must checkpoint and deliver 201 changes: status=%d body=%s", response.Code, response.Body.String())
+				}
+			})
+		})
+	}
+}
+
+type pacedJournal struct {
+	mu                  sync.Mutex
+	behind              bool
+	delay               time.Duration
+	reads, visibleReads []time.Time
+	visible             int
+}
+
+func (j *pacedJournal) snapshot() (reads, visibleReads []time.Time, remaining int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return append([]time.Time(nil), j.reads...), append([]time.Time(nil), j.visibleReads...), j.visible
+}
+
+func (j *pacedJournal) ReadChanges(ctx context.Context, _, corpusID string, after int64, limit int, _ time.Duration) (changes.Window, error) {
+	if limit == 0 {
+		return changes.Window{}, nil
+	}
+	j.mu.Lock()
+	count, delay := len(j.reads), j.delay
+	j.mu.Unlock()
+	if count > 20 {
+		return changes.Window{}, errors.New("stream exceeded the fake dependency's query budget")
+	}
+	timer := time.NewTimer(delay) // Runs only inside synctest's fake clock.
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return changes.Window{}, ctx.Err()
+	case <-timer.C:
+	}
+	if err := ctx.Err(); err != nil {
+		return changes.Window{}, err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.reads = append(j.reads, time.Now())
+	if j.visible > 0 {
+		j.visibleReads = append(j.visibleReads, time.Now())
+		w := changes.Window{Head: after + int64(j.visible)}
+		for range min(limit, j.visible) {
+			after++
+			w.Events = append(w.Events, changes.Event{Position: after, CorpusID: corpusID, Type: "record.accepted"})
+			j.visible--
+		}
+		w.Through = after
+		return w, nil
+	}
+	w := changes.Window{Through: after + 1000, Head: after + 1000}
+	if j.behind {
+		w.Head += 10000
+	}
+	return w, nil
 }

@@ -166,6 +166,8 @@ Each item is a full change event; the `jq` filter above prints only its type and
 - `limit` sets the page size, from 1 to 100 (the default).
 - Each item also carries its own `cursor`, to resume right after that item.
 
+Each read looks up this collection's notices directly. Changes in other collections do not add extra pages to read.
+
 The [poll reference](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) lists every parameter.
 
 ## Update your copy
@@ -381,6 +383,8 @@ Other notices concern alerts and collectors: `saved_query.*`, `subscription.*`, 
 ## Stream changes live
 
 `GET /v0/changes/stream` sends the same notices as they happen, over one long HTTP response in the [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) format. It replaces polling, not the rest of this page. To see a notice arrive, withdraw the article:
+
+The stream waits between reads with no notices for your collection, even while other collections change. The default wait is 250 ms, set by the operator with `change_stream_poll` ([configuration](/reference/configuration)). Pages with more notices for your collection are sent without that wait.
 
 {/* runnable */}
 ```bash

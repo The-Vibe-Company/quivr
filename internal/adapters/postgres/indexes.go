@@ -19,6 +19,7 @@ var concurrentIndexes = []struct {
 	Columns     []string
 	Predicate   string
 }{
+	{Name: "change_events_by_corpus", Table: "change_events", Columns: []string{"organization", "corpus_id", "sequence"}},
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
 	{Name: "projection_purges_cleanup_due", Table: "projection_purges", Columns: []string{"noticed_at"}, Predicate: "((purged_at IS NULL) OR (cleanup_stage < 3))"},
 	{Name: "queue_enrichment_pending", Table: "queue_enrichment_records", Columns: []string{"organization", "version_id"}, Predicate: "pending"},
