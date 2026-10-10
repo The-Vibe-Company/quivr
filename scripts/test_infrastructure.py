@@ -72,26 +72,24 @@ class Infrastructure(unittest.TestCase):
 
     def test_profiles_and_literal_overrides_reach_the_launch_model(self):
         small = infra.resolve()
-        self.assertEqual(small['index-warmup']['environment'], {
-            'QUIVR_INDEX_WARMUP_INTERVAL': '60s',
-            'QUIVR_INDEX_WARMUP_REQUEST_TIMEOUT': '30s',
-            'QUIVR_INDEX_WARMUP_PASS_TIMEOUT': '120s'})
+        self.assertEqual(small['weaviate']['environment']['GOMEMLIMIT'], '1700MiB')
+        self.assertEqual(small['weaviate']['deploy']['resources']['limits']['memory'], '2147483648')
         self.assertEqual(small['weaviate']['environment']['ASYNC_INDEXING'], 'false')
         self.assertEqual(small['postgres']['environment']['QUIVR_POSTGRES_RANDOM_PAGE_COST'], '1.1')
         large = infra.resolve('large')
-        self.assertEqual(infra.compose_model(large)['services']['index-warmup']['environment']
-                         ['QUIVR_INDEX_WARMUP_INTERVAL'], '60s')
-        from deploy.railway.provision import load_services
-        self.assertEqual(load_services('large')['index-warmup']['variables']
-                         ['QUIVR_INDEX_WARMUP_PASS_TIMEOUT'], '120s')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_MAX_CONNECTIONS'], '500')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_SHARED_BUFFERS'], '10GB')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_JIT'], 'on')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_SYNCHRONOUS_COMMIT'], 'on')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_VOLUME_MB'], '476837')
         self.assertEqual(large['postgres']['x-quivr-storage-budget-bytes'], '500000000000')
-        self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '27GiB')
-        self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '32000000000', 'cpus': '32'})
+        self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '16GiB')
+        self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '64000000000', 'cpus': '32'})
+        from deploy.railway.provision import load_services
+        for model in (infra.compose_model(large)['services']['weaviate'], load_services('large')['weaviate']):
+            self.assertEqual(model.get('environment', model.get('variables'))['GOMEMLIMIT'], '16GiB')
+            self.assertEqual(model.get('limits', model.get('deploy', {}).get('resources', {}).get('limits'))
+                             ['memory'], '64000000000')
         self.assertEqual(large['autoscaler']['environment']['QUIVR_AUTOSCALER_MIN'], '1')
         self.assertEqual(large['weaviate']['environment']['ASYNC_INDEXING'], 'true')
         self.assertEqual(large['weaviate']['environment']['PERSISTENCE_MEMTABLES_MAX_SIZE_MB'], '1024')
@@ -109,14 +107,6 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(model['services']['weaviate']['environment']['GOMEMLIMIT'], '3500MiB')
             self.assertEqual(model['services']['weaviate']['deploy']['resources']['limits']['memory'], '4294967296')
             self.assertEqual(model['services']['postgres']['environment']['QUIVR_POSTGRES_RANDOM_PAGE_COST'], '1.1')
-            override.write_text('''{"services":{"index-warmup":{"environment":{"QUIVR_INDEX_WARMUP_INTERVAL":"15s"}}}}''')
-            self.assertEqual(infra.resolve(overrides=override)['index-warmup']['environment']
-                             ['QUIVR_INDEX_WARMUP_INTERVAL'], '15s')
-            for invalid in ('0s', '-1s', '3601s', '60', 'secret-value'):
-                override.write_text(json.dumps({'services': {'index-warmup': {'environment': {
-                    'QUIVR_INDEX_WARMUP_INTERVAL': invalid}}}}))
-                with self.assertRaisesRegex(ValueError, 'invalid infrastructure value'):
-                    infra.resolve(overrides=override)
             override.write_text('{"services":{"weaviate":{"environment":{"API_KEY":"private"}}}}')
             with self.assertRaisesRegex(ValueError, 'unsupported infrastructure setting'):
                 infra.resolve(overrides=override)
@@ -378,7 +368,7 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(environment['QUIVR_DB_PASSWORD'], 'fixture-password')
             self.assertEqual(environment['QUIVR_LOCAL_ROOT'], str(project))
             self.assertEqual(environment['QUIVR_MODEL_ROOT'], str(root / '.scratch/e5-model'))
-            self.assertEqual(run.call_args.args[0][-5:], ['up', '-d', 'postgres', 'weaviate', 'index-warmup'])
+            self.assertEqual(run.call_args.args[0][-4:], ['up', '-d', 'postgres', 'weaviate'])
             with patch.object(compose_module.infra, 'ROOT', root):
                 with self.assertRaisesRegex(RuntimeError, 'local project state'):
                     Compose('missing', run=run).apply(root / 'overlay.json')

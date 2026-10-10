@@ -144,12 +144,6 @@ class Railway:
             infra.observation(rows, name, 'configured', 'dockerfile', expected,
                               actual if actual in (None, expected) else '<other>')
             infra.observation(rows, name, 'configured', 'image_source_cleared', True, not state.get('image'))
-        if name == 'index-warmup':
-            expected = 'deploy/railway/index-warmup.Dockerfile'
-            actual = state.get('dockerfile')
-            infra.observation(rows, name, 'configured', 'dockerfile', expected,
-                              actual if actual in (None, expected) else '<other>')
-            infra.observation(rows, name, 'configured', 'image_source_cleared', True, not state.get('image'))
         if name == 'weaviate' and spec.get('image'):
             actual = state.get('image')
             if actual and not isinstance(actual, str):
@@ -186,11 +180,6 @@ class Railway:
             if name == 'weaviate' and state.get('image') != spec.get('image'):
                 self.api(UPDATE, {'serviceId': self.targets[name], 'environmentId': self.environment,
                                   'input': {'source': {'image': spec['image']}}})
-            if name == 'index-warmup' and (state.get('dockerfile') != 'deploy/railway/index-warmup.Dockerfile'
-                                         or state.get('image')):
-                self.api(UPDATE, {'serviceId': self.targets[name], 'environmentId': self.environment,
-                                  'input': {'dockerfilePath': 'deploy/railway/index-warmup.Dockerfile',
-                                            'source': {'image': None}}})
 
     def initialize_monitoring(self):
         if 'postgres' not in self.targets:

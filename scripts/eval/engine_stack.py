@@ -36,8 +36,7 @@ def lineage():
                                     os.environ.get('QUIVR_INFRASTRUCTURE_OVERRIDES'), os.environ)
     model = json.loads((ROOT / 'third_party/e5/model-lock.json').read_text())
     return {'services': {name: (shared[name] if name in shared else value)['image']
-                         for name, value in compose['services'].items()
-                         if 'image' in (shared[name] if name in shared else value)},
+                         for name, value in compose['services'].items()},
             'model_revision': model['model_revision'],
             'tokenizer_sha256': model['files']['tokenizer.json'],
             'go_version': next(line.split()[1] for line in (ROOT / 'go.mod').read_text().splitlines()

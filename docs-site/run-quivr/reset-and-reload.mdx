@@ -30,7 +30,7 @@ A Corpus may select an existing `retrieval_profile` by name at creation. Apply r
 
 Optional `plugins` entries contain `idempotency_key`, `endpoint`, `manifest_file`, and nonsecret `configuration`. They accept `fixture_files` (fixture name to local path), `routes`, `kinds` and `spaces` from the [public registration API](/api-reference/overview). Manifests and fixtures resolve beside the declaration. Conflicting declared plugin roles are refused before writes; a changed registration needs a new key. Plugin host secrets stay in the host environment.
 
-Copy either [the Compose installation example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.compose.json) or [the Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.railway.json). Set your deployment name and selectors. `dedicated: true` asserts exclusive use of all four selected data volumes. Compose verifies project/service volume labels and refuses additional container attachments. Railway also verifies that no other environment attaches them; it refuses incomplete or unreadable ownership checks. Declare every Railway service with a supported role, including `autoscaler` and `index-warmup` when present. The `index-warmup` role selects the companion that keeps Weaviate ready for search; its value is your Railway service name or ID.
+Copy either [the Compose installation example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.compose.json) or [the Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.railway.json). Set your deployment name and selectors. `dedicated: true` asserts exclusive use of all four selected data volumes. Compose verifies project/service volume labels and refuses additional container attachments. Railway also verifies that no other environment attaches them; it refuses incomplete or unreadable ownership checks. Declare every Railway service with a supported role, including `autoscaler` when present.
 
 ### 2. Preview and reset
 
@@ -48,8 +48,6 @@ python3 deploy/reset.py -f /private/installation.json \
 ```
 
 Both confirmation inputs are required. Reset stops writers, terminates running workflows, replaces the four data volumes, applies startup migrations and restarts writers. Compose reports deleted volumes and storage counts. Railway restores the same deployed artifacts and reports detached old volumes whose deletion was acknowledged; provider retention can delay physical deletion.
-
-Railway stops `index-warmup` with the writers before changing volumes because it reads Weaviate. It restores the companion after Weaviate and the API are running and replacement stores pass the empty-data checks. If a later restore fails, reset also stops the restored companion.
 
 If Railway acknowledges a stop but leaves instances running after 30 seconds, reset removes that recorded deployment and verifies shutdown before replacing volumes. Restore redeploys the original recorded artifact, including a removed deployment.
 

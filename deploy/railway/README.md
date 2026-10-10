@@ -23,7 +23,6 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 | seaweed | Pinned SeaweedFS mini, authenticated S3 | `/data` volume |
 | temporal | Pinned Temporal dev server, headless | SQLite `/data/temporal.db` volume |
 | weaviate | Pinned standalone search projection | `/var/lib/weaviate` volume |
-| index-warmup | Periodic named-vector and BM25 probes | Stateless |
 | tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
 
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
@@ -59,7 +58,7 @@ python3 deploy/railway/infrastructure.py check \
   --project-id ID --environment-id ENV_ID --profile large
 ```
 
-For `small`, the adapter defaults to PostgreSQL, Weaviate and index-warmup. For `large`,
+For `small`, the infrastructure adapter defaults to PostgreSQL and Weaviate. For `large`,
 it also selects API, worker and worker-bulk to apply their 32,000,000,000-byte/32-vCPU
 limits. Without `--service`, an existing uniquely named `autoscaler` is included; it is
 never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` replaces the defaults
@@ -97,11 +96,11 @@ then apply and redeploy; avoid a separate set of hand-edited service variables:
 | Variable | Purpose |
 | --- | --- |
 | `RAFT_BOOTSTRAP_TIMEOUT` | Seconds allowed to bootstrap/rejoin while loading the database. The pinned 1.39.10 default is **600 s**; increase it if index loading needs longer, and allow the deployment's startup deadline to cover it. |
-| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Choose about 80–90% of the service memory to leave headroom; this does not bound total RSS or make an oversized index fit. |
+| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Budget the Go runtime separately from index file cache: the large profile uses `16GiB` within 64 GB. This does not bound total RSS. |
 
-The [pinned source](https://github.com/weaviate/weaviate/blob/v1.39.10/usecases/config/environment.go) honors deprecated `HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE`; leave it unset: eager shards wait for prefill by default.
-This does not keep lexical pages resident after idle periods or imports. Provision and deploy the shared [index warm-up companion](../infrastructure.md#index-warm-up) for periodic named-vector and BM25 probes; it uses the private index URL and one replica.
-`ASYNC_INDEXING_BATCH_SIZE` was removed.
+The [pinned configuration source](https://github.com/weaviate/weaviate/blob/v1.39.10/usecases/config/environment.go)
+still honors deprecated `HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE`; leave it unset so
+shard loading determines prefill behavior. Startup prefill does not keep BM25 and object pages resident after idle periods. The [shared memory profile](../infrastructure.md#profiles) reserves file-cache room; verify RAM and random-read IOPS for your data. `ASYNC_INDEXING_BATCH_SIZE` was removed.
 The 1.38–1.39 release-note review found no required Quivr schema migration:
 1.39.1's auto-schema named-vector default does not apply because Quivr disables
 auto-schema and declares named vectors explicitly. See [memory sizing](https://docs.weaviate.io/weaviate/concepts/resources).
@@ -376,14 +375,15 @@ repeated provisioning; do not rotate the database or S3 password by rerunning wi
 new file against an existing deployment. The web password is `demo_password` in that
 file. It is a shared evaluation space, not per-user access.
 
-For a newly provisioned installation, the deployment helper connects pinned images or uploads Dockerfile services from the repository root. It starts deployment but does not
+For a newly provisioned installation, the deployment helper connects pinned image sources
+or uploads Dockerfile services from the repository root. It starts deployment but does not
 wait for readiness; existing installations can use the environment-scoped `railway up`
 command above without provisioner state:
 
 ```sh
 python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID postgres temporal seaweed weaviate tei
 # Wait for dependencies to start successfully, then:
-python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID index-warmup api
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID api
 # Wait for API readiness, then:
 python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id YOUR_ENVIRONMENT_ID worker worker-bulk web
 ```
@@ -391,7 +391,7 @@ python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id Y
 The provisioner sets each Dockerfile path. Deploy in order:
 
 1. postgres, seaweed, temporal, weaviate and tei; inspect deployment status/logs.
-2. index-warmup and api; warming discovers indexes as API bootstrap creates them, then API readiness.
+2. api; its startup migration bootstraps schema, bucket and projection, then readiness.
 3. worker, worker-bulk and web; verify readiness before publishing.
 
 Core readiness uses `PORT=8081`; internal API traffic uses port 8080. The worker

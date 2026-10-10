@@ -14,7 +14,6 @@
     "temporal": "temporal",
     "seaweed": "seaweed",
     "weaviate": "weaviate",
-    "index-warmup": "index-warmup",
     "tei": "tei"
   }
 }

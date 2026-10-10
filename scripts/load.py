@@ -548,7 +548,7 @@ def main(argv=None):
     report['versions'] = {'python': platform.python_version(), 'go': output([os.environ.get('GO', 'go'), 'version']),
         'docker': output(['docker', '--host', docker_host, 'version', '--format', '{{.Server.Version}}']),
         'services': {k: (shared[k] if k in shared else v)['image'] for k, v in yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())['services'].items()
-                     if k != 'tei' and 'image' in (shared[k] if k in shared else v)}, 'plugin': 'load.fake@0.1.0',
+                     if k != 'tei'}, 'plugin': 'load.fake@0.1.0',
         'plugin_sha256': hashlib.sha256((ROOT / 'tests/fakes/load-plugin/main.go').read_bytes()).hexdigest()}
     report['source_sha256'] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in [ROOT / 'scripts' / name for name in
