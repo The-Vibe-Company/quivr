@@ -144,7 +144,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 	if page.NotDue {
 		return connectors.Page{}, connectors.ErrNotDue
 	}
-	out := connectors.Page{SubmissionConcurrency: page.SubmissionConcurrency, Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
+	out := connectors.Page{AllowRepeatedRecordKeys: page.AllowRepeatedRecordKeys != nil && *page.AllowRepeatedRecordKeys, SubmissionConcurrency: page.SubmissionConcurrency, Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
 	if p := page.Push; p != nil && plugins.KindPushes(&c.Pin.Manifest, c.Name) {
 		out.Push = &connectors.PushStatus{State: p.State, Class: connectors.ErrorClass(p.ErrorClass), Code: p.Code, PollInterval: time.Duration(p.PollIntervalSeconds) * time.Second}
 	}

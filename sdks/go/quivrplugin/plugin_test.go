@@ -258,6 +258,88 @@ func TestTypedPageCarriesNewConnectorFieldsOnSupportedAPI(t *testing.T) {
 	}
 }
 
+func TestFetchOrderedRecordFlagIsOptionalVersionGatedAndStillValidatesItems(t *testing.T) {
+	pageFromFixture := func(t *testing.T, name string) Page {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(fixtures, "responses", "connector", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire pageJSON
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatal(err)
+		}
+		return Page{
+			AllowRepeatedRecordKeys: wire.AllowRepeatedRecordKeys,
+			Items:                   wire.Items,
+			Checkpoint:              wire.Checkpoint,
+			More:                    wire.More,
+		}
+	}
+	pluginFromManifest := func(t *testing.T, name string) *Plugin {
+		t.Helper()
+		p, err := New(filepath.Join(fixtures, "manifests", "valid", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.MustConnector("feed", fake{})
+		return p
+	}
+
+	cases := []struct {
+		name     string
+		manifest string
+		response string
+		want     string
+	}{
+		{"new API omits flag", "connector-ordered-019.yaml", "ordered-revisions-absent.json", "record key is duplicated"},
+		{"new API false rejects duplicates", "connector-ordered-019.yaml", "ordered-revisions-false.json", "record key is duplicated"},
+		{"new API true preserves source order", "connector-ordered-019.yaml", "ordered-revisions.json", ""},
+		{"old API omits flag", "connector-ordered-018.yaml", "ordered-revisions-absent.json", "record key is duplicated"},
+		{"old API false rejects duplicates", "connector-ordered-018.yaml", "ordered-old-false.json", "record key is duplicated"},
+		{"old API true is refused", "connector-ordered-018.yaml", "ordered-old-true.json", "requires Plugin API 0.19.0"},
+		{"repeated item is still validated", "connector-ordered-019.yaml", "ordered-invalid-revision.json", "content and withdraw"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, problem := pluginFromManifest(t, tc.manifest).encodePage(func() *Page {
+				page := pageFromFixture(t, tc.response)
+				return &page
+			}())
+			if tc.want != "" {
+				if problem == "" || !strings.Contains(problem, tc.want) {
+					t.Fatalf("expected %q, got body %s and problem %q", tc.want, body, problem)
+				}
+				return
+			}
+			if problem != "" {
+				t.Fatal(problem)
+			}
+			var wire map[string]any
+			if err := json.Unmarshal(body, &wire); err != nil {
+				t.Fatal(err)
+			}
+			if wire["allow_repeated_record_keys"] != true {
+				t.Fatalf("the enabled flag was not encoded: %s", body)
+			}
+		})
+	}
+
+	old := pluginFromManifest(t, "connector-ordered-018.yaml")
+	page := Page{Items: []Item{{RecordKey: "unique", Content: Text("body")}}}
+	body, problem := old.encodePage(&page)
+	if problem != "" {
+		t.Fatal(problem)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := wire["allow_repeated_record_keys"]; present {
+		t.Fatalf("false default must omit the optional flag: %s", body)
+	}
+}
+
 func TestAPageAndACredentialCheckMatchTheResponseSchemas(t *testing.T) {
 	h, _ := newTestPlugin(t, func(r *FetchRequest) (*Page, error) {
 		var at struct{ Offset int }

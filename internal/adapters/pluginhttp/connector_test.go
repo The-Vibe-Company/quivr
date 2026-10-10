@@ -155,6 +155,30 @@ func TestAPluginPageBecomesAnAcquisitionPage(t *testing.T) {
 	if string(page.Checkpoint) != `{"offset":4}` || !page.More || page.Reads != 2 || string(page.Diagnostics) != `{"quota":9}` || page.Notice != "quota_low" {
 		t.Fatalf("page %+v", page)
 	}
+	t.Run("ordered revisions reach acquisition", func(t *testing.T) {
+		ring, err := plugins.NewSigningKeys()
+		if err != nil {
+			t.Fatal(err)
+		}
+		signing, _ := json.Marshal(map[string]plugins.SigningKeys{"acme.source": ring})
+		t.Setenv(plugins.EnvSigningKeys, string(signing))
+		manifest := strings.Replace(sourceManifest, `plugin_api: ">=0.3.0 <0.4.0"`, `plugin_api: ">=0.19.0 <0.20.0"`, 1)
+		c, plugin, _ := pinnedConnector(t, manifest, func(string) (int, any) {
+			return 200, map[string]any{"checkpoint": 4, "more": false, "allow_repeated_record_keys": true, "submission_concurrency": 2,
+				"items": []any{
+					map[string]any{"record_key": "a", "revision": "12", "source_position": "12", "content": map[string]any{"kind": "text", "text": "first"}},
+					map[string]any{"record_key": "a", "revision": "13", "source_position": "13", "content": map[string]any{"kind": "text", "text": "second"}},
+				}}
+		})
+		plugin.served = "0.19.0"
+		page, err := c.Fetch(context.Background(), fetchRequest())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !page.AllowRepeatedRecordKeys || page.SubmissionConcurrency != 2 || len(page.Items) != 2 || page.Items[0].Position != "12" || page.Items[1].Position != "13" {
+			t.Fatalf("ordered page lost its capability or revisions: %+v", page)
+		}
+	})
 }
 
 // Every failure is a typed connector error, so Connector Health reports it

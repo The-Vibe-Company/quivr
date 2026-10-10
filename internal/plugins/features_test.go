@@ -32,6 +32,7 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 		{plugins.FeatureConnectorSubmissionConcurrency, "0.14.0", "0.15.0"},
 		{plugins.FeatureConnectorAttachmentOnly, "0.14.0", "0.15.0"},
 		{plugins.FeatureMultiPartSegments, "0.16.0", "0.17.0"},
+		{plugins.FeatureConnectorOrderedRecords, "0.18.0", "0.19.0"},
 	} {
 		t.Run(string(tc.feature), func(t *testing.T) {
 			if got := plugins.FeatureSince(tc.feature); got != tc.since {

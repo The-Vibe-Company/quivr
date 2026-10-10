@@ -719,6 +719,7 @@ class ConnectorFetchResponse(Model):
     not_due: bool | None = None
     push: PushStatus | None = None
     submission_concurrency: int | None = None
+    allow_repeated_record_keys: bool | None = None
 
 
 @dataclass(kw_only=True)

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -488,7 +489,15 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	if page == nil {
 		return nil, "Fetch returned no page and no error"
 	}
-	for _, item := range page.Items {
+	seenRecords := map[string]struct{}{}
+	for index, item := range page.Items {
+		if _, seen := seenRecords[item.RecordKey]; seen && !page.AllowRepeatedRecordKeys {
+			return nil, fmt.Sprintf("/items/%d/record_key: record key is duplicated", index)
+		}
+		seenRecords[item.RecordKey] = struct{}{}
+		if problem := connectorItemProblem(item); problem != "" {
+			return nil, fmt.Sprintf("/items/%d: %s", index, problem)
+		}
 		if item.Content != nil && item.Content.Kind == "manifest" && len(item.Content.Parts) == 0 {
 			if len(item.Attachments) == 0 {
 				return nil, "a connector Manifest needs at least one Part or attachment"
@@ -506,7 +515,7 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	if err != nil {
 		return nil, "the checkpoint is not JSON-encodable: " + err.Error()
 	}
-	out := pageJSON{SubmissionConcurrency: page.SubmissionConcurrency, Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice, Push: page.Push}
+	out := pageJSON{SubmissionConcurrency: page.SubmissionConcurrency, AllowRepeatedRecordKeys: page.AllowRepeatedRecordKeys, Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice, Push: page.Push}
 	if out.Items == nil {
 		out.Items = []Item{}
 	}
@@ -523,6 +532,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 		return nil, fmt.Sprintf("submission_concurrency %d must be from 1 to 32; leave it zero for serial submission", page.SubmissionConcurrency)
 	case page.SubmissionConcurrency != 0 && !resolveAPIFeatures(p.m.pluginAPI).speaks("connector_submission_concurrency"):
 		return nil, "submission_concurrency requires Plugin API " + FeatureSince["connector_submission_concurrency"]
+	case page.AllowRepeatedRecordKeys && !resolveAPIFeatures(p.m.pluginAPI).speaks("connector_ordered_records"):
+		return nil, "allow_repeated_record_keys requires Plugin API " + FeatureSince["connector_ordered_records"]
 	case p.m.Connector.Attachments == nil && hasAttachments(page.Items):
 		return nil, "items carry attachments; declare contributions.connector.attachments in the manifest (Plugin API 0.4) and implement AttachmentSource"
 	case len(page.Items) > p.m.maxItems:
@@ -540,6 +551,32 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 		return nil, "the page does not match the response schema: " + err.Error()
 	}
 	return body, ""
+}
+
+// connectorItemProblem covers the item-level invariants that JSON Schema
+// cannot express. In particular, allowing repeated Record Keys must not skip
+// validation of a later revision in the same page.
+func connectorItemProblem(item Item) string {
+	hasContent := item.Content != nil
+	if item.Withdraw && hasContent {
+		return fmt.Sprintf("item %q has content and withdraw: true", item.RecordKey)
+	}
+	if item.Withdraw {
+		if len(item.Attachments) > 0 || len(item.Extensions) > 0 {
+			return fmt.Sprintf("item %q is withdrawn and carries attachments or extensions", item.RecordKey)
+		}
+		return ""
+	}
+	if !hasContent {
+		return fmt.Sprintf("item %q has neither content nor withdraw: true", item.RecordKey)
+	}
+	if item.Content.Kind == "text" && strings.Contains(item.Content.Text, "\x00") {
+		return fmt.Sprintf("item %q text contains NUL", item.RecordKey)
+	}
+	if len(item.Attachments) > 0 && item.Content.Kind != "manifest" {
+		return fmt.Sprintf("item %q has attachments beside non-Manifest content", item.RecordKey)
+	}
+	return ""
 }
 
 func (p *Plugin) serveCheckCredential(w http.ResponseWriter, r *http.Request) {

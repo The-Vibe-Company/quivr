@@ -10,7 +10,8 @@ becomes a raw source Blob, the immutable bytes Quivr normalizes into a document.
 ## Before you start
 
 You need a running Quivr with the `connector.object_storage_archive` plugin
-pinned. External processes require [engine call signing](/reference/plugin-protocol#signed-engine-requests);
+pinned. Version 1.1 requires Plugin API 0.19; earlier engines should retain
+the earlier plugin version. External processes require [engine call signing](/reference/plugin-protocol#signed-engine-requests);
 local and packaged launchers provision the signing ring automatically. Local stacks and the packaged worker include it. For an external
 plugin process, [pin its manifest and endpoint](/run-quivr/pin).
 
@@ -58,7 +59,9 @@ the failed instance and create one with a corrected mapping or member filter.
 Keep the same Corpus and `source_namespace` when the Record Key mapping remains
 the same; a new instance rereads the prefix. Changing keys creates different
 Records, so withdraw any previously accepted incorrect identities separately.
-Revisions of one Record are submitted on separate pages.
+Revisions of one Record may share a page and are submitted in archive order,
+with at most one revision of each key in flight. Only different keys run
+concurrently; a later older position still cannot replace a higher current position.
 
 ## Configure and start the source
 
@@ -102,7 +105,8 @@ Keep these values out of source control and shell history.
 
 `batch_size` accepts 1–1000 matching members, default 100. The page cache also
 caps the batch at 64 MiB. `concurrency` accepts 1–32 distinct Record submissions,
-default 1. Each member must contain 1 byte to 25 MiB of uncompressed data.
+default 1. Increase it only after measuring database and storage headroom on
+your installation; pages remain sequential. Each member must contain 1 byte to 25 MiB of uncompressed data.
 An empty or larger matched member stops the page with a source error.
 
 ## Read progress and resume
@@ -124,9 +128,8 @@ Its diagnostics report:
 | `acquisition` | Engine timing for this committed page; fields below |
 
 For a page from the current archive, `page_cut` is `batch_size`, `page_bytes`,
-`record_key` or `archive_end`. These mean the requested item count, the 64 MiB
-page byte bound, a repeated record key, or the end of that archive.
-Repeated keys go on separate pages so their submissions retain source order.
+or `archive_end`. These mean the requested item count, the 64 MiB
+page byte bound, or the end of that archive. Repeated Record Keys do not cut a page.
 The ZIP reader's 1 MiB read window bounds buffering; it does not limit page bytes.
 
 `acquisition.items` counts page members. `fetch_ms` is elapsed fetch time,

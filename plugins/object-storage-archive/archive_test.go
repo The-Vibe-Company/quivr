@@ -253,7 +253,7 @@ func syntheticZip(t *testing.T, paths ...string) []byte {
 
 // This fixture protects URL-decoding, independent identity captures and the
 // ordering boundary: a later path carrying an older source revision must not
-// become a different Record or share a concurrent page with its newer revision.
+// become a different Record or be listed before its newer revision.
 func TestArchiveIdentityCapturesAndInvalidMembers(t *testing.T) {
 	for _, tc := range []struct {
 		name, positionPattern string
@@ -284,16 +284,8 @@ func TestArchiveIdentityCapturesAndInvalidMembers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(first.Items) != 1 || first.Items[0].RecordKey != "ITEM7" || first.Items[0].SourcePosition != "12" || first.SubmissionConcurrency != 4 {
-				t.Fatalf("newer revision page: %+v", first)
-			}
-			req.Checkpoint, _ = json.Marshal(first.Checkpoint)
-			second, err := source.Fetch(context.Background(), req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(second.Items) != 1 || second.Items[0].RecordKey != "ITEM7" || second.Items[0].SourcePosition != "3" {
-				t.Fatalf("older revision page: %+v", second)
+			if len(first.Items) != 2 || first.Items[0].RecordKey != "ITEM7" || first.Items[0].SourcePosition != "12" || first.SubmissionConcurrency != 4 || !first.AllowRepeatedRecordKeys || first.Items[1].RecordKey != "ITEM7" || first.Items[1].SourcePosition != "3" {
+				t.Fatalf("revision identities or source order changed: %+v", first)
 			}
 		})
 	}
@@ -399,7 +391,7 @@ func TestArchiveReportsPageCuts(t *testing.T) {
 		cut    string
 	}{
 		{"distinct_members_cross_one_mebibyte", false, 40, "archive_end"},
-		{"corrections_cut_at_repeated_key", true, 31, "record_key"},
+		{"corrections_share_ordered_page", true, 40, "archive_end"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -413,7 +405,7 @@ func TestArchiveReportsPageCuts(t *testing.T) {
 					position = 3
 				}
 				name := fmt.Sprintf("urn:example:ITEM%d-%d.xml", key, position)
-				body := bytes.Repeat([]byte("x"), 30<<10)
+				body := bytes.Repeat([]byte{byte(65 + i)}, 30<<10)
 				if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body))}); err != nil {
 					t.Fatal(err)
 				}
@@ -436,23 +428,46 @@ func TestArchiveReportsPageCuts(t *testing.T) {
 				t.Fatal(err)
 			}
 			config["batch_size"] = 500
+			wantConcurrency := 1
+			if tc.repeat {
+				config["concurrency"], wantConcurrency = 8, 8
+			}
 			req.Connector.Config, _ = json.Marshal(config)
 			page, err := source.Fetch(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
 			}
 			diagnostic := page.Diagnostics
-			if len(page.Items) != tc.want || diagnostic["page_cut"] != tc.cut || diagnostic["page_bytes"] != int64(tc.want*(30<<10)) {
+			if page.SubmissionConcurrency != wantConcurrency || !page.AllowRepeatedRecordKeys || len(page.Items) != tc.want || diagnostic["page_cut"] != tc.cut || diagnostic["page_bytes"] != int64(tc.want*(30<<10)) {
 				t.Fatalf("page items=%d diagnostic=%v, want %d/%s", len(page.Items), diagnostic, tc.want, tc.cut)
 			}
+			if tc.repeat && (page.Items[31].RecordKey != "ITEM0" || page.Items[31].SourcePosition != "3") {
+				t.Fatalf("correction source order lost: %+v", page.Items[31])
+			}
 			if tc.repeat {
-				req.Checkpoint, _ = json.Marshal(page.Checkpoint)
-				next, err := source.Fetch(context.Background(), req)
-				if err != nil {
-					t.Fatal(err)
+				refs := map[string]bool{}
+				for _, item := range page.Items {
+					ref := item.Attachments[0].Ref
+					if refs[ref] {
+						t.Fatal("revisions share an attachment reference")
+					}
+					refs[ref] = true
 				}
-				if len(next.Items) != 9 || next.Items[0].RecordKey != "ITEM0" || next.Items[0].SourcePosition != "3" {
-					t.Fatalf("pending correction lost: %+v", next)
+				// A cold correction upload must rebuild both revisions' distinct
+				// bytes even when uploads arrive in reverse source order.
+				source.Close()
+				cold := NewArchiveConnector()
+				defer cold.Close()
+				for _, index := range []int{31, 0} {
+					body, err := cold.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: page.Items[index].Attachments[0]})
+					if err != nil {
+						t.Fatal(err)
+					}
+					data, err := io.ReadAll(body)
+					body.Close()
+					if err != nil || !bytes.Equal(data, bytes.Repeat([]byte{byte(65 + index)}, 30<<10)) {
+						t.Fatalf("cold revision %d bytes differ: %v", index, err)
+					}
 				}
 			}
 		})

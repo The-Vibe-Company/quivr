@@ -484,11 +484,12 @@ type heldSubmission struct {
 }
 
 type heldIngest struct {
-	active  atomic.Int32
-	maximum atomic.Int32
-	calls   chan heldSubmission
-	failKey string
-	failure error
+	active       atomic.Int32
+	maximum      atomic.Int32
+	calls        chan heldSubmission
+	failKey      string
+	failRevision string
+	failure      error
 }
 
 func (f *heldIngest) TrustedAccept(ctx context.Context, _, _ string, command content.Command) (content.Receipt, error) {
@@ -510,7 +511,7 @@ func (f *heldIngest) TrustedAccept(ctx context.Context, _, _ string, command con
 	case <-ctx.Done():
 		return content.Receipt{}, ctx.Err()
 	}
-	if command.Source.RecordKey == f.failKey {
+	if command.Source.RecordKey == f.failKey && (f.failRevision == "" || command.Revision == f.failRevision) {
 		return content.Receipt{}, f.failure
 	}
 	return content.Receipt{NewRevision: true}, nil
@@ -547,7 +548,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
 		hint, simultaneous int
-		duplicate          bool
+		duplicate, ordered bool
 		failure            error
 	}{
 		{name: "default serial", simultaneous: 1},
@@ -555,6 +556,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 		{name: "parallel", hint: 2, simultaneous: 2},
 		{name: "engine cap", hint: 100, simultaneous: 32},
 		{name: "repeated key remains ordered", hint: 2, simultaneous: 1, duplicate: true},
+		{name: "opted in independent keys", hint: 2, simultaneous: 2, duplicate: true, ordered: true},
 		{name: "transient page replay", hint: 2, simultaneous: 2, failure: errors.New("ingestion unavailable")},
 		{name: "permanent item rejected", hint: 2, simultaneous: 2, failure: content.ErrInvalid},
 	} {
@@ -568,7 +570,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			if tc.duplicate {
 				items[1].RecordKey = items[0].RecordKey
 			}
-			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), More: true, SubmissionConcurrency: tc.hint}
+			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), More: true, SubmissionConcurrency: tc.hint, AllowRepeatedRecordKeys: tc.ordered}
 			stub := &stubConnector{pages: []Page{page}}
 			a, runs := stubAcquirer(t, stub, 0)
 			ingest := &heldIngest{calls: make(chan heldSubmission, len(items)), failKey: items[0].RecordKey, failure: tc.failure}
@@ -594,7 +596,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			}
 			before := map[string]string{}
 			for _, call := range first {
-				before[call.command.Source.RecordKey] = call.command.Key
+				before[call.command.Source.RecordKey+"/"+call.command.Revision] = call.command.Key
 				close(call.release)
 			}
 			count := len(first)
@@ -602,7 +604,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 				for {
 					select {
 					case call := <-ingest.calls:
-						before[call.command.Source.RecordKey] = call.command.Key
+						before[call.command.Source.RecordKey+"/"+call.command.Revision] = call.command.Key
 						count++
 						close(call.release)
 					case err := <-done:
@@ -634,7 +636,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 					select {
 					case call := <-ingest.calls:
 						replayed++
-						if key, exists := before[call.command.Source.RecordKey]; exists && call.command.Key != key {
+						if key, exists := before[call.command.Source.RecordKey+"/"+call.command.Revision]; exists && call.command.Key != key {
 							t.Fatalf("replay changed key for %q: %q to %q", call.command.Source.RecordKey, key, call.command.Key)
 						}
 						close(call.release)
@@ -665,6 +667,97 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			}
 		})
 	}
+	t.Run("ordered partial page replay", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		items := []Item{
+			{RecordKey: "A", Revision: "A1", Position: "12", Content: content.Text{Kind: "text", Text: "first"}},
+			{RecordKey: "A", Revision: "A2", Position: "13", Content: content.Text{Kind: "text", Text: "second"}},
+			{RecordKey: "A", Revision: "A3", Position: "3", Content: content.Text{Kind: "text", Text: "late older"}},
+			{RecordKey: "B", Revision: "B1", Position: "1", Content: content.Text{Kind: "text", Text: "independent"}},
+		}
+		page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":4}`), More: true, SubmissionConcurrency: 2, AllowRepeatedRecordKeys: true}
+		stub := &stubConnector{pages: []Page{page}}
+		a, runs := stubAcquirer(t, stub, 0)
+		ingest := &heldIngest{calls: make(chan heldSubmission, len(items)), failKey: "A", failRevision: "A2", failure: errors.New("unavailable")}
+		a.Ingest = ingest
+		observed := &observedRuns{fakeRuns: runs, ingest: ingest}
+		a.Store, a.MaxPages = observed, 1
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
+		receive := func() heldSubmission {
+			t.Helper()
+			select {
+			case call := <-ingest.calls:
+				return call
+			case <-ctx.Done():
+				t.Fatal("expected an independent record or next ordered revision")
+				return heldSubmission{}
+			}
+		}
+		first, independent := receive(), receive()
+		if first.command.Revision == "B1" {
+			first, independent = independent, first
+		}
+		if first.command.Revision != "A1" || independent.command.Revision != "B1" {
+			t.Fatalf("concurrent revisions: %s, %s", first.command.Revision, independent.command.Revision)
+		}
+		keys := map[string]string{first.command.Revision: first.command.Key, independent.command.Revision: independent.command.Key}
+		close(first.release)
+		second := receive()
+		if second.command.Revision != "A2" || second.command.Position != "13" {
+			t.Fatalf("same-key source order changed: %+v", second.command)
+		}
+		keys[second.command.Revision] = second.command.Key
+		close(second.release)
+		select {
+		case <-done:
+			t.Fatal("failed page finished while an independent submission was held")
+		default:
+		}
+		close(independent.release)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("failed page did not drain")
+		}
+		select {
+		case call := <-ingest.calls:
+			t.Fatalf("submitted later revision after failure: %s", call.command.Revision)
+		default:
+		}
+		if len(runs.checkpoints) != 0 || observed.premature || len(runs.finished) != 1 || runs.finished[0] == nil {
+			t.Fatalf("partial page advanced or finished prematurely: %+v", observed)
+		}
+		ingest.failure = nil
+		stub.pages, stub.requests = []Page{page}, nil
+		go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
+		var revisions []string
+		for range items {
+			call := receive()
+			if key, exists := keys[call.command.Revision]; exists && call.command.Key != key {
+				t.Fatalf("replay changed identity for %s", call.command.Revision)
+			}
+			if call.command.Source.RecordKey == "A" {
+				revisions = append(revisions, call.command.Revision)
+			}
+			close(call.release)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("replay did not finish")
+		}
+		if strings.Join(revisions, ",") != "A1,A2,A3" || len(runs.checkpoints) != 1 || observed.premature || observed.continued != 1 {
+			t.Fatalf("replay revisions=%v, checkpoints=%v, premature=%v", revisions, runs.checkpoints, observed.premature)
+		}
+	})
 }
 
 // Attachment-only content is raw input for normalization, not an already

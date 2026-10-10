@@ -169,9 +169,11 @@ type Page struct {
 	// SubmissionConcurrency bounds concurrent item submissions (at most 32).
 	// Zero or one keeps the serial default.
 	SubmissionConcurrency int
-	Items                 []Item
-	Checkpoint            json.RawMessage
-	More                  bool
+	// AllowRepeatedRecordKeys opts into per-key ordered submission.
+	AllowRepeatedRecordKeys bool
+	Items                   []Item
+	Checkpoint              json.RawMessage
+	More                    bool
 	// Reads counts the source resources this page read (for sources that bill
 	// or rate-limit per resource). It feeds the per-UTC-day usage counters.
 	Reads int64

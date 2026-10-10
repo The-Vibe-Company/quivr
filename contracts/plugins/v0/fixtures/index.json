@@ -2692,6 +2692,78 @@
         "schema_violation"
       ],
       "description": "A bounded page contains exactly one source window."
+    },
+    {
+      "file": "responses/connector/ordered-revisions.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-019.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "responses/connector/ordered-revisions-false.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-019.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "responses/connector/ordered-revisions-absent.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-019.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "responses/connector/ordered-old-true.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "ordered_records_unsupported",
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-018.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "responses/connector/ordered-old-false.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "ordered_records_unsupported",
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-018.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "responses/connector/ordered-invalid-revision.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-ordered-019.yaml",
+      "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
     }
   ]
 }
