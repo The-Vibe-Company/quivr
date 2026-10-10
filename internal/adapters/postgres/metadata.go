@@ -49,16 +49,24 @@ func (s RecordStore) SaveProjectionMetadata(ctx context.Context, org, versionID,
 // catalogMetadata applies predicates before ORDER BY/LIMIT and uses the same
 // normalized typed values the search projection received.
 func catalogMetadata(q content.RecordQuery, args *[]any) string {
+	return catalogMetadataDates(q, args, false)
+}
+
+func catalogMetadataDates(q content.RecordQuery, args *[]any, indexedDates bool) string {
 	if len(q.Metadata) == 0 {
 		return ""
 	}
-	conditions := metadataRouteConditions(q, args)
+	conditions := metadataConditions(q, args, indexedDates)
 	return " AND EXISTS(SELECT 1 FROM projection_metadata pm WHERE pm.organization=records.organization AND pm.version_id=records.current_version_id AND (" + conditions + "))"
 }
 
 // metadataRouteConditions also serves aggregations that already join the
 // pinned projection, avoiding a second metadata lookup for every document.
 func metadataRouteConditions(q content.RecordQuery, args *[]any) string {
+	return metadataConditions(q, args, false)
+}
+
+func metadataConditions(q content.RecordQuery, args *[]any, indexedDates bool) string {
 	bind := func(value any) string { *args = append(*args, value); return fmt.Sprintf("$%d", len(*args)) }
 	branches := []string{}
 	for _, route := range q.FilterRoutes {
@@ -82,10 +90,18 @@ func metadataRouteConditions(q content.RecordQuery, args *[]any) string {
 				conditions = append(conditions, "("+strings.Join(equalities, " OR ")+")")
 			}
 			if f.Gte != "" {
-				conditions = append(conditions, "("+value+" #>> '{}')::timestamptz >= "+bind(f.Gte)+"::timestamptz")
+				if indexedDates {
+					conditions = append(conditions, "projection_metadata_filter_epoch("+value+" #>> '{}') >= projection_metadata_filter_epoch("+bind(f.Gte)+")")
+				} else {
+					conditions = append(conditions, "("+value+" #>> '{}')::timestamptz >= "+bind(f.Gte)+"::timestamptz")
+				}
 			}
 			if f.Lte != "" {
-				conditions = append(conditions, "("+value+" #>> '{}')::timestamptz <= "+bind(f.Lte)+"::timestamptz")
+				if indexedDates {
+					conditions = append(conditions, "projection_metadata_filter_epoch("+value+" #>> '{}') <= projection_metadata_filter_epoch("+bind(f.Lte)+")")
+				} else {
+					conditions = append(conditions, "("+value+" #>> '{}')::timestamptz <= "+bind(f.Lte)+"::timestamptz")
+				}
 			}
 		}
 		branches = append(branches, "("+strings.Join(conditions, " AND ")+")")

@@ -309,6 +309,10 @@ x-public-errors:
     status_class: 422
     retryable: false
     operations: [searchRecords, listRecords, countFacets]
+  filter_too_broad:
+    status_class: 422
+    retryable: false
+    operations: [listRecords]
   source_filter_unavailable:
     status_class: 422
     retryable: false
@@ -439,6 +443,10 @@ paths:
         the current Version to be projected in the routed generation; withdrawn Records
         can disappear from filtered pages after projection purge or rebuild. Use the
         unfiltered catalog and change feed for complete resynchronization.
+        Metadata equality and datetime-range pages use scoped indexes and bounded
+        reads. A filter that exceeds the bounded read budget returns 422
+        filter_too_broad with retryable false; narrow the metadata or acceptance-time
+        range before sending another request. No partial page is returned.
         The default record_id order is ascending byte-wise ID order for resynchronization.
         accepted_at_desc orders by the current Version's acceptance time, newest first,
         then by Record ID descending for ties. A correction moves the Record when its

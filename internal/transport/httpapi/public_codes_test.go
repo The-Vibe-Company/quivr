@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
@@ -16,6 +17,40 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
+
+// Owns the wire refusal separately from the adapter's scan-exhaustion owner.
+// The published fixture also validates against the authoritative Error schema.
+func TestMetadataFilterCapacityRefusal(t *testing.T) {
+	raw, err := os.ReadFile("../../../contracts/http/v0/examples.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var examples []struct {
+		Name  string
+		Value map[string]any
+	}
+	if err := json.Unmarshal(raw, &examples); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	for _, example := range examples {
+		if example.Name == "metadata_filter_too_broad" {
+			want = example.Value
+		}
+	}
+	if want == nil {
+		t.Fatal("missing metadata_filter_too_broad contract fixture")
+	}
+	rec := httptest.NewRecorder()
+	writeError(rec, fmt.Errorf("bounded scan: %w", publicerr.FilterTooBroad), publicerr.ContentUnavailable)
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 422 || got["code"] != want["code"] || got["message"] != want["message"] || got["retryable"] != want["retryable"] {
+		t.Fatalf("capacity refusal %d %v, want 422 %v", rec.Code, got, want)
+	}
+}
 
 // detailed returns err as a domain would report it with an explanation, in
 // both supported wrapping styles.

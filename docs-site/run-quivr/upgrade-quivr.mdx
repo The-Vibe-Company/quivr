@@ -47,6 +47,14 @@ Packed files are the only embedding storage format. The command prints `{"compac
 
 Inspect the `X-Quivr-Index-Setup` header on `/readyz` for each process. `pending`, `building`, `retrying` or `conflict` reports degraded performance until the process verifies the indexes. `ready` means it verified all expected indexes as valid. The header is cached: another process may finish setup before this process retries, and later external changes are not reflected after `ready`. These states do not change readiness HTTP 204 when required dependencies are ready. Structured `quivr.postgres.index_setup` events report state, attempt number and retry delay. Keep an API or worker running so setup can finish.
 
+Background setup installs metadata synchronization with bounded DDL locks and
+builds the metadata catalog indexes concurrently. It then copies existing
+metadata in short transactions and resumes after interruption. During this copy,
+filtered listings use bounded record reads and can return non-retryable
+`422 filter_too_broad`; they do not silently omit uncopied metadata. New and old
+binaries maintain the derived entries transactionally once synchronization is installed.
+Setup retires the legacy metadata GIN index concurrently after the copy completes.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

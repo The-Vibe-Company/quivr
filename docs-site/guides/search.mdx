@@ -229,6 +229,10 @@ rebuilt. Use the unfiltered catalog for complete resynchronization, including
 withdrawn Records. Repeat the same selection and
 predicates on every page, passing the response's `next_page_cursor` as the next
 request's `page_cursor`. Stop when `next_page_cursor` is absent.
+Metadata equality and datetime ranges use indexes scoped to the selected Corpus
+and routed generation. If the bounded read cannot complete a page, Quivr returns
+`422 filter_too_broad` with `retryable: false` and no partial page. Narrow the
+metadata or acceptance-time range before trying again.
 Changing the order, a filter, scope or routed generation returns
 `409 cursor_scope_changed`; restart the listing. Search and listing filters on
 older indexes return `422 metadata_filter_unavailable`; rebuild those Corpora

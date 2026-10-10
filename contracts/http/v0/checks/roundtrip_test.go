@@ -24,6 +24,8 @@ func TestContractRoundTrips(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			var target any
 			switch c.Schema {
+			case "Error":
+				target = &Error{}
 			case "FacetRequest":
 				target = &FacetRequest{}
 			case "FacetResponse":
