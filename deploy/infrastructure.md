@@ -103,6 +103,14 @@ adapter plan, then apply variables and limits without changing existing replicas
 services start at one. Deploy changed services (include API, worker and worker-bulk for
 large), initialize monitoring, then check the active deployment:
 
+`preview` shows each service's numeric provider caps from `project.subscriptionPlanLimit.containers.memoryBytes` (bytes) and `cpu` (vCPU), separately from its configured override. `maxMemoryDescription` / `maxCpuDescription` are upgrade ceilings, not enforceable caps. Informational `provider_volume` rows show `volumeIopsLimit` (operations/s) and `volumeBpsLimit` (bytes/s) when available. `apply` checks all selected services before any variable, resource or source write. An exceeded or unknown memory/CPU cap refuses the whole apply with a service/cap diagnostic; preview reports the same refusal in `errors` with a nonzero exit. Later provider writes are not transactional.
+
+The example commands below assume a reported 32 GB cap: save this neutral override outside version control as `.scratch/provider-limits.json`. To discover your cap first, run preview without `--overrides`; adjust the example to your installation before applying. Override CPU or other services too if their declarations exceed the caps. Keeping the 16 GiB Go target at 32 GB reduces file-cache headroom; see [cold-index sizing](../docs-site/run-quivr/scale-quivr.mdx#cold-index-search):
+
+```json
+{"services":{"weaviate":{"deploy":{"resources":{"limits":{"memory":"32000000000"}}}}}}
+```
+
 Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule
 maintenance and verify readiness before continuing.
 
@@ -113,9 +121,9 @@ On restart, startup command-line settings take precedence over existing `ALTER S
 
 ```sh
 python3 deploy/railway/infrastructure.py preview \
-  --project-id ID --environment-id ID --profile large
+  --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 python3 deploy/railway/infrastructure.py apply \
-  --project-id ID --environment-id ID --profile large
+  --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 railway up --project ID --environment ID \
   --service POSTGRES_SERVICE_ID --detach
 # Large: restart changed application services; rebuild with railway up for code/build-pin changes.
@@ -125,9 +133,9 @@ railway redeploy --project ID --environment ID --service WORKER_SERVICE_ID --yes
 railway redeploy --project ID --environment ID --service WORKER_BULK_SERVICE_ID --yes
 railway redeploy --project ID --environment ID --service AUTOSCALER_SERVICE_ID --yes
 python3 deploy/railway/infrastructure.py initialize-monitoring \
-  --project-id ID --environment-id ID --profile large
+  --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 python3 deploy/railway/infrastructure.py check \
-  --project-id ID --environment-id ID --profile large
+  --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 ```
 
 The Railway adapter targets PostgreSQL and Weaviate by default; large adds API, worker and

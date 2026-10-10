@@ -1,5 +1,6 @@
 """Deployment configuration contracts at the operator tooling boundary."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,9 @@ class RailwayTransport:
         self.acknowledge = True
         self.instances = [{"id": "instance", "status": "RUNNING"}]
         self.dockerfile = None
+        self.plan_limits = {"containers": {"memoryBytes": 32000000000, "cpu": 32,
+                            "maxMemoryDescription": "1 TB", "maxCpuDescription": "1,000 vCPU",
+                            "volumeIopsLimit": 3000, "volumeBpsLimit": 70000000}}
 
     def __call__(self, args, stdin=None):
         self.calls.append((args, stdin))
@@ -38,10 +42,12 @@ class RailwayTransport:
                 return json.dumps({'data': {'serviceInstanceUpdate': self.acknowledge}})
             if "project(id" in args[1]:
                 return json.dumps({"data": {"project": {
+                    "subscriptionPlanLimit": self.plan_limits,
                     "environments": {"edges": [{"node": {"id": "environment"}}]},
-                    "services": {"edges": [{"node": {"id": "index-service", "name": "weaviate"}}]}}}})
+                    "services": {"edges": [{"node": {"id": "index-service", "name": "weaviate"}},
+                                            {"node": {"id": "api-service", "name": "api"}}]}}}})
             return json.dumps({"data": {"serviceInstance": {
-                "serviceId": "index-service", "environmentId": "environment",
+                "serviceId": json.loads(args[3])['serviceId'], "environmentId": "environment",
                 "source": {"image": self.image},
                 "dockerfilePath": self.dockerfile,
                 "latestDeployment": {"id": "deployment", "status": self.deployment_status},
@@ -61,6 +67,58 @@ spec.loader.exec_module(infra)
 
 
 class Infrastructure(unittest.TestCase):
+    def test_railway_cap_preflight_reports_limits_and_refuses_before_any_write(self):
+        # Owns provider-cap admission at the CLI boundary: a later oversized
+        # service must not leave earlier variables or sources partly applied.
+        from deploy.railway import infrastructure as railway
+        cases = [
+            ('memory', {"containers": {"memoryBytes": 32000000000, "cpu": 32,
+                       "maxMemoryDescription": "1 TB", "volumeIopsLimit": 3000,
+                       "volumeBpsLimit": 70000000}}, 'weaviate', '32 GB'),
+            ('cpu', {"containers": {"memoryBytes": 64000000000, "cpu": 16}}, 'api', '16 vCPU'),
+            ('missing', None, 'api', 'unknown'),
+            ('invalid', {"containers": {"memoryBytes": True, "cpu": 32}}, 'api', 'unknown'),
+            ('nonfinite', {"containers": {"memoryBytes": 32000000000, "cpu": float('inf')}}, 'api', 'unknown'),
+        ]
+        for case, plan, service, diagnostic in cases:
+            for command in ('preview', 'apply'):
+                with self.subTest(case=case, command=command):
+                    transport = RailwayTransport()
+                    transport.plan_limits = plan
+                    def run(args, **kwargs):
+                        return subprocess.CompletedProcess(args, 0, transport(args[1:], kwargs.get('input')), '')
+                    output, errors = io.StringIO(), io.StringIO()
+                    with patch.object(sys, 'argv', ['infrastructure.py', command, '--project-id', 'project',
+                          '--environment-id', 'environment', '--profile', 'large', '--service', 'api=api-service',
+                          '--service', 'weaviate=index-service']), patch.object(railway.subprocess, 'run', side_effect=run), \
+                          patch('sys.stdout', output), patch('sys.stderr', errors):
+                        code = railway.main()
+                    self.assertNotEqual(code, 0)
+                    self.assertIn(service, output.getvalue() + errors.getvalue())
+                    self.assertIn(diagnostic, output.getvalue() + errors.getvalue())
+                    self.assertNotIn('private', output.getvalue() + errors.getvalue())
+                    self.assertFalse(any(args[:2] == ['variable', 'set'] or
+                        (args[0] == 'api' and args[1].startswith('mutation')) for args, _ in transport.calls))
+                    if case == 'memory' and command == 'preview':
+                        rows = json.loads(output.getvalue())['observations']
+                        for name in ('api', 'weaviate'):
+                            observed = {row['setting']: row['observed'] for row in rows
+                                        if row['service'] == name and row['scope'] == 'provider_cap'}
+                            self.assertEqual(observed, {'memory': '32000000000', 'cpus': '32'})
+                        io_limits = {row['setting']: row['observed'] for row in rows
+                                     if row['service'] == 'weaviate' and row['scope'] == 'provider_volume'}
+                        self.assertEqual(io_limits, {'volumeIopsLimit': 3000, 'volumeBpsLimit': 70000000})
+        # An increase above the current override, exactly at the provider cap,
+        # is admitted; the override must never be mistaken for the plan ceiling.
+        transport = RailwayTransport()
+        adapter = railway.Railway('project', 'environment', run=transport)
+        adapter.select({'weaviate': 'index-service'})
+        with tempfile.TemporaryDirectory() as directory:
+            override = Path(directory) / 'limits.json'
+            override.write_text('{"services":{"weaviate":{"deploy":{"resources":{"limits":{"memory":"32000000000"}}}}}}')
+            adapter.apply(infra.resolve('large', override))
+        self.assertTrue(any(args[0] == 'api' and args[1].startswith('mutation') for args, _ in transport.calls))
+
     def test_deployment_clis_load_from_the_documented_script_paths(self):
         for script in ('deploy/railway/deploy.py', 'deploy/railway/provision.py',
                        'deploy/railway/infrastructure.py', 'deploy/compose/infrastructure.py'):
