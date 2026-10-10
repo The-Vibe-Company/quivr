@@ -77,6 +77,9 @@ func catalogPredicates(q content.RecordQuery, args *[]any, corpusSQL string) str
 
 // Records reads one keyset page, defaulting to the original byte-wise ID order.
 func (s RecordStore) Records(ctx context.Context, org, corpusID string, q content.RecordQuery) ([]content.Record, error) {
+	if len(q.Metadata) > 0 {
+		return s.metadataRecords(ctx, org, corpusID, q)
+	}
 	q.CorpusIDs = union(q.CorpusIDs, nil)
 	args := []any{org, corpusID}
 	where := ""
@@ -86,21 +89,8 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 	} else {
 		where = catalogRange(q, &args)
 	}
-	order := `id COLLATE "C"`
-	if q.Order == content.AcceptedAtDesc {
-		order = catalogTimeSQL + ` DESC,id COLLATE "C" DESC`
-		if q.AfterID != "" {
-			after := pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
-			if q.AfterAcceptedAt != nil {
-				after = pgtype.Timestamptz{Time: *q.AfterAcceptedAt, Valid: true}
-			}
-			args = append(args, after, q.AfterID)
-			where += fmt.Sprintf(` AND (%s,id COLLATE "C") < ($%d,$%d)`, catalogTimeSQL, len(args)-1, len(args))
-		}
-	} else {
-		args = append(args, q.AfterID)
-		where += fmt.Sprintf(` AND id > $%d COLLATE "C"`, len(args))
-	}
+	cursor, order := catalogCursor(q, &args)
+	where += cursor
 	args = append(args, q.Limit)
 	// Each corpus contributes at most one page. The outer merge can never
 	// sort the corpus; its input is bounded by the requested corpus count.
@@ -123,6 +113,27 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 		records = append(records, r)
 	}
 	return records, rows.Err()
+}
+
+// catalogCursor is shared by ordered windows and candidate pages, so the
+// adaptive path preserves the unfiltered catalog's exclusive tuple seek.
+func catalogCursor(q content.RecordQuery, args *[]any) (where, order string) {
+	order = `id COLLATE "C"`
+	if q.Order == content.AcceptedAtDesc {
+		order = catalogTimeSQL + ` DESC,id COLLATE "C" DESC`
+		if q.AfterID != "" {
+			after := pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
+			if q.AfterAcceptedAt != nil {
+				after = pgtype.Timestamptz{Time: *q.AfterAcceptedAt, Valid: true}
+			}
+			*args = append(*args, after, q.AfterID)
+			where += fmt.Sprintf(` AND (%s,id COLLATE "C") < ($%d,$%d)`, catalogTimeSQL, len(*args)-1, len(*args))
+		}
+	} else {
+		*args = append(*args, q.AfterID)
+		where += fmt.Sprintf(` AND id > $%d COLLATE "C"`, len(*args))
+	}
+	return where, order
 }
 
 func (s RecordStore) CountRecords(ctx context.Context, org, corpusID string, q content.RecordQuery) (int64, error) {

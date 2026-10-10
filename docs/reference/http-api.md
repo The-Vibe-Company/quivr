@@ -158,7 +158,7 @@ Commit durable input, Receipt and dispatch intent before responding. Same key an
 
 Operation `listRecords`. Requires `content:read`.
 
-List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. Metadata equality and datetime-range pages use scoped indexes and bounded reads. A filter that exceeds the bounded read budget returns 422 filter_too_broad with retryable false; narrow the metadata or acceptance-time range before sending another request. No partial page is returned. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 
 **Parameters**
 
@@ -2367,6 +2367,16 @@ required:
 | `retryable` | boolean | yes |  |
 | `field` | string |  | JSON Pointer (RFC 6901) to the request member that caused a 422, when known (for example /config/url or /credential/secret/token on connector commands). Minimum length `1`. |
 | `resync_url` | string (uri-reference) |  |  |
+
+Example `metadata_filter_too_broad`:
+
+```json
+{
+  "code": "filter_too_broad",
+  "message": "metadata filter exceeds the bounded read budget; narrow the metadata or acceptance-time range",
+  "retryable": false
+}
+```
 
 <details>
 <summary>Full schema</summary>

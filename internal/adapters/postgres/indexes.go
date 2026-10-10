@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,6 +30,10 @@ var concurrentIndexes = []struct {
 	{Name: "queue_operations_active", Table: "operations", Columns: []string{"organization", "corpus_id"}, Predicate: "(state = ANY (ARRAY['queued'::text, 'running'::text]))"},
 	{Name: "accepted_revisions_version_lookup", Table: "accepted_revisions", Columns: []string{"organization", "version_id"}},
 	{Name: "records_by_current_version", Table: "records", Columns: []string{"organization", "corpus_id", "current_version_id"}},
+	{Name: "projection_metadata_filter_source", Table: "projection_metadata_filter_values", Columns: []string{"organization", "version_id", "generation_id"}},
+	{Name: "projection_metadata_filter_values_lookup", Table: "projection_metadata_filter_values", Columns: []string{"organization", "corpus_id", "generation_id", "field", "value", "version_id"}},
+	{Name: "projection_metadata_filter_dates_lookup", Table: "projection_metadata_filter_values", Columns: []string{"organization", "corpus_id", "generation_id", "field", "date_epoch_ms", "version_id"}, Predicate: "(date_epoch_ms IS NOT NULL)"},
+	{Name: "projection_metadata_filter_pending", Table: "projection_metadata", Columns: []string{"organization", "generation_id", "version_id"}, Predicate: "(NOT filter_indexed)"},
 }
 
 // Index setup errors let the CLI report operator actions without logging raw
@@ -42,6 +47,41 @@ var (
 // Reserved independently of schema migrations: a build waiting for an older
 // writer must not prevent another process from applying required migrations.
 const indexAdvisoryLock int64 = 642004
+
+//go:embed metadata_catalog_sync.sql
+var metadataCatalogSync string
+
+// Synchronization is optional performance maintenance, outside the declarative
+// schema expansion. Install it atomically before any source is marked indexed.
+// A canceled attempt leaves all unpopulated sources on the bounded read path.
+func ensureMetadataCatalogSync(ctx context.Context, conn *pgx.Conn) error {
+	var installed bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT FROM pg_trigger
+ WHERE tgrelid='projection_metadata'::regclass AND tgname='projection_metadata_filter_sync'
+ AND tgenabled='O' AND NOT tgisinternal
+ AND tgfoid=to_regprocedure('projection_metadata_filter_sync()'))`).Scan(&installed); err != nil {
+		return err
+	}
+	if installed {
+		return nil
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+	}()
+	if _, err = tx.Exec(ctx, `SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, metadataCatalogSync); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 // EnsureIndexes runs resumable index work after schema migrations commit. Each
 // build preserves concurrent writes, reuses a matching valid index, and repairs
@@ -76,6 +116,9 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
 	}
 	if !locked {
 		return ErrIndexBusy
+	}
+	if err := ensureMetadataCatalogSync(ctx, conn); err != nil {
+		return err
 	}
 	for _, index := range concurrentIndexes {
 		state := func() (valid, matches bool, err error) {
@@ -126,5 +169,31 @@ LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
 			return fmt.Errorf("index %s did not become valid with the expected definition (valid=%t, matches=%t): %v", index.Name, valid, matches, err)
 		}
 	}
-	return nil
+	// Population commits short batches, so cancellation/restart resumes from the
+	// remaining source rows and never holds a write fence across the corpus.
+	for {
+		result, err := conn.Exec(ctx, `WITH pending AS MATERIALIZED (
+ SELECT organization,version_id,generation_id FROM projection_metadata
+ WHERE NOT filter_indexed ORDER BY organization,generation_id,version_id
+ LIMIT 500 FOR UPDATE SKIP LOCKED)
+ UPDATE projection_metadata pm SET data=pm.data FROM pending p
+ WHERE (pm.organization,pm.version_id,pm.generation_id)=(p.organization,p.version_id,p.generation_id)`)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			break
+		}
+	}
+	var pending bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT FROM projection_metadata WHERE NOT filter_indexed)`).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return ErrIndexBusy
+	}
+	// All consumers now use point probes or scoped Btree entries. Retiring this
+	// installation-wide GIN avoids paying for two complete metadata indexes.
+	_, err = conn.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS projection_metadata_values")
+	return err
 }

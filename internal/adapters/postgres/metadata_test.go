@@ -16,6 +16,9 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	pool := adapterPool(t, ctx)
+	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
 	stores := contentStores(pool)
 	svc := content.Service{Submissions: stores, Receipts: stores, Materialization: stores, Catalog: stores}
 	corpora := corpus.Service{Store: postgres.Store{Pool: pool}}
