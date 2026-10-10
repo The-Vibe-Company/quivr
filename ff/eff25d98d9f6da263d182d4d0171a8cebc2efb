@@ -1,0 +1,19 @@
+.claude/settings.json
+  s_d658e7251951c2::t_68ea014c01c55e 13-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ffeff25d98d9f6da263d182d4d0171a8cebc2efb",
+  "prompts": {},
+  "sessions": {
+    "s_d658e7251951c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0cf2ced-2bdf-45f0-afe3-62c9cf64923f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
