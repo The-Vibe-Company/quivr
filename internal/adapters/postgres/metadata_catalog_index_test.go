@@ -178,6 +178,18 @@ func TestMetadataCatalogIndexedPageWork(t *testing.T) {
 			})
 		}
 	}
+	t.Run("date-equality-with-broad-range", func(t *testing.T) {
+		f := corpus.TypedFilter{MetadataFilter: corpus.MetadataFilter{Field: "date", AnyOf: []any{"2026-10-02T00:00:00.000Z"}, Gte: "2026-10-01T00:00:00.000Z"}, Type: "datetime"}
+		got, err := store.Records(ctx, "example", "corpus", content.RecordQuery{Metadata: []corpus.MetadataFilter{f.MetadataFilter}, FilterRoutes: []content.CatalogFilterRoute{{CorpusID: "corpus", GenerationID: "generation", Filters: []corpus.TypedFilter{f}}}, Limit: 101})
+		if err != nil || len(got) != 25 {
+			t.Fatalf("selective date equality lost behind its broad range: %v, %v", got, err)
+		}
+		for i, row := range got {
+			if want := fmt.Sprintf("r%06d", (i+1)*2000); row.ID != want {
+				t.Fatalf("date intersection item %d: %s, want %s", i, row.ID, want)
+			}
+		}
+	})
 	t.Run("incomplete-intersection", func(t *testing.T) {
 		filters := []corpus.TypedFilter{{MetadataFilter: corpus.MetadataFilter{Field: "half", AnyOf: []any{true}}, Type: "boolean"}, {MetadataFilter: corpus.MetadataFilter{Field: "same", AnyOf: []any{false}}, Type: "boolean"}}
 		got, err := store.Records(ctx, "example", "corpus", content.RecordQuery{CorpusIDs: []string{"corpus"}, Metadata: []corpus.MetadataFilter{{Field: "requested"}}, FilterRoutes: []content.CatalogFilterRoute{{CorpusID: "corpus", GenerationID: "generation", Filters: filters}}, Limit: 5})

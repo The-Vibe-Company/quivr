@@ -225,7 +225,7 @@ func metadataOrderedWindow(ctx context.Context, tx pgx.Tx, org, id string, q con
 
 func metadataAnchor(ctx context.Context, tx pgx.Tx, org, id, generation string, f corpus.TypedFilter) ([]string, bool, error) {
 	needles := f.AnyOf
-	ranged := f.Gte != "" || f.Lte != ""
+	ranged := len(needles) == 0 && (f.Gte != "" || f.Lte != "")
 	if ranged {
 		needles = []any{nil}
 	}
@@ -247,8 +247,7 @@ func metadataAnchor(ctx context.Context, tx pgx.Tx, org, id, generation string, 
 			bind := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
 			where := `organization=$1 AND corpus_id=$2 AND generation_id=$3 AND field=$4`
 			order, dateColumn := "version_id", "NULL::bigint"
-			if ranged {
-				order, dateColumn = "date_epoch_ms,version_id", "date_epoch_ms"
+			if f.Gte != "" || f.Lte != "" {
 				where += " AND date_epoch_ms IS NOT NULL"
 				if f.Gte != "" {
 					where += " AND date_epoch_ms >= projection_metadata_filter_epoch(" + bind(f.Gte) + ")"
@@ -256,6 +255,9 @@ func metadataAnchor(ctx context.Context, tx pgx.Tx, org, id, generation string, 
 				if f.Lte != "" {
 					where += " AND date_epoch_ms <= projection_metadata_filter_epoch(" + bind(f.Lte) + ")"
 				}
+			}
+			if ranged {
+				order, dateColumn = "date_epoch_ms,version_id", "date_epoch_ms"
 				if lastVersion != "" {
 					where += " AND (date_epoch_ms,version_id) > (" + bind(lastDate) + "," + bind(lastVersion) + ")"
 				}
