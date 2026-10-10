@@ -14,10 +14,14 @@ security:
 # response_code records a domain condition reported with an existing envelope code.
 # response_code_from marks delivery conditions whose public code comes from the provider.
 x-public-errors:
+  record_count_too_broad:
+    status_class: 422
+    retryable: false
+    operations: [countRecords]
   corpus_archived:
     status_class: 409
     retryable: false
-    operations: [searchRecords, listRecords, countRecords, countFacets, pollChanges, streamChanges, requestConnectorRun]
+    operations: [getCorpusStats, searchRecords, listRecords, countRecords, countFacets, pollChanges, streamChanges, requestConnectorRun]
   delivery_failed:
     status_class: 500
     retryable: false
@@ -68,7 +72,7 @@ x-public-errors:
   content_unavailable:
     status_class: 503
     retryable: true
-    operations: [getReceipt, getRecord, getVersion, ingestBatch, ingestRecord, listRecords, countRecords, countFacets, withdrawRecord]
+    operations: [getCorpusStats, getReceipt, getRecord, getVersion, ingestBatch, ingestRecord, listRecords, countRecords, countFacets, withdrawRecord]
   cost_confirmation_required:
     status_class: 409
     retryable: false
@@ -88,7 +92,7 @@ x-public-errors:
   cursor_scope_changed:
     status_class: 409
     retryable: false
-    operations: [listAdminDocuments, listCorpora, listDeliveryAttempts, listMatches, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
+    operations: [getCorpusStats, listAdminDocuments, listCorpora, listDeliveryAttempts, listMatches, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
   definition_too_large:
     status_class: 422
     retryable: false
@@ -120,7 +124,7 @@ x-public-errors:
   forbidden:
     status_class: 403
     retryable: false
-    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, pauseConnector, resumeConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, listConnectorPushStats, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+    operations: [getCorpusStats, activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, pauseConnector, resumeConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, listConnectorPushStats, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
   idempotency_conflict:
     status_class: 409
     retryable: false
@@ -144,7 +148,7 @@ x-public-errors:
   invalid_cursor:
     status_class: 422
     retryable: false
-    operations: [listAdminDocuments, listConnectors, listCorpora, listDeliveryAttempts, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
+    operations: [getCorpusStats, listAdminDocuments, listConnectors, listCorpora, listDeliveryAttempts, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
   invalid_expression:
     status_class: 422
     retryable: false
@@ -188,7 +192,7 @@ x-public-errors:
   invalid_query:
     status_class: 422
     retryable: false
-    operations: [searchRecords, listConnectorPushStats, getEvaluationRetirement, getMatchStats, getPluginCallStats, getReceivedStats, getSearchStats, getStepStats, getTopQueries, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSubscriptions, pollChanges, streamChanges]
+    operations: [getCorpusStats, searchRecords, listConnectorPushStats, getEvaluationRetirement, getMatchStats, getPluginCallStats, getReceivedStats, getSearchStats, getStepStats, getTopQueries, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSubscriptions, pollChanges, streamChanges]
   invalid_reprocess:
     status_class: 422
     retryable: false
@@ -232,7 +236,7 @@ x-public-errors:
   not_found:
     status_class: 404
     retryable: false
-    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, pauseConnector, resumeConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorPushStats, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+    operations: [getCorpusStats, activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, pauseConnector, resumeConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorPushStats, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, countRecords, countFacets, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
   operation_not_terminal:
     status_class: 409
     retryable: false
@@ -583,12 +587,85 @@ paths:
                 $ref: '#/components/schemas/Error'
       x-required-permissions:
       - content:read
+  /v0/corpora/{corpus_id}/stats:
+    get:
+      operationId: getCorpusStats
+      description: >-
+        Running eligible-document and catalog totals from transactional aggregates.
+        Eligible documents have a current baseline-ready, non-quarantined Version and
+        no withdrawal or tombstone. Catalog membership includes withdrawn and unready
+        Record identities. Counts are independent of projection generations.
+        All requested fields share one database snapshot at observed_at. complete=false
+        and approximate=true mean historical initialization has not finished; partial
+        zeros are not certified empty. Archived Corpora return 409 corpus_archived.
+        Default reads return totals only. Include histogram and/or sources explicitly.
+        History uses the CURRENT Version's acceptance time, stored in UTC hours; a
+        correction moves its Record to the new hour. Day resolution groups UTC days.
+        Local days can be reconstructed exactly only for whole-hour UTC offsets.
+        Fractional-hour offsets require finer data and must not be labelled exact.
+        History has no lifetime cutoff: each page covers at most 10000 consecutive
+        buckets, with missing buckets zero only within its covered interval at observed_at
+        when complete=true. Boundary days may be clipped by the requested time range.
+        Consume histogram.next_page_cursor with histogram_cursor and repeat the original
+        parameters. Sources use namespace plus trusted connector identity; historical
+        and public submissions have connector_id unknown. Source counts are lifetime
+        totals regardless of histogram bounds. Consume sources.next_page_cursor with
+        sources_cursor. Each continuation is an independent snapshot; concurrent
+        corrections can change earlier pages, so multiple pages are not one census.
+        Cursors bind Corpus, authorization scope and every query option.
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+      - name: include
+        in: query
+        description: Comma-separated histogram and/or sources; omit for totals only.
+        schema: {type: string}
+      - name: resolution
+        in: query
+        description: Histogram grouping. Requires include=histogram.
+        schema: {type: string, enum: [day, hour], default: day}
+      - name: accepted_after
+        in: query
+        description: Inclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+        schema: {type: string, format: date-time}
+      - name: accepted_before
+        in: query
+        description: Exclusive histogram bound, RFC 3339 at a UTC-hour boundary.
+        schema: {type: string, format: date-time}
+      - name: histogram_cursor
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: sources_cursor
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: source_limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+      responses:
+        '200':
+          description: Totals and any requested series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CorpusStats'}
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+      x-required-permissions: [content:read]
   /v0/records/count:
     get:
       operationId: countRecords
       description: >-
-        Exact count of one Corpus's authorized Records within optional current-Version
-        acceptance-time bounds. Includes withdrawn Records, as the listing does. Records
+        Count of one Corpus's authorized Records. Time-bounded counts are exact within
+        a two-second query budget; larger windows return non-retryable 422
+        record_count_too_broad and require narrower bounds. Unbounded counts probe at
+        most 10001 identities: up to 10000 are exact, larger Corpora return stored
+        catalog totals with approximate=true. complete=false means initialization
+        has not finished; incomplete zeros must not be presented as empty. observed_at
+        names the independent read snapshot. Includes withdrawn Records, as the listing does. Records
         without a current Version are counted only when neither bound is supplied.
         Uses content:read and the same Corpus scope as listRecords. This is an independent
         read, not a snapshot shared with listing pages. Equal bounds count zero; reversed
@@ -6739,6 +6816,69 @@ components:
           minLength: 1
       required:
       - items
+    CorpusStats:
+      type: object
+      additionalProperties: false
+      required: [corpus_id, total, catalog_total, undated_total, catalog_undated_total, observed_at, approximate, complete]
+      properties:
+        corpus_id: {type: string}
+        total: {type: integer, format: int64, minimum: 0}
+        catalog_total: {type: integer, format: int64, minimum: 0}
+        undated_total: {type: integer, format: int64, minimum: 0}
+        catalog_undated_total: {type: integer, format: int64, minimum: 0}
+        first_catalog_hour:
+          type: string
+          format: date-time
+          description: First occupied catalog UTC hour; not the exact first acceptance time. Absent for an undated or empty corpus.
+        last_catalog_hour:
+          type: string
+          format: date-time
+          description: Last occupied catalog UTC hour; not the exact last acceptance time.
+        observed_at: {type: string, format: date-time}
+        approximate: {type: boolean}
+        complete: {type: boolean}
+        histogram: {$ref: '#/components/schemas/CorpusStatsHistogram'}
+        sources: {$ref: '#/components/schemas/CorpusStatsSources'}
+    CorpusStatsHistogram:
+      type: object
+      additionalProperties: false
+      required: [from, to, resolution_seconds, items]
+      properties:
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        resolution_seconds: {type: integer, enum: [3600, 86400]}
+        items:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [start, count, catalog_count]
+            properties:
+              start: {type: string, format: date-time}
+              count: {type: integer, format: int64, minimum: 0}
+              catalog_count: {type: integer, format: int64, minimum: 0}
+        next_page_cursor: {type: string, minLength: 1}
+    CorpusStatsSources:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [namespace, connector_id, count, catalog_count]
+            properties:
+              namespace: {type: string}
+              connector_id:
+                type: string
+                description: Trusted accepting connector instance, or the explicit unknown bucket for historical/public submissions.
+              count: {type: integer, format: int64, minimum: 0}
+              catalog_count: {type: integer, format: int64, minimum: 0}
+        next_page_cursor: {type: string, minLength: 1}
     RecordCount:
       type: object
       additionalProperties: false
@@ -6747,6 +6887,9 @@ components:
           type: integer
           format: int64
           minimum: 0
+        observed_at: {type: string, format: date-time}
+        approximate: {type: boolean}
+        complete: {type: boolean}
       required:
       - count
     RecordPage:

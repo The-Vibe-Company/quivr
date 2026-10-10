@@ -85,6 +85,7 @@ var (
 	InvalidMigration                 = declare("invalid_migration", InvalidClass, false)
 	InvalidOwner                     = declare("invalid_owner", InvalidClass, false)
 	InvalidQuery                     = declare("invalid_query", InvalidClass, false)
+	RecordCountTooBroad               = declare("record_count_too_broad", InvalidClass, false)
 	InvalidReprocess                 = declare("invalid_reprocess", InvalidClass, false)
 	InvalidSchema                    = declare("invalid_schema", InvalidClass, false)
 	InvalidSignature                 = declare("invalid_signature", UnauthenticatedClass, false)

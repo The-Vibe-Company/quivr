@@ -148,10 +148,10 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	// Separate statements retain fresh READ COMMITTED snapshots; the caller
 	// still owns the journal fence and this entry's all-or-nothing transaction.
 	writes := &pgx.Batch{}
-	writes.Queue(`INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type)
+	writes.Queue(`INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type,connector_instance_id)
  VALUES($1,$2,$3,$4,$5,$6,$7,
  (SELECT version_id FROM accepted_revisions WHERE organization=$1 AND record_id=$2 AND ($7='' OR source_position='' OR length(source_position)<length($7) OR (length(source_position)=length($7) AND source_position COLLATE "C" < $7 COLLATE "C")) ORDER BY acceptance_order DESC LIMIT 1),
- $8,now(),nullif($9,''),COALESCE(NULLIF($10,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, execution, content.Title(c), c.SourceMediaType)
+ $8,now(),nullif($9,''),COALESCE(NULLIF($10,''),'text/plain'),COALESCE(NULLIF($11,''),'unknown')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, execution, content.Title(c), c.SourceMediaType, c.ConnectorInstanceID)
 	if content.NewerPosition(c.Position, position) {
 		writes.Queue(`UPDATE records SET desired_order=$3,desired_position=$4,desired_version_id=$5 WHERE organization=$1 AND id=$2
  AND EXISTS(SELECT 1 FROM accepted_revisions WHERE organization=$1 AND record_id=$2 AND slot=$6 AND acceptance_order=$3)`, scope.Organization, recordID, order, c.Position, versionID, slot)

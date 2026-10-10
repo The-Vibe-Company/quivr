@@ -115,6 +115,9 @@ type RelationResolver interface {
 }
 
 type Command struct {
+	// ConnectorInstanceID is set only by trusted acquisition, outside canonical
+	// request bytes. Client-supplied producer provenance is never attribution.
+	ConnectorInstanceID string `json:"-"`
 	// SourceMediaType is engine-owned acceptance metadata, stored apart from
 	// the canonical command so existing receipt replays keep their identity.
 	SourceMediaType string         `json:"-"`
@@ -304,6 +307,7 @@ type Service struct {
 	Versions        VersionReader
 	Materialization MaterializationStore
 	Catalog         RecordCatalog
+	Stats           CorpusStatsReader
 	Facets          FacetReader
 	Blobs           Blobs
 	Baseline        BaselineRepository
@@ -325,6 +329,7 @@ type Service struct {
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
+	c.ConnectorInstanceID = ""
 	if err := scope.Require(corpus.ActionContentAccept); err != nil {
 		return Receipt{}, err
 	}

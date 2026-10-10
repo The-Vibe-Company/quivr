@@ -25,6 +25,14 @@ Start a new worker and wait for its `/readyz` to report ready. Then send SIGTERM
 
 Start each new API instance and wait for `/readyz` to return HTTP 204 before routing traffic to it. Send SIGTERM to drain the previous instance after the new one is ready, then wait for it to exit. Keep at least one ready API serving throughout the rollout.
 
+## Initialize document totals
+
+The document statistics migration adds empty rollups without scanning the corpus. New writers maintain totals in their publication transactions. Leave `corpus_stats.bootstrap_enabled` at its default `false` while previous API or worker instances can still write.
+
+After **every previous writer has drained and stopped**, set `corpus_stats.bootstrap_enabled` to `true` in the shared configuration and restart the new processes. Initialization runs outside migration locks. Each API or worker visits at most 1,000 historical Records per transaction; multiple processes divide the work and resume from durable cursors after a restart. Keep an enabled process running until `GET /v0/corpora/{corpus_id}/stats` reports `complete: true` for every Corpus you use. Reading statistics needs `content:read` and a matching Corpus grant. Until then, `complete: false` and `approximate: true` mark partial totals, including large unbounded count responses.
+
+Enabling initialization closes application rollback to a version that does not maintain these totals. Changing the gate requires restarting the affected processes. Disabling the initializer pauses its progress; it does not make old writers safe. Use a forward fix or your data recovery procedure if an old writer runs afterward. See [Read document totals](/guides/follow-changes#read-document-totals) for eligibility and timezone rules.
+
 ## Keep the rollback window
 
 Observe ingestion, search and worker processing before ending the rollback window. Before applying contracts or enabling features that close the rollback window, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place. Read the release notes for feature-specific compatibility limits; an additive schema alone does not guarantee that previous binaries can read newly written data.

@@ -53,8 +53,11 @@ type Config struct {
 	Postgres         PostgresConfig              `json:"postgres"`
 	Worker           workqueue.Config            `json:"worker"`
 	QueueObservation workqueue.ObservationConfig `json:"queue_observation"`
-	TLS              TLSConfig                   `json:"tls"`
-	Telemetry        telemetry.Config            `json:"telemetry"`
+	CorpusStats      struct {
+		BootstrapEnabled bool `json:"bootstrap_enabled"`
+	} `json:"corpus_stats"`
+	TLS       TLSConfig        `json:"tls"`
+	Telemetry telemetry.Config `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
 	TEIURL                  string                  `json:"tei_url"`
@@ -549,7 +552,7 @@ func Run(command string, args ...string) error {
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
-	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Facets: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
+	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Stats: postgres.CorpusStatsStore{Pool: pool}, Facets: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection, err := weaviate.NewWithTLS(cfg.WeaviateURL, cfg.TLS.Weaviate)
@@ -642,6 +645,29 @@ func Run(command string, args ...string) error {
 	}
 	indexes := &IndexMaintenance{Pool: pool}
 	loops.Go(indexes.Run)
+	if cfg.CorpusStats.BootstrapEnabled {
+		loops.Go(func(ctx context.Context) {
+			stats := postgres.CorpusStatsStore{Pool: pool}
+			for {
+				attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+				progress, err := stats.Bootstrap(attempt, 1000)
+				cancel()
+				delay := time.Second
+				if err != nil && ctx.Err() == nil {
+					slog.Warn("corpus totals initialization unavailable")
+				} else if progress {
+					delay = 100 * time.Millisecond
+				}
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		})
+	}
 	queueSnapshots := postgres.QueueSnapshots{Pool: pool, RefreshInterval: queueRefreshInterval}
 	acquisition.Acquirer.Queues = queueSnapshots
 	loops.Go(func(ctx context.Context) {

@@ -68,7 +68,7 @@ func catalogServer(t *testing.T, catalog *memoryCatalog, stores ...corpus.Store)
 	if len(stores) > 0 {
 		store = stores[0]
 	}
-	handler, err := httpapi.New(store, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 0), httpapi.WithConnectors(catalogConnectors(t)))
+	handler, err := httpapi.New(store, content.Service{Catalog: catalog, Stats: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 0), httpapi.WithConnectors(catalogConnectors(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,4 +338,12 @@ func TestRecordDateCursorBindsOrderAndBounds(t *testing.T) {
 func (c *memoryCatalog) CountRecords(_ context.Context, _, _ string, q content.RecordQuery) (int64, error) {
 	c.lastQuery = q
 	return int64(len(c.records)), c.fail
+}
+
+func (c *memoryCatalog) RecordCount(ctx context.Context, org, id string, q content.RecordQuery) (content.RecordCountResult, error) {
+	count, err := c.CountRecords(ctx, org, id, q)
+	return content.RecordCountResult{Count: count, ObservedAt: time.Now().UTC(), Complete: true}, err
+}
+func (c *memoryCatalog) CorpusStats(context.Context, string, string, content.CorpusStatsQuery) (content.CorpusStats, error) {
+	return content.CorpusStats{}, content.ErrUnsupported
 }

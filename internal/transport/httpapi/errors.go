@@ -37,6 +37,8 @@ func errorResponse(err error, fallback *publicerr.Error, corpusID ...string) (in
 		body.Field = &field
 	}
 	switch e {
+	case publicerr.RecordCountTooBroad:
+		body.Message = "record count exceeded its query budget; use a narrower accepted_after/accepted_before window"
 	case publicerr.QueryTooLong:
 		if detail := publicerr.Detail(err); detail != "" {
 			body.Message = detail

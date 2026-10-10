@@ -21,7 +21,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
 | [`quivr plugin test`](#quivr-plugin-test) | nothing: works offline | Certify that the engine can safely invoke every Contribution the plugin declares. |
 | [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
-| [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists. |
+| [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or get a count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists. |
 | [`quivr mcp`](#quivr-mcp) | a running server | Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile. |
 | [`quivr apply`](#quivr-apply) | a running server | Preview or apply a private sources declaration through the public API. |
 
@@ -175,14 +175,14 @@ Exit codes:
 
 ### quivr records {#quivr-records}
 
-List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
+List one page of a Corpus's Records or get a count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
 
 `quivr records --help` prints:
 
 ```text
 usage: quivr records --corpus <corpus-id> [--order record_id|accepted_at_desc] [--accepted-after <RFC3339>] [--accepted-before <RFC3339>] [--page-cursor <cursor>] [--limit <1-100>] [--count] [--api-url <url>] [--api-key <key>]
 
-List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
+List one page of a Corpus's Records or get a count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
 
 Flags:
   -accepted-after string
@@ -196,7 +196,7 @@ Flags:
   -corpus string
         Corpus ID (required; needs content:read)
   -count
-        print the exact count with optional time bounds; omit order, page-cursor and limit
+        print a count (large unbounded counts are approximate); omit order, page-cursor and limit
   -limit int
         page size, 1 to 100 (default 100)
   -order string
