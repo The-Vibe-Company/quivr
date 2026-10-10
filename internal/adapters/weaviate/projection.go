@@ -107,7 +107,7 @@ func vectorConfig(metric string, index *content.VectorIndex) map[string]any {
 		if index.Quantization == content.QuantizationRQ1 {
 			rq["bits"] = 1
 		}
-		if index.RescoreLimit > 0 {
+		if index.Quantization == content.QuantizationRQ8 || index.RescoreLimit > 0 {
 			rq["rescoreLimit"] = index.RescoreLimit
 		}
 		config["rq"] = rq
@@ -117,9 +117,28 @@ func vectorConfig(metric string, index *content.VectorIndex) map[string]any {
 	return map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": config}
 }
 
-// ensureVectors adds the named vectors of a generation's spaces that its
-// collection lacks. Weaviate adds a named vector to an existing collection
-// in place (since 1.31), so a new space never recreates the collection.
+// rq8Setting identifies a mutable RQ-8 limit using the generation's recorded
+// setting. Other compression settings and unrelated vector options stay intact.
+func rq8Setting(raw any, index *content.VectorIndex) (map[string]any, int, bool) {
+	if index != nil && index.Quantization != content.QuantizationRQ8 {
+		return nil, 0, false
+	}
+	vector, _ := raw.(map[string]any)
+	config, _ := vector["vectorIndexConfig"].(map[string]any)
+	rq, _ := config["rq"].(map[string]any)
+	if vector["vectorIndexType"] != "hnsw" || rq["enabled"] != true || rq["bits"] != float64(8) {
+		return nil, 0, false
+	}
+	limit := 0
+	if index != nil {
+		limit = index.RescoreLimit
+	}
+	return rq, limit, true
+}
+
+// ensureVectors adds missing spaces and reconciles mutable RQ-8 limits before
+// caching a generation's named vectors. Vector names and graph contents stay
+// unchanged, including for generations recorded before index settings.
 func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 	if !g.SpacesProjected {
 		return nil
@@ -145,18 +164,33 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 	if configs == nil {
 		configs = map[string]any{}
 	}
-	added := false
+	changed := false
+	limits := map[string]int{}
 	for _, sp := range g.Spaces {
 		name := s.VectorName(g, sp.ID)
 		if _, ok := configs[name]; !ok {
 			configs[name] = vectorConfig(sp.Metric, sp.Index)
-			added = true
+			changed = true
+			if sp.Index == nil || sp.Index.Quantization == content.QuantizationRQ8 {
+				limit := 0
+				if sp.Index != nil {
+					limit = sp.Index.RescoreLimit
+				}
+				limits[name] = limit
+			}
+		} else if rq, limit, ok := rq8Setting(configs[name], sp.Index); ok {
+			limits[name] = limit
+			if rq["rescoreLimit"] != float64(limit) {
+				rq["rescoreLimit"] = limit
+				changed = true
+			}
 		}
 	}
-	if added {
+	if changed {
 		class["vectorConfig"] = configs
-		// A concurrent writer may have added it first; the read below decides.
-		_, _ = s.call(ctx, "PUT", "/v1/schema/"+g.Collection, class, nil)
+		if _, err := s.call(ctx, "PUT", "/v1/schema/"+g.Collection, class, nil); err != nil {
+			return err
+		}
 		class = nil
 		if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
 			return err
@@ -168,6 +202,15 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 		if _, ok := configs[name]; !ok {
 			return errors.New("projection named vector missing")
 		}
+		if limit, check := limits[name]; check {
+			rq, _, ok := rq8Setting(configs[name], sp.Index)
+			if !ok || rq["rescoreLimit"] != float64(limit) {
+				return errors.New("projection named vector rescore setting differs")
+			}
+		}
+	}
+	for _, sp := range g.Spaces {
+		name := s.VectorName(g, sp.ID)
 		known.Store(g.Collection+"/"+name, true)
 	}
 	return nil
@@ -222,7 +265,8 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 		return errors.New("invalid projection route")
 	}
 	var existing struct {
-		Properties []struct {
+		VectorConfig map[string]any `json:"vectorConfig"`
+		Properties   []struct {
 			Name string `json:"name"`
 		} `json:"properties"`
 	}
@@ -250,6 +294,30 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 			}
 			if _, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", property.config, nil); err != nil {
 				return err
+			}
+		}
+		// Bootstrap owns only the legacy default. Other named vectors require
+		// their generation's recorded settings, reconciled by ensureVectors.
+		if rq, _, ok := rq8Setting(existing.VectorConfig[legacyVector], nil); ok && rq["rescoreLimit"] != float64(0) {
+			var class map[string]any
+			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &class); err != nil {
+				return err
+			}
+			configs, _ := class["vectorConfig"].(map[string]any)
+			rq, _, ok = rq8Setting(configs[legacyVector], nil)
+			if !ok {
+				return errors.New("projection legacy vector setting changed")
+			}
+			rq["rescoreLimit"] = 0
+			if _, err = s.call(ctx, "PUT", "/v1/schema/"+collection, class, nil); err != nil {
+				return err
+			}
+			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing); err != nil {
+				return err
+			}
+			rq, _, ok = rq8Setting(existing.VectorConfig[legacyVector], nil)
+			if !ok || rq["rescoreLimit"] != float64(0) {
+				return errors.New("projection legacy vector rescore setting differs")
 			}
 		}
 		return nil

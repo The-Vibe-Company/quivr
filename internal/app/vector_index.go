@@ -9,8 +9,8 @@ import (
 
 // VectorIndexSetting is how the search index stores a space's vectors. An
 // omitted quantization or rescore limit takes the deployment's, except that
-// a space set to "none" has nothing to rescore. A rescore limit of 0 keeps
-// the index's own default.
+// a space set to "none" has nothing to rescore. A limit of 0 disables RQ-8
+// rescoring and keeps the index's RQ-1 default.
 type VectorIndexSetting struct {
 	Quantization string `json:"quantization,omitempty"`
 	RescoreLimit *int   `json:"rescore_limit,omitempty"`

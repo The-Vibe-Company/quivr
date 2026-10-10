@@ -72,6 +72,8 @@ class Infrastructure(unittest.TestCase):
 
     def test_profiles_and_literal_overrides_reach_the_launch_model(self):
         small = infra.resolve()
+        self.assertEqual(small['weaviate']['environment']['GOMEMLIMIT'], '1700MiB')
+        self.assertEqual(small['weaviate']['deploy']['resources']['limits']['memory'], '2147483648')
         self.assertEqual(small['weaviate']['environment']['ASYNC_INDEXING'], 'false')
         self.assertEqual(small['postgres']['environment']['QUIVR_POSTGRES_RANDOM_PAGE_COST'], '1.1')
         large = infra.resolve('large')
@@ -81,8 +83,13 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_SYNCHRONOUS_COMMIT'], 'on')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_VOLUME_MB'], '476837')
         self.assertEqual(large['postgres']['x-quivr-storage-budget-bytes'], '500000000000')
-        self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '27GiB')
-        self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '32000000000', 'cpus': '32'})
+        self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '16GiB')
+        self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '64000000000', 'cpus': '32'})
+        from deploy.railway.provision import load_services
+        for model in (infra.compose_model(large)['services']['weaviate'], load_services('large')['weaviate']):
+            self.assertEqual(model.get('environment', model.get('variables'))['GOMEMLIMIT'], '16GiB')
+            self.assertEqual(model.get('limits', model.get('deploy', {}).get('resources', {}).get('limits'))
+                             ['memory'], '64000000000')
         self.assertEqual(large['autoscaler']['environment']['QUIVR_AUTOSCALER_MIN'], '1')
         self.assertEqual(large['weaviate']['environment']['ASYNC_INDEXING'], 'true')
         self.assertEqual(large['weaviate']['environment']['PERSISTENCE_MEMTABLES_MAX_SIZE_MB'], '1024')

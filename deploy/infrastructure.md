@@ -10,7 +10,7 @@ Both profiles keep the pinned images and PostgreSQL tuning; bytes are decimal un
 | Service | small memory / CPU | large memory / CPU |
 | --- | ---: | ---: |
 | PostgreSQL | 1,073,741,824 / 1 | 32,000,000,000 / 32 |
-| Weaviate | 2,147,483,648 / 2 | 32,000,000,000 / 32 |
+| Weaviate | 2,147,483,648 / 2 | 64,000,000,000 / 32 |
 | API | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | worker (live) | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | worker-bulk | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
@@ -18,10 +18,12 @@ Both profiles keep the pinned images and PostgreSQL tuning; bytes are decimal un
 
 Large PostgreSQL and Weaviate planning budgets are 500,000,000,000 bytes (500 GB decimal) each. PostgreSQL derives `QUIVR_POSTGRES_VOLUME_MB=476837` unless overridden; the capacity report does not resize volumes or verify shared filesystem quotas.
 
-The large profile sets Weaviate `ASYNC_INDEXING=true`, `PERSISTENCE_MEMTABLES_MAX_SIZE_MB=1024`, `GOMEMLIMIT=27GiB` and `RAFT_BOOTSTRAP_TIMEOUT=3600`; these unbenchmarked settings
+The large profile sets Weaviate `ASYNC_INDEXING=true`, `PERSISTENCE_MEMTABLES_MAX_SIZE_MB=1024`, `GOMEMLIMIT=16GiB` and `RAFT_BOOTSTRAP_TIMEOUT=3600`; these unbenchmarked settings
 may let object writes precede vector visibility, and memtable memory multiplies across active buckets and shards.
 
-`GOMEMLIMIT` is a soft Go runtime budget, not an RSS cap. Keep RQ-8, schema disabled and the `none` vectorizer; choose measured limits before increasing a profile.
+`GOMEMLIMIT` is a soft Go runtime budget, not an RSS cap. The large profile leaves about 47 GB outside its 16 GiB runtime target for file cache and other memory. Size total RAM for index data on disk + compressed vector cache and graph + runtime/import/rebuild headroom. Recheck this budget as data grows; 64 GB is a starting allocation, not a capacity guarantee. Keep RQ-8, schema disabled and the `none` vectorizer.
+
+The engine declares RQ-8 `rescoreLimit: 0`, including existing default-compressed indexes, to avoid full-precision rescoring reads. Explicit positive limits remain supported. Object fetches and BM25 still need file-cache residency and storage IOPS; prefer SSD/NVMe or provisioned random-read throughput. See [cold-index sizing](../docs-site/run-quivr/scale-quivr.mdx#cold-index-search).
 
 ## Declared settings
 
@@ -42,7 +44,7 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | Weaviate `DEFAULT_QUANTIZATION` | rq-8; reduce vector memory, retaining explicit per-space configuration. |
 | `ASYNC_INDEXING` | false in small, true in large; decouple large writes from ANN indexing with visibility lag. |
 | `PERSISTENCE_MEMTABLES_MAX_SIZE_MB` | 200 in small, 1024 in large; fewer flushes consume more bucket/shard memory and recovery work. |
-| `GOMEMLIMIT` | 1700MiB in small / 27GiB in large; leave headroom below the service limit. |
+| `GOMEMLIMIT` | 1700MiB in small / 16GiB in large; reserve room for file cache below the 64 GB service limit. |
 | `RAFT_BOOTSTRAP_TIMEOUT` | 600 seconds small / 3600 large; allow a populated index time to recover at startup. |
 | `AUTOSCHEMA_ENABLED` / `DEFAULT_VECTORIZER_MODULE` | false / none; the engine owns schema and embeddings. |
 | `PERSISTENCE_DATA_PATH` | /var/lib/weaviate; match the persistent volume mount. |

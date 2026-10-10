@@ -96,11 +96,11 @@ then apply and redeploy; avoid a separate set of hand-edited service variables:
 | Variable | Purpose |
 | --- | --- |
 | `RAFT_BOOTSTRAP_TIMEOUT` | Seconds allowed to bootstrap/rejoin while loading the database. The pinned 1.39.10 default is **600 s**; increase it if index loading needs longer, and allow the deployment's startup deadline to cover it. |
-| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Choose about 80–90% of the service memory to leave headroom; this does not bound total RSS or make an oversized index fit. |
+| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Budget the Go runtime separately from index file cache: the large profile uses `16GiB` within 64 GB. This does not bound total RSS. |
 
 The [pinned configuration source](https://github.com/weaviate/weaviate/blob/v1.39.10/usecases/config/environment.go)
 still honors deprecated `HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE`; leave it unset so
-shard loading determines prefill behavior. `ASYNC_INDEXING_BATCH_SIZE` was removed.
+shard loading determines prefill behavior. Startup prefill does not keep BM25 and object pages resident after idle periods. The [shared memory profile](../infrastructure.md#profiles) reserves file-cache room; verify RAM and random-read IOPS for your data. `ASYNC_INDEXING_BATCH_SIZE` was removed.
 The 1.38–1.39 release-note review found no required Quivr schema migration:
 1.39.1's auto-schema named-vector default does not apply because Quivr disables
 auto-schema and declares named vectors explicitly. See [memory sizing](https://docs.weaviate.io/weaviate/concepts/resources).

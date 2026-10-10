@@ -57,9 +57,10 @@ const (
 // VectorIndex is how the search index stores one space's vectors: an HNSW
 // graph over vectors compressed by Quantization. A compressed index keeps
 // the full-precision vectors on disk and rescores the best RescoreLimit
-// candidates with them; zero keeps the index's own default. A generation
+// candidates with them; zero disables RQ-8 rescoring and keeps the RQ-1
+// default. A generation
 // records it with each space, so changing it builds a new index through a
-// rebuild instead of altering one in place.
+// rebuild. The adapter reconciles the zero RQ-8 default in place.
 type VectorIndex struct {
 	Quantization string `json:"quantization"`
 	RescoreLimit int    `json:"rescore_limit,omitempty"`
