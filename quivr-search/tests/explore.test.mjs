@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { countFacets, createExplorer, periodBounds } from "../explore.mjs";
+import { createExplorer } from "../explore.mjs";
 
 // How the Explorer counts a date (THE-1184): the step of its histogram and
 // the filters each count keeps, against a fake engine that answers each
@@ -32,32 +32,49 @@ test("Explorer search preserves degradation and explains unsupported_search", as
   }
 });
 
-async function counted(predicates, buckets, timeline) {
+// Exercise the facade with raw engine answers. It selects the histogram,
+// filters and batches; the fixture only supplies schema and interval buckets.
+async function counted(field, predicates, buckets, window) {
   const sent = [];
-  const out = await countFacets({
-    ids: ["c1"],
-    fields: [language, date],
-    predicates,
-    timeline,
-    count: async (body) => {
+  const explorer = createExplorer({
+    upstream: async (path, method, body) => {
+      if (path !== "/v0/facets")
+        return { status: 200, data: { effective_retrieval: { fields: [
+          { name: "issued_at", type: "datetime", roles: ["filter"], source_pointer: "/issued_at" },
+        ] } } };
       sent.push(body);
-      return {
-        items: body.fields.map((f) => ({ field: f.field, buckets: f.interval ? buckets[f.interval] || [] : [] })),
-      };
+      return { status: 200, data: {
+        items: body.fields.map((f) => ({ field: f.field, buckets: buckets[f.interval] || [] })),
+      } };
     },
+    picked: async () => ["c1"],
+    demo: () => "c1",
   });
-  const histogram = out.fields.find((f) => f.field === date.name);
-  // Each request: the date's step in it, and the filters it kept.
-  const asked = sent.map((b) => [
-    b.fields.find((f) => f.field === date.name)?.interval,
-    (b.filter?.metadata || []).map((p) => `${p.field.slice(9)} ${p.gte || ""}`.trim()),
-  ]);
+  const params = { field, metadata: JSON.stringify(predicates), ...(window ? { window: `${window.gte},${window.lte}` } : {}) };
+  const out = await explorer.facets(new URLSearchParams(params));
+  // Another facet keeps the selected date but leaves its own predicate out.
+  if (predicates.length) await explorer.facets(new URLSearchParams({ ...params, field: language.name }));
+  const histogram = out.fields.find((f) => f.field === field);
+  const requests = (name) => sent
+    .filter((b) => b.fields.some((f) => f.field === name))
+    .map((b) => [b.fields.find((f) => f.field === name).interval, b.filter?.metadata || []]);
   return {
     interval: histogram.interval,
     values: histogram.values.map((v) => `${v.value} ${v.count}`),
-    asked,
+    asked: requests(field),
+    languageAsked: requests(language.name),
     ...(out.total === undefined ? {} : { total: out.total }),
   };
+}
+
+// Requests for distinct counts may start in either order; membership matters.
+function sameCounts(actual, want, name) {
+  const { asked, languageAsked, ...result } = actual;
+  const { asked: expected, languageAsked: other = [], ...output } = want;
+  const order = (requests) => requests.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  assert.deepEqual(result, output, name);
+  assert.deepEqual(order(asked), order(expected), `${name}: date requests`);
+  assert.deepEqual(languageAsked, other, `${name}: language requests`);
 }
 
 const at = (value, count = 1) => ({ value, count });
@@ -67,10 +84,12 @@ const months = (first, n) =>
     const d = new Date(Date.UTC(first, i, 1));
     return at(d.toISOString().replace(".000", ""), i + 1);
   });
-const picked = (period) => ({ field: date.name, ...periodBounds(period) });
 const en = { field: language.name, any_of: ["en"] };
 
 test("a date's histogram steps by the period picked, or by the span of its documents", async () => {
+  const year = { field: "issued_at", gte: "2026-01-01T00:00:00.000Z", lte: "2026-12-31T23:59:59.999Z" };
+  const day = { field: "issued_at", gte: "2026-10-05T00:00:00.000Z", lte: "2026-10-05T23:59:59.999Z" };
+  const month = { field: "issued_at", gte: "2026-10-01T00:00:00.000Z", lte: "2026-10-31T23:59:59.999Z" };
   const cases = [
     {
       name: "unpicked, within two months: counted again by day",
@@ -98,32 +117,24 @@ test("a date's histogram steps by the period picked, or by the span of its docum
     },
     {
       name: "a year picked: its months, under its own filter",
-      predicates: [en, picked("2026")],
+      predicates: [en, year],
       buckets: { month: [at("2026-03-01T00:00:00Z")] },
       want: {
-        interval: "month",
-        values: ["2026-03 1"],
-        asked: [
-          ["month", ["language", "published_at 2026-01-01T00:00:00.000Z"]],
-          [undefined, ["published_at 2026-01-01T00:00:00.000Z"]],
-        ],
+        interval: "month", values: ["2026-03 1"],
+        asked: [["month", [en, year]]], languageAsked: [[undefined, [year]]],
       },
     },
     {
       name: "a day picked: the days of its month, the other facets under the day",
-      predicates: [picked("2026-10-05")],
+      predicates: [day],
       buckets: { day: [at("2026-10-05T00:00:00Z"), at("2026-10-20T00:00:00Z")] },
       want: {
-        interval: "day",
-        values: ["2026-10-05 1", "2026-10-20 1"],
-        asked: [
-          [undefined, ["published_at 2026-10-05T00:00:00.000Z"]],
-          ["day", ["published_at 2026-10-01T00:00:00.000Z"]],
-        ],
+        interval: "day", values: ["2026-10-05 1", "2026-10-20 1"],
+        asked: [["day", [month]]], languageAsked: [[undefined, [day]]],
       },
     },
   ];
-  for (const c of cases) assert.deepEqual(await counted(c.predicates, c.buckets), c.want, c.name);
+  for (const c of cases) sameCounts(await counted("issued_at", c.predicates, c.buckets), c.want, c.name);
 });
 
 // The timeline (THE-1204) draws the documents around the range it picks: it
@@ -132,73 +143,64 @@ test("a date's histogram steps by the period picked, or by the span of its docum
 test("the timeline counts outside its range, within its window, and totals what every filter keeps", async () => {
   const range = { field: date.name, gte: "2026-10-03T00:00:00.000Z", lte: "2026-10-04T23:59:59.999Z" };
   const window = { gte: "2026-09-20T00:00:00.000Z", lte: "2026-10-10T23:59:59.999Z" };
-  const timeline = (w) => ({ field: date.name, ...(w ? { window: w } : {}) });
   const days = { day: [at("2026-10-01T00:00:00Z", 2), at("2026-10-03T00:00:00Z", 3)] };
   const cases = [
     {
       name: "nothing picked: its months, refined to days, and their sum as the total",
       predicates: [],
-      timeline: timeline(),
       buckets: { month: [at("2026-10-01T00:00:00Z", 5)], ...days },
       want: { interval: "day", values: ["2026-10-01 2", "2026-10-03 3"], asked: [["month", []], ["day", []]], total: 5 },
     },
     {
       name: "a range picked: counted without it, the total from its years under every filter",
       predicates: [en, range],
-      timeline: timeline(),
       buckets: { month: [at("2026-10-01T00:00:00Z", 5)], year: [at("2026-01-01T00:00:00Z", 3)], ...days },
       want: {
-        interval: "day",
-        values: ["2026-10-01 2", "2026-10-03 3"],
-        asked: [
-          [undefined, ["published_at 2026-10-03T00:00:00.000Z"]],
-          ["month", ["language"]],
-          ["year", ["language", "published_at 2026-10-03T00:00:00.000Z"]],
-          ["day", ["language"]],
-        ],
-        total: 3,
+        interval: "day", values: ["2026-10-01 2", "2026-10-03 3"], total: 3,
+        asked: [["month", [en]], ["year", [en, range]], ["day", [en]]],
+        languageAsked: [[undefined, [range]]],
       },
     },
     {
       name: "a window shown: counted within it, by the step its length asks",
-      predicates: [range],
-      timeline: timeline(window),
+      predicates: [range], window,
       buckets: { year: [at("2026-01-01T00:00:00Z", 3)], ...days },
       want: {
-        interval: "day",
-        values: ["2026-10-01 2", "2026-10-03 3"],
-        asked: [
-          [undefined, ["published_at 2026-10-03T00:00:00.000Z"]],
-          ["day", ["published_at 2026-09-20T00:00:00.000Z"]],
-          ["year", ["published_at 2026-10-03T00:00:00.000Z"]],
-        ],
-        total: 3,
+        interval: "day", values: ["2026-10-01 2", "2026-10-03 3"], total: 3,
+        asked: [["day", [{ field: date.name, ...window }]], ["year", [range]]],
+        languageAsked: [[undefined, [range]]],
       },
     },
   ];
-  for (const c of cases) assert.deepEqual(await counted(c.predicates, c.buckets, c.timeline), c.want, c.name);
+  for (const c of cases) sameCounts(await counted(date.name, c.predicates, c.buckets, c.window), c.want, c.name);
 });
 
-test("a corpus's own fields are counted apart, 16 at a time, and only the common count names exclusions", async () => {
-  const own = Array.from({ length: 20 }, (_, i) => ({ name: `f${i}`, type: "string" }));
+test("a corpus's own fields are counted apart, at most 16 at a time, and only the common count names exclusions", async () => {
+  const own = Array.from({ length: 20 }, (_, i) => ({ name: `f${i}`, type: "string", roles: ["filter"], source_pointer: `/f${i}` }));
   const sent = [];
-  const out = await countFacets({
-    ids: ["c1"],
-    fields: [language, ...own],
-    predicates: [],
-    count: async (body) => {
+  const explorer = createExplorer({
+    upstream: async (path, method, body) => {
+      if (path !== "/v0/facets") return { status: 200, data: { effective_retrieval: { fields: own } } };
       sent.push(body.fields.map((f) => f.field));
       // A field the corpus's index does not serve yet excludes it.
       const missing = body.fields.some((f) => f.field === "f19");
-      return {
-        items: body.fields.map((f) => ({ field: f.field, buckets: missing ? [] : [at("x", 3)] })),
+      return { status: 200, data: {
+        items: body.fields.map((f) => ({ field: f.field, buckets: missing || f.interval ? [] : [at("x", 3)] })),
         ...(missing ? { excluded_corpora: [{ corpus_id: "c1", fields: ["f19"] }] } : {}),
-      };
+      } };
     },
+    picked: async () => ["c1"],
+    demo: () => "c1",
   });
-  assert.deepEqual(sent.map((names) => names.length), [1, 16, 4]);
+  const out = await explorer.facets(new URLSearchParams());
+  const common = sent.filter((names) => names.some((name) => name.startsWith("metadata.")));
+  assert.equal(common.length, 1);
+  assert.ok(common[0].every((name) => name.startsWith("metadata.")), "common and own fields counted apart");
+  const batches = sent.filter((names) => !names.some((name) => name.startsWith("metadata.")));
+  assert.ok(batches.every((names) => names.length <= 16), JSON.stringify(batches));
+  assert.deepEqual(batches.flat().toSorted(), own.map((f) => f.name).toSorted(), "each own field counted once");
   assert.equal(out.excluded_corpora, undefined);
-  assert.deepEqual(out.fields[0].values, [{ value: "x", count: 3 }]);
+  assert.deepEqual(out.fields.find((f) => f.field === language.name).values, [{ value: "x", count: 3 }]);
 });
 
 // The browser asks one field at a time (THE-1387). A fast count may come from

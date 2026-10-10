@@ -116,6 +116,7 @@ excluded = [
 "plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
+"quivr-search/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep demo test contracts at their observable owners" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
 "sdks/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep each SDK test contract at its owning boundary" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify every kind of plugin in Go" }
@@ -162,6 +163,7 @@ excluded = [
 "plugins/push-source/README.md" = 21
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
+"quivr-search/AGENTS.md" = 10
 "quivr-search/README.md" = 128
 "sdks/AGENTS.md" = 8
 "sdks/go/README.md" = 212

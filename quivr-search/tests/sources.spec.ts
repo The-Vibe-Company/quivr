@@ -195,7 +195,7 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
   await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
 });
 
-test("mobile sombre : ajout et liste lisibles", async ({ page }, info) => {
+test("mobile sombre : le choix des fils trouvés tient dans l’écran", async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await openSources(page);

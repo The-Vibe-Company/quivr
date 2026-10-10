@@ -6,9 +6,9 @@ import type {
 } from "../src/lib/adminStats";
 
 // The Goulots and Plugins sections against the real core (make verify-demo,
-// THE-797): a text added through the facade is timed at each step by the
-// worker's rollups, and the ingestion plugin that cut it shows as healthy
-// with its calls. Search readiness precedes the asynchronous stats flush;
+// THE-797): a text added through the facade becomes searchable, and published
+// worker rollups display step timings and healthy ingestion calls. These
+// aggregates can include earlier writes. Search readiness precedes the stats flush;
 // wait for published rollups before Admin takes its first snapshot.
 // Synthetic content only.
 const run = Date.now().toString(36);
@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("un texte ajouté est chronométré à chaque étape, et le plugin d’ingestion est opérationnel", async ({
+test("un texte ajouté devient trouvable, les durées publiées et le plugin d’ingestion s’affichent", async ({
   page,
 }, info) => {
   const { corpus_id } = await (await page.request.get("/demo/session")).json();
