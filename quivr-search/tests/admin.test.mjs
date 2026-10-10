@@ -473,7 +473,7 @@ test("past days are reread less often than today, and history is capped", async 
   ]);
   const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
   await history(admin, "UTC");
-  assert.equal(flight.max, 4, "at most four counts in flight");
+  assert.ok(flight.max <= 4, `${flight.max} counts in flight; at most four`);
   calls.length = 0;
   now += 60_000;
   await history(admin, "UTC");

@@ -91,7 +91,12 @@ test("la phrase repère une série de jours et le moment où les articles arrive
   const bar = (count: number) => ({ key: "", label: `j${count}`, count, recent: true });
   expect(streakStart([bar(0), bar(1), bar(2), bar(3)])?.label).toBe("j1");
   // Today may still be empty: the run ends yesterday.
-  expect(streakStart([bar(1), bar(1), bar(1), bar(0)])?.label).toBe("j1");
+  expect(streakStart([
+    { key: "2026-10-01", label: "1 oct.", count: 1, recent: true },
+    { key: "2026-10-02", label: "2 oct.", count: 1, recent: true },
+    { key: "2026-10-03", label: "3 oct.", count: 1, recent: true },
+    { key: "2026-10-04", label: "4 oct.", count: 0, recent: true },
+  ])?.label).toBe("1 oct.");
   expect(streakStart([bar(1), bar(0), bar(1), bar(1)])).toBeNull();
   const hours = new Array(24).fill(0);
   hours[19] = 3;

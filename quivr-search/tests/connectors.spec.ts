@@ -277,7 +277,7 @@ test("un déploiement sans permission connecteurs l’annonce", async ({
   ).toHaveCount(0);
 });
 
-test("mobile sombre : liste et détail lisibles", async ({ page }, info) => {
+test("mobile sombre : créer, ouvrir et fermer les réglages, puis retrouver le connecteur", async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await openConnectors(page);

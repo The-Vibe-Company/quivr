@@ -148,7 +148,7 @@ const PERIOD = { year: 4, month: 7, day: 10 };
 const utc = (year, month, day) => new Date(0).setUTCFullYear(year, month, day);
 
 /** The UTC instants that bound a period: "2026", "2026-10" or "2026-10-05". */
-export function periodBounds(period) {
+function periodBounds(period) {
   const [year, month = 1, day = 1] = period.split("-").map(Number);
   const start = utc(year, month - 1, day);
   const next =
@@ -219,7 +219,7 @@ const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slic
  * count under every predicate, as the list's: a corpus's own fields, counted
  * apart, 16 at a time, exclude nothing the page would announce.
  */
-export async function countFacets({ count, ids, fields, predicates, timeline, accuracy }) {
+async function countFacets({ count, ids, fields, predicates, timeline, accuracy }) {
   const own = new Map(predicates.map((p) => [p.field, p]));
   const histograms = new Map(
     fields
