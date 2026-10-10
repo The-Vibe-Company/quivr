@@ -141,8 +141,8 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 	if poll <= 0 {
 		poll = DefaultStreamPoll
 	}
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
+	timer := time.NewTimer(poll)
+	defer timer.Stop()
 	lastWrite := time.Now()
 	for {
 		read, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -172,7 +172,7 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			lastWrite = time.Now()
 		}
 		position = page.Position
-		if page.HasMore {
+		if page.HasMore && len(page.Items) > 0 {
 			continue
 		}
 		if time.Since(lastWrite) >= streamKeepalive {
@@ -181,10 +181,11 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			}
 			lastWrite = time.Now()
 		}
+		timer.Reset(poll)
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }

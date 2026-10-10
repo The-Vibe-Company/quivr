@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -116,4 +118,107 @@ func TestChangeJournalWindowsAndRetention(t *testing.T) {
 	if err != nil || caughtUp.Expired {
 		t.Fatal("cursor at head must not expire on a quiet journal", caughtUp, err)
 	}
+
+	// Sparse visible events must be reached in one read, regardless of how
+	// many positions a neighbouring Corpus committed. The final row is beyond
+	// the journal head and must remain invisible until that head advances.
+	if _, err := pool.Exec(ctx, `INSERT INTO change_events
+(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id)
+SELECT $1,i,$1||'-sparse-'||i,
+CASE WHEN i IN (10007,20007,20008) THEN $2 ELSE $3 END,
+'record.accepted','record','sparse-'||i FROM generate_series(7,20008) i`, scope.Organization, a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE organization_journals SET last_sequence=20007 WHERE organization=$1`, scope.Organization); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ReadChanges(ctx, scope.Organization, a.ID, 6, 1, week)
+	if err != nil || len(first.Events) != 1 || first.Events[0].Position != 10007 || first.Through != 10007 || first.Head != 20007 {
+		t.Fatalf("sparse first page: %+v, err=%v; want position/through 10007 and head 20007", first, err)
+	}
+	last, err := store.ReadChanges(ctx, scope.Organization, a.ID, first.Through, 1, week)
+	if err != nil || len(last.Events) != 1 || last.Events[0].Position != 20007 || last.Through != 20007 {
+		t.Fatalf("sparse last page leaked or skipped events: %+v, err=%v", last, err)
+	}
+	quiet, _, err := corpora.Create(ctx, scope, corpus.CreateInput{Key: "quiet", Name: "Quiet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := store.ReadChanges(ctx, scope.Organization, quiet.ID, 6, 10, week)
+	if err != nil || len(window.Events) != 0 || window.Through != 20007 || window.Head != 20007 {
+		t.Fatalf("quiet Corpus must reach head in one read: %+v, err=%v", window, err)
+	}
+	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "ANALYZE change_events"); err != nil {
+		t.Fatal(err)
+	}
+	trace := &changeReadTrace{}
+	cfgPool := pool.Config().Copy()
+	cfgPool.ConnConfig.Tracer = trace
+	traced, err := pgxpool.NewWithConfig(ctx, cfgPool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer traced.Close()
+	for _, id := range []string{a.ID, quiet.ID} {
+		if _, err := (postgres.ChangeStore{Pool: traced}).ReadChanges(ctx, scope.Organization, id, 6, 1, week); err != nil {
+			t.Fatal(err)
+		}
+		assertChangeReadPlan(t, ctx, pool, trace.query, 2)
+	}
+}
+
+// The calling pool executes only ReadChanges; fixture and EXPLAIN statements
+// use the untraced pool so the proof always analyzes the real adapter query.
+type changeReadTrace struct{ query pgx.TraceQueryStartData }
+
+func (r *changeReadTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	r.query = d
+	return ctx
+}
+func (*changeReadTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func assertChangeReadPlan(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query pgx.TraceQueryStartData, maxRows float64) {
+	t.Helper()
+	var raw []byte
+	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+query.SQL, query.Args...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var plans []struct{ Plan changeReadPlan }
+	if err := json.Unmarshal(raw, &plans); err != nil || len(plans) != 1 {
+		t.Fatalf("decode change read plan: %s, err=%v", raw, err)
+	}
+	t.Logf("change read EXPLAIN: %s", raw)
+	found := false
+	var visit func(changeReadPlan, bool)
+	visit = func(p changeReadPlan, limited bool) {
+		limited = limited || p.NodeType == "Limit"
+		if p.Relation == "change_events" && strings.Contains(p.Condition, "corpus_id") {
+			found = true
+			if !limited || p.Index != "change_events_by_corpus" || p.NodeType != "Index Scan" ||
+				!strings.Contains(p.Condition, "organization") || !strings.Contains(p.Condition, "sequence >") ||
+				!strings.Contains(p.Condition, "sequence <=") || p.Rows > maxRows || p.Removed != 0 {
+				t.Errorf("Corpus read must seek at most limit+1 rows without filtering neighbours: %+v", p)
+			}
+		}
+		for _, child := range p.Plans {
+			visit(child, limited)
+		}
+	}
+	visit(plans[0].Plan, false)
+	if !found {
+		t.Fatalf("bounded Corpus index lookup missing: %s", raw)
+	}
+}
+
+type changeReadPlan struct {
+	NodeType  string           `json:"Node Type"`
+	Relation  string           `json:"Relation Name"`
+	Index     string           `json:"Index Name"`
+	Condition string           `json:"Index Cond"`
+	Rows      float64          `json:"Actual Rows"`
+	Removed   float64          `json:"Rows Removed by Filter"`
+	Plans     []changeReadPlan `json:"Plans"`
 }

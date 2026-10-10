@@ -11,10 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// changeScanBudget bounds how many journal positions one read may traverse,
-// so busy neighbouring Corpora cannot make a single poll unbounded.
-const changeScanBudget = 1000
-
 // ReadChanges reads one consistent journal window. A cursor is expired when
 // it precedes the pruned watermark (its next events are physically gone) or
 // when its next event is older than retention. The committed head, the
@@ -26,31 +22,30 @@ func (s ChangeStore) ReadChanges(ctx context.Context, org, corpusID string, afte
 WITH head AS (
   SELECT COALESCE((SELECT last_sequence FROM organization_journals WHERE organization=$1), 0) AS h
 ), bound AS (
-  SELECT h, LEAST(h, $3::bigint + $5::bigint) AS upper,
+  SELECT h,
     EXISTS(SELECT 1 FROM corpora c WHERE c.organization=$1 AND c.id=$2 AND c.archived) AS archived,
     $3::bigint < COALESCE((SELECT pruned_through FROM change_journal_prunes WHERE organization=$1), 0)
-    OR COALESCE((SELECT occurred_at < now() - make_interval(secs => $6::double precision) FROM change_events WHERE organization=$1 AND sequence=$3::bigint + 1), false) AS expired
+    OR COALESCE((SELECT occurred_at < now() - make_interval(secs => $5::double precision) FROM change_events WHERE organization=$1 AND sequence=$3::bigint + 1), false) AS expired
   FROM head
 )
-SELECT b.h, b.upper, b.expired, b.archived, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
+SELECT b.h, b.expired, b.archived, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
   n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, coalesce(n.delivery_id,''), coalesce(n.previous_match_id,''), coalesce(s.owner,'')
 FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at
   FROM change_events
-  WHERE organization=$1 AND corpus_id=$2 AND NOT b.archived AND sequence > $3 AND sequence <= b.upper
+  WHERE organization=$1 AND corpus_id=$2 AND NOT b.archived AND sequence > $3 AND sequence <= b.h
   ORDER BY sequence
   LIMIT $4
 ) e ON true
 LEFT JOIN monitoring_notices n ON n.organization=$1 AND n.event_id=e.event_id
 LEFT JOIN subscriptions s ON s.organization=$1 AND s.id=n.subscription_id
-ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, retention.Seconds())
+ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, retention.Seconds())
 	if err != nil {
 		return changes.Window{}, err
 	}
 	defer rows.Close()
 	var w changes.Window
-	var upper int64
 	var visible []changes.Event
 	for rows.Next() {
 		var archived bool
@@ -58,7 +53,7 @@ ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, r
 		var id, kind, resource, resourceID *string
 		var occurred *time.Time
 		var match, record, version, subscription, subscriptionVersion, delivery, previous, owner *string
-		if err = rows.Scan(&w.Head, &upper, &w.Expired, &archived, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous, &owner); err != nil {
+		if err = rows.Scan(&w.Head, &w.Expired, &archived, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous, &owner); err != nil {
 			return changes.Window{}, err
 		}
 		if archived {
@@ -83,7 +78,7 @@ ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, r
 		w.Through = visible[limit-1].Position
 	default:
 		w.Events = visible
-		w.Through = upper
+		w.Through = w.Head
 	}
 	return w, nil
 }
