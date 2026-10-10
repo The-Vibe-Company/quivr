@@ -203,6 +203,32 @@ class Connectors(unittest.TestCase):
                 self.assert_error(reply, 500, "invalid_response")
                 self.assertIn("attachment-only input", reply.body["message"])
 
+    def test_fetch_ordered_record_flag_is_optional_version_gated_and_still_validates_items(self):
+        fixtures = REPO / "contracts/plugins/v0/fixtures"
+        cases = [
+            ("new API omits flag", "connector-ordered-019.yaml", "ordered-revisions-absent.json", "duplicate"),
+            ("new API false rejects duplicates", "connector-ordered-019.yaml", "ordered-revisions-false.json", "duplicate"),
+            ("new API true preserves source order", "connector-ordered-019.yaml", "ordered-revisions.json", None),
+            ("old API omits flag", "connector-ordered-018.yaml", "ordered-revisions-absent.json", "duplicate"),
+            ("old API false is refused", "connector-ordered-018.yaml", "ordered-old-false.json", "requires Plugin API 0.19.0"),
+            ("old API true is refused", "connector-ordered-018.yaml", "ordered-old-true.json", "requires Plugin API 0.19.0"),
+            ("repeated item is still validated", "connector-ordered-019.yaml", "ordered-invalid-revision.json", "content and withdraw"),
+        ]
+        for description, manifest_name, response_name, expected in cases:
+            with self.subTest(description=description):
+                manifest = yaml.safe_load((fixtures / "manifests/valid" / manifest_name).read_text())
+                self.path.write_text(yaml.safe_dump(manifest))
+                self.plugin = Plugin(self.path)
+                raw_response = (fixtures / "responses/connector" / response_name).read_bytes()
+                self.register(lambda request, raw=raw_response: json.loads(raw))
+                reply = self.invoke()
+                if expected is None:
+                    self.assertEqual(reply.status, 200, reply.body)
+                    self.assertIs(reply.body["allow_repeated_record_keys"], True)
+                else:
+                    self.assert_error(reply, 500, "invalid_response")
+                    self.assertIn(expected, reply.body["message"])
+
 
     def test_configuration_diagnostics_redact_before_truncation(self):
         self.register(lambda request: self.fail("invalid configuration reached the source"))

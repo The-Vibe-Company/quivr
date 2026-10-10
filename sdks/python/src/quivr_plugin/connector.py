@@ -36,8 +36,6 @@ MAX_CONNECTOR_REQUEST_BYTES = 16 << 20
 MAX_RECEIVE_RESPONSE_BODY_BYTES = 64 << 10
 MAX_ATTACHMENT_RESPONSE_BYTES = 16 << 20
 MAX_GENERIC_JSON_BYTES = 64 << 10
-
-
 @dataclass(kw_only=True)
 class FetchRequest(ConnectorFetchRequest):
     """Generated fetch model with a redacting invocation logger."""
@@ -438,6 +436,10 @@ def _response_problems(manifest: LoadedManifest, document: dict[str, Any], opera
     if operation == "fetch":
         if document.get("submission_concurrency") is not None and tuple(map(int, manifest.plugin_api.split("."))) < tuple(map(int, FEATURE_SINCE["connector_submission_concurrency"].split("."))):
             problems.append("submission_concurrency requires Plugin API " + FEATURE_SINCE["connector_submission_concurrency"])
+        allow_repeated = document.get("allow_repeated_record_keys")
+        ordered_records_since = FEATURE_SINCE["connector_ordered_records"]
+        if allow_repeated is not None and tuple(map(int, manifest.plugin_api.split("."))) < tuple(map(int, ordered_records_since.split("."))):
+            problems.append("allow_repeated_record_keys requires Plugin API " + ordered_records_since)
         items = document.get("items", [])
         if len(items) > manifest.connector_max_items:
             problems.append("the page exceeds max_items")
@@ -470,7 +472,7 @@ def _response_problems(manifest: LoadedManifest, document: dict[str, Any], opera
         attachments_allowed = contribution.attachments is not None
         for index, item in enumerate(items):
             record_key = item.get("record_key")
-            if record_key in seen_records:
+            if record_key in seen_records and not allow_repeated:
                 problems.append(f"/items/{index}/record_key: record key is duplicated")
             seen_records.add(record_key)
             problems.extend(_item_problems(manifest, item, f"/items/{index}",

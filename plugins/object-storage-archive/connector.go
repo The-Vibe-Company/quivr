@@ -207,10 +207,9 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 	stop := context.AfterFunc(ctx, r.cancel)
 	defer stop()
 	batchStart := cp.MemberOffset
-	page := &quivrplugin.Page{SubmissionConcurrency: c.Concurrency}
+	page := &quivrplugin.Page{SubmissionConcurrency: c.Concurrency, AllowRepeatedRecordKeys: true}
 	cut := "batch_size"
 	var cached int64
-	seen := map[string]bool{}
 	fail := func(err error) (*quivrplugin.Page, error) { s.reset(); return nil, archiveError(err) }
 	for len(page.Items) < c.BatchSize {
 		if err := ctx.Err(); err != nil {
@@ -262,13 +261,9 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 		if err != nil {
 			return fail(err)
 		}
-		// Versions of one record must cross a checkpoint boundary: the protocol
-		// forbids repeated keys in a page, and concurrent submission must not reorder them.
-		if seen[key] || cached+int64(len(pending.data)) > maxPageBytes {
+		// API 0.19 preserves each record's source order inside the page.
+		if cached+int64(len(pending.data)) > maxPageBytes {
 			cut = "page_bytes"
-			if seen[key] {
-				cut = "record_key"
-			}
 			s.pending = pending
 			break
 		}
@@ -282,7 +277,6 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 		size := int64(len(pending.data))
 		s.cache[ref] = pending.data
 		cached += size
-		seen[key] = true
 		// Revision binds the numeric source position and bytes, so a correction
 		// back to earlier bytes still creates a new version while replay converges.
 		rev := sha256.Sum256([]byte(pos + ":" + digest))

@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "record_key": "article-101",
+      "revision": "12",
+      "source_position": "12",
+      "content": {
+        "kind": "text",
+        "text": "First"
+      }
+    },
+    {
+      "record_key": "article-101",
+      "revision": "13",
+      "source_position": "13",
+      "content": {
+        "kind": "text",
+        "text": "Second"
+      }
+    }
+  ],
+  "checkpoint": {
+    "member": 2
+  },
+  "more": false,
+  "allow_repeated_record_keys": false
+}

@@ -53,7 +53,12 @@
       "minimum": 1,
       "maximum": 32,
       "default": 1,
-      "description": "Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. Record Keys remain unique; the checkpoint advances only after every submission completes successfully or is permanently rejected."
+      "description": "Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. The checkpoint advances only after every submission completes successfully or is permanently rejected. Repeated keys require allow_repeated_record_keys; only independent keys may run concurrently."
+    },
+    "allow_repeated_record_keys": {
+      "type": "boolean",
+      "default": false,
+      "description": "Since Plugin API 0.19.0: true admits multiple revisions of the same Record Key in this fetch page. Items of each key are submitted in their listed source order, with at most one in flight per key. Independent keys may run concurrently. Omitted or false preserves the unique-key requirement. Checkpoints advance only after the entire page is accounted for; replay retains each revision\u2019s idempotency key. This field must be omitted on older APIs."
     }
   },
   "$defs": {

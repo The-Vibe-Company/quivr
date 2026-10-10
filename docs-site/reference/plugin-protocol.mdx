@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.18.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`.
+Latest Plugin API: `0.19.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`, `0.19.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -35,6 +35,7 @@ Latest Plugin API: `0.18.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Informational coverage snapshots with unknown state and age | `0.16.0` |
 | Ingestion segments spanning ordered ranges from multiple Parts | `0.17.0` |
 | Bounded ingestion pages with complete source coverage and durable negotiated cuts | `0.18.0` |
+| Optional connector pages with ordered revisions of each record | `0.19.0` |
 
 ## Trace context
 
@@ -366,7 +367,8 @@ Since Plugin API 0.3. Fetch one page of new or changed source items after the ch
 | `push.error_class` | `access`, `transient`, `source` | no | Required when state is failed, absent otherwise. |
 | `push.code` | string | no | Required when state is failed; an optional reason when pending; absent when active. At most 64 characters. |
 | `push.poll_interval_seconds` | integer | no | Only with state active: while deliveries arrive, the core runs pull at most this often (the greater of this and the instance's interval), as a safety net. It returns to the instance's interval as soon as push degrades. 60 to 86400. |
-| `submission_concurrency` | integer | no | Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. Record Keys remain unique; the checkpoint advances only after every submission completes successfully or is permanently rejected. 1 to 32. Default `1`. |
+| `submission_concurrency` | integer | no | Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. The checkpoint advances only after every submission completes successfully or is permanently rejected. Repeated keys require allow_repeated_record_keys; only independent keys may run concurrently. 1 to 32. Default `1`. |
+| `allow_repeated_record_keys` | boolean | no | Since Plugin API 0.19.0: true admits multiple revisions of the same Record Key in this fetch page. Items of each key are submitted in their listed source order, with at most one in flight per key. Independent keys may run concurrently. Omitted or false preserves the unique-key requirement. Checkpoints advance only after the entire page is accounted for; replay retains each revision’s idempotency key. This field must be omitted on older APIs. Default `false`. |
 
 ### `POST /v0/contributions/connector/receive`
 

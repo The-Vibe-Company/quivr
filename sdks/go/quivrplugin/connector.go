@@ -110,7 +110,10 @@ type Page struct {
 	// SubmissionConcurrency requests 1..32 parallel submissions (Plugin API 0.15).
 	// Zero omits the hint and keeps serial submission.
 	SubmissionConcurrency int
-	Items                 []Item
+	// AllowRepeatedRecordKeys admits repeated revisions of a Record Key in
+	// source order (Plugin API 0.19). False omits the optional hint.
+	AllowRepeatedRecordKeys bool
+	Items                   []Item
 	// Checkpoint resumes after this page (any JSON-encodable value, at most
 	// limits.max_checkpoint_bytes encoded, 64 KiB by default). Return the request's checkpoint when nothing moved.
 	Checkpoint any
@@ -249,15 +252,16 @@ type Attachment struct {
 }
 
 type pageJSON struct {
-	SubmissionConcurrency int             `json:"submission_concurrency,omitempty"`
-	Items                 []Item          `json:"items"`
-	Checkpoint            json.RawMessage `json:"checkpoint"`
-	More                  bool            `json:"more"`
-	Reads                 int64           `json:"reads,omitempty"`
-	Diagnostics           map[string]any  `json:"diagnostics,omitempty"`
-	Notice                string          `json:"notice,omitempty"`
-	NotDue                bool            `json:"not_due,omitempty"`
-	Push                  *PushStatus     `json:"push,omitempty"`
+	SubmissionConcurrency   int             `json:"submission_concurrency,omitempty"`
+	AllowRepeatedRecordKeys bool            `json:"allow_repeated_record_keys,omitempty"`
+	Items                   []Item          `json:"items"`
+	Checkpoint              json.RawMessage `json:"checkpoint"`
+	More                    bool            `json:"more"`
+	Reads                   int64           `json:"reads,omitempty"`
+	Diagnostics             map[string]any  `json:"diagnostics,omitempty"`
+	Notice                  string          `json:"notice,omitempty"`
+	NotDue                  bool            `json:"not_due,omitempty"`
+	Push                    *PushStatus     `json:"push,omitempty"`
 }
 
 type credentialJSON struct {

@@ -28,6 +28,7 @@ const (
 	FeatureCoverageSnapshots              Feature = "coverage_snapshots"
 	FeatureMultiPartSegments              Feature = "multi_part_segments"
 	FeatureIngestionPages                 Feature = "ingestion_pages"
+	FeatureConnectorOrderedRecords        Feature = "connector_ordered_records"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -62,6 +63,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureCoverageSnapshots, "0.16.0", "Informational coverage snapshots with unknown state and age", "", ""},
 	{FeatureMultiPartSegments, "0.17.0", "Ingestion segments spanning ordered ranges from multiple Parts", "", ""},
 	{FeatureIngestionPages, "0.18.0", "Bounded ingestion pages with complete source coverage and durable negotiated cuts", "", "/contributions/ingestion/paging"},
+	{FeatureConnectorOrderedRecords, "0.19.0", "Optional connector pages with ordered revisions of each record", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.
