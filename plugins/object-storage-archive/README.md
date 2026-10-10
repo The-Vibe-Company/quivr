@@ -81,6 +81,12 @@ overshoot the watermark. `continuation_reason` explains suppression; deferrals
 before fetching log `ingestion_backpressure` or `queue_unavailable` without
 replacing the last committed page diagnostic.
 See the operator guide for all fields and diagnostics-size fallback behavior.
+For a page from the current archive, `page_cut` names its boundary:
+`batch_size` (requested item count), `page_bytes` (64 MiB uncompressed bytes),
+`record_key` (a repeated key deferred to the next page), or `archive_end`.
+`page_items` and `page_bytes` report that page's item count and uncompressed
+bytes. The engine's `acquisition.stop_reason: page_limit` instead means ten
+pages in one run. The ZIP read window does not impose a 1 MiB page limit.
 With the standard HTTP transport, the SDK retains up to 32 idle upload connections per storage host between
 pages (128 total), with the default transport's 90-second idle expiry. Active
 submissions remain bounded by `concurrency`; upload grants, checksum checks

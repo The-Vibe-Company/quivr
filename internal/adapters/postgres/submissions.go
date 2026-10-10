@@ -70,24 +70,25 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		slot = "revision:" + c.Revision
 	}
 	db := database(ctx, s.Pool)
-	// The implicit batch owns its transaction. Audited commands must instead
-	// stay inside their request transaction, including any refusal rollback.
-	if db == s.Pool {
-		created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest, s.RetainImportAuditDetail)
-		if err != nil {
-			return content.Receipt{}, err
-		}
-		if created {
-			return pendingReceipt(receiptID, recordID, c.Source, true), nil
-		}
-	}
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockProjectionRouting(ctx, tx); err != nil {
-		return content.Receipt{}, err
+	// Audited requests keep their surrounding transaction. Ordinary accepts
+	// try the new-record path inside this same transaction, so corrections
+	// do not pay for a speculative rollback, another BEGIN or another fence.
+	if db == s.Pool {
+		created, err := acceptFirstRevision(ctx, tx, scope.Organization, c, canonical, recordID, receiptID, slot, digest, s.RetainImportAuditDetail)
+		if err != nil {
+			return content.Receipt{}, err
+		}
+		if created {
+			if err := tx.Commit(ctx); err != nil {
+				return content.Receipt{}, err
+			}
+			return pendingReceipt(receiptID, recordID, c.Source, true), nil
+		}
 	}
 	requestCopy, receiptCommand, execution := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	requestDigest := sha256.Sum256(canonical)
@@ -114,16 +115,24 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if !exists {
 		return content.Receipt{}, corpus.ErrNotFound
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
-	if err != nil {
+	identity := &pgx.Batch{}
+	identity.Queue(`INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
+	identity.Queue(`UPDATE records SET acceptance_order=acceptance_order+1 WHERE organization=$1 AND id=$2 RETURNING acceptance_order,desired_position,withdrawn`, scope.Organization, recordID)
+	result := tx.SendBatch(ctx, identity)
+	if _, err = result.Exec(); err != nil {
+		_ = result.Close()
 		return content.Receipt{}, err
 	}
 	var order int64
 	var position string
 	var withdrawn bool
-	err = tx.QueryRow(ctx, `UPDATE records SET acceptance_order=acceptance_order+1 WHERE organization=$1 AND id=$2 RETURNING acceptance_order,desired_position,withdrawn`, scope.Organization, recordID).Scan(&order, &position, &withdrawn)
+	err = result.QueryRow().Scan(&order, &position, &withdrawn)
+	closeErr := result.Close()
 	if err != nil {
 		return content.Receipt{}, err
+	}
+	if closeErr != nil {
+		return content.Receipt{}, closeErr
 	}
 	if withdrawn {
 		return content.Receipt{}, content.ErrConflict
@@ -135,38 +144,34 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		return content.Receipt{}, err
 	}
 	versionID := content.StableID("version", scope.Organization, recordID, slot)
-	// Reserve the original revision order and lineage once, before any worker can publish it.
-	var predecessor string
-	err = tx.QueryRow(ctx, `SELECT version_id FROM accepted_revisions WHERE organization=$1 AND record_id=$2 AND ($3='' OR source_position='' OR length(source_position)<length($3) OR (length(source_position)=length($3) AND source_position COLLATE "C" < $3 COLLATE "C")) ORDER BY acceptance_order DESC LIMIT 1`, scope.Organization, recordID, c.Position).Scan(&predecessor)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return content.Receipt{}, err
+	// Reserve lineage, currentness, receipt, outbox and journal facts together.
+	// Separate statements retain fresh READ COMMITTED snapshots; the caller
+	// still owns the journal fence and this entry's all-or-nothing transaction.
+	writes := &pgx.Batch{}
+	writes.Queue(`INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type)
+ VALUES($1,$2,$3,$4,$5,$6,$7,
+ (SELECT version_id FROM accepted_revisions WHERE organization=$1 AND record_id=$2 AND ($7='' OR source_position='' OR length(source_position)<length($7) OR (length(source_position)=length($7) AND source_position COLLATE "C" < $7 COLLATE "C")) ORDER BY acceptance_order DESC LIMIT 1),
+ $8,now(),nullif($9,''),COALESCE(NULLIF($10,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, execution, content.Title(c), c.SourceMediaType)
+	if content.NewerPosition(c.Position, position) {
+		writes.Queue(`UPDATE records SET desired_order=$3,desired_position=$4,desired_version_id=$5 WHERE organization=$1 AND id=$2
+ AND EXISTS(SELECT 1 FROM accepted_revisions WHERE organization=$1 AND record_id=$2 AND slot=$6 AND acceptance_order=$3)`, scope.Organization, recordID, order, c.Position, versionID, slot)
 	}
-	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,''),COALESCE(NULLIF($11,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, execution, content.Title(c), c.SourceMediaType)
-	if err != nil {
-		return content.Receipt{}, err
-	}
-	if reservation.RowsAffected() == 1 && content.NewerPosition(c.Position, position) {
-		_, err = tx.Exec(ctx, "UPDATE records SET desired_order=$3,desired_position=$4,desired_version_id=$5 WHERE organization=$1 AND id=$2", scope.Organization, recordID, order, c.Position, versionID)
-		if err != nil {
-			return content.Receipt{}, err
-		}
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue,request_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, scope.Organization, receiptID, c.Key, requestCopy, receiptCommand, c.Source.CorpusID, recordID, order, slot, digest, workqueue.Class(ctx), requestDigest[:])
-	if err != nil {
-		return content.Receipt{}, err
-	}
+	writes.Queue(`INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue,request_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, scope.Organization, receiptID, c.Key, requestCopy, receiptCommand, c.Source.CorpusID, recordID, order, slot, digest, workqueue.Class(ctx), requestDigest[:])
 	outbox := "ingestion_outbox"
 	if workqueue.Class(ctx) == workqueue.Bulk {
 		outbox = "bulk_ingestion_outbox"
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO "+outbox+"(organization,receipt_id,trace_context,work_queue) VALUES($1,$2,$3,$4)", scope.Organization, receiptID, telemetry.Encode(ctx), workqueue.Class(ctx)); err != nil {
-		return content.Receipt{}, err
-	}
-	if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}); err != nil {
-		return content.Receipt{}, err
-	}
+	writes.Queue("INSERT INTO "+outbox+"(organization,receipt_id,trace_context,work_queue) VALUES($1,$2,$3,$4)", scope.Organization, receiptID, telemetry.Encode(ctx), workqueue.Class(ctx))
+	queueEvent(ctx, writes, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID})
 	// Catalog invalidation belongs to the same acceptance transaction, including a Record first seen before materialization.
-	if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID}); err != nil {
+	queueEvent(ctx, writes, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID})
+	results := tx.SendBatch(ctx, writes)
+	reservation, err := results.Exec()
+	if err != nil {
+		_ = results.Close()
+		return content.Receipt{}, err
+	}
+	if err = results.Close(); err != nil {
 		return content.Receipt{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {

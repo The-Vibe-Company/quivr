@@ -119,7 +119,15 @@ Its diagnostics report:
 | `compressed_bytes_read`, `object_size_bytes` | Compressed source bytes read and current object size |
 | `progress_percent` | Compressed byte reads divided by object size, capped at 100; buffered or repeated ranged reads can reach 100 before every member is submitted |
 | `archive_complete` | All members of the current archive were traversed |
+| `page_items`, `page_bytes` | Matching members returned and their total uncompressed bytes |
+| `page_cut` | Why the archive reader ended this page; values below |
 | `acquisition` | Engine timing for this committed page; fields below |
+
+For a page from the current archive, `page_cut` is `batch_size`, `page_bytes`,
+`record_key` or `archive_end`. These mean the requested item count, the 64 MiB
+page byte bound, a repeated record key, or the end of that archive.
+Repeated keys go on separate pages so their submissions retain source order.
+The ZIP reader's 1 MiB read window bounds buffering; it does not limit page bytes.
 
 `acquisition.items` counts page members. `fetch_ms` is elapsed fetch time,
 including the engine's lease/archive admission and its release. `grant_ms`, `upload_ms`, `verify_ms`, `accept_ms`,
@@ -136,6 +144,8 @@ an intermediate page, or `source_drained`, `page_limit`, `soft_limit` or
 `attachment_budget` for the last page. Failed or interrupted page logs use
 `incomplete`; intentionally skipped or inactive runs emit no page diagnostic. Runs remain bounded to ten pages, two
 minutes before starting another page, and a 200 MiB attachment budget.
+`acquisition.stop_reason: page_limit` means the run reached ten pages;
+use `page_cut` to explain the size of an individual archive page.
 
 `continuation: true` means the engine requests another durable leased run
 immediately after a successful bounded run. The final page must report `more: true` and advance the checkpoint from both this page's input and the run's starting

@@ -208,6 +208,7 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 	defer stop()
 	batchStart := cp.MemberOffset
 	page := &quivrplugin.Page{SubmissionConcurrency: c.Concurrency}
+	cut := "batch_size"
 	var cached int64
 	seen := map[string]bool{}
 	fail := func(err error) (*quivrplugin.Page, error) { s.reset(); return nil, archiveError(err) }
@@ -221,6 +222,7 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 			m, err := r.next()
 			if err == io.EOF {
 				cp.Complete = true
+				cut = "archive_end"
 				_ = r.close()
 				s.reader = nil
 				break
@@ -263,6 +265,10 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 		// Versions of one record must cross a checkpoint boundary: the protocol
 		// forbids repeated keys in a page, and concurrent submission must not reorder them.
 		if seen[key] || cached+int64(len(pending.data)) > maxPageBytes {
+			cut = "page_bytes"
+			if seen[key] {
+				cut = "record_key"
+			}
 			s.pending = pending
 			break
 		}
@@ -309,7 +315,9 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 	page.Checkpoint = cp
 	page.More = true
 	page.Reads = int64(len(page.Items))
-	page.Diagnostics = diagnostics(cp, r, c)
+	detail := diagnostics(cp, r, c)
+	detail["page_cut"], detail["page_bytes"], detail["page_items"] = cut, cached, len(page.Items)
+	page.Diagnostics = detail
 	s.cursor = cp
 	s.input = input
 	s.page = page

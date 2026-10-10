@@ -8,37 +8,16 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // acceptFirstRevision writes a new Record's reservation, receipt, dispatch
-// intent and both journal facts atomically. Canonical writes precede the
-// journal fence; unique keys arbitrate concurrent new Records. Existing Records
-// take the general revision path after this batch closes, including reverts and
-// source-position arbitration under their existing READ COMMITTED fence.
-// Every ID is still computed by the domain's canonical hash function.
-func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
-	var result0 bool
-	err := retryJournalWrite(ctx, "acceptFirstRevision", func(ctx context.Context) error {
-		var err error
-		result0, err = acceptFirstRevisionAttempt(ctx, pool, org, c, canonical, recordID, receiptID, slot, digest, retainDetail)
-		return err
-	})
-	return result0, err
-}
-
-func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
+// intent and both journal facts in the caller's transaction. Existing Records
+// continue through the general revision path without discarding a transaction.
+// The routing fence precedes canonical writes; the journal fence follows them.
+func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
 	versionID := content.StableID("version", org, recordID, slot)
 	pending := eventInput{Organization: org, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}
 	accepted := eventInput{Organization: org, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockProjectionRouting(ctx, tx); err != nil {
-		return false, err
-	}
 	requestCopy, receiptCommand, execution := importRequestStorage(canonical, retainDetail)
 	requestDigest := sha256.Sum256(canonical)
 	batch := &pgx.Batch{}
@@ -71,7 +50,7 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
 		}
 	}
 	var created bool
-	err = results.QueryRow().Scan(&created)
+	err := results.QueryRow().Scan(&created)
 	closeErr := results.Close()
 	if err != nil {
 		return false, err
@@ -91,5 +70,5 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
 	if err = tx.SendBatch(ctx, events).Close(); err != nil {
 		return false, err
 	}
-	return true, tx.Commit(ctx)
+	return true, nil
 }
