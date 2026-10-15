@@ -34,7 +34,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       id: failure-artifact
       with:
@@ -60,7 +60,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       id: failure-artifact
       with:
