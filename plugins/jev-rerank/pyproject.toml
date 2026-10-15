@@ -7,7 +7,7 @@ name = "quivr-jev-rerank"
 version = "1.0.1"
 description = "Optional Jev reranking of Quivr hybrid candidates"
 requires-python = ">=3.12"
-dependencies = ["quivr-plugin-sdk>=0.6.1", "tokenizers==0.23.2"]
+dependencies = ["quivr-plugin-sdk>=0.6.1", "tokenizers==0.23.3"]
 
 [tool.setuptools.packages.find]
 include = ["jev_rerank*"]

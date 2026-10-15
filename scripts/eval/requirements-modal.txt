@@ -1,6 +1,6 @@
 # Paid measurement machines only. CI never invokes the Modal runner.
 ranx==0.3.21
-pyarrow==25.0.1
+pyarrow==26.0.0
 numpy==2.5.3
 sentence-transformers==6.1.0
 modal==1.6.1         # Apache-2.0; coordinator-controlled compute
