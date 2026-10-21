@@ -26,7 +26,7 @@
       }
     },
     "weaviate": {
-      "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.10@sha256:de371bb2e07604636915581d784ce182303f0046376a3dd23822936fa10acc56",
+      "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.13@sha256:ad2b986bbe4666fbd5302a5ee0cc6c74a048c4c769198d46147ea232d46a2dd8",
       "environment": {
         "AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED": "true",
         "AUTOSCHEMA_ENABLED": "false",

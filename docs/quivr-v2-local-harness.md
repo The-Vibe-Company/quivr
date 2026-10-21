@@ -51,7 +51,7 @@ publishes TEI on a loopback port.
 for example a verification run kept with `QUIVR_KEEP_ON_FAILURE=1`.
 
 Before restarting an existing 1.37.15 development or demo stack with the new
-Weaviate 1.39.10 pin, back up its volume and follow the
+Weaviate 1.39.13 pin, back up its volume and follow the
 [sequential search-database upgrade procedure](../deploy/railway/README.md#upgrade-the-search-database).
 For Compose, while 1.37.15 is still running, check readiness and Raft synchronization
 as described above before stopping it. Stop a running `make demo` with Ctrl+C
@@ -61,10 +61,10 @@ Bare `make down` selects only the development stack. Then use that same Compose
 project, volume and `CLUSTER_HOSTNAME` with a temporary
 image override to start only Weaviate 1.38.20. Check readiness, `/v1/meta` and
 Raft synchronization, stop it cleanly, remove the override, and run `make dev`
-(or `make demo` for that stack) with 1.39.10. Do not use `reset` during an upgrade.
+(or `make demo` for that stack) with 1.39.13. Do not use `reset` during an upgrade.
 The core verification lane runs `scripts/weaviate_upgrade.py` on its own disposable
 volume: it writes/searches on 1.37.15, then verifies original objects and all three
-search modes on 1.38.20 and 1.39.10, without recreating or publishing the fixture.
+search modes on 1.38.20 and 1.39.13, without recreating or publishing the fixture.
 
 `verify` uses its own project name, volumes, network, fixture identities and
 temporary credentials. It must not reuse or reset the developer's stack. Publish
