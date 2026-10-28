@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
@@ -611,6 +612,170 @@ func waitForTrackResult(t *testing.T, ctx context.Context, result <-chan error) 
 // refresh publishes both queues, while a missing or stale observation fails
 // instead of presenting an empty backlog. Table locking makes that dependency
 // failure deterministic without sleeps or a size-dependent timing assertion.
+// This owns continuous-import publication, which the stale-read and producer
+// lock-order owners cannot see. Restoring the any-dirty publication gate must
+// fail after a bounded drain makes progress but leaves recent work outstanding.
+// Fixture timestamps replace waits; all work enters through real acceptance.
+func TestQueueSnapshotsStayAvailableDuringContinuousImports(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := app.BootstrapDatabase(ctx, pool, nil); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := postgres.QueueSnapshots{Pool: pool}
+	for {
+		more, err := snapshots.Maintain(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			break
+		}
+	}
+	c, _, err := (postgres.Store{Pool: pool}).Create(ctx, "example", corpus.CreateInput{Key: "queues", Name: "Queues"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = (postgres.JournalStore{Pool: pool}).SetParallel(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	accept := func(key string) {
+		t.Helper()
+		_, err := (postgres.SubmissionStore{Pool: pool}).Accept(ctx,
+			corpus.Scope{Organization: "example", Corpora: []string{c.ID}}, content.Command{
+				Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "queues", RecordKey: key},
+				Content: content.Text{Kind: "text", Text: key},
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	accept("first")
+	accept("second")
+	for turn := 1; turn <= 3; turn++ {
+		accept(fmt.Sprintf("next-%d", turn))
+		more, err := snapshots.ReconcileParallelQueue(ctx, 1)
+		if err != nil || !more {
+			t.Fatalf("bounded drain turn=%d more=%v error=%v", turn, more, err)
+		}
+		var dirty, applied int
+		var oldestDirty float64
+		if err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE revision<>applied_revision),
+ count(*) FILTER(WHERE revision=applied_revision),
+ coalesce(max(extract(epoch FROM clock_timestamp()-dirty_since)) FILTER(WHERE revision<>applied_revision),0)
+ FROM parallel_queue_observations`).Scan(&dirty, &applied, &oldestDirty); err != nil {
+			t.Fatal(err)
+		}
+		if dirty != 2 || applied != turn || oldestDirty >= 10 {
+			t.Fatalf("turn=%d dirty=%d applied=%d oldest dirty seconds=%f", turn, dirty, applied, oldestDirty)
+		}
+		// Make publication due and reproduce an expired previous observation
+		// without waiting a minute. The outstanding changes themselves are recent.
+		if _, err = pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET
+ observed_at=clock_timestamp()-interval '2 minutes',published_at='-infinity',
+ ingestion_observed_at=clock_timestamp()-interval '2 minutes'`); err != nil {
+			t.Fatal(err)
+		}
+		if err = snapshots.Refresh(ctx); err != nil {
+			t.Fatal(err)
+		}
+		read, stop := context.WithTimeout(ctx, time.Second)
+		statuses, err := snapshots.QueueBacklog(read)
+		readError := read.Err()
+		stop()
+		if err != nil {
+			t.Fatalf("publication starved: turn=%d dirty=%d applied=%d dirty age=%fs read context=%v reader error=%v", turn, dirty, applied, oldestDirty, readError, err)
+		}
+		if len(statuses) != 2 || statuses[0].Queue != workqueue.Bulk || statuses[1].Queue != workqueue.Live ||
+			statuses[1].Waiting != int64(turn) || statuses[1].IngestionWaiting == nil || *statuses[1].IngestionWaiting != int64(turn) {
+			t.Fatalf("turn=%d bounded observation=%+v, want both queues and %d reconciled live documents", turn, statuses, turn)
+		}
+	}
+	// Repeated publication cannot move the first unresolved change forward,
+	// and dirty age must not become the clock origin for oldest waiting age.
+	for turn := 0; turn < 2; turn++ {
+		if _, err = pool.Exec(ctx, `UPDATE parallel_queue_observations
+ SET dirty_since=clock_timestamp()-interval '40 seconds',changed_at=clock_timestamp()
+ WHERE revision<>applied_revision;
+ UPDATE queue_backlog_snapshots SET published_at='-infinity'`); err != nil {
+			t.Fatal(err)
+		}
+		if err = snapshots.Refresh(ctx); err != nil {
+			t.Fatal(err)
+		}
+		statuses, err := snapshots.QueueBacklog(ctx)
+		if err != nil || len(statuses) != 2 || statuses[1].OldestAgeSeconds >= 10 {
+			t.Fatalf("recent observation inherited dirty age: statuses=%+v error=%v", statuses, err)
+		}
+		// Advance the persisted clocks together; the count observation itself
+		// remains fresh. This expires only the counter completeness proof.
+		if _, err = pool.Exec(ctx, `UPDATE parallel_queue_observations SET dirty_since=dirty_since-interval '30 seconds' WHERE revision<>applied_revision;
+ UPDATE queue_backlog_snapshots SET counters_observed_at=counters_observed_at-interval '30 seconds'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = snapshots.QueueBacklog(ctx); err == nil {
+			t.Fatal("recent publication renewed an unresolved change's freshness budget")
+		}
+	}
+	// A recent correction must preserve the oldest unresolved change. With
+	// a longer refresh interval the same lag is valid; the default rejects it.
+	var dirtyKey string
+	if err = pool.QueryRow(ctx, `SELECT r.record_key FROM parallel_queue_observations q
+ JOIN records r ON (r.organization,r.id)=(q.organization,q.record_id)
+ WHERE q.revision<>q.applied_revision LIMIT 1`).Scan(&dirtyKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = (postgres.SubmissionStore{Pool: pool}).Accept(ctx,
+		corpus.Scope{Organization: "example", Corpora: []string{c.ID}}, content.Command{
+			Key: "correction", Source: content.Source{CorpusID: c.ID, Namespace: "queues", RecordKey: dirtyKey},
+			Content: content.Text{Kind: "text", Text: "corrected"},
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if err = snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = snapshots.QueueBacklog(ctx); err == nil {
+		t.Fatal("aged dirty work or recent correction advertised as fresh")
+	}
+	snapshots.RefreshInterval = time.Minute
+	if err = snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if statuses, err := snapshots.QueueBacklog(ctx); err != nil || len(statuses) != 2 || statuses[1].IngestionWaiting == nil {
+		t.Fatalf("lag within custom two-interval budget unavailable: statuses=%+v error=%v", statuses, err)
+	}
+	snapshots.RefreshInterval = 0
+	if _, err = snapshots.QueueBacklog(ctx); err == nil {
+		t.Fatal("custom publication extended the default freshness budget")
+	}
+	if more, err := snapshots.ReconcileParallelQueue(ctx, 1000); err != nil || more {
+		t.Fatalf("final drain more=%v error=%v", more, err)
+	}
+	if _, err = snapshots.QueueBacklog(ctx); err == nil {
+		t.Fatal("draining the ledger made its old published counters fresh")
+	}
+	// Fresh publication recovers even though a recent publisher used the
+	// longer budget. The result is independent of the aggregate ledger.
+	if err = snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var canonical int64
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM ingestion_receipts
+ WHERE organization='example' AND route_family='ingestion' AND state='pending'`).Scan(&canonical); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := snapshots.QueueBacklog(ctx)
+	if err != nil || len(statuses) != 2 || canonical != 6 || statuses[1].Waiting != canonical ||
+		statuses[1].IngestionWaiting == nil || *statuses[1].IngestionWaiting != canonical || statuses[0].Waiting != 0 {
+		t.Fatalf("drained observation=%+v canonical=%d error=%v", statuses, canonical, err)
+	}
+}
+
 func TestQueueSnapshotsReadWithoutDocumentScanAndRejectStaleData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

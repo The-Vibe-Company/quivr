@@ -23,9 +23,9 @@ func TestQueueSnapshotRefreshReusesDefaultInterval(t *testing.T) {
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,observed_at,published_at,ingestion_waiting,ingestion_observed_at)
-	 VALUES('live',123,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds'),
-	       ('bulk',456,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,observed_at,published_at,ingestion_waiting,ingestion_observed_at,counters_observed_at)
+	 VALUES('live',123,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds'),
+	       ('bulk',456,0,0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds',0,clock_timestamp()-interval '2 seconds',clock_timestamp()-interval '2 seconds')`); err != nil {
 		t.Fatal(err)
 	}
 	snapshots := QueueSnapshots{Pool: pool}
@@ -87,6 +87,16 @@ func TestQueueSnapshotRefreshReusesDefaultInterval(t *testing.T) {
 	}
 	assertWaiting(7)
 	snapshots.RefreshInterval = time.Second
+	if err := snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertWaiting(0)
+	// Previous writers can stamp publication without supplying the new proof.
+	// The conservative default must force a new refresh within the cached interval.
+	exec(`UPDATE queue_backlog_snapshots SET waiting=123,published_at=clock_timestamp(),counters_observed_at='-infinity'`)
+	if _, err := snapshots.QueueBacklog(ctx); err == nil {
+		t.Fatal("missing counter cutoff presented as current")
+	}
 	if err := snapshots.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}

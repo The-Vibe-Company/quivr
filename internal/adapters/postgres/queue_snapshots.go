@@ -25,6 +25,13 @@ func (s QueueSnapshots) refreshInterval() time.Duration {
 	return s.RefreshInterval
 }
 
+// The first unresolved change bounds how far counters can lag. Reading this
+// indexed cutoff in the same statement as the totals preserves that proof even
+// if a producer commits or maintenance drains the ledger after publication.
+const queueCountersCutoffSQL = `SELECT LEAST(statement_timestamp(),coalesce(
+ (SELECT dirty_since FROM parallel_queue_observations
+ WHERE revision<>applied_revision ORDER BY dirty_since LIMIT 1),statement_timestamp())) AS observed_at`
+
 // Refresh publishes both queues atomically, at most once per configured
 // interval. Bootstrap, expiry cleanup and scope discovery run independently.
 // Incomplete initialization/due promotion preserves the last valid observation.
@@ -37,15 +44,17 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	published, err := tx.Exec(ctx, `INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,ingestion_waiting,observed_at,ingestion_observed_at)
-	 SELECT backlog.*,statement_timestamp(),statement_timestamp() FROM (`+queueBacklogSQL()+`) backlog
+	published, err := tx.Exec(ctx, `WITH cutoff AS MATERIALIZED (`+queueCountersCutoffSQL+`)
+	 INSERT INTO queue_backlog_snapshots(queue,waiting,in_progress,oldest_waiting_age_seconds,ingestion_waiting,observed_at,ingestion_observed_at,counters_observed_at)
+	 SELECT backlog.*,statement_timestamp(),statement_timestamp(),cutoff.observed_at FROM (`+queueBacklogSQL()+`) backlog CROSS JOIN cutoff
 	 WHERE (SELECT initialized FROM queue_backlog_bootstrap WHERE singleton)
 	 AND NOT EXISTS(SELECT FROM queue_scope_reconciliation WHERE kind='quarantine')
 	 AND NOT EXISTS(SELECT FROM queue_backlog_documents WHERE NOT ready AND ready_at<=statement_timestamp() LIMIT 1)
-	 AND NOT EXISTS(SELECT FROM parallel_queue_observations WHERE revision<>applied_revision)
+	 AND cutoff.observed_at>statement_timestamp()-make_interval(secs => $1::double precision)
 	 ON CONFLICT(queue) DO UPDATE SET waiting=EXCLUDED.waiting,in_progress=EXCLUDED.in_progress,
 	 oldest_waiting_age_seconds=EXCLUDED.oldest_waiting_age_seconds,observed_at=EXCLUDED.observed_at,
-	 ingestion_waiting=EXCLUDED.ingestion_waiting,ingestion_observed_at=EXCLUDED.ingestion_observed_at`)
+	 ingestion_waiting=EXCLUDED.ingestion_waiting,ingestion_observed_at=EXCLUDED.ingestion_observed_at,
+	 counters_observed_at=EXCLUDED.counters_observed_at`, max(time.Minute, 2*s.refreshInterval()).Seconds())
 	if err != nil {
 		return err
 	}
@@ -75,6 +84,7 @@ func (s QueueSnapshots) beginRefresh(ctx context.Context) (pgx.Tx, error) {
 	if err = tx.QueryRow(ctx, `SELECT count(*)=2 AND min(published_at)>clock_timestamp()-make_interval(secs => $1::double precision)
 	      AND count(ingestion_waiting)=2 AND count(ingestion_observed_at)=2
 	      AND min(ingestion_observed_at)>clock_timestamp()-make_interval(secs => $2::double precision)
+	      AND min(counters_observed_at)>clock_timestamp()-make_interval(secs => $2::double precision)
 	      FROM queue_backlog_snapshots WHERE queue IN ('live','bulk')`, s.refreshInterval().Seconds(), max(time.Minute, 2*s.refreshInterval()).Seconds()).Scan(&fresh); err != nil || fresh {
 		tx.Rollback(ctx)
 		return nil, err
@@ -94,6 +104,7 @@ func (s QueueSnapshots) QueueBacklog(ctx context.Context) ([]workqueue.Status, e
 	     CASE WHEN ingestion_observed_at>clock_timestamp()-make_interval(secs => $1::double precision)
 	       THEN ingestion_waiting END
 	     FROM queue_backlog_snapshots WHERE queue IN ('live','bulk') AND observed_at>clock_timestamp()-make_interval(secs => $1::double precision)
+	     AND counters_observed_at>clock_timestamp()-make_interval(secs => $1::double precision)
 	 ORDER BY queue`, max(time.Minute, 2*s.refreshInterval()).Seconds())
 	if err != nil {
 		return nil, err

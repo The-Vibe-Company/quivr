@@ -22,6 +22,7 @@ type indexDefinition struct {
 }
 
 var concurrentIndexes = []indexDefinition{
+	{Name: "parallel_queue_observations_by_age", Table: "parallel_queue_observations", Columns: []string{"dirty_since"}, Predicate: "(revision <> applied_revision)"},
 	{Name: "change_events_by_corpus", Table: "change_events", Columns: []string{"organization", "corpus_id", "sequence"}},
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
 	{Name: "projection_purges_cleanup_due", Table: "projection_purges", Columns: []string{"noticed_at"}, Predicate: "((purged_at IS NULL) OR (cleanup_stage < 3))"},

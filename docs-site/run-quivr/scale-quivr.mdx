@@ -28,6 +28,8 @@ The signal `queues.bulk.waiting` includes estimated rebuild, backfill and quaran
 
 Queue observations read running backlog totals and indexed oldest arrivals. Imports update these totals as work changes. Rebuild scope discovery runs in resumable pages outside observation refresh; an unfinished scope contributes estimated bulk work even when no import is running. Connector backpressure reads the ingestion-only part of the same observation. During mixed-version upgrades, counts can lag behind older writers until the next resumable reconciliation reaches their changes; see [queue initialization](../run-quivr/upgrade-quivr.mdx#initialize-queue-observations).
 
+Parallel imports reconcile counts independently of acceptance. Queue observations can remain available while recent changes await reconciliation. Their freshness budget includes the oldest unresolved change and expires after two refresh intervals, with a minimum of one minute. Publishing again or draining that change does not renew an older observation's budget; a fresh observation after reconciliation restores availability.
+
 A missing observation or queue endpoint `503` means unknown work, never zero. Use a dedicated all-corpus `queues:read` key. Installation-wide metrics use `max` across replicas, not `sum`.
 
 [Scale workers on backlog](../run-quivr/deploy.mdx#scale-workers-on-backlog) owns the variables, queue fields, KEDA/Prometheus examples, bundled scaler backends and manual scaling procedure. Check platform-injected variables for collisions with your target configuration. When changing a Dockerfile path or service definition, update the platform's build settings too.
