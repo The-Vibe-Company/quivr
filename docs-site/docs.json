@@ -164,6 +164,13 @@
         "tab": "Reference",
         "groups": [
           {
+            "group": "Quivr 2",
+            "pages": [
+              "reference/compatibility",
+              "reference/known-limits"
+            ]
+          },
+          {
             "group": "HTTP API",
             "pages": [
               "api-reference/overview"

@@ -1,0 +1,46 @@
+---
+title: "Versions and compatibility"
+description: "What Quivr 2.x keeps stable, what can change between releases, and which features are still experimental."
+keywords: ["versions", "compatibility", "stability", "upgrade", "semver", "experimental", "v0"]
+---
+
+Quivr releases are numbered `MAJOR.MINOR.PATCH`, such as `2.1.3`. This page says what you can rely on from one 2.x release to the next.
+
+## The HTTP API
+
+The API keeps the `/v0` path for every 2.x release. The name is historical: from 2.0.0 on, `/v0` is the stable API.
+
+Within 2.x, a release may **add** to the API:
+
+- new endpoints;
+- new optional request fields;
+- new fields in responses;
+- new values in fields that list kinds, such as event types, error codes or receipt outcomes.
+
+So write clients that ignore fields and event types they do not know, as [Follow changes](/guides/follow-changes#what-the-notices-mean) already recommends.
+
+A change that could break a working client waits for the next major release: removing or renaming an endpoint or field, making an optional field required, or changing what a response means. The [changelog](https://github.com/The-Vibe-Company/quivr/blob/main/CHANGELOG.md) lists every change under its release, with breaking changes first.
+
+## Plugins
+
+A plugin declares which Plugin API versions it supports in its manifest (`compatibility.plugin_api`). Quivr refuses to pin or activate a plugin whose range it does not support, and `quivr plugin inspect` reports the result before you try. The changelog marks every change that asks plugin authors to act. [The plugin manifest reference](/reference/plugin-manifest) lists the fields.
+
+## Upgrading
+
+Upgrades between 2.x releases keep your data in place: run the new `quivr migrate`, then roll the worker and the API, as [Upgrade Quivr](/run-quivr/upgrade-quivr) describes. Read each release's notes first; they name any extra step.
+
+Pre-releases (`2.0.0-alpha.N`) are not covered. To move from an alpha to 2.0.0, start a fresh installation, or export your documents from the old one and send them again to the new one.
+
+## Stable and experimental features
+
+Everything documented on this site is stable within 2.x, except the features below. An experimental feature works and is tested, but its settings, endpoints or behaviour may still change in a minor release. Its page, or its section, says so.
+
+| Experimental feature | Page |
+| --- | --- |
+| Search measurements, load tests and search campaigns | [Record search measurements](/run-quivr/record-search-measurements), [Run local load tests](/run-quivr/run-local-load-tests), [Run a search campaign](/run-quivr/run-search-campaign) |
+| Re-ranking deep searches with Jev | [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) |
+| Meaning alerts judged by Jev | [Use the external classifier](/guides/described-alerts#use-the-external-classifier) |
+| The vector index on a dedicated host | [Run the vector index on a dedicated host](/run-quivr/dedicated-vector-host) |
+| The `quivr-autoscaler` binary | [The quivr-autoscaler binary](/run-quivr/deploy#the-quivr-autoscaler-binary) |
+
+[Known limits](/reference/known-limits) lists what Quivr 2.0 does not do yet.

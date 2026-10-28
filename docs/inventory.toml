@@ -98,7 +98,7 @@ excluded = [
 "docs/search-campaigns.md" = { audience = "contributor", kind = "guide", summary = "start, resume and stop a bounded configuration search campaign" }
 "docs/eval-results.md" = { audience = "contributor", kind = "guide", summary = "log, sync, compare and query shared search measurements" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
-"docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
+"docs/quivr-v2-remaining-limits.md" = { audience = "contributor", kind = "concept", summary = "technical limits of the engine and its harness, for contributors" }
 "docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
 "docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference", summary = "every endpoint, field and example, generated from the contract" }
 "docs/reference/mcp.md" = { audience = "functional", kind = "generated-reference", summary = "every MCP profile and tool an AI agent can use, with its arguments" }

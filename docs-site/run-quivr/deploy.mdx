@@ -7,10 +7,6 @@ keywords: ["deploy", "QUIVR_CONFIG", "migrate", "readiness", "probes", "self-hos
 
 A Quivr deployment runs one `quivr` binary as three commands, next to four services and the plugins you choose. Every process reads the same JSON configuration file; you run `quivr migrate` first, then keep `quivr api` and `quivr worker` running.
 
-<Warning>
-Quivr is at the evaluation stage: its API is `v0` and may change. Do not run it in production yet.
-</Warning>
-
 For an image-only evaluation installation, follow [Run Quivr on one machine](/run-quivr/single-machine). It packages the API, worker, plugins and dependencies in one Compose file.
 
 ## What a deployment runs
@@ -336,6 +332,10 @@ triggers:
 The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per configured interval (15 seconds by default), with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than the larger of one minute and twice the configured interval. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog.
 
 ### The quivr-autoscaler binary
+
+<Note>
+Experimental: `quivr-autoscaler` may still change in a minor 2.x release. See [Versions and compatibility](/reference/compatibility#stable-and-experimental-features).
+</Note>
 
 Where KEDA is not available, run `quivr-autoscaler`: one small, always-on process that polls the queue endpoint and sets one worker service's replica count. Build it from the repository root with `cmd/quivr-autoscaler/Dockerfile`. Run exactly one per target, with no other scaler on it. `QUIVR_AUTOSCALER_BACKEND` selects how replicas are read and set:
 

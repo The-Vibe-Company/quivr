@@ -1,23 +1,17 @@
-# Quivr V2 — Remaining limits
+# Quivr — Engine limits for contributors
 
-Status: consolidated for the text-monitoring vertical slice (Spec 1) by
-[THE-662](https://linear.app/thevibecompany/issue/THE-662), 2026-09-28.
-Quivr V2 is at evaluation stage. Nothing here, and no green `make verify`,
-certifies production readiness, capacity, security or relevance.
+The technical limits of the engine and its verification harness, for people
+changing this repository. Users and operators read the shorter
+[Known limits](https://docs.quivr.thevibecompany.co/reference/known-limits) page
+instead. A green `make verify` does not certify capacity, security or relevance.
 
-Each limit was declared by the slice that shipped the behaviour. A limit with a
+This register was first consolidated for Spec 1 on 2026-09-28
+([THE-662](https://linear.app/thevibecompany/issue/THE-662); obligation map in
+[docs/dated/evidence/the-662-spec1-closure.md](dated/evidence/the-662-spec1-closure.md))
+and checked against the code again for the 2.0 release
+([THE-1940](https://linear.app/thevibecompany/issue/THE-1940)). A limit with a
 correctness or security impact has its own ticket; the rest are listed so they
-stay visible. The Spec 1 obligation map is in
-[docs/dated/evidence/the-662-spec1-closure.md](dated/evidence/the-662-spec1-closure.md).
-
-## Open, tracked
-
-| Limit | Impact | Ticket |
-| --- | --- | --- |
-| PostgreSQL adapter tests need the whole Linux stack | Slow feedback off Linux | [THE-699](https://linear.app/thevibecompany/issue/THE-699) |
-| Hybrid search ranks below semantic search on the FR/EN fixture | Relevance, kept separate from this list | [THE-641](https://linear.app/thevibecompany/issue/THE-641) |
-
-## Accepted or untracked
+stay visible. Remove a limit in the pull request that lifts it.
 
 **Platform and harness**
 
@@ -56,8 +50,9 @@ stay visible. The Spec 1 obligation map is in
 
 **Ingestion**
 
-- Batches share the global 5 s request deadline, upload time included.
-- A Blob-only Manifest is stored but not extracted, so it is `blocked` for search.
+- Batches share one request deadline (8 s), upload time included.
+- Only text Parts are indexed: a Blob-only Manifest is stored but ends
+  `ingestion_refused` for search.
 - No orphan-upload sweeper or retention policy exists.
 
 **Search and rebuild**
@@ -86,11 +81,8 @@ stay visible. The Spec 1 obligation map is in
   adapter test fails if that ever changes.
 - Physical collections left by evaluation cutover migrations (earlier default
   generations) are not purged.
-- Each worker's purge sweep scans every Record Version once a minute to find
-  newly dead ones, and `projection_purges` rows are kept as history. Both grow
-  with the total number of Versions; revisit for scale in Spec 8.
-- Retrieval measurement ran on one 2-CPU runner with 24 documents.
-  Lexical and hybrid ranks vary slightly between runs with identical pins.
+- `projection_purges` rows are kept as history and grow with the total number
+  of purged Versions.
 - Mapping values that cannot be projected are skipped silently. Pending
   retrieval configuration is not readable, and semantic vectors ignore mappings.
 - Some branches are proven only at adapter or unit level:
@@ -103,12 +95,8 @@ stay visible. The Spec 1 obligation map is in
 
 - Evaluation and delivery run as PostgreSQL-leased loops rather than Temporal
   workflows. This is a documented deviation from the blueprint.
-- Match criteria come from pinned `subscription` plugins. This repository ships
-  the alerts plugin `plugins/alerts`: keyword alerts (boolean keyword queries and
-  metadata filters, without stemming or wildcards), local meaning alerts using
-  stored vectors without an external classifier, and Jev meaning checks that
-  need a TypeSafe key. Keyword and meaning checks can be combined. It also ships
-  the `quivr plugin init --kind subscription` template.
+- Match criteria come from `subscription` plugins. The first-party
+  `plugins/alerts` has no stemming or wildcards in keyword alerts.
 - Jev meaning checks send article text to TypeSafe. A TypeSafe outage delays the
   keyword alerts of the same articles too, because the core retries a plugin's
   batch as one.
@@ -116,12 +104,11 @@ stay visible. The Spec 1 obligation map is in
   claims a Record Version's intents. After a failed call, each intent retries on
   its own jittered schedule, so the retries of one article can cost more than one
   call until they succeed.
-- A pin names one plugin version at startup. Changing it restarts the api and
-  worker; Subscription Versions pinned to a version no longer installed stay
-  pending with `evaluator_unavailable`.
+- Subscription Versions pinned to an alert-rule version no longer installed stay
+  pending with `evaluator_unavailable` until an operator restores it or retires
+  them (ADR 0006).
 - Delivery is at least once: a crash after sending can resend the same
   event id and bytes.
-- Deliveries exhausted by the retry migration emitted no `delivery.updated`.
 - Re-enabling a Subscription resumes delivery of its parked notices under their
   original window, so an ordinary notice parked for longer than the window ends
   `exhausted` (`window_elapsed`) without being sent. Only a `match.withdrawn`
@@ -129,8 +116,8 @@ stay visible. The Spec 1 obligation map is in
   at the re-enable (THE-696). Changes made during the pause are never
   evaluated; there is no backfill command.
 - Editing a Saved Query or Subscription applies from its commit on; there is
-  no re-evaluation of earlier content under the new Version. Names are
-  immutable, a Subscription keeps its Saved Query, and deletion is permanent
+  no re-evaluation of earlier content under the new Version. A Subscription
+  keeps its Saved Query, and deletion is permanent
   (no undelete). Pending notices of a deleted Subscription, including a
   `match.withdrawn` committed after the deletion, are never sent (THE-724).
 - Delivery refuses private and internal receiver addresses after DNS
@@ -142,16 +129,14 @@ stay visible. The Spec 1 obligation map is in
 
 **Observability**
 
-- Metrics are a small Prometheus-text set on the probe listeners. There are no
-  dashboards, distributed tracing or alerting.
+- Prometheus metrics and OpenTelemetry export exist, but no dashboards or alert
+  rules ship in `deploy/`.
 - Counters and histograms reset when a process restarts.
-- The ingestion backlog counts Receipts that are not yet materialized, not later
-  processing stages. Receipts accepted before the `accepted_at` migration are
-  dated at migration time.
 
 **Supply chain**
 
-- Container image licences are not inventoried.
+- Release images carry SPDX SBOMs; the licences of dependency images
+  (PostgreSQL, Weaviate, Temporal, SeaweedFS, TEI) are not inventoried.
 - The E5 model's MIT declaration and training-data provenance are as published
   upstream; see [third_party/README.md](../third_party/README.md).
 - The denylist does not scan the `multimodal-rag` submodule.
@@ -160,8 +145,7 @@ stay visible. The Spec 1 obligation map is in
 
 - Expand/contract migration lint and a merge-base binary compatibility job cover
   inline ingestion, authorization and lexical search. There is no full release
-  compatibility matrix yet; the previous artifact is a commit until release
-  images are integrated. Historical migrations flagged in `migrations/legacy.json`
+  compatibility matrix yet. Historical migrations flagged in `migrations/legacy.json`
   retain their original risks. Additive DDL can briefly delay writes while locks
   are held. Contract execution closes the application rollback window; there are
   no down migrations. See the [upgrade guide](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
