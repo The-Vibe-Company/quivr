@@ -10,6 +10,10 @@ import (
 const Live = "live"
 const Bulk = "bulk"
 
+// DefaultMaxBulkIngestionWaiting bounds connector prefetch. Bulk autoscaling
+// treats this much waiting work as demand even when prefetch stops growing it.
+const DefaultMaxBulkIngestionWaiting int64 = 1000
+
 type Slots struct {
 	Live int `json:"live"`
 	Bulk int `json:"bulk"`

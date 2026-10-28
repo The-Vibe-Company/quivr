@@ -259,13 +259,15 @@ Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk
 {"queues":{"live":{"waiting":0,"in_progress":1,"oldest_waiting_age_seconds":0},"bulk":{"waiting":123,"in_progress":2,"oldest_waiting_age_seconds":45}}}
 ```
 
-Every option below applies the same rule to one queue's waiting count:
+Proportional scaling uses one queue's waiting count:
 
 ```text
 replicas = clamp(ceil(waiting / documents_per_replica), min, max)
 ```
 
-Scale-up needs no stabilization window; scale-down goes only to the highest recommendation of the last five minutes, which reduces short-lived scale-downs around a threshold. The examples use one to eight workers and 20,000 waiting documents per replica, so 20,001 waiting documents need two workers. Choose the target from measured document throughput and your provider's capacity. Keep at least one bulk worker so admitted work continues when waiting reaches zero. Counts are installation-wide, so a request to any healthy API replica is enough.
+Scale-up needs no stabilization window; scale-down goes only to the highest recommendation of the last five minutes, which reduces short-lived scale-downs around a threshold. With 20,000 waiting documents per replica, the proportional rule requests two workers at 20,001 documents. Choose the target from measured document throughput and your provider's capacity. Keep at least one bulk worker so admitted work continues when waiting reaches zero. Counts are installation-wide, so a request to any healthy API replica is enough.
+
+Bulk connectors stop fetching new pages at 1,000 waiting ingestion documents. The built-in `quivr-autoscaler` shares that bound and requests at least one more bulk worker whenever total waiting reaches it, up to the configured maximum. Total waiting includes ingestion and downstream work. Sustained saturation therefore adds workers even while connector prefetch is paused. The connector still stops at its bound when workers reach the maximum; an already fetched page and concurrent connectors can overshoot it. More workers may not increase throughput when the database or another dependency is saturated.
 
 Create a dedicated key for the scaler with only `queues:read` and `corpora: ["*"]`, distinct from the API and operator keys, under [API keys](/reference/configuration#api-keys). Never give a scaler the operator key.
 
@@ -315,6 +317,8 @@ spec:
 
 KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. HPA stabilization controls scale-down between positive replica counts; KEDA's `cooldownPeriod` applies to scaling to zero. HPA tolerance can change exact decisions near a threshold. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
 
+KEDA applies only the proportional rule. For connector imports, choose a target low enough to reach your maximum before the 1,000-document prefetch bound (for example, `targetValue: "125"` for eight replicas), or use the built-in controller below. Apply the same choice to the Prometheus `threshold` if you use that trigger.
+
 Alternatively, scrape Quivr's private probe endpoint `/metrics` and replace the trigger with KEDA's [Prometheus scaler](https://keda.sh/docs/2.20/scalers/prometheus/) on `quivr_queue_waiting_documents`. The example `job` selector must identify only this Quivr installation. `max` avoids adding the same database count once per scraped replica. Configure Prometheus authentication separately when required.
 
 For example, not run:
@@ -348,13 +352,15 @@ Where KEDA is not available, run `quivr-autoscaler`: one small, always-on proces
 | `RAILWAY_TOKEN`, `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only; the service ID is the target, not the autoscaler's own `RAILWAY_SERVICE_ID` |
 | `QUIVR_AUTOSCALER_ENABLED` | `true`; `false` exits without reading APIs or changing replicas |
 | `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | `1` / `8` replicas |
-| `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | `20000` waiting documents per replica |
+| `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | `20000` waiting documents per replica for the proportional rule; bulk saturation can request more |
 | `QUIVR_AUTOSCALER_DOWNSCALE_WINDOW` | `5m`; the highest recent recommendation limits scale-down; `0s` disables stabilization |
 | `QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL` | `2m` between successful scale actions; `0s` disables spacing |
 | `QUIVR_AUTOSCALER_INTERVAL` | `30s` delay after each poll, at least `1s` |
 | `QUIVR_AUTOSCALER_REQUEST_TIMEOUT` | `10s` per HTTP request, at least `1s` |
 
 The process logs JSON lines: `autoscaler started` with its backend and queue, then one `autoscaling decision` per poll with `waiting`, the observed `current` count, the recommended `target`, the acknowledged `applied` count and an `outcome`: `hold`, `cooldown`, `scaled`, or an error stage. An unknown count is `-1`. A `hold` with a lower backlog can be the stabilization window; `cooldown` means the minimum scale interval has not elapsed. It reads the backend's replica count on every poll and never assumes a failed write succeeded. Startup, failed reads or writes and replica changes made by someone else restart the stabilization window at the observed count. Missing or malformed counts and `503` responses are errors, never zero backlog.
+
+For `bulk`, the target is the larger of the proportional recommendation and `current + 1` when waiting is at least 1,000, clamped to the replica bounds. Repeated successful actions reach the maximum while saturation persists; `QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL` still spaces them. For `live`, only the proportional rule applies. Both queues retain downscale stabilization.
 
 ### Scale by hand
 

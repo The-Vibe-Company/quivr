@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/autoscaling"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
@@ -936,6 +937,82 @@ func TestBulkAcquisitionDefersBeforeFetchingWhenIngestionWaits(t *testing.T) {
 				}
 			} else if runs.finished[0] != nil {
 				t.Fatalf("deferral after committed progress is not a source failure: %+v", runs.finished[0])
+			}
+		})
+	}
+}
+
+// The snapshot and replica provider are external boundaries. Real acquisition
+// and scaling must agree even when prefetch prevents further queue growth.
+type importBacklog struct{ waiting int64 }
+
+func (b *importBacklog) QueueBacklog(context.Context) ([]workqueue.Status, error) {
+	return []workqueue.Status{{Queue: workqueue.Bulk, Waiting: b.waiting, IngestionWaiting: &b.waiting}}, nil
+}
+func (b *importBacklog) Waiting(context.Context) (int64, error) { return b.waiting, nil }
+
+type importReplicas struct{ current int }
+
+func (r *importReplicas) Replicas(context.Context) (int, error) { return r.current, nil }
+func (r *importReplicas) SetReplicas(_ context.Context, count int) error {
+	r.current = count
+	return nil
+}
+
+func TestSaturatedConnectorImportAddsWorkersWithoutFetchingPastTheBound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		max  int
+		want []int
+	}{
+		{"default maximum", 8, []int{2, 3, 4, 5, 6, 7, 8, 8}},
+		{"custom maximum", 3, []int{2, 3, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &stubConnector{pages: []Page{{
+				Items:      []Item{{RecordKey: "a", Content: content.Text{Kind: "text", Text: "Alpha"}}},
+				Checkpoint: json.RawMessage(`{"next":1}`),
+				More:       true,
+			}}}
+			a, runs := stubAcquirer(t, source, 0)
+			a.MaxPages = 1
+			runs.target.WorkQueue = workqueue.Bulk
+			b := &importBacklog{waiting: 999}
+			a.Queues = b
+			r := &importReplicas{current: 1}
+			p, err := autoscaling.NewPolicy(autoscaling.Config{Queue: workqueue.Bulk, Min: 1, Max: tc.max, DocumentsPerReplica: 20000, DownscaleWindow: 5 * time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := autoscaling.NewController(p, b, r)
+			c.MinScaleInterval = 2 * time.Minute
+			start := time.Unix(1000, 0)
+			if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+				t.Fatal(err)
+			}
+			if len(source.requests) != 1 || len(runs.checkpoints) != 1 {
+				t.Fatal("connector did not fetch and commit below the prefetch bound")
+			}
+			if d, err := c.Step(context.Background(), start); err != nil || d.Applied != 1 || d.Outcome != "hold" {
+				t.Fatalf("below bound: decision %+v, error %v; want hold at one", d, err)
+			}
+			b.waiting = 1000
+			for i, want := range tc.want {
+				if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+					t.Fatal(err)
+				}
+				if len(source.requests) != 1 || len(runs.checkpoints) != 1 || len(runs.finished) != i+2 ||
+					runs.finished[i+1] == nil || !runs.finished[i+1].Skipped {
+					t.Fatalf("at bound with %d replicas: fetched or checkpointed more work", r.current)
+				}
+				outcome := "scaled"
+				if i == len(tc.want)-1 {
+					outcome = "hold"
+				}
+				d, err := c.Step(context.Background(), start.Add(time.Duration(i)*2*time.Minute))
+				if err != nil || d.Applied != want || d.Target != want || d.Outcome != outcome {
+					t.Fatalf("at bound, step %d: decision %+v, error %v; want replicas %d and %s", i, d, err, want, outcome)
+				}
 			}
 		})
 	}

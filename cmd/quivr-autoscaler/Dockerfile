@@ -4,6 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 COPY cmd/quivr-autoscaler ./cmd/quivr-autoscaler
 COPY internal/autoscaling ./internal/autoscaling
+COPY internal/workqueue ./internal/workqueue
 RUN CGO_ENABLED=0 go build -trimpath -o /quivr-autoscaler ./cmd/quivr-autoscaler
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab

@@ -30,7 +30,7 @@ func IsConnectorKey(key string) bool { return strings.HasPrefix(key, KeyPrefix) 
 const ConnectorVersion = "v1"
 
 // DefaultMaxBulkIngestionWaiting bounds prefetched ingestion work, not usage.
-const DefaultMaxBulkIngestionWaiting int64 = 1000
+const DefaultMaxBulkIngestionWaiting = workqueue.DefaultMaxBulkIngestionWaiting
 
 // DefaultMaxPages bounds the pages one run may fetch.
 const DefaultMaxPages = 10

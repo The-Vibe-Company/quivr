@@ -377,6 +377,7 @@ def generated_files():
                   'WORKDIR /app\nCOPY go.mod go.sum ./\n'
                   'COPY cmd/quivr-autoscaler ./cmd/quivr-autoscaler\n'
                   'COPY internal/autoscaling ./internal/autoscaling\n'
+                  'COPY internal/workqueue ./internal/workqueue\n'
                   'RUN CGO_ENABLED=0 go build -trimpath -o /quivr-autoscaler ./cmd/quivr-autoscaler\n\n'
                   'FROM ' + build['autoscaler_runtime'] + '\n'
                   'COPY --from=build /quivr-autoscaler /usr/local/bin/quivr-autoscaler\n'
