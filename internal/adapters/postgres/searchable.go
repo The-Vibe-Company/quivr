@@ -447,34 +447,67 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 // Ordering and LIMIT preserve the full key seek; outer equality rejects the
 // next row when the key is absent. The same serving predicates fence the
 // initial metadata lookup and the post-blob-read recheck.
-var hydrationCandidatesSQL = `
-FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,evaluation_plugin,evaluation_space,n)
-JOIN LATERAL (SELECT sg.organization,sg.id,sg.version_id,sg.segmentation_id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,sg.derivation
+// Resolve routing overlays once per distinct requested generation, rather than
+// repeating their control-table probes for every hit and embedding lookup.
+func hydrationLookupsSQL(response bool) string {
+	segmentFields, generationFields := "", ""
+	if response {
+		segmentFields = ",sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,sg.derivation"
+		generationFields = ",g.spaces,g.space_id"
+	}
+	return `WITH candidates AS MATERIALIZED (
+ SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,evaluation_plugin,evaluation_space,n)
+), generations AS MATERIALIZED (
+ SELECT g.id,g.coverage_routed,g.ingestion_routing` + generationFields + `
+ FROM (SELECT DISTINCT generation_id FROM candidates) requested
+ JOIN ` + effectiveGenerationsSQL + ` g ON g.id=requested.generation_id
+), located AS MATERIALIZED (
+ SELECT c.*,sg.version_id,sg.segmentation_id` + segmentFields + `,
+ v.record_id,v.slot,v.baseline_ready,v.quarantined,r.corpus_id,r.current_version_id,r.withdrawn
+FROM candidates c JOIN generations g ON g.id=c.generation_id
+JOIN LATERAL (SELECT sg.organization,sg.id,sg.version_id,sg.segmentation_id` + segmentFields + `
  FROM segments sg WHERE (sg.organization,sg.id)>=(c.organization,c.segment_id)
  ORDER BY sg.organization,sg.id LIMIT 1) sg ON (sg.organization,sg.id)=(c.organization,c.segment_id)
-JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.baseline_ready,v.quarantined FROM record_versions v
+JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.slot,v.baseline_ready,v.quarantined FROM record_versions v
  WHERE (v.organization,v.id)>=(c.organization,sg.version_id)
  ORDER BY v.organization,v.id LIMIT 1) v ON (v.organization,v.id)=(c.organization,sg.version_id)
 JOIN LATERAL (SELECT r.organization,r.id,r.corpus_id,r.current_version_id,r.withdrawn FROM records r
  WHERE (r.organization,r.id)>=(c.organization,v.record_id)
  ORDER BY r.organization,r.id LIMIT 1) r ON (r.organization,r.id)=(c.organization,v.record_id)
-CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND ` + effectiveCoverageSQL("pc") + `) OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
+), routes AS MATERIALIZED (
+ SELECT requested.organization,requested.corpus_id,cp.archived,
+ ` + routedGenerationSQL("requested.organization", "requested.corpus_id") + ` AS generation_id
+ FROM (SELECT DISTINCT organization,corpus_id FROM located) requested
+ JOIN LATERAL (SELECT cp.organization,cp.id,cp.archived FROM corpora cp
+ WHERE (cp.organization,cp.id)>=(requested.organization,requested.corpus_id)
+ ORDER BY cp.organization,cp.id LIMIT 1) cp ON (cp.organization,cp.id)=(requested.organization,requested.corpus_id)
+)
+`
+}
+
+var hydrationCandidatesSQL = `
+FROM located c JOIN generations g ON g.id=c.generation_id
+JOIN routes route ON (route.organization,route.corpus_id)=(c.organization,c.corpus_id)
+CROSS JOIN LATERAL (SELECT c.organization,c.segment_id AS id,c.version_id,c.segmentation_id) sg
+CROSS JOIN LATERAL (SELECT c.organization,c.version_id AS id,c.record_id,c.slot,c.baseline_ready,c.quarantined) v
+CROSS JOIN LATERAL (SELECT c.organization,c.record_id AS id,c.corpus_id,c.current_version_id,c.withdrawn) r
+CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND ` + effectiveServingSQL("pc", "g", "v") + `) OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
 `
 
 var hydrationFenceSQL = `
-WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=r.organization AND cp.id=r.corpus_id AND cp.archived)`
+WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT route.archived`
 
-var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),
- jsonb_build_object('source_ranges',sg.derivation->'source_ranges','source_separator',sg.derivation->'source_separator')
+var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),
+ jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator')
 ` + hydrationCandidatesSQL + `
 JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id FROM version_parts p
- WHERE (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,sg.part_key)
- ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,sg.part_key)
+ WHERE (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
+ ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
 JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
  WHERE (b.organization,b.blob_id)>=(c.organization,p.blob_id)
  ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
-LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec JOIN ` + effectiveGenerationsSQL + ` g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
-  WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
+LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec WHERE ec.generation_id=g.id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g", "v") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
+  AND ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
 ` + hydrationFenceSQL
 
 func hydrationArgs(scope corpus.Scope, cs []content.Candidate) []any {
@@ -493,7 +526,7 @@ func (s ProjectionStore) RecheckHydration(ctx context.Context, scope corpus.Scop
 	if len(cs) == 0 {
 		return out, nil
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT c.n,r.corpus_id `+hydrationCandidatesSQL+hydrationFenceSQL, hydrationArgs(scope, cs)...)
+	rows, err := database(ctx, s.Pool).Query(ctx, hydrationLookupsSQL(false)+`SELECT c.n,r.corpus_id `+hydrationCandidatesSQL+hydrationFenceSQL, hydrationArgs(scope, cs)...)
 	if err != nil {
 		return nil, err
 	}

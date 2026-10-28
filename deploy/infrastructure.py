@@ -24,6 +24,7 @@ POSTGRES_KEYS = {
     'QUIVR_POSTGRES_WAL_COMPRESSION', 'QUIVR_POSTGRES_STAT_STATEMENTS_TRACK',
     'QUIVR_POSTGRES_JIT', 'QUIVR_POSTGRES_SYNCHRONOUS_COMMIT',
     'QUIVR_POSTGRES_COMMIT_DELAY', 'QUIVR_POSTGRES_COMMIT_SIBLINGS',
+    'QUIVR_POSTGRES_AUTOPREWARM',
 }
 WEAVIATE_KEYS = {
     'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED', 'AUTOSCHEMA_ENABLED',
@@ -153,7 +154,8 @@ def postgres_expected(service, volume_mb=None):
         'effective_cache_size': str(memory * 3 // 4) + 'MB',
         'work_mem': env['QUIVR_POSTGRES_WORK_MEM'],
         'maintenance_work_mem': str(min(512, max(16, memory // 16))) + 'MB',
-        'dynamic_shared_memory_type': 'mmap', 'shared_preload_libraries': 'pg_stat_statements',
+        'dynamic_shared_memory_type': 'mmap', 'shared_preload_libraries': 'pg_stat_statements,pg_prewarm',
+        'pg_prewarm.autoprewarm': env['QUIVR_POSTGRES_AUTOPREWARM'],
         'track_io_timing': 'on', 'jit': env['QUIVR_POSTGRES_JIT'],
         'synchronous_commit': env['QUIVR_POSTGRES_SYNCHRONOUS_COMMIT'],
         'commit_delay': env['QUIVR_POSTGRES_COMMIT_DELAY'],
@@ -325,7 +327,7 @@ def safe_environment(name, value):
         valid = value in ('railway', 'kubernetes')
     elif name == 'QUIVR_AUTOSCALER_QUEUE':
         valid = value in ('bulk', 'live')
-    elif name == 'QUIVR_POSTGRES_JIT':
+    elif name in ('QUIVR_POSTGRES_JIT', 'QUIVR_POSTGRES_AUTOPREWARM'):
         valid = value in ('on', 'off')
     elif name == 'QUIVR_POSTGRES_SYNCHRONOUS_COMMIT':
         valid = value == 'on'

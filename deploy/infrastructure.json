@@ -13,7 +13,8 @@
         "QUIVR_POSTGRES_JIT": "on",
         "QUIVR_POSTGRES_SYNCHRONOUS_COMMIT": "on",
         "QUIVR_POSTGRES_COMMIT_DELAY": "100",
-        "QUIVR_POSTGRES_COMMIT_SIBLINGS": "5"
+        "QUIVR_POSTGRES_COMMIT_SIBLINGS": "5",
+        "QUIVR_POSTGRES_AUTOPREWARM": "on"
       },
       "deploy": {
         "resources": {

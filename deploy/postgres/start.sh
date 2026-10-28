@@ -99,6 +99,9 @@ awk -v value="$QUIVR_POSTGRES_CHECKPOINT_TIMEOUT" 'BEGIN {
     seconds=value * (unit=="h" ? 3600 : unit=="min" ? 60 : 1)
     exit !(seconds >= 30 && seconds <= 3600)
 }' || fail QUIVR_POSTGRES_CHECKPOINT_TIMEOUT
+case "$QUIVR_POSTGRES_AUTOPREWARM" in
+    on|off) ;; *) fail QUIVR_POSTGRES_AUTOPREWARM ;;
+esac
 case "$QUIVR_POSTGRES_JIT" in
     on|off) ;; *) fail QUIVR_POSTGRES_JIT ;;
 esac
@@ -127,7 +130,8 @@ set -- postgres \
     -c "work_mem=${QUIVR_POSTGRES_WORK_MEM:-4MB}" \
     -c "maintenance_work_mem=${QUIVR_POSTGRES_MAINTENANCE_WORK_MEM:-${maintenance}MB}" \
     -c dynamic_shared_memory_type=mmap \
-    -c shared_preload_libraries=pg_stat_statements \
+    -c shared_preload_libraries=pg_stat_statements,pg_prewarm \
+    -c "pg_prewarm.autoprewarm=$QUIVR_POSTGRES_AUTOPREWARM" \
     -c track_io_timing=on \
     -c "pg_stat_statements.track=$QUIVR_POSTGRES_STAT_STATEMENTS_TRACK" \
     -c "random_page_cost=$QUIVR_POSTGRES_RANDOM_PAGE_COST" \
