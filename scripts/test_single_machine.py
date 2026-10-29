@@ -13,13 +13,31 @@ SCRIPT = ROOT / 'deploy/single-machine/setup.py'
 
 
 class SingleMachineTest(unittest.TestCase):
+    def test_release_identity_accepts_stable_and_alpha_versions_only(self):
+        spec = importlib.util.spec_from_file_location('single_machine_setup', SCRIPT)
+        setup = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup)
+        with tempfile.TemporaryDirectory() as temporary:
+            release = pathlib.Path(temporary) / 'release.json'
+            for version, valid in [('2.0.0', True), ('2.4.1', True), ('2.0.0-alpha.7', True),
+                                   ('3.0.0', False), ('2.0.0-rc.1', False), ('2.0', False)]:
+                release.write_text(json.dumps({'version': version, 'revision': 'b' * 40, 'models': {}, 'images': {}}))
+                with self.subTest(version=version):
+                    if valid:
+                        with self.assertRaisesRegex(Exception, 'model|gemma|KeyError') as raised:
+                            setup.release_images(release)
+                        self.assertNotIn('release identity', str(raised.exception))
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'invalid release identity'):
+                            setup.release_images(release)
+
     def test_install_cli_preserves_secrets_and_refuses_model_switch_and_mutable_images(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
-            manifest = {'version': '2.0.0-alpha.7', 'revision': 'b' * 40,
+            manifest = {'version': '2.0.0', 'revision': 'b' * 40,
                 'models': {'gemma': 'c' * 40, 'e5': 'd' * 40}, 'images': {
                 name: {'reference': f'ghcr.io/example/quivr-{name}@sha256:' + 'a' * 64,
-                       'version': '2.0.0-alpha.7', 'revision': 'b' * 40}
+                       'version': '2.0.0', 'revision': 'b' * 40}
                 for name in ('core', 'web', 'cpu-embeddings', 'postgres', 'seaweed', 'tei')}}
             release = directory / 'release.json'
             release.write_text(json.dumps(manifest))

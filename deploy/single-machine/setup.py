@@ -39,7 +39,7 @@ def read_env(path):
 
 def release_images(path):
     release = json.loads(path.read_text())
-    if not re.fullmatch(r'2\.0\.0-alpha\.\d+', release['version']) or not re.fullmatch('[0-9a-f]{40}', release['revision']):
+    if not re.fullmatch(r'2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-alpha\.(0|[1-9][0-9]*))?', release['version']) or not re.fullmatch('[0-9a-f]{40}', release['revision']):
         raise ValueError('invalid release identity')
     if any(not re.fullmatch('[0-9a-f]{40}', release['models'][name]) for name in ('gemma', 'e5')):
         raise ValueError('invalid model revision')

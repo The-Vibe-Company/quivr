@@ -97,7 +97,7 @@ A change to this file takes effect when the processes restart. Plugin changes ma
 
 ## Pull and verify a release image
 
-Release images use `2.0.0-alpha.N` versions and run on `linux/amd64`. The [GitHub releases](https://github.com/The-Vibe-Company/quivr/releases) contain release-please's changelog and an `images.txt` file listing signed image digests. A digest identifies the exact image bytes; copy the engine entry beginning `ghcr.io/the-vibe-company/quivr@`. Docker and [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) must be installed.
+Release images use `2.X.Y` versions, such as `2.0.0`, and run on `linux/amd64`. The [GitHub releases](https://github.com/The-Vibe-Company/quivr/releases) contain release-please's changelog and an `images.txt` file listing signed image digests. A digest identifies the exact image bytes; copy the engine entry beginning `ghcr.io/the-vibe-company/quivr@`. Docker and [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) must be installed.
 
 For example, not run; replace both placeholders with values from the same release:
 
@@ -113,7 +113,7 @@ docker pull "$IMAGE"
 docker run --rm --read-only --tmpfs /tmp "$IMAGE" --version
 ```
 
-Verification checks the digest, GitHub's OIDC issuer and the exact release workflow identity. A failed verification stops deployment. The version command prints the release version and full commit. `latest-alpha` is a moving tag; use a verified digest to keep a deployment fixed. Every image also has `<version>` and `sha-<full commit>` tags.
+Verification checks the digest, GitHub's OIDC issuer and the exact release workflow identity. A failed verification stops deployment. The version command prints the release version and full commit. `latest` is a moving tag that follows the newest 2.x release; use a verified digest to keep a deployment fixed. Every image also has `<version>` and `sha-<full commit>` tags.
 
 See [Security of Quivr releases](/run-quivr/security) for the signed component inventory and vulnerability checks.
 

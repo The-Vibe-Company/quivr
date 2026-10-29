@@ -10,12 +10,12 @@ permissions:
   contents: read
 jobs:
   verification:
-    if: startsWith(github.event.release.tag_name, 'v2.0.0-alpha.')
+    if: startsWith(github.event.release.tag_name, 'v2.')
     uses: ./.github/workflows/verify.yml
     with:
       ref: ${{ github.event.release.tag_name }}
   prepare:
-    if: startsWith(github.event.release.tag_name, 'v2.0.0-alpha.')
+    if: startsWith(github.event.release.tag_name, 'v2.')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -202,7 +202,7 @@ jobs:
       with:
         ref: ${{ needs.prepare.outputs.revision }}
         persist-credentials: false
-    - name: Advance latest-alpha only after every image passes and is signed
+    - name: Advance the rolling tag only after every image passes and is signed
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -213,9 +213,10 @@ jobs:
         python3 scripts/single_machine_bundle.py --images signed-images --output .scratch/compose-bundle --version "$VERSION" --revision "$REVISION"
         gh release upload "$RELEASE_TAG" ".scratch/quivr-compose-$VERSION.tar.gz" --repo "$GITHUB_REPOSITORY" --clobber
         # Rerunning an older release must not move the rolling alias backwards.
-        published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-          --jq '.[] | select(any(.assets[]; .name == "images.txt")) | .tag_name' \
-          | sort -V | tail -n 1)
+        # Stable releases advance `latest`; the 2.0.0 alphas advanced `latest-alpha`.
+        gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" | jq 'add // []' > releases.json
+        newest=$(python3 scripts/release_scan.py newest --candidate "$RELEASE_TAG" < releases.json)
+        case "$VERSION" in *-*) alias=latest-alpha ;; *) alias=latest ;; esac
         gh release upload "$RELEASE_TAG" sboms/*.spdx.json --repo "$GITHUB_REPOSITORY" --clobber
         gh release upload "$RELEASE_TAG" images.txt --repo "$GITHUB_REPOSITORY" --clobber
         gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$RELEASE_TAG" --jq .content | base64 --decode > CHANGELOG.md
@@ -224,9 +225,9 @@ jobs:
           docker buildx imagetools create --prefer-index=false \
             --tag "${image%@*}:$VERSION" --tag "${image%@*}:sha-$REVISION" "$image"
         done < images.txt
-        if [ "$(printf '%s\n' "$published" "$RELEASE_TAG" | sort -V | tail -n 1)" = "$RELEASE_TAG" ]; then
+        if [ "$newest" = "$RELEASE_TAG" ]; then
           while IFS= read -r image; do
-            docker buildx imagetools create --prefer-index=false --tag "${image%@*}:latest-alpha" "$image"
+            docker buildx imagetools create --prefer-index=false --tag "${image%@*}:$alias" "$image"
           done < images.txt
         fi
 env:
