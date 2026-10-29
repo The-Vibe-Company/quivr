@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Quivr V2 is at the evaluation stage. Security fixes target the newest
-`2.0.0-alpha.N` release; older alpha releases are not maintained. Upgrade to the
-newest release and verify its signed image digest before deploying it.
+Security fixes target the newest 2.x release; older releases, including the
+`2.0.0-alpha.N` pre-releases, are not maintained. Upgrade to the newest release
+and verify its signed image digest before deploying it.
 
 ## Report a vulnerability
 
@@ -15,7 +15,7 @@ details.
 Include the affected release and image digest, the component or endpoint,
 steps to reproduce, expected impact and any suggested fix. Remove credentials
 and private data from examples. Maintainers will coordinate disclosure and a
-fix with the reporter; no response-time guarantee is offered during alpha.
+fix with the reporter; no response-time guarantee is offered.
 
 ## Release inventories and verification
 

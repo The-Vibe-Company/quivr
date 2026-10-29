@@ -35,19 +35,19 @@ jq -sr '.[0].payload' verified-attestations.jsonl | base64 --decode \
 
 Successful verification checks the image digest, GitHub's OIDC issuer and the exact workflow/tag identity. The final file contains the signed inventory. Use it as the authenticated source; a release asset alone does not verify a signature. Stop deployment if either cosign command fails. Remove the two local JSON files when you no longer need them.
 
-A signature proves who published these bytes and that they have not changed. It does not prove the software is free of vulnerabilities. Use a verified digest when [deploying Quivr](/run-quivr/deploy); `latest-alpha` changes over time.
+A signature proves who published these bytes and that they have not changed. It does not prove the software is free of vulnerabilities. Use a verified digest when [deploying Quivr](/run-quivr/deploy); `latest` changes over time.
 
 ## Vulnerability checks
 
 Every pull request runs `govulncheck` across all Go modules to detect known vulnerabilities reachable from Go code. The required `verify` check includes this scan. Releases scan every engine and first-party plugin image with Grype before signing, attesting and promoting release tags. A critical vulnerability with an available fix fails publication; lower severities and findings without a fix do not block it.
 
-The nightly [Release vulnerability scan workflow](https://github.com/The-Vibe-Company/quivr/actions/workflows/security-nightly.yml) rescans every digest in the newest completed alpha image release with an updated vulnerability database. Its failure flags the release for maintainers; it does not remove previously published images. Before the first completed image release, it reports that there is nothing to scan. Release and nightly workflow artifacts retain JSON scan reports of findings with available fixes, including lower severities.
+The nightly [Release vulnerability scan workflow](https://github.com/The-Vibe-Company/quivr/actions/workflows/security-nightly.yml) rescans every digest in the newest completed image release with an updated vulnerability database. Its failure flags the release for maintainers; it does not remove previously published images. Before the first completed image release, it reports that there is nothing to scan. Release and nightly workflow artifacts retain JSON scan reports of findings with available fixes, including lower severities.
 
 Dependabot proposes grouped dependency updates weekly for Go, Python, npm and GitHub Actions. Maintainers review and merge those pull requests. Scanners can miss components or vulnerabilities absent from their databases; external services, plugins you supply, and deployment configuration need their own checks. These checks make no license-policy or compliance claim.
 
 ## Report a vulnerability
 
-Follow [SECURITY.md](https://github.com/The-Vibe-Company/quivr/blob/main/SECURITY.md) to send a private report with the affected version, digest and reproduction steps. Security fixes target the newest alpha release; older alpha releases are not maintained.
+Follow [SECURITY.md](https://github.com/The-Vibe-Company/quivr/blob/main/SECURITY.md) to send a private report with the affected version, digest and reproduction steps. Security fixes target the newest 2.x release; older releases are not maintained.
 
 ## Next
 

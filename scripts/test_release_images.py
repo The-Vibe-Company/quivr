@@ -17,9 +17,12 @@ class ReleaseImagesTests(unittest.TestCase):
             'postgres': 'ghcr.io/example/quivr-postgres', 'seaweed': 'ghcr.io/example/quivr-seaweed',
             'tei': 'ghcr.io/example/quivr-tei'})
 
-    def test_accepts_only_the_alpha_release_line(self):
+    def test_accepts_stable_2x_and_alpha_release_tags(self):
+        self.assertEqual(release_images.version('v2.0.0'), '2.0.0')
+        self.assertEqual(release_images.version('v2.13.4'), '2.13.4')
         self.assertEqual(release_images.version('v2.0.0-alpha.12'), '2.0.0-alpha.12')
-        for tag in ['v1.0.0', 'v2.0.0', 'v2.0.0-alpha.01', 'v2.0.0-alpha.1-extra', '../main']:
+        for tag in ['v1.0.0', 'v3.0.0', 'v2.0', 'v2.01.0', 'v2.0.0-beta.1', 'v2.0.0-alpha.01',
+                    'v2.0.0-alpha.1-extra', '2.0.0', '../main']:
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 release_images.version(tag)
 

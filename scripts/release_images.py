@@ -1,4 +1,4 @@
-"""Discover the first-party images built for one alpha release.
+"""Discover the first-party images built for one Quivr 2 release.
 
 The workflow uses this inventory instead of maintaining a second plugin list.
 Version and changelog ownership stays with release-please.
@@ -13,9 +13,13 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+# Stable 2.x releases, and the 2.0.0 alphas that preceded them.
+VERSION = r'2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-alpha\.(0|[1-9][0-9]*))?'
+
+
 def version(tag):
-    if not re.fullmatch(r'v2\.0\.0-alpha\.(0|[1-9][0-9]*)', tag):
-        raise ValueError(f'not a Quivr alpha release tag: {tag}')
+    if not re.fullmatch('v' + VERSION, tag):
+        raise ValueError(f'not a Quivr 2 release tag: {tag}')
     return tag[1:]
 
 

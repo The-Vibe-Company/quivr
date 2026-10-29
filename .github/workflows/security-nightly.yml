@@ -31,7 +31,7 @@ jobs:
         release=$(python3 scripts/release_scan.py release < releases.json)
         echo "release=$release" >> "$GITHUB_OUTPUT"
         if [ -z "$release" ]; then
-          echo 'No completed alpha image release to scan yet.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No completed image release to scan yet.' >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
         gh release download "$release" --repo "$GITHUB_REPOSITORY" --pattern images.txt

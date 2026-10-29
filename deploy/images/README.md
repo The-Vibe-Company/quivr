@@ -23,19 +23,19 @@ PR's CI or the image workflow. See the [release-please credential guidance](http
 For an expiring App token, use `actions/create-github-app-token` in the release
 workflow and pass its output to release-please instead of the PAT secret.
 
-`release-please-config.json` selects the simple release type and prerelease
-versioning. `.release-please-manifest.json` and `version.txt` start at
-`2.0.0-alpha.0`; the first release PR proposes `2.0.0-alpha.1`. Features, fixes
-and breaking changes increment the alpha counter while on `2.0.0-alpha.N`.
+`release-please-config.json` selects the simple release type with default
+versioning. `.release-please-manifest.json` and `version.txt` hold the current
+release, `2.0.0` onwards: features bump the minor version and fixes the patch
+version. The `2.0.0-alpha.N` pre-releases came before 2.0.0.
 `bootstrap-sha` excludes history before this distribution release series.
 The plugin engine compatibility version remains `0.2.0`, and the API remains
 `v0`; these contracts are independent of the distribution version.
 
 ## Publish a release
 
-Merging the release PR causes release-please to publish its GitHub prerelease.
+Merging the release PR causes release-please to publish its GitHub release.
 Only that `release: published` event runs `.github/workflows/release-images.yml`.
-The workflow refuses a tag outside `v2.0.0-alpha.N` or a version that differs
+The workflow refuses a tag outside `v2.X.Y` (or an old `v2.0.0-alpha.N`) or a version that differs
 from the checked-out manifest and `version.txt`. It:
 
 1. Discovers first-party plugin manifests and their Go or Python runtimes.
@@ -47,12 +47,13 @@ from the checked-out manifest and `version.txt`. It:
 6. Runs the anonymous, image-only Compose smoke for both CPU models, then attaches the
    `quivr-compose-VERSION.tar.gz` bundle, per-image `*.spdx.json` SBOMs, `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
    the existing release. Its release notes already contain the changelog.
-7. Creates version/full `sha-<commit>` tags and advances `latest-alpha` without
+7. Creates version/full `sha-<commit>` tags and advances `latest` without
    changing the signed digests. Older reruns do not move that alias backwards.
+   The 2.0.0 alphas advanced `latest-alpha` instead.
 
 Rolling aliases update separately for each package; registries cannot promote
 multiple packages atomically. Deploy a shared release by its version or the
-signed digests in `images.txt`, rather than combining `latest-alpha` tags.
+signed digests in `images.txt`, rather than combining `latest` tags.
 
 GHCR package names use manifest ids: `quivr` for the engine and
 `quivr-plugin-<id>` for each plugin. For example, `quivr-plugin-core.ingest`
