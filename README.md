@@ -1,6 +1,7 @@
 # Quivr
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/The-Vibe-Company/quivr)
 
 **An open-source engine for content that keeps arriving: store it, search it, and get
 alerted when something new matches a topic you follow.**
