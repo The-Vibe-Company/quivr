@@ -139,7 +139,6 @@ stay visible. Remove a limit in the pull request that lifts it.
   (PostgreSQL, Weaviate, Temporal, SeaweedFS, TEI) are not inventoried.
 - The E5 model's MIT declaration and training-data provenance are as published
   upstream; see [third_party/README.md](../third_party/README.md).
-- The denylist does not scan the `multimodal-rag` submodule.
 
 **Application upgrades**
 

@@ -1,15 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Breaking API changes
-
-- Plugin activation, plan rollback and vector space promotion return `202 Accepted` with an Operation and `Location`, replacing the immediate `200` plan or promotion response. Follow the Operation with the same `plugins:admin` key. Successful results appear in `admin`; background discovery and coverage errors appear in `errors`.
-
-### Fixes
-
-- Prepare deployment routing changes in checkpointed batches while imports continue. Publish the final switch through one routing pointer. Rollback accepts missing coverage and retains outgoing searchable projections while recovery completes. Backfill scope counting runs outside the routing lock.
-
 ## [2.0.0-alpha.7](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.6...v2.0.0-alpha.7) (2026-10-13)
 
 
@@ -17,6 +7,7 @@
 
 * **storage:** In-place upgrades from `2.0.0-alpha.6` and earlier are unsupported. Reset the installation, or export data using the old installation and re-import into a fresh one. The existing Commitizen  footer records this for release-please; CHANGELOG.md is untouched.
 * **queues:** In-place upgrades from 2.0.0-alpha.6 and older are unsupported. Reset the installation, or export the data and re-import it. Rebuild operations no longer report `indexed` or `vectors_reused`.
+* **routing:** Plugin activation, plan rollback and vector space promotion return `202 Accepted` with an Operation and `Location`, replacing the immediate `200` plan or promotion response. Follow the Operation with the same `plugins:admin` key. Successful results appear in `admin`; background discovery and coverage errors appear in `errors` ([#3910](https://github.com/The-Vibe-Company/quivr/issues/3910)).
 
 ### Features
 
@@ -25,10 +16,8 @@
 * **changes:** publish independent record writes in parallel ([#3946](https://github.com/The-Vibe-Company/quivr/issues/3946)) ([8c9ec6d](https://github.com/The-Vibe-Company/quivr/commit/8c9ec6daa784c52cfcfe97c433ca675c370e0667))
 * **content:** add running corpus document totals ([#3927](https://github.com/The-Vibe-Company/quivr/issues/3927)) ([3a4e626](https://github.com/The-Vibe-Company/quivr/commit/3a4e626d61b39ae31f4df2b9b998e533af96a93b))
 * **deploy:** add dedicated Azure vector host ([67a6c0e](https://github.com/The-Vibe-Company/quivr/commit/67a6c0e9f345645bddfaaefbf3445b768b7b18b8))
-* **deploy:** add dedicated Azure vector host ([146c945](https://github.com/The-Vibe-Company/quivr/commit/146c9456b519594f73bb332ce3764a97bc6285f5))
 * **deploy:** reset installations and apply source declarations ([#3911](https://github.com/The-Vibe-Company/quivr/issues/3911)) ([c11a893](https://github.com/The-Vibe-Company/quivr/commit/c11a8930a458a40b1b4a1a02e608727cb0a9c006))
 * **deploy:** run a complete CPU stack with Compose ([ea68536](https://github.com/The-Vibe-Company/quivr/commit/ea6853658a1d5d4f09cd20ff42c8d2a92c1e08a9))
-* **deploy:** run a complete CPU stack with Compose ([ab4952f](https://github.com/The-Vibe-Company/quivr/commit/ab4952fbce696221f1397cdc1ef98dfa209203d9))
 * **deploy:** ship declarative infrastructure profiles and drift checks ([#3909](https://github.com/The-Vibe-Company/quivr/issues/3909)) ([a863db8](https://github.com/The-Vibe-Company/quivr/commit/a863db86fbee089e21c79de7838b3b2d7be7761a))
 * **explorer:** show each filter as soon as its fast count arrives ([#3904](https://github.com/The-Vibe-Company/quivr/issues/3904)) ([9bfb469](https://github.com/The-Vibe-Company/quivr/commit/9bfb4690185ba06b79623f0026a3ffbcfa511fbd))
 * **facets:** answer fast facet counts from snapshots or samples ([#3902](https://github.com/The-Vibe-Company/quivr/issues/3902)) ([8d34e53](https://github.com/The-Vibe-Company/quivr/commit/8d34e53fe40e603ec0f4ce05f9484b814dd88d72))
@@ -38,16 +27,15 @@
 * **monitoring:** allow subscriptions without webhook delivery ([#3884](https://github.com/The-Vibe-Company/quivr/issues/3884)) ([f8452a6](https://github.com/The-Vibe-Company/quivr/commit/f8452a6fa4bdcba5ab87f74ff1b2f075211a4c59))
 * **postgres:** ship import tuning and configurable pools ([#3881](https://github.com/The-Vibe-Company/quivr/issues/3881)) ([4fbe125](https://github.com/The-Vibe-Company/quivr/commit/4fbe125e6eb7d09cb4070dc2036ec249a751a1e4))
 * **queues:** maintain backlog totals with bounded reconciliation ([8e7c966](https://github.com/The-Vibe-Company/quivr/commit/8e7c9665ca9db1bc1d348a9af8e0dabdf4a48b1e))
-* **queues:** maintain backlog totals with bounded reconciliation ([3cee3d6](https://github.com/The-Vibe-Company/quivr/commit/3cee3d6e291215e37ad965cc4c7bb02779fbcdb8))
 * **routing:** run plugin switches as background operations ([#3910](https://github.com/The-Vibe-Company/quivr/issues/3910)) ([d89ef17](https://github.com/The-Vibe-Company/quivr/commit/d89ef1705e5c88265af81738fb1b99906d063ba0))
 * **search:** choose keyword analyzers by name ([#3875](https://github.com/The-Vibe-Company/quivr/issues/3875)) ([ae97158](https://github.com/The-Vibe-Company/quivr/commit/ae97158fe1d1e5db73802166672fac47c55edb0d))
 * **search:** compress every vector index and choose it per space ([#3859](https://github.com/The-Vibe-Company/quivr/issues/3859)) ([eabce1e](https://github.com/The-Vibe-Company/quivr/commit/eabce1edf15c025d8a878418c96346198bf4ef61))
 * **weaviate:** support authenticated vector indexes ([dd022b2](https://github.com/The-Vibe-Company/quivr/commit/dd022b2ec7718ed9097f8256c9f60836a2af4dfb))
-* **weaviate:** support authenticated vector indexes ([6f82408](https://github.com/The-Vibe-Company/quivr/commit/6f824087e7f9a8c5bfe0ac15322cbdc901af1e00))
 
 
 ### Bug Fixes
 
+* **routing:** prepare deployment routing changes in checkpointed batches while imports continue. Publish the final switch through one routing pointer. Rollback accepts missing coverage and retains outgoing searchable projections while recovery completes. Backfill scope counting runs outside the routing lock ([#3910](https://github.com/The-Vibe-Company/quivr/issues/3910)).
 * **admin:** tag only versions a newer one replaced ([#3891](https://github.com/The-Vibe-Company/quivr/issues/3891)) ([0a9c0a0](https://github.com/The-Vibe-Company/quivr/commit/0a9c0a03b22a503f136f91fdf0be85088034fb17))
 * **autoscaler:** read the Railway target from its own variable ([#3885](https://github.com/The-Vibe-Company/quivr/issues/3885)) ([828ad2b](https://github.com/The-Vibe-Company/quivr/commit/828ad2b69925d38e8ade29572c3585f0948ce4b6))
 * **ci:** isolate metadata events from required checks ([#3932](https://github.com/The-Vibe-Company/quivr/issues/3932)) ([73703e1](https://github.com/The-Vibe-Company/quivr/commit/73703e113d51528254ca9b19c7ebad7f2b81c346))
@@ -56,13 +44,10 @@
 * **connectors:** resume an archive import interrupted mid-verification ([#3871](https://github.com/The-Vibe-Company/quivr/issues/3871)) ([2ef53e1](https://github.com/The-Vibe-Company/quivr/commit/2ef53e1b3e370e94b64d22b5e7cbd0500a5515ce))
 * **content:** keep catalog and preview pages on ordered indexes ([#3907](https://github.com/The-Vibe-Company/quivr/issues/3907)) ([fe11102](https://github.com/The-Vibe-Company/quivr/commit/fe1110268dc1528701b9c54f7478a7d66ed775d3))
 * **demo:** control polling in the dashboard retry test ([4e1806a](https://github.com/The-Vibe-Company/quivr/commit/4e1806a7db1582bb9b3700549cc010f342acbcc0))
-* **demo:** control polling in the dashboard retry test ([e1d76cf](https://github.com/The-Vibe-Company/quivr/commit/e1d76cf418e77980f9bcefa8207a52277e6b29eb))
 * **demo:** keep the demo working after its databases are reset ([#3876](https://github.com/The-Vibe-Company/quivr/issues/3876)) ([834f8a1](https://github.com/The-Vibe-Company/quivr/commit/834f8a16caedfc4640a8bab0a6679bc8ce56f3f4))
 * **deploy:** fall back to other GPU types for hosted embeddings ([5cdfcf7](https://github.com/The-Vibe-Company/quivr/commit/5cdfcf709da533c1a7cfe551dd6cc74e94e9a76b))
-* **deploy:** fall back to other GPU types for hosted embeddings ([b4266ad](https://github.com/The-Vibe-Company/quivr/commit/b4266ad66d5f8bbffaf6639a21eb6d6082052924))
 * **deploy:** finish Railway resets when stop is ineffective ([#3915](https://github.com/The-Vibe-Company/quivr/issues/3915)) ([dbf673a](https://github.com/The-Vibe-Company/quivr/commit/dbf673a8fc80ef9e8c7ae9f964e4647a19abfa4b))
 * **deploy:** handle Azure disk responses and report safe failure context ([0336ffa](https://github.com/The-Vibe-Company/quivr/commit/0336ffa018d394ffe2b23f50c40ce347ed30e8c9))
-* **deploy:** handle Azure disk responses and report safe failure context ([ff8ee4c](https://github.com/The-Vibe-Company/quivr/commit/ff8ee4c359de0dd88c882a0598e44e50719fc407))
 * **deploy:** handle Railway volume attachment redeploys ([#3917](https://github.com/The-Vibe-Company/quivr/issues/3917)) ([3bb0abc](https://github.com/The-Vibe-Company/quivr/commit/3bb0abcb254875c86b7b2c7ab9e7b5ea03807f00))
 * **deploy:** integrate authenticated reset clients ([82bf663](https://github.com/The-Vibe-Company/quivr/commit/82bf663bc921639fac3b62cb5e85ac2815448220))
 * **deploy:** patch runtime images and publish loopback ports ([b8990f5](https://github.com/The-Vibe-Company/quivr/commit/b8990f5006ac11f252d604f6597a6a8a5dcd35c6))
@@ -80,14 +65,12 @@
 * **plugins:** retry pinned imports through upgrade outages ([#3864](https://github.com/The-Vibe-Company/quivr/issues/3864)) ([2137342](https://github.com/The-Vibe-Company/quivr/commit/2137342dc6dedfbd7bd91d720838222f41c916f9))
 * **postgres:** bound compact coverage lookups ([#3851](https://github.com/The-Vibe-Company/quivr/issues/3851)) ([3bfe62a](https://github.com/The-Vibe-Company/quivr/commit/3bfe62a9a8cf36d330acfda201f7605ff07416a3))
 * **postgres:** bound metadata page predicate work ([16d0909](https://github.com/The-Vibe-Company/quivr/commit/16d09099048a4377859415e7ccd8d41f8d7216e5))
-* **postgres:** bound metadata page predicate work ([facd862](https://github.com/The-Vibe-Company/quivr/commit/facd86221fff579dfdfaeca4e541ca71ddd190f1))
 * **postgres:** keep coverage and catalog reads indexed ([#3905](https://github.com/The-Vibe-Company/quivr/issues/3905)) ([53e7e51](https://github.com/The-Vibe-Company/quivr/commit/53e7e5147f9f510a980561ccf4cc19a655fc2adb))
 * **postgres:** reduce contention on hot small tables ([#3874](https://github.com/The-Vibe-Company/quivr/issues/3874)) ([980ffec](https://github.com/The-Vibe-Company/quivr/commit/980ffec9e3cc79cc44c389ae0cfc7f8f74782ef9))
 * **processing:** preserve baseline retry causes and share overload cooldown ([#3890](https://github.com/The-Vibe-Company/quivr/issues/3890)) ([52bde62](https://github.com/The-Vibe-Company/quivr/commit/52bde62a181ee6e33629d326445d15b8475e8a44))
 * **processing:** settle enrichment for unowned routed spaces ([#3855](https://github.com/The-Vibe-Company/quivr/issues/3855)) ([c46b585](https://github.com/The-Vibe-Company/quivr/commit/c46b5853bc8eae63600866007d93bdb4a2a9d095))
 * **purge:** reclaim abandoned coverage and orphan pages ([#3901](https://github.com/The-Vibe-Company/quivr/issues/3901)) ([7516d1c](https://github.com/The-Vibe-Company/quivr/commit/7516d1cb6c6c099204fbd98ee6b80275e32b62ea))
 * **railway:** drop the core image VOLUME Railway rejects ([8f9f8af](https://github.com/The-Vibe-Company/quivr/commit/8f9f8af183f4f44efd7a7bfb8a5eca52363caaa3))
-* **railway:** drop the core image VOLUME Railway rejects ([394cf67](https://github.com/The-Vibe-Company/quivr/commit/394cf6760d8e2291689409052f1a1ec62b9cb5ee))
 * **railway:** expose connector minimum polling interval ([#3918](https://github.com/The-Vibe-Company/quivr/issues/3918)) ([2c5241e](https://github.com/The-Vibe-Company/quivr/commit/2c5241e7deeeeec2df129b9d44e106b85a7f8b48))
 * **railway:** validate provider caps before applying settings ([#3923](https://github.com/The-Vibe-Company/quivr/issues/3923)) ([e6f4d6d](https://github.com/The-Vibe-Company/quivr/commit/e6f4d6dcca8e9170d6ea5f53135ac4927d0e3adb))
 * **railway:** wait for API migrations during worker rollout ([#3938](https://github.com/The-Vibe-Company/quivr/issues/3938)) ([cbef25a](https://github.com/The-Vibe-Company/quivr/commit/cbef25a77a74c14dbb4f7d06a6eaf347397bb3a6))
@@ -98,9 +81,7 @@
 * **retrieval:** preserve rebuild fences with queue maintenance ([92032b7](https://github.com/The-Vibe-Company/quivr/commit/92032b7e0b46edd7c54396f58b1bd7a3a2c72f58))
 * **retrieval:** resume abandoned generation purges in bounded windows ([#3908](https://github.com/The-Vibe-Company/quivr/issues/3908)) ([5368f18](https://github.com/The-Vibe-Company/quivr/commit/5368f1887b208b264b5f894988da7fa64593c52a))
 * **retrieval:** resume bounded rebuild activation ([21dc26f](https://github.com/The-Vibe-Company/quivr/commit/21dc26fbec67be9207e79373abe7bf4ac6f0673c))
-* **retrieval:** resume bounded rebuild activation ([0223c89](https://github.com/The-Vibe-Company/quivr/commit/0223c897d1a10b1e96a27c2e86005b0c64565e5b))
 * **search:** bound hydration work during imports ([c2124c8](https://github.com/The-Vibe-Company/quivr/commit/c2124c89c9dff129ba1335da0d306596b94ab5c3))
-* **search:** bound hydration work during imports ([c25c8d7](https://github.com/The-Vibe-Company/quivr/commit/c25c8d731f263a3924569b9070b68e29e090d41a))
 * **search:** bound lexical passage retrieval under write load ([#3889](https://github.com/The-Vibe-Company/quivr/issues/3889)) ([653d99a](https://github.com/The-Vibe-Company/quivr/commit/653d99ab74775f2e13c93b6e1bfce0c4944a6525))
 * **search:** distinguish query model outages ([#3867](https://github.com/The-Vibe-Company/quivr/issues/3867)) ([eb7efcf](https://github.com/The-Vibe-Company/quivr/commit/eb7efcfada823824082e46f7dcaa5b9925776269))
 * **search:** reduce cold index disk reads ([#3921](https://github.com/The-Vibe-Company/quivr/issues/3921)) ([9434251](https://github.com/The-Vibe-Company/quivr/commit/94342513e42b6d6c91532bed64962b662ff0d9f5))
@@ -123,7 +104,6 @@
 * **postgres:** bound cleanup and compact old history ([#3929](https://github.com/The-Vibe-Company/quivr/issues/3929)) ([9165eb3](https://github.com/The-Vibe-Company/quivr/commit/9165eb31fbc5f6af25b1ef2d6032c394f804af1f))
 * **rebuild:** refill document slots across candidate pages ([#3865](https://github.com/The-Vibe-Company/quivr/issues/3865)) ([af24e5e](https://github.com/The-Vibe-Company/quivr/commit/af24e5e7727b7abef6ebcdc2cfe9ed7041c15257))
 * **uploads:** verify stored checksums without read-back ([97bf2c0](https://github.com/The-Vibe-Company/quivr/commit/97bf2c0360d0c4a4c97118234d1cff1ca5cdcf21))
-* **uploads:** verify stored checksums without read-back ([ac65d9b](https://github.com/The-Vibe-Company/quivr/commit/ac65d9b0c970db3b3f29c7a0cec10818f10bfa60))
 
 
 ### Code Refactoring
