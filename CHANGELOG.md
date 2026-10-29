@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.7...v2.0.0) (2026-10-29)
+
+
+### Features
+
+* **docs-site:** add PostHog analytics to the documentation site ([#3954](https://github.com/The-Vibe-Company/quivr/issues/3954)) ([1f72133](https://github.com/The-Vibe-Company/quivr/commit/1f72133e27e1cc0a7a05fb35a93df0f9e33136c4))
+
+
+### Bug Fixes
+
+* **autoscaling:** scale bulk workers at connector prefetch bound ([#3952](https://github.com/The-Vibe-Company/quivr/issues/3952)) ([8a58f13](https://github.com/The-Vibe-Company/quivr/commit/8a58f134b60c0ce647b59e95e46458560a52bcbb))
+* **queues:** preserve bounded snapshots during continuous imports ([#3951](https://github.com/The-Vibe-Company/quivr/issues/3951)) ([90e7c63](https://github.com/The-Vibe-Company/quivr/commit/90e7c6389610eee01f3786d58f16d3426707a4f1))
+* **release:** check out before downloading signed images in publish ([#3971](https://github.com/The-Vibe-Company/quivr/issues/3971)) ([313f51e](https://github.com/The-Vibe-Company/quivr/commit/313f51e361b737f7986522493e26f0f1fa411ef7))
+* **search:** restore buffers and bound hydration after restart ([#3953](https://github.com/The-Vibe-Company/quivr/issues/3953)) ([ec80407](https://github.com/The-Vibe-Company/quivr/commit/ec80407fe05828729efb00665d1e026a0a5b1cb2))
+* **security:** build with Go 1.27.3 and patch vulnerable dependencies ([#3967](https://github.com/The-Vibe-Company/quivr/issues/3967)) ([426bc62](https://github.com/The-Vibe-Company/quivr/commit/426bc62b4ef368fa858ca6a435133610be3fe954))
+
+
+### Miscellaneous Chores
+
+* **release:** prepare Quivr 2.0.0 ([#3968](https://github.com/The-Vibe-Company/quivr/issues/3968)) ([5bb5690](https://github.com/The-Vibe-Company/quivr/commit/5bb56905eeaae51e95ad6e5b7822b80220004f2b))
+
 ## [2.0.0-alpha.7](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.6...v2.0.0-alpha.7) (2026-10-13)
 
 
