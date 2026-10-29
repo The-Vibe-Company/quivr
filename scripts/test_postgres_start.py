@@ -42,7 +42,8 @@ class PostgresStart(unittest.TestCase):
                                 'effective_cache_size=' + cache, 'work_mem=4MB',
                                 'maintenance_work_mem=' + maintenance,
                                 'dynamic_shared_memory_type=mmap',
-                                'shared_preload_libraries=pg_stat_statements', 'track_io_timing=on',
+                                'shared_preload_libraries=pg_stat_statements,pg_prewarm',
+                                'pg_prewarm.autoprewarm=on', 'track_io_timing=on',
                                 'pg_stat_statements.track=all', 'jit=on',
                                 'random_page_cost=1.1', 'effective_io_concurrency=200',
                                 'synchronous_commit=on', 'fsync=on', 'full_page_writes=on',
@@ -57,6 +58,7 @@ class PostgresStart(unittest.TestCase):
                                  'QUIVR_POSTGRES_CHECKPOINT_TIMEOUT': '10min',
                                  'QUIVR_POSTGRES_WAL_COMPRESSION': 'off',
                                  'QUIVR_POSTGRES_JIT': 'off',
+                                 'QUIVR_POSTGRES_AUTOPREWARM': 'off',
                                  'QUIVR_POSTGRES_WORK_MEM': '2MB',
                                  'QUIVR_POSTGRES_COMMIT_DELAY': '0000',
                                  'QUIVR_POSTGRES_COMMIT_SIBLINGS': '0000'})
@@ -68,7 +70,13 @@ class PostgresStart(unittest.TestCase):
                         'commit_delay=0', 'commit_siblings=0']:
             self.assertIn(setting, argv)
         self.assertIn('jit=off', argv)
+        self.assertIn('pg_prewarm.autoprewarm=off', argv)
         from deploy import infrastructure
+        for profile in ('small', 'large'):
+            settings = infrastructure.resolve(profile)['postgres']['environment']
+            result = self.run_start(settings)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('pg_prewarm.autoprewarm=on', json.loads(result.stdout))
         result = self.run_start(infrastructure.resolve('large')['postgres']['environment'])
         self.assertEqual(result.returncode, 0, result.stderr)
         argv = json.loads(result.stdout)
@@ -109,6 +117,7 @@ class PostgresStart(unittest.TestCase):
                   for settings, field in [
                       ({'QUIVR_POSTGRES_MAX_CONNECTIONS': '0'}, 'QUIVR_POSTGRES_MAX_CONNECTIONS'),
                       ({'QUIVR_POSTGRES_WORK_MEM': 'bad'}, 'memory-settings'),
+                      ({'QUIVR_POSTGRES_AUTOPREWARM': 'bad'}, 'QUIVR_POSTGRES_AUTOPREWARM'),
                       ({'QUIVR_POSTGRES_RANDOM_PAGE_COST': 'bad'}, 'QUIVR_POSTGRES_RANDOM_PAGE_COST'),
                       ({'QUIVR_POSTGRES_COMMIT_DELAY': '-1'}, 'QUIVR_POSTGRES_COMMIT_DELAY'),
                       ({'QUIVR_POSTGRES_COMMIT_DELAY': '100001'}, 'QUIVR_POSTGRES_COMMIT_DELAY'),

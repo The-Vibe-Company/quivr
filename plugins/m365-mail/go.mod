@@ -1,11 +1,11 @@
 module github.com/The-Vibe-Company/quivr/plugins/m365-mail
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/The-Vibe-Company/quivr/sdks/go v0.0.0
 	github.com/The-Vibe-Company/quivr/tests/fakes v0.0.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.62.0
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

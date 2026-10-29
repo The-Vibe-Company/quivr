@@ -260,6 +260,22 @@ curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$WITHDRAWAL_RECEIPT_ID" -H "Author
 
 A Version over the indexing limits, or with no title or body text, is stored and readable, but not searchable: its Receipt shows `ingestion_refused`, and the Version's diagnostic says which limit, or that it has no text to index.
 
+## If you can't find it
+
+First check that the search covers the right collection and that your API key can read it. Then read the article's Receipt: its `processing` progress, its `availability` readiness and its `diagnostics`, which explain failures.
+
+| What you see | What it means |
+| --- | --- |
+| `state: pending` | The article is queued or being read. A file's extraction can still be running. |
+| In `availability`: `searchable: false` | Word search is not ready for this Version yet, or it is no longer the current one. Check `processing` and `diagnostics`. |
+| In `processing`: `state: retrying` | A step is retrying. The diagnostics tell an outage from a file reader's bounded retries. |
+| In `processing`: `phase: enrichment`, with `state` `queued`, `running`, `retrying` or `blocked` | Meaning search is pending or stopped. Word search stays available. |
+| In `availability`: `state: quarantined`, with a diagnostic | On hold. An operator fixes the cause and [reprocesses it](/run-quivr/reprocess-quarantined-versions). |
+| Search returns the old text | The correction is still processing or quarantined; the earlier Version stays current until it is ready. |
+| HTTP `409` on a write | The `idempotency_key` was reused for a different request, or the article was withdrawn. |
+
+Sending a quarantined article again with the same key returns its Receipt; it does not restart processing.
+
 ## Next
 
 <CardGroup cols={2}>

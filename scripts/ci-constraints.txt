@@ -9,7 +9,7 @@ attrs==26.1.0
 boto3==1.43.108
 botocore==1.43.110
 cbor2==6.1.5
-certifi==2026.7.22
+certifi==2026.10.18
 cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
@@ -62,7 +62,7 @@ packaging==26.3
 pandas==3.0.6
 pathable==0.6.0
 pglast==7.20
-pillow==12.3.0
+pillow==13.0.0
 propcache==0.5.4
 protobuf==7.36.2
 psycopg==3.3.6

@@ -31,7 +31,7 @@ app = modal.App('quivr-embeddinggemma')
 # Match the proven bake-off stack, including the processor's vision imports.
 gpu_image = (modal.Image.debian_slim(python_version='3.12')
              .pip_install('torch==2.8.0', 'torchvision==0.23.0', index_url='https://download.pytorch.org/whl/cu126')
-             .pip_install('sentence-transformers==6.1.0', 'transformers==5.19.0', 'pillow==12.3.0')
+             .pip_install('sentence-transformers==6.1.0', 'transformers==5.19.0', 'pillow==13.0.0')
              .env({'HF_HOME': '/opt/huggingface', 'HF_HUB_DISABLE_TELEMETRY': '1',
                    'TOKENIZERS_PARALLELISM': 'false'})
              .run_function(cache_model)

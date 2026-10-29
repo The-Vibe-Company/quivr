@@ -41,86 +41,13 @@
             "pages": [
               "index",
               "quickstart",
-              "concepts"
+              "concepts",
+              "how-quivr-works",
+              "glossary"
             ]
           },
           {
-            "group": "Plugins",
-            "pages": [
-              "plugins/overview",
-              "plugins/types",
-              "plugins/first-plugin",
-              {
-                "group": "Write a plugin",
-                "pages": [
-                  "plugins/write-a-connector",
-                  "plugins/push-source",
-                  "plugins/write-an-ingestion-plugin",
-                  "plugins/write-a-retrieval-plugin",
-                  "plugins/write-an-alert-rule"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Run Quivr",
-            "pages": [
-              "run-quivr/overview",
-              "run-quivr/deploy",
-              "run-quivr/single-machine",
-              "run-quivr/run-a-large-import",
-              "run-quivr/scale-quivr",
-              "run-quivr/dedicated-vector-host",
-              "run-quivr/upgrade-quivr",
-              "run-quivr/security",
-              "run-quivr/tls",
-              {
-                "group": "Plugins",
-                "pages": [
-                  "run-quivr/catalog",
-                  "run-quivr/pin",
-                  "run-quivr/upgrade-a-plugin",
-                  "run-quivr/reprocess-quarantined-versions"
-                ]
-              },
-              {
-                "group": "Sources",
-                "pages": [
-                  "run-quivr/reset-and-reload",
-                  "run-quivr/receive-pushes"
-                ]
-              },
-              {
-                "group": "Search",
-                "pages": [
-                  "run-quivr/search-profiles",
-                  "run-quivr/rerank-with-jev",
-                  "run-quivr/choose-an-embedding-model",
-                  "run-quivr/switch-a-vector-model",
-                  "run-quivr/backfill-a-vector-space"
-                ]
-              },
-              {
-                "group": "Alerts",
-                "pages": [
-                  "run-quivr/configure-alert-fields",
-                  "run-quivr/upgrade-an-alert-rule",
-                  "run-quivr/move-meaning-alerts",
-                  "run-quivr/retire-alert-evaluations"
-                ]
-              },
-              {
-                "group": "Measure search",
-                "pages": [
-                  "run-quivr/record-search-measurements",
-                  "run-quivr/run-local-load-tests",
-                  "run-quivr/run-search-campaign"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Guides",
+            "group": "Use Quivr",
             "pages": [
               "guides/add-content",
               "guides/search",
@@ -145,12 +72,104 @@
               },
               "guides/ai-agents"
             ]
+          },
+          {
+            "group": "Run Quivr",
+            "pages": [
+              "run-quivr/overview",
+              {
+                "group": "Install and upgrade",
+                "pages": [
+                  "run-quivr/single-machine",
+                  "run-quivr/deploy",
+                  "run-quivr/tls",
+                  "run-quivr/security",
+                  "run-quivr/upgrade-quivr",
+                  "run-quivr/reset-and-reload"
+                ]
+              },
+              {
+                "group": "Plugins",
+                "pages": [
+                  "run-quivr/catalog",
+                  "run-quivr/pin",
+                  "run-quivr/upgrade-a-plugin",
+                  "run-quivr/reprocess-quarantined-versions"
+                ]
+              },
+              {
+                "group": "Sources",
+                "pages": [
+                  "run-quivr/receive-pushes"
+                ]
+              },
+              {
+                "group": "Search",
+                "pages": [
+                  "run-quivr/search-profiles",
+                  "run-quivr/choose-an-embedding-model",
+                  "run-quivr/switch-a-vector-model",
+                  "run-quivr/backfill-a-vector-space",
+                  "run-quivr/rerank-with-jev"
+                ]
+              },
+              {
+                "group": "Alerts",
+                "pages": [
+                  "run-quivr/configure-alert-fields",
+                  "run-quivr/upgrade-an-alert-rule",
+                  "run-quivr/move-meaning-alerts",
+                  "run-quivr/retire-alert-evaluations"
+                ]
+              },
+              {
+                "group": "Scale",
+                "pages": [
+                  "run-quivr/scale-quivr",
+                  "run-quivr/run-a-large-import",
+                  "run-quivr/dedicated-vector-host"
+                ]
+              },
+              {
+                "group": "Measure search (advanced)",
+                "pages": [
+                  "run-quivr/record-search-measurements",
+                  "run-quivr/run-local-load-tests",
+                  "run-quivr/run-search-campaign"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Extend Quivr",
+            "pages": [
+              "plugins/overview",
+              "plugins/types",
+              "plugins/first-plugin",
+              {
+                "group": "Write a plugin",
+                "pages": [
+                  "plugins/write-a-connector",
+                  "plugins/push-source",
+                  "plugins/write-an-ingestion-plugin",
+                  "plugins/write-a-retrieval-plugin",
+                  "plugins/write-an-alert-rule"
+                ]
+              }
+            ]
           }
         ]
       },
       {
         "tab": "Reference",
         "groups": [
+          {
+            "group": "Quivr 2",
+            "pages": [
+              "reference/compatibility",
+              "reference/known-limits"
+            ]
+          },
           {
             "group": "HTTP API",
             "pages": [

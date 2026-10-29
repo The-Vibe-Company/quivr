@@ -52,12 +52,12 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED` | true; private-network example access, never expose this port publicly. |
 | Autoscaler `QUIVR_AUTOSCALER_QUEUE` / `QUIVR_AUTOSCALER_BACKEND` | bulk / railway in large; keep live work separate, or override the backend to kubernetes. |
 | `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | 1 / 8; retain a worker and bound dependency pressure. |
-| `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | 20000; starting backlog target, tune from measured throughput. |
+| `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | 20000; proportional backlog target, combined with the bulk prefetch demand rule below. |
 | `QUIVR_AUTOSCALER_INTERVAL` / `QUIVR_AUTOSCALER_REQUEST_TIMEOUT` | 30s / 10s; bound polling and API waits. |
 | `QUIVR_AUTOSCALER_DOWNSCALE_WINDOW` / `QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL` | 5m / 2m; avoid oscillation and repeated deployment restarts. |
+| Bulk connector prefetch / autoscaler demand | Shared 1,000-document bound in every profile. Connectors defer on ingestion waiting; the built-in autoscaler adds at least one worker per successful action on total bulk waiting, retaining larger proportional targets. `QUIVR_AUTOSCALER_MAX` caps workers; connector backpressure still applies there. Cooldowns and downscale stabilization remain. Dependency saturation can limit throughput. |
 
-PostgreSQL keeps mmap dynamic shared memory, preloaded statistics, I/O timing and JIT; `synchronous_commit=on` preserves acknowledged-write durability. Its initialization creates `pg_stat_statements`; monitoring setup for existing volumes uses the same idempotent script. Autoscaler credentials, URLs and target IDs stay external.
-Declaration `x-quivr.build_images` pins its build/runtime bases and keeps generated artifacts in sync.
+PostgreSQL keeps mmap dynamic shared memory, preloaded statistics, I/O timing and JIT; `synchronous_commit=on` preserves acknowledged-write durability. Its initialization creates `pg_stat_statements`; monitoring setup for existing volumes uses the same idempotent script. Autoscaler credentials, URLs and target IDs stay external. Declaration `x-quivr.build_images` pins its build/runtime bases and keeps generated artifacts in sync.
 
 ## Override and render
 

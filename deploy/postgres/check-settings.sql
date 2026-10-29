@@ -8,7 +8,8 @@ BEGIN
         OR current_setting('work_mem') <> '4MB'
         OR current_setting('maintenance_work_mem') <> '64MB'
         OR current_setting('dynamic_shared_memory_type') <> 'mmap'
-        OR current_setting('shared_preload_libraries') <> 'pg_stat_statements'
+        OR current_setting('shared_preload_libraries') <> 'pg_stat_statements,pg_prewarm'
+        OR current_setting('pg_prewarm.autoprewarm') <> 'on'
         OR current_setting('track_io_timing') <> 'on'
         OR current_setting('pg_stat_statements.track') <> 'all'
         OR current_setting('random_page_cost') <> '1.1'
@@ -28,7 +29,7 @@ BEGIN
     IF EXISTS (SELECT FROM pg_settings WHERE name IN
         ('max_connections','shared_buffers','effective_cache_size','work_mem',
          'maintenance_work_mem','dynamic_shared_memory_type','shared_preload_libraries',
-         'track_io_timing','pg_stat_statements.track','jit','commit_delay','commit_siblings','synchronous_commit','fsync','full_page_writes',
+         'pg_prewarm.autoprewarm','track_io_timing','pg_stat_statements.track','jit','commit_delay','commit_siblings','synchronous_commit','fsync','full_page_writes',
          'max_wal_size','min_wal_size','checkpoint_timeout','wal_compression',
          'random_page_cost','effective_io_concurrency')
         AND source <> 'command line') THEN

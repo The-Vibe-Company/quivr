@@ -216,7 +216,7 @@ On `signature` POST routes, Quivr reserves fingerprints of the signature and, if
 
 Signature routes never use the response cache, including GET challenges. A refusal or failed processing normally releases the reservation. If cleanup fails or the request deadline expires, it remains until the window expires; retries return `409` meanwhile. After the reservation expires, a request with a signed timestamp is still refused once that timestamp is older than the window. Without a signed timestamp, the engine only prevents replay during the reservation window.
 
-Stable Record Keys and revisions make already accepted items converge on their Receipts when processing is retried. A push may have stored some items before failing; a `202` Receipt tracks processing, not immediate search availability. Follow [the life of a document](/concepts#the-life-of-a-document) for the path after acceptance.
+Stable Record Keys and revisions make already accepted items converge on their Receipts when processing is retried. A push may have stored some items before failing; a `202` Receipt tracks processing, not immediate search availability. Follow [the life of a document](/how-quivr-works#the-path-of-a-document) for the path after acceptance.
 
 ## Inspect attempts
 

@@ -76,13 +76,25 @@ func materializeRoutingGeneration(ctx context.Context, tx pgx.Tx, id string) err
 // effectiveServingSQL selects the preferred owner by accepted source format.
 // A rollback gap keeps its exact outgoing owner until complete recovery removes
 // the gap. Stored roles describe only generations without routing metadata.
-func effectiveServingSQL(pc, generation string) string {
+func effectiveServingSQL(pc, generation string, version ...string) string {
+	record := `(SELECT record_id FROM record_versions WHERE organization=` + pc + `.organization AND id=` + pc + `.version_id)`
+	source := `(SELECT COALESCE(` + generation + `.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),` + generation + `.ingestion_routing->>'default','')
+ FROM record_versions rv JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(rv.organization,rv.record_id,rv.slot)
+ WHERE rv.organization=` + pc + `.organization AND rv.id=` + pc + `.version_id)`
+	// Hydration already sought the immutable Version; reuse its keys rather
+	// than paying two more Version seeks per hit for the same serving decision.
+	if len(version) > 0 {
+		record = version[0] + `.record_id`
+		source = `(SELECT COALESCE(` + generation + `.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),` + generation + `.ingestion_routing->>'default','')
+ FROM (SELECT ar.organization,ar.record_id,ar.slot,ar.source_media_type FROM accepted_revisions ar
+ WHERE (ar.organization,ar.record_id,ar.slot)>=(` + version[0] + `.organization,` + version[0] + `.record_id,` + version[0] + `.slot)
+ ORDER BY ar.organization,ar.record_id,ar.slot LIMIT 1) ar
+ WHERE (ar.organization,ar.record_id,ar.slot)=(` + version[0] + `.organization,` + version[0] + `.record_id,` + version[0] + `.slot))`
+	}
 	return `(` + generation + `.coverage_routed=false AND ` + pc + `.role='served' OR ` + generation + `.coverage_routed=true AND ` + pc + `.plugin_id=COALESCE(
  (SELECT NULLIF(gap.fallback_owner,'') FROM routing_coverage_gaps gap JOIN routing_switch_state st ON st.singleton AND st.epoch=gap.epoch
- WHERE gap.organization=` + pc + `.organization AND gap.record_id=(SELECT record_id FROM record_versions WHERE organization=` + pc + `.organization AND id=` + pc + `.version_id) AND gap.version_id=` + pc + `.version_id),
- (SELECT COALESCE(` + generation + `.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),` + generation + `.ingestion_routing->>'default','')
- FROM record_versions rv JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(rv.organization,rv.record_id,rv.slot)
- WHERE rv.organization=` + pc + `.organization AND rv.id=` + pc + `.version_id)))`
+ WHERE gap.organization=` + pc + `.organization AND gap.record_id=` + record + ` AND gap.version_id=` + pc + `.version_id),
+ ` + source + `))`
 }
 
 func effectiveCoverageSQL(pc string) string {
@@ -91,8 +103,12 @@ func effectiveCoverageSQL(pc string) string {
 
 // A retained rollback projection is tied to its original named vector space,
 // even when a later command changes that owner's preferred model.
-func selectedVectorSpaceSQL(pc, generation string) string {
+func selectedVectorSpaceSQL(pc, generation string, version ...string) string {
+	record := `(SELECT record_id FROM record_versions WHERE organization=` + pc + `.organization AND id=` + pc + `.version_id)`
+	if len(version) > 0 {
+		record = version[0] + `.record_id`
+	}
 	return `COALESCE((SELECT NULLIF(gap.fallback_space,'') FROM routing_coverage_gaps gap JOIN routing_switch_state st ON st.singleton AND st.epoch=gap.epoch
- WHERE gap.organization=` + pc + `.organization AND gap.version_id=` + pc + `.version_id AND gap.record_id=(SELECT record_id FROM record_versions WHERE organization=` + pc + `.organization AND id=` + pc + `.version_id) AND gap.fallback_owner=` + pc + `.plugin_id),
+ WHERE gap.organization=` + pc + `.organization AND gap.version_id=` + pc + `.version_id AND gap.record_id=` + record + ` AND gap.fallback_owner=` + pc + `.plugin_id),
  (SELECT sp->>'id' FROM jsonb_array_elements(` + generation + `.spaces) sp WHERE sp->>'owner_plugin_id'=` + pc + `.plugin_id AND sp->>'role'='served' LIMIT 1),` + generation + `.space_id)`
 }

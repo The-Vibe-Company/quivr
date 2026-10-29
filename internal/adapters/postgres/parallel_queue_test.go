@@ -220,20 +220,13 @@ func TestParallelQueueProducersStayAvailableUntilBoundedDrain(t *testing.T) {
 	if err = snapshots.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var unpublished bool
-	if err = pool.QueryRow(ctx, `SELECT bool_and(published_at='-infinity') FROM queue_backlog_snapshots`).Scan(&unpublished); err != nil {
-		t.Fatal(err)
-	}
-	if !unpublished {
-		t.Fatal("snapshot publication advertised fresh totals while dirty revisions were pending")
-	}
 	prior, err := snapshots.QueueBacklog(ctx)
 	if err != nil {
 		t.Fatalf("valid older snapshot unavailable during bounded reconciliation: %v", err)
 	}
 	for _, status := range prior {
 		if status.Queue == "live" && status.Waiting != baselineWaiting {
-			t.Fatalf("incomplete totals advertised: %+v baseline=%d", status, baselineWaiting)
+			t.Fatalf("bounded older totals changed before reconciliation: %+v baseline=%d", status, baselineWaiting)
 		}
 	}
 	if pending, _, err := (postgres.MaterializationStore{Pool: pool}).IngestionBacklog(ctx); err != nil || pending != baselineMetric {

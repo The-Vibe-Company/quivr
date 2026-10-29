@@ -414,7 +414,7 @@ The `type` says what happened, and `resource.kind` and `resource.id` say to what
 | `record.materialized` | A new Version is stored and readable |
 | `record.retrieval_ready` | Word search is ready for that Version |
 | `record.enrichment_available` | Meaning search is ready for that Version |
-| `record.quarantined` | That Version is on hold; the earlier text stays current ([why](/concepts#if-you-cant-find-it)) |
+| `record.quarantined` | That Version is on hold; the earlier text stays current ([why](/guides/add-content#if-you-cant-find-it)) |
 | `record.withdrawn` | Out of search and new matches for good; earlier matches can get a `match.withdrawn` notice |
 | `receipt.pending`, `receipt.resolved` | A submission's Receipt (its acknowledgement) was created, then got its outcome |
 | `match.*` | An alert caught the document, or a follow-up on an earlier catch |

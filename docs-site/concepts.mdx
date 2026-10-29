@@ -1,145 +1,120 @@
 ---
 title: "Core concepts"
-description: "What happens after you send a document, when you can find it, and what corrections and withdrawals do."
-keywords: ["document", "search", "version", "receipt", "quarantine"]
+description: "The few ideas behind Quivr, in plain words with one example: collections, documents, versions, search, alerts, changes and plugins."
+keywords: ["concepts", "corpus", "record", "version", "receipt", "search", "alert", "match", "quarantine"]
 ---
 
-Quivr stores your documents and asks plugins to prepare them for search. A document can be accepted while it is still being prepared for word search, then meaning search.
+A handful of ideas covers almost everything you do with Quivr. This page explains each one with the same example, a news article, and gives the name the API uses for it in brackets. The [glossary](/glossary) lists every API name.
 
-## Documents and collections
+The article: _Harbour strike halts the ferry_, with the line "The harbour strike stopped every ferry to the island on Friday."
 
-You put documents into a collection (a Corpus, in the API) that you search together. A collection also limits what an API key can reach. A document (a Record) can be an article, an email or a post. Its identity combines the collection, where it comes from (the Source Namespace, such as `news`), and its ID there (the Record Key, such as the article's URL).
+## Collections and documents
 
-Quivr keeps each accepted text you send as a version (a Version), which never changes. Its content has named pieces (Parts), such as a title, body or PDF page. Search results point to these pieces so you can find the quoted passage.
+You put documents into a **collection** (a Corpus), and you search collections. A collection is also an access boundary: an API key can be limited to some collections. Our article goes into a collection called `News`.
 
-## The life of a document
+Each article, email or post is a **document** (a Record). Quivr knows a document by three things together:
 
-A plugin is a separate service that Quivr calls for a job. Text sent in the request body (inline text) skips the file reader. Quivr can also read valid text files with a `text/*` media type, up to 2 MiB, directly. Other file types need a configured reader (a normalizer plugin), which extracts their content after acceptance.
+- the collection it is in;
+- where it comes from (the Source Namespace), a short name such as `news` or `mail`;
+- its identity there (the Record Key), such as the article's URL.
 
-You still need an ingestion plugin, such as `core.ingest`, for plain text. It cuts the text into passages; Quivr indexes their words. Later, the ingestion plugin makes numerical representations of meaning (embeddings). This extra work (enrichment) has no guaranteed completion time.
+Send another text under the same three, and Quivr treats it as a new edition of the same document, not as a new document.
 
-Your alerts are saved checks for content you want to hear about. Quivr checks them when word search becomes ready. If a rule is waiting for embeddings, enrichment can prompt another check. Only alerts that have not decided yet are asked again; a rule that already matched or did not match this version keeps its decision.
+Everything belongs to an **organization**: its collections, documents and alerts. Your application calls Quivr with an **API key** that the operator gives it. The key decides the organization, which collections it reaches and what it may do, such as add documents or search.
 
-Plugins read files and prepare passages and embeddings; a failure before word search is ready can put the version on hold (quarantine).
+## Versions: corrections and withdrawals
 
-```mermaid
-flowchart TD
-    received["Received"] -->|Text| readable["Readable"]
-    received -->|Other file| extract["Read file<br/>Reader plugin"]
-    extract --> readable
-    readable --> passages["Cut passages<br/>Ingestion plugin"]
-    passages --> words["Words ready<br/>Check alerts"]
-    words --> embed["Embeddings<br/>Ingestion plugin"]
-    embed --> meaning["Meaning ready<br/>Ask waiting alerts"]
-    extract -. Failure .-> held["Quarantined"]
-    passages -. Failure .-> held
-    embed -. Stopped .-> blocked["Meaning blocked<br/>Words ready"]
-```
+Quivr never overwrites a document. Each text you send becomes a **version** (a Record Version) that never changes. A version is made of named pieces (Parts), such as `title` and `body`, or one piece per page of a PDF.
 
-In words: inline text and supported text files skip extraction. Other files use the reader plugin. The ingestion plugin cuts passages, then Quivr makes word search available and checks alerts. The plugin adds embeddings for meaning search; only alerts still waiting for a decision are asked again. A reader or passage-processing failure can quarantine the version. Enrichment failure blocks meaning search while word search stays available.
+When the paper corrects the article to "The harbour strike stopped every ferry to the island on Saturday", you send the new text under the same document identity. Quivr creates a second version:
 
-An unavailable dependency can leave work retrying. File-reader timeouts and repeated retryable errors have a retry budget; exhausting it can quarantine the version. Quivr keeps quarantined content but withholds that version from search until an operator fixes the cause and [reprocesses it](/run-quivr/reprocess-quarantined-versions). Enrichment never quarantines a version.
+- search keeps finding the Friday text until the Saturday text is ready, then switches to it;
+- the Friday version stays readable by its identifier;
+- alerts that caught the article are told whether the corrected text still matches.
 
-## Acceptance and search readiness
-
-Single-document ingestion returns `202 Accepted` with a tracking acknowledgement (an Ingestion Receipt). A batch returns `200` with one result per entry. A new ingestion receipt starts with `state: pending` and no outcome; for a file needing a reader, it stays pending during extraction, with `processing.phase: materialization`.
-
-The receipt resolves once as `created`, `duplicate`, `withdrawal_applied` or `conflict`. A resolved `conflict` means the document was withdrawn before publication, or the source's revision label (`source_revision`) was reused for different content. It differs from an HTTP error that refuses a request before accepting it.
-
-`state: resolved` and `outcome: created` can appear while word indexing is still running. The associated version's readiness is separate: `availability.searchable: true` means word search is ready and the version is current. Meaning search may still be pending. Reading the receipt later updates readiness without changing its outcome.
-
-Creation and word-search readiness are separate moments; fast processing may skip the intermediate states you observe.
-
-```mermaid
-sequenceDiagram
-    participant App as Your app
-    participant Quivr
-    App->>Quivr: Send a document
-    Quivr-->>App: Accepted, receipt pending
-    App->>Quivr: Read receipt
-    Quivr-->>App: Created<br/>Words pending
-    App->>Quivr: Read receipt later
-    Quivr-->>App: Word search ready
-    App->>Quivr: Search for its words
-    Quivr-->>App: Matching passages
-```
-
-In words: the application sends content, gets a pending receipt, then reads it to follow creation and word-search readiness. A matching search can return passages after readiness. These are separate moments, even if the first receipt check already shows the last one.
-
-Every content submission has a retry identifier (`idempotency_key`). After a timeout, retry the same request with the same key to get the same receipt. A different request under that key gets `409 idempotency_conflict`; a new submission for a withdrawn document gets the same error, even with a fresh key. The retry key identifies a request; the record key identifies the document. A correction keeps the document identity and uses a new retry key; see [Add content](/guides/add-content).
-
-## Corrections and withdrawals
-
-Search uses the document's current version. Corrected text with the same collection, namespace and record key creates a replacement. The old version stays current until the correction is searchable. If the correction is quarantined, the old text stays in search until the correction is successfully reprocessed or another replacement becomes ready.
-
-For example, a ferry article says “The ferry leaves at nine.” You correct it to “The ferry leaves at ten.” Search still finds “nine” while the correction is processing or quarantined; it switches to “ten” only when the correction is ready.
-
-A correction replaces the current version only when word search is ready; withdrawal ends search permanently.
+When the paper withdraws the article, you **withdraw** the document. It leaves search and alerts at once and for good, while its versions stay readable to people with access. A withdrawn document cannot come back under the same identity.
 
 ```mermaid
 stateDiagram-v2
-    direction TB
-    state "Document in search" as Available {
-        state "Original current" as Original
-        state "Processing<br/>Original current" as Pending
-        state "Quarantined<br/>Original current" as Held
-        state "Correction current" as Current
-        Original --> Pending: Send correction
-        Pending --> Current: Words ready
-        Pending --> Held: Failure
-        Held --> Pending: Reprocess
-    }
-    state "Withdrawn<br/>History retained" as Withdrawn
-    Available --> Withdrawn: Withdraw
+    direction LR
+    [*] --> Searchable: send
+    Searchable --> Searchable: correction ready
+    Searchable --> Withdrawn: withdraw
+    Withdrawn --> [*]
 ```
 
-In words: the original stays current while a correction is processing or quarantined. A searchable correction replaces it. Withdrawal can happen at any point; it removes the document from search and monitoring, and an alert that already matched it can still receive a withdrawal notice.
+## From sent to searchable
 
-Withdrawal is permanent. A new submission under that document identity is refused with `409 idempotency_conflict`; replaying an old request only returns its receipt and cannot restore search. Stored versions remain readable by identifier, subject to access. Withdrawal does not physically delete them.
+Quivr answers as soon as the article is stored safely, with a **receipt** (an Ingestion Receipt). Processing then happens in the background, in two steps:
 
-Resending the latest submitted content without a source revision label, using a new retry key, resolves as `duplicate`. Returning to earlier content after a correction can create a new version; it does not rewrite the old one.
+1. **Searchable by keyword**, usually within a second. The article is cut into passages and indexed.
+2. **Searchable by meaning**, a few seconds later. A vector is computed for each passage, a list of numbers that captures what it means.
 
-## If you can't find it
+Your application reads the receipt to follow this. Its `state` goes from `pending` to `resolved`, with an `outcome`:
 
-Read the receipt's `processing` progress, `availability` readiness and `diagnostics` explaining failures. Check that your search covers the right collection and your API key can access it, then compare what you see:
-
-| What you see | What it means |
+| Outcome | What happened |
 | --- | --- |
-| `state: pending` | Content is queued or being read. A file's extraction can still be running. |
-| In `availability`:<br/>`searchable: false` | Word search is not ready for this version, or it is no longer current. Check processing and diagnostics. |
-| In `processing`:<br/>`state: retrying` | A stage is retrying. Diagnostics distinguish an outage from bounded file-reader retries. |
-| In `processing`:<br/>`phase: enrichment`;<br/>`state` is `queued`, `running`, `retrying` or `blocked` | Meaning search is pending or stopped. Word search stays available. |
-| In `availability`:<br/>`state: quarantined`, with a diagnostic | On hold. An operator must fix the cause and reprocess this version. |
-| Search returns old text | The correction may be pending or quarantined. Check its receipt; the original stays current. |
-| HTTP `409` on a write | A key was reused for a different request, or the document was withdrawn. |
+| `created` | A new document or version was stored |
+| `duplicate` | The same text was already the latest version; nothing new was stored |
+| `withdrawal_applied` | The document was withdrawn |
+| `conflict` | The document was withdrawn before this version could be published, or the source's revision label was reused for different text |
 
-Resending a quarantined submission with the same key returns its receipt; it does not restart processing. See [quarantine recovery](/run-quivr/reprocess-quarantined-versions) for the operator's next step.
+`created` says the version exists, not that it is searchable yet. The version's `availability.searchable` turns `true` once keyword search is ready; meaning search may follow later.
 
-## Search and alerts
+Every request that adds something carries an **idempotency key**, a name your application gives it. If a request times out, send it again with the same key: you get the same receipt, never a second copy. Use a new key for a correction.
 
-A search covers up to 16 collections. It offers word matching (`lexical`), meaning matching (`semantic`) and a combined ranking (`hybrid`, the default). Meaning search needs embeddings; hybrid can return word matches while embeddings are pending. Quivr checks each hit against stored content and your access; a required dependency outage returns an error.
+Sometimes a plugin cannot process a version, for example a damaged PDF. The version is then **quarantined**: it is kept, but stays out of search, and its receipt explains why. The previous version, if any, stays in search. An operator fixes the cause and [processes it again](/run-quivr/reprocess-quarantined-versions). [Add content](/guides/add-content#if-you-cant-find-it) shows how to diagnose a document you cannot find.
 
-A retrieval plugin finds and ranks results using a search profile. `core.retrieve` provides `default` and `deep`; both use the same ranking today, with different work budgets. [Search profiles](/run-quivr/search-profiles) explains how a deployment picks the plugin behind each name, and how one profile can re-rank another's results.
+## Search
 
-An alert pairs a search definition (a Saved Query) with activation and notification settings (a Subscription). The saved query says what to look for and in which collections. The subscription chooses the rule and the notification destination. A positive decision is stored as a Match with evidence; that match never changes. Enrichment asks only undecided alerts again.
+A search looks through up to 16 collections at once, in one of three ways:
 
-A subscription can carry `owner`, a reference from your application that Quivr echoes so you can route notifications to the right person. Notifications are signed webhooks: HTTP requests to your receiver. Attempts can repeat, so receivers deduplicate; retries end on a permanent failure or when the retry window ends. Delivery is not guaranteed. Corrections and withdrawals of matched content can produce follow-up notices. [How alerts work](/guides/alerts) follows one alert from saved search to webhook.
+| Mode | Finds | Our article, for the query… |
+| --- | --- | --- |
+| `lexical` | the words you typed | `ferry` |
+| `semantic` | passages close in meaning | `boats stopped by a walkout` |
+| `hybrid` (the default) | both, ranked together | either |
 
-## Access, sources and plugins
+Each result is a passage, not just a document. It names the document, the version and the piece it comes from, with the exact excerpt, so you can always quote and cite it. Quivr checks every result against stored content and against your API key before returning it.
 
-An Organization owns its collections, documents and alerts. Normal API calls carry a key that determines the organization, allowed actions and reachable collections. The operator creates these keys.
+A search runs under a **profile**: `default` is fast and free, `deep` may spend more time to rank better. [Search](/guides/search) shows every option.
 
-A configured collector (a Connector Instance) adds content to one collection and namespace. It can fetch on a schedule or receive updates from a push source. Collected documents follow the same path as documents you send. Your application follows changes by [polling `GET /v0/changes`](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) or using the [live stream at `GET /v0/changes/stream`](https://docs.quivr.thevibecompany.co/api-reference/changes/stream-changes), resuming from a cursor that marks its position; [Follow changes](/guides/follow-changes) shows how.
+## Alerts
 
-Source push routes declare their own authentication: a Quivr API key, a token for one collector or a provider signature. Quivr or the connector plugin verifies the request for the chosen mode. Webhooks authenticated by a provider signature need no Quivr API key. See [Collect from sources](/guides/connectors) for the choices.
+An alert watches your collections for new documents that fit a search you saved. It is two objects:
 
-Quivr's core stays generic; plugins make the decisions that depend on your content. Plugins read files, cut passages and make embeddings, rank results and decide alerts. They run as separate HTTP services; the operator runs and configures them. [How plugins work](/plugins/overview) explains their roles.
+- a **saved search** (a Saved Query) says what to look for and where, such as `"harbour strike" AND (ferry OR port)` in `News`;
+- an **alert** (a Subscription) switches it on and names the rule that decides, which is a plugin.
+
+When our article becomes searchable, the rule decides whether it matches. A positive decision is stored as a **match** (a Match), with the reason, such as `Matched "harbour strike" in body`. A match never changes. Alerts watch documents that arrive after they are switched on; they do not look back.
+
+Your application reads matches through the API or the change feed. If the alert has a destination, Quivr also sends each match as a signed **webhook**. A webhook can arrive more than once, so your receiver ignores copies it has already seen. When a matched document is corrected or withdrawn, Quivr sends a follow-up notice.
+
+An alert can carry an **owner**, the identifier of one of your users, which Quivr stores and echoes so you know whom to tell. Quivr itself never emails anyone. [How alerts work](/guides/alerts) follows one alert from start to finish.
+
+## Following changes
+
+Everything that happens in your collections is published in order in the **change feed**: a document created, corrected, withdrawn or made searchable, a new match, and so on. Your application reads it page by page or as a live stream, and keeps a cursor that marks where it stopped, so it can resume after a restart without missing anything. [Follow changes](/guides/follow-changes) shows how.
+
+## Sources
+
+Instead of sending documents yourself, you can let Quivr collect them. A **source** (a Connector Instance) adds documents to one collection: it reads an RSS feed, a Microsoft 365 mailbox or an X list on a schedule, or receives pushes from a partner. Collected documents follow exactly the same path as the ones you send. [Collect from sources](/guides/connectors) lists the kinds.
+
+## Plugins
+
+Quivr does the bookkeeping that must work the same for everyone: storing, versioning, access, scheduling and retries. It asks **plugins** for the decisions that depend on your content: how to read a file, how to cut text and compute vectors, how to rank results, whether a document matches an alert, and how to collect a source. A plugin is a small web service; Quivr ships one for each job, and you can replace them or [write your own](/plugins/overview).
 
 ## Next
 
 <CardGroup cols={2}>
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+Try each of these ideas on your machine in fifteen minutes.
+</Card>
+<Card title="How Quivr works" icon="gears" href="/how-quivr-works">
+The parts inside Quivr and what it promises.
+</Card>
 <Card title="Add content" icon="file-plus" href="/guides/add-content">
-Send documents, check receipts, make corrections and withdraw content.
+Send documents, follow receipts, correct and withdraw.
 </Card>
 <Card title="Search" icon="search" href="/guides/search">
 Find passages by words or meaning.
