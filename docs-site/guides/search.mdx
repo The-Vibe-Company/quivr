@@ -46,7 +46,7 @@ EOF
 ["...", "..."]
 ```
 
-Quivr indexes the articles in the background, usually within seconds, so a search sent at once can miss them. Each batch item's `receipt` has a `receipt_id`: read `GET /v0/ingestion-receipts/{receipt_id}` until `availability.searchable` is `true`, as [Add content](/guides/add-content#send-an-article-with-a-title) shows. If `availability.state` reads `quarantined` instead, the article is on hold until an operator reprocesses it; [If you can't find it](/concepts#if-you-cant-find-it) lists the other cases.
+Quivr indexes the articles in the background, usually within seconds, so a search sent at once can miss them. Each batch item's `receipt` has a `receipt_id`: read `GET /v0/ingestion-receipts/{receipt_id}` until `availability.searchable` is `true`, as [Add content](/guides/add-content#send-an-article-with-a-title) shows. If `availability.state` reads `quarantined` instead, the article is on hold until an operator reprocesses it; [If you can't find it](/guides/add-content#if-you-cant-find-it) lists the other cases.
 
 ## Choose a mode
 

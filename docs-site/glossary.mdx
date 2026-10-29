@@ -1,0 +1,73 @@
+---
+title: "Glossary"
+description: "Every name the API and the documentation use, explained in one or two plain sentences."
+keywords: ["glossary", "terms", "vocabulary", "corpus", "record", "subscription", "match", "plugin"]
+---
+
+The guides use plain words first, then the name the API uses. This page maps each API name back to what it means. [Core concepts](/concepts) shows how they fit together.
+
+## Content
+
+| Name | What it is |
+| --- | --- |
+| **Organization** | The owner of collections, documents and alerts. Every API key belongs to one. |
+| **Corpus** | A collection of documents that you search together. It is also an access boundary for API keys. |
+| **Record** | One document, such as an article, an email or a post, independent of its successive texts. |
+| **Source Namespace** | A short name for where a document comes from, such as `news`. With the Record Key, it identifies the document. |
+| **Record Key** | The document's identity in its source, such as an article URL. It stays the same across corrections. |
+| **Record Version** | One text of a document, as it was sent. It never changes; a correction creates a new one. |
+| **Part** | A named piece of a version, such as `title`, `body` or one page of a PDF. Search results point to a Part. |
+| **Manifest** | The full description of a version: its Parts, files, metadata and where they came from. |
+| **Blob** | A stored file, such as an uploaded PDF, whose size and checksum Quivr verified when it was uploaded. |
+| **Idempotency key** | A name your application gives each request that creates something. Repeating the request with the same key returns the same result instead of a copy. |
+| **Ingestion Receipt** | Quivr's acknowledgement of a submitted document. Read it to follow processing until the document is searchable. |
+| **Quarantine** | A version a plugin could not process is kept but held out of search, with the reason, until an operator reprocesses it. |
+| **Withdrawal** | Removing a document from search and alerts for good. Its versions stay readable. |
+
+## Search
+
+| Name | What it is |
+| --- | --- |
+| **Lexical search** | Search by the words you typed. |
+| **Semantic search** | Search by meaning, using vectors. It finds passages that say the same thing in other words. |
+| **Hybrid search** | Both together, ranked as one list. The default. |
+| **Segment** | A passage of a document, cut so it can be indexed and returned as a result. |
+| **Vector** | A list of numbers computed from a passage that captures its meaning, so close meanings have close vectors. |
+| **Vector Space** | All the vectors made by one embedding model in one way. Vectors from different spaces cannot be compared. |
+| **Retrieval Profile** | A named way to run a search with its own time and cost budget, such as `default` or `deep`. |
+| **Projection** | The search index's copy of documents. It can always be rebuilt from stored content. |
+
+## Alerts
+
+| Name | What it is |
+| --- | --- |
+| **Saved Query** | A saved search: what to look for and in which collections. Editing it creates a new Saved Query Version. |
+| **Subscription** | An alert: it switches a Saved Query on and names the rule that decides matches. Editing it creates a new Subscription Version. |
+| **Alert rule** | The plugin that decides whether a new document matches an alert, such as keyword rules or a meaning check. |
+| **Match** | A stored decision that one version of a document matches one alert, with the reason. It never changes. |
+| **Owner** | An identifier of one of your users attached to an alert. Quivr stores and echoes it without interpreting it. |
+| **Destination** | An address of your system that receives alerts as signed webhooks. Configured by the operator. |
+| **Delivery** | One notification of one match to one destination. Its attempts can repeat, so a webhook can arrive more than once. |
+
+## Sources and changes
+
+| Name | What it is |
+| --- | --- |
+| **Connector Instance** | A source that adds documents to one collection: an RSS feed, a mailbox, an X list, or pushes from a partner. |
+| **Connector kind** | The type of a source, such as `rss`, `m365_mail` or `x_list`, served by a plugin. |
+| **Change feed** | The ordered list of everything that happened in your collections, which your application reads or streams. |
+| **Cursor** | Your position in the change feed, so you can resume where you stopped. |
+| **Operation** | A long-running task, such as rebuilding an index, that you follow until it ends. |
+
+## Plugins and operation
+
+| Name | What it is |
+| --- | --- |
+| **Plugin** | A small web service Quivr calls for a job that depends on your content. |
+| **Contribution** | One job a plugin does: a source (`connector`), a file reader (`normalizer`), text preparation (`ingestion`), ranking (`retrieval`) or an alert rule (`subscription`). |
+| **Normalizer** | A plugin that reads a file format, such as PDF, and returns its text as Parts. |
+| **Pin** | Telling Quivr, in its configuration, to call a given plugin version at startup. |
+| **Pipeline Plan** | The current list of which plugin serves each job. Activating a plugin creates a new plan; you can roll back to the previous one. |
+| **Backfill** | Computing new vectors for documents you already have, for example after choosing a new embedding model. |
+| **Space promotion** | Switching search to another vector space once it is filled. Promoting the old space again switches back. |
+| **Contract Runner** | `quivr plugin test`: it checks that a plugin follows the plugin protocol before you use it. |

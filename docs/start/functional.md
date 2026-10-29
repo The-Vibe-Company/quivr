@@ -31,7 +31,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 ## More lists
 
-- [Quivr V2](../../README.md): the project overview: why Quivr, architecture, quickstart and what works today
+- [Quivr](../../README.md): what Quivr is, how to try it, and where each reader starts in the documentation
 
 ## Other readers
 
