@@ -63,6 +63,10 @@ The description's vector stays fixed with its Saved Query Version. When the oper
 
 ## Use the external classifier
 
+<Note>
+Experimental: the external Jev check may still change in a minor 2.x release. See [Versions and compatibility](/reference/compatibility#stable-and-experimental-features).
+</Note>
+
 The `described` expression sends each new article to TypeSafe's Jev classifier, which scores how well it fits your description. English descriptions work best, and they can also find articles in other languages. Jev reads negations literally, which is one more reason to say what fits.
 
 <Warning>

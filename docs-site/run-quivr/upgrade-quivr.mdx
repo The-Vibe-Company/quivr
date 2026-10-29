@@ -110,6 +110,8 @@ After a database upgrade, API and worker processes initialize queue totals in re
 
 Rebuild scope discovery uses a separate cursor and contributes estimated bulk work while its count is incomplete. Receipt, evaluation and delivery backlog metrics also initialize independently; an incomplete metric is unavailable rather than reported as zero.
 
+After upgrading queue freshness tracking, previous snapshots remain unavailable to new readers until a new process refreshes them. Keep an API or worker running. Older processes can still publish observations, but cannot renew the freshness cutoff used by new readers. The oldest unresolved parallel change bounds that cutoff; counts remain available only within two refresh intervals, with a minimum of one minute.
+
 During a rolling upgrade, previous binaries keep reading and writing but do not maintain the new totals. Queue numbers can lag until a reconciliation pass reaches their changes. Retire previous binaries so individual work transitions maintain totals transactionally. Scope-wide changes, such as reprocessing quarantine or re-enabling a subscription, request a bounded paged repair. Queue publication retains its previous observation during that repair; an affected delivery metric is unavailable until repair finishes. Reconciliation starts another bounded, resumable pass five minutes after its previous pass completes. Keep API or worker processes running for it to catch up; do not treat mixed-version counts as an immediate account of every write.
 
 ## Maintain hot queue tables
@@ -127,7 +129,7 @@ quivr journal status
 quivr journal activate --previous-writers-retired
 ```
 
-The result reports `parallel`, `published_through`, `allocated_through`, `unpublished_positions` and `pending_age_seconds`. Positions include unused allocation gaps, so the backlog is a position span, not an event count. Independent document writes then use Record/request arbitration. Queue totals reconcile outside acceptance; an incomplete aggregate is not advertised as a fresh snapshot. Old event IDs and numeric cursors stay valid.
+The result reports `parallel`, `published_through`, `allocated_through`, `unpublished_positions` and `pending_age_seconds`. Positions include unused allocation gaps, so the backlog is a position span, not an event count. Independent document writes then use Record/request arbitration. Queue totals reconcile outside acceptance; observations retain the oldest unresolved change's freshness cutoff while reconciliation progresses. Old event IDs and numeric cursors stay valid.
 
 Publication polls every 100 ms. The default engine transaction timeout is 30 seconds. Healthy publication is bounded by the longest [engine transaction timeout](/reference/configuration#postgresql-connections) across replicas plus two poll intervals. If pending age exceeds that bound, check external long-running or prepared transactions and database connectivity. XIDs are cluster-wide: another database's transaction can hold the horizon. Publication stops advancing rather than skip a late event.
 

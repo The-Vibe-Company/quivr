@@ -134,6 +134,35 @@ WHERE record_id IN (SELECT 'record-'||i FROM generate_series($1::int,$2::int) i)
 			t.Fatalf("backlog query work grew with history/rebuild scope: buffers %d -> %d (bound %d)", firstBlocks, blocks, 2*firstBlocks+100)
 		}
 	}
+	// The freshness cutoff must find one ancient unresolved change without
+	// scanning every recent dirty row. Managed-index registration alone cannot
+	// protect this work contract; observe the actual production probe's plan.
+	var firstCutoffBlocks int
+	for _, size := range []int{1000, 10000} {
+		exec(`INSERT INTO parallel_queue_observations(organization,record_id,changed_at,dirty_since)
+ SELECT 'example','dirty-'||i,clock_timestamp(),clock_timestamp()
+ FROM generate_series(1,$1::int) i ON CONFLICT DO NOTHING`, size)
+		exec(`UPDATE parallel_queue_observations SET dirty_since=clock_timestamp()-interval '2 minutes'
+ WHERE organization='example' AND record_id='dirty-1'; ANALYZE parallel_queue_observations`)
+		var age float64
+		if err := pool.QueryRow(ctx, `SELECT extract(epoch FROM statement_timestamp()-observed_at) FROM (`+queueCountersCutoffSQL+`) cutoff`).Scan(&age); err != nil || age < 119 || age > 130 {
+			t.Fatalf("dirty cutoff age=%f error=%v", age, err)
+		}
+		var raw []byte
+		if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+queueCountersCutoffSQL).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		blocks := queueWorkBlocks(t, raw)
+		if !strings.Contains(string(raw), `"Index Name": "parallel_queue_observations_by_age"`) {
+			t.Fatalf("oldest dirty lookup missed its age index: %s", raw)
+		}
+		t.Logf("dirty=%d rows: cutoff buffers=%d", size, blocks)
+		if size == 1000 {
+			firstCutoffBlocks = blocks
+		} else if blocks > 2*firstCutoffBlocks+10 {
+			t.Fatalf("oldest dirty work grew with ledger size: buffers %d -> %d", firstCutoffBlocks, blocks)
+		}
+	}
 }
 
 func queueWorkBlocks(t *testing.T, raw []byte) int {

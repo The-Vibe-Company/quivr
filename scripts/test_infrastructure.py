@@ -166,14 +166,22 @@ class Infrastructure(unittest.TestCase):
 
     def test_profiles_and_literal_overrides_reach_the_launch_model(self):
         small = infra.resolve()
+        # Own the external host-to-container binding on the direct Compose path.
+        # A literal default here would silently ignore an operator's off value.
+        import yaml
+        direct = yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())
+        self.assertEqual(direct['services']['postgres']['environment'].get('QUIVR_POSTGRES_AUTOPREWARM'),
+                         '${QUIVR_POSTGRES_AUTOPREWARM:-}')
         self.assertEqual(small['weaviate']['environment']['GOMEMLIMIT'], '1700MiB')
         self.assertEqual(small['weaviate']['deploy']['resources']['limits']['memory'], '2147483648')
         self.assertEqual(small['weaviate']['environment']['ASYNC_INDEXING'], 'false')
         self.assertEqual(small['postgres']['environment']['QUIVR_POSTGRES_RANDOM_PAGE_COST'], '1.1')
+        self.assertEqual(small['postgres']['environment']['QUIVR_POSTGRES_AUTOPREWARM'], 'on')
         large = infra.resolve('large')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_MAX_CONNECTIONS'], '500')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_SHARED_BUFFERS'], '10GB')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_JIT'], 'on')
+        self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_AUTOPREWARM'], 'on')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_SYNCHRONOUS_COMMIT'], 'on')
         self.assertEqual(large['postgres']['environment']['QUIVR_POSTGRES_VOLUME_MB'], '476837')
         self.assertEqual(large['postgres']['x-quivr-storage-budget-bytes'], '500000000000')
@@ -188,10 +196,13 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(large['weaviate']['environment']['ASYNC_INDEXING'], 'true')
         self.assertEqual(large['weaviate']['environment']['PERSISTENCE_MEMTABLES_MAX_SIZE_MB'], '1024')
         rendered = subprocess.run([sys.executable, str(ROOT / 'deploy/infrastructure.py'), 'render'],
-                                  env={**os.environ, 'QUIVR_POSTGRES_MAX_CONNECTIONS': '321'},
+                                  env={**os.environ, 'QUIVR_POSTGRES_MAX_CONNECTIONS': '321',
+                                       'QUIVR_POSTGRES_AUTOPREWARM': 'off'},
                                   capture_output=True, text=True, timeout=5, check=True)
         self.assertEqual(json.loads(rendered.stdout)['services']['postgres']['environment']
                          ['QUIVR_POSTGRES_MAX_CONNECTIONS'], '321')
+        self.assertEqual(json.loads(rendered.stdout)['services']['postgres']['environment']
+                         ['QUIVR_POSTGRES_AUTOPREWARM'], 'off')
         with tempfile.TemporaryDirectory() as directory:
             override = Path(directory) / 'installation.json'
             override.write_text('''{"services":{"weaviate":{"environment":{"GOMEMLIMIT":"3500MiB"},

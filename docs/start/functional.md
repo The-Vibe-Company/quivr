@@ -8,7 +8,6 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 - [Security policy](../../SECURITY.md): report vulnerabilities privately and verify release inventories
 - [Public HTTP transport contract](../../contracts/http/v0/README.md): how the HTTP API contract is organised and checked
 - [docs-site/run-quivr/scale-quivr.mdx](../../docs-site/run-quivr/scale-quivr.mdx): capacity budgets, import lessons and incident checks for operators
-- [Quivr V2 — Remaining limits](../quivr-v2-remaining-limits.md): known limits and what is not claimed
 
 ## Guides
 
@@ -31,7 +30,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 ## More lists
 
-- [Quivr V2](../../README.md): the project overview: why Quivr, architecture, quickstart and what works today
+- [Quivr](../../README.md): what Quivr is, how to try it, and where each reader starts in the documentation
 
 ## Other readers
 

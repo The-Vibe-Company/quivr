@@ -28,7 +28,7 @@ In words:
 2. Quivr stores every version of every document, prepares it for search and checks it against your saved alerts.
 3. Plugins do the jobs that depend on your content: read files, collect sources, prepare text for search, rank results and decide alerts. Quivr asks them over HTTP. Only two jobs are required, preparing text for search and ranking results, and Quivr ships a plugin for each. The others are there when you need them.
 4. Your application searches Quivr and gets back ranked passages, each linked to its document and version.
-5. When a new document matches a saved alert, Quivr sends a signed message (a webhook) to an address your application runs, the alert receiver. Your application then decides how to tell people, by email or in your app.
+5. When a new document matches a saved alert, Quivr records the match with its reason. Your application reads it through the API, or receives it as a signed message (a webhook) at an address it runs, and decides how to tell people, by email or in your app.
 6. AI agents search Quivr through MCP, a standard way for agents to call tools, and quote what they find. Quivr returns passages; the agent writes the answer. See [Connect an AI agent](/guides/ai-agents).
 
 ## What goes in, what comes out
@@ -38,7 +38,7 @@ Take one news article: _Harbour strike halts the ferry_, with the line "The harb
 | What you do | What Quivr gives back |
 | --- | --- |
 | Search for `ferry` | The passage "The harbour strike stopped every ferry…", with the document, version and character positions it comes from |
-| Save the alert `"harbour strike" AND (ferry OR port) NOT football` | A match, recorded with its reason: `Matched "harbour strike" in title, body; "ferry" in title, body.` A signed webhook tells your receiver, and your application reads the reason through the API |
+| Save the alert `"harbour strike" AND (ferry OR port) NOT football` | A match, recorded with its reason: `Matched "harbour strike" in title, body; "ferry" in title, body.` Your application reads it through the API, or gets a signed webhook |
 | Let an AI agent answer "what happened to the ferry?" | The same passage, which the agent quotes with its source |
 | Receive a correction of the article from the feed | A new version, searchable in place of the old one. The old one stays readable, and the alert sends a follow-up saying whether the new text still matches |
 
@@ -54,7 +54,7 @@ Send documents one by one or in batches, as text or files such as PDFs. Or let Q
 Search by keywords, by meaning, or both. Each result names the document, the version and the exact passage it comes from.
 </Card>
 <Card title="Follow a topic" icon="bell" href="/guides/alerts">
-Save a keyword query or a plain-language description as an alert. Quivr records why each document matched and sends a signed webhook with its identifiers. Your application reads the explanation through the API.
+Save a keyword query or a plain-language description as an alert. Quivr records each document that matches, with the reason. Your application reads the matches through the API or receives them as signed webhooks.
 </Card>
 <Card title="Extend it with plugins" icon="puzzle" href="/plugins/overview">
 Add a file format, a source, a way to prepare text for meaning search or rank results, or an alert rule, in any language that serves HTTP.
@@ -63,11 +63,7 @@ Add a file format, a source, a way to prepare text for meaning search or rank re
 
 ## What Quivr promises
 
-Quivr confirms a document only once it has stored it, so an outage delays processing and does not lose what it confirmed. Processing has no deadline. While a plugin Quivr needs is down, Quivr waits and retries. A document a plugin rejects is set aside (quarantined) with the reason, and an operator can [process it again](/run-quivr/reprocess-quarantined-versions) once the cause is fixed. A file with no text Quivr can read, such as a scanned PDF, stays stored but is not searchable.
-
-Each document submission must carry an idempotency key, a name your application gives it. Repeating the same submission with the same key returns the same receipt, Quivr's tracking record for it, instead of storing a second copy. Reusing the key for a different submission returns a conflict.
-
-By default, Quivr retries a webhook your receiver does not accept for up to 24 hours, and the operator can change this window. A webhook can therefore arrive more than once, so your receiver ignores the copies it has already seen. Retries stop at the end of the window or when the receiver refuses for good, so a receiver that stays down misses alerts. Your application can still list the matches through the API.
+Quivr confirms a document only once it has stored it, so an outage delays processing but never loses what it confirmed. Every write can be retried safely, a correction never overwrites history, and every search result is checked against stored content and your access. [How Quivr works](/how-quivr-works) explains these promises and the parts behind them.
 
 ## Who runs what
 
@@ -78,7 +74,7 @@ Quivr runs on servers you control, next to your application. Your users talk to 
 | Your application | You. It shows your screens, manages your users and calls Quivr from its server with an API key. |
 | Quivr | You, or an operator for you: an API and a worker with their own databases and file storage. The operator creates the API keys. |
 | Plugins | Small web services Quivr calls. The default ones run with Quivr; yours run wherever Quivr can reach them over HTTP. |
-| Alert receiver | You: an address in your system that receives the signed alerts. The operator lists it in Quivr's settings. |
+| Alert receiver (optional) | You: an address in your system that receives alerts as signed webhooks. The operator lists it in Quivr's settings. Without one, your application reads alerts through the API. |
 
 By default, Quivr itself sends document text nowhere outside your installation: the plugins it runs by default work there, and so does the model that lets it search by meaning. Quivr sends text out only through a plugin the operator turns on that calls an outside service: a hosted model for meaning search, a paid service that re-orders search results, or one that judges alerts described in plain language. Alerts carry identifiers, not text. Anything that holds an API key, your application or an AI agent, reads the documents that key allows, and an agent may pass them to the AI service it runs on.
 
@@ -114,7 +110,7 @@ The pictured feeds and alerts are example data, and your local demo starts empty
 
 ## What it does not do yet
 
-Quivr is at the evaluation stage: the API is `v0` and may change, so do not run it in production. The local stack runs on Linux x86_64 and on Apple Silicon Macs. Quivr does not read text inside images, so scanned documents stay unsearchable (there is no OCR).
+Quivr searches text only: it does not search images, audio or video, and it does not read text inside images, so scanned documents stay unsearchable (there is no OCR). It has no user accounts or quotas of its own; those belong to your application. [Known limits](/reference/known-limits) lists the rest, and [Versions and compatibility](/reference/compatibility) says what stays stable across 2.x releases.
 
 ## Next steps
 
@@ -125,7 +121,7 @@ Run Quivr locally and search your first article.
 <Card title="Core concepts" icon="book-open" href="/concepts">
 The few ideas you need to use the API.
 </Card>
-<Card title="How plugins work" icon="puzzle" href="/plugins/overview">
-How Quivr calls the plugins that adapt it to your content.
+<Card title="How Quivr works" icon="gears" href="/how-quivr-works">
+The parts inside Quivr, the path of a document and what Quivr promises.
 </Card>
 </CardGroup>

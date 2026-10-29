@@ -113,7 +113,7 @@ func load() (settings, error) {
 	if err != nil {
 		return s, err
 	}
-	s.policy = autoscaling.Config{Min: int(minimum), Max: int(maximum), DocumentsPerReplica: documents, DownscaleWindow: window}
+	s.policy = autoscaling.Config{Queue: s.queue, Min: int(minimum), Max: int(maximum), DocumentsPerReplica: documents, DownscaleWindow: window}
 	if s.interval, err = duration("QUIVR_AUTOSCALER_INTERVAL", 30*time.Second, false); err != nil {
 		return s, err
 	}

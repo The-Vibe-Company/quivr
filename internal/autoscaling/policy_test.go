@@ -17,10 +17,21 @@ func TestPolicy(t *testing.T) {
 			{Min: 2, Max: 1, DocumentsPerReplica: 20000},
 			{Min: 1, Max: 8, DocumentsPerReplica: 0},
 			{Min: 1, Max: 8, DocumentsPerReplica: 20000, DownscaleWindow: -time.Second},
+			{Queue: "unknown", Min: 1, Max: 8, DocumentsPerReplica: 20000},
 		} {
 			if _, err := autoscaling.NewPolicy(c); err == nil {
 				t.Fatalf("accepted invalid config %+v", c)
 			}
+		}
+	})
+	t.Run("bulk saturation retains larger proportional demand", func(t *testing.T) {
+		p, err := autoscaling.NewPolicy(autoscaling.Config{Queue: "bulk", Min: 1, Max: 16, DocumentsPerReplica: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := p.Decide(1000, 1, time.Unix(1000, 0))
+		if err != nil || got != 10 {
+			t.Fatalf("bulk backlog needs ten replicas: got %d/error %v", got, err)
 		}
 	})
 	t.Run("custom bounds and zero capacity recovery", func(t *testing.T) {

@@ -307,6 +307,19 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Model a current plugin-routed generation, where hydration must check the
+	// accepted source and rollback-gap fence as well as the immutable keys.
+	generationID := "hydration-" + org
+	_, err = pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,space_id,organization,corpus_id,spaces,spaces_projected,ingestion_routing,coverage_routed)
+ SELECT $1,collection,profile_version,space_id,$2,$3,spaces,spaces_projected,'{"default":"adapter.fixture"}'::jsonb,true FROM projection_generations WHERE id=$4`, generationID, org, c.ID, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id) VALUES($1,$2,$3)`, org, c.ID, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.ID = generationID
 	var batch []content.Candidate
 	for i := range 150 {
 		key := "record-" + strconv.Itoa(i)
@@ -349,7 +362,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 		// A private copy of the hot tables gives every run genuinely empty
 		// statistics, independent of test order and autovacuum on public tables.
 		// LIKE retains the real indexes; no production hook or global tuning.
-		for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage"} {
+		for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "corpora", "corpus_projection_routes", "accepted_revisions", "tombstones", "routing_coverage_gaps"} {
 			if _, err := conn.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL); ANALYZE "+table); err != nil {
 				return err
 			}
@@ -369,7 +382,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	// both choices. Repeat with current statistics so ANALYZE cannot regress it.
 	for _, statistics := range []string{"empty", "analyzed"} {
 		if statistics == "analyzed" {
-			if _, err = explained.Exec(ctx, `ANALYZE segments, record_versions, records, version_parts, content_blobs, projection_coverage`); err != nil {
+			if _, err = explained.Exec(ctx, `ANALYZE segments, record_versions, records, version_parts, content_blobs, projection_coverage, corpora, corpus_projection_routes, accepted_revisions, tombstones, routing_coverage_gaps`); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -405,8 +418,8 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 				if run == 0 || run == 6 {
 					t.Logf("%s/%s run %d: %d statements, %d pages for %d hits", statistics, mode, run, len(plans), pages, len(found))
 				}
-				if pages > 50*len(batch) {
-					t.Fatalf("%s/%s run %d: hydrating %d candidates touched %d pages, want at most %d; plans: %v", statistics, mode, run, len(batch), pages, 50*len(batch), plans)
+				if pages > 44*len(batch) {
+					t.Fatalf("%s/%s run %d: hydrating %d candidates touched %d pages, want at most %d; plans: %v", statistics, mode, run, len(batch), pages, 44*len(batch), plans)
 				}
 			}
 		}

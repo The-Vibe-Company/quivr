@@ -55,8 +55,12 @@ def main():
     run([os.environ.get('GO', 'go'), 'build', '-o', str(candidate), './cmd/quivr'], cwd=ROOT)
     report = {'previous_commit': base, 'candidate_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'acceptance_pattern': PATTERN, 'result': 'failed'}
     start = time.monotonic()
+    # The previous checkout installs its own locks, so it must not inherit the candidate's pip constraints.
+    env = dict(os.environ)
+    if 'PIP_CONSTRAINT' in env:
+        env['PIP_CONSTRAINT'] = str(source / 'scripts' / 'ci-constraints.txt')
     try:
-        run([sys.executable, str(pathlib.Path(__file__).resolve()), '--previous-source', str(source), '--candidate', str(candidate), '--output', str(output)], cwd=source)
+        run([sys.executable, str(pathlib.Path(__file__).resolve()), '--previous-source', str(source), '--candidate', str(candidate), '--output', str(output)], cwd=source, env=env)
         report['result'] = 'passed'
     finally:
         report['seconds'] = round(time.monotonic()-start, 3)

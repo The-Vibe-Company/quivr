@@ -5,9 +5,13 @@ package autoscaling
 import (
 	"errors"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 type Config struct {
+	// Queue selects bulk prefetch demand; empty keeps proportional scaling.
+	Queue               string
 	Min, Max            int
 	DocumentsPerReplica int64
 	DownscaleWindow     time.Duration
@@ -28,7 +32,8 @@ type Policy struct {
 }
 
 func NewPolicy(config Config) (*Policy, error) {
-	if config.Min < 1 || config.Max < config.Min || config.DocumentsPerReplica < 1 || config.DownscaleWindow < 0 {
+	if config.Min < 1 || config.Max < config.Min || config.DocumentsPerReplica < 1 || config.DownscaleWindow < 0 ||
+		(config.Queue != "" && !workqueue.Valid(config.Queue)) {
 		return nil, errors.New("invalid autoscaling policy")
 	}
 	return &Policy{config: config}, nil
@@ -45,6 +50,17 @@ func (p *Policy) Decide(waiting int64, current int, now time.Time) (int, error) 
 	desired := waiting / p.config.DocumentsPerReplica
 	if waiting%p.config.DocumentsPerReplica != 0 {
 		desired++
+	}
+	// A connector cannot grow ingestion backlog beyond its prefetch bound.
+	// Total waiting includes ingestion, so saturation remains observable when
+	// acquisition pauses. Ramp one replica per action, retaining larger
+	// proportional recommendations and the controller's action cooldown.
+	if p.config.Queue == workqueue.Bulk && waiting >= workqueue.DefaultMaxBulkIngestionWaiting {
+		if current < p.config.Max {
+			desired = max(desired, int64(current)+1)
+		} else {
+			desired = int64(p.config.Max)
+		}
 	}
 	if desired < int64(p.config.Min) {
 		desired = int64(p.config.Min)

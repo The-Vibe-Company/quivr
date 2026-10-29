@@ -7,6 +7,7 @@ How this repository is organised, tested and changed, for people and coding agen
 
 - [Quivr Ingestion and Retrieval](../../CONTEXT.md): the domain language: Corpus, Record, Version, Manifest and the other terms
 - [Quivr V2 — Local harness and operational baseline](../quivr-v2-local-harness.md): how `make dev` and `make verify` work
+- [Quivr — Engine limits for contributors](../quivr-v2-remaining-limits.md): technical limits of the engine and its harness, for contributors
 - [Graph response examples](../../tests/fakes/graph/fixtures/README.md): the sanitized official examples used by the Graph fake
 - [X response examples](../../tests/fakes/x/fixtures/README.md): the sanitized official examples used by the X fake
 
