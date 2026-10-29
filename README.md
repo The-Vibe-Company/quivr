@@ -10,6 +10,9 @@ from RSS feeds, Microsoft 365 mailboxes and X lists. Quivr keeps every version, 
 each document searchable within seconds, and checks it against your saved alerts. Your
 application talks to Quivr over an HTTP API; Quivr has no user interface of its own.
 
+Quivr is developed by [The Vibe Company](https://www.thevibecompany.co), the AI agency
+created by the Quivr team.
+
 > **Status: Quivr 2.** From 2.0.0 on, the HTTP API (`/v0`) stays compatible across
 > 2.x releases and upgrades keep your data in place; see
 > [Versions and compatibility](https://docs.quivr.thevibecompany.co/reference/compatibility)

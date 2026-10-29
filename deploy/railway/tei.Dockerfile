@@ -9,7 +9,7 @@ FROM ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32
 # Keep the real TEI CPU runtime; repair its fixed critical Debian packages.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libssl-dev=3.0.22-1~deb12u1 libssl3=3.0.22-1~deb12u1 openssl=3.0.22-1~deb12u1 \
+      libssl-dev=3.0.22-1~deb12u2 libssl3=3.0.22-1~deb12u2 openssl=3.0.22-1~deb12u2 \
       libgnutls30=3.7.9-2+deb12u7 libssh2-1=1.10.0-3+deb12u1 perl-base=5.36.0-7+deb12u4 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=model /app/.scratch/e5-model /model
