@@ -10,9 +10,10 @@ from RSS feeds, Microsoft 365 mailboxes and X lists. Quivr keeps every version, 
 each document searchable within seconds, and checks it against your saved alerts. Your
 application talks to Quivr over an HTTP API; Quivr has no user interface of its own.
 
-> **Status: alpha.** Quivr 2.0.0 is in preparation. The API is `v0`; until 2.0.0 a
-> release may still change it, and the [changelog](CHANGELOG.md) lists every breaking
-> change.
+> **Status: Quivr 2.** From 2.0.0 on, the HTTP API (`/v0`) stays compatible across
+> 2.x releases and upgrades keep your data in place; see
+> [Versions and compatibility](https://docs.quivr.thevibecompany.co/reference/compatibility)
+> and [Known limits](https://docs.quivr.thevibecompany.co/reference/known-limits).
 
 ## What you can do with it
 

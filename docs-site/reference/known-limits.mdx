@@ -1,0 +1,55 @@
+---
+title: "Known limits"
+description: "What Quivr 2.0 does not do yet, the size limits you can hit, and the trade-offs to know before you run it."
+keywords: ["limits", "limitations", "not supported", "OCR", "multimodal", "size limits", "platforms"]
+---
+
+This page lists what Quivr 2.0 does not do, and the limits you are most likely to meet. [Versions and compatibility](/reference/compatibility) says what stays stable across 2.x releases.
+
+## What Quivr does not do
+
+- **Text only.** Quivr searches text. It does not search images, audio or video, and it does not read text inside images, so a scanned PDF is stored but not searchable (there is no OCR). Microsoft 365 attachments are stored as files, but their text is not extracted.
+- **Files it can read.** Text files (`text/*`) are read directly. Other file types need a reader plugin; Quivr ships one for PDF. Anything else is refused.
+- **No user accounts, quotas or billing.** Quivr is an engine: an API key belongs to an organization, not to a person. Your application manages its users, their limits and what they pay.
+- **No emails or push notifications to people.** Quivr records matches and can send webhooks to your system; telling people is your application's job.
+- **Alerts do not look back.** An alert judges documents that become searchable after it is switched on. A [preview](/guides/alerts) shows what it would have caught among recent documents, but there is no way to run it over the past.
+- **No keyword stemming.** Keyword alerts match whole words, ignoring case and accents: `strike` does not match `strikes`. Use meaning alerts, or list the forms you need.
+
+## Size limits
+
+| What | Limit |
+| --- | --- |
+| One document sent in a request | 1 MiB |
+| One batch | 100 documents, 10 MiB in total |
+| One uploaded file | 1 GiB, uploaded within 15 minutes |
+| Text indexed for one version | 256 KiB and 64 `title` or `body` pieces, with the first-party ingestion plugin |
+| One search | up to 16 collections, 50 results, no pagination |
+| One query | 8,192 characters; for meaning search, also the model's limit (256 tokens with the default model) |
+| Searches running at once | 64 per API process; more are refused with a retryable error |
+
+A version over the indexing limits is stored and readable, but not searchable; its receipt says which limit it hit. [Add content](/guides/add-content#limits) and [Search](/guides/search) give the details.
+
+## History you can lose on purpose
+
+To keep storage bounded, Quivr reclaims old detail, at the earliest after 30 days by default: the full copies of old import requests and the evidence of old matches. The matches themselves stay. Reading expired evidence returns `410 evidence_expired`, so export what you need to keep. The operator can change or disable this; see [History retention](/reference/configuration#history-retention).
+
+## Notifications
+
+- A webhook can arrive more than once, and it stops being retried at the end of its retry window (24 hours by default). A receiver that stays down misses webhooks, but your application can still read the matches through the API.
+- Quivr refuses webhook destinations on private or internal addresses, but it has no egress proxy or per-destination allowlist: a public address the operator configures is trusted.
+- A meaning alert judged by Jev sends the article's text to TypeSafe. While TypeSafe is down, the keyword alerts on the same article wait too.
+
+## Platforms and installation
+
+- **Local development (`make dev`)** runs on Linux x86_64 and on Apple Silicon Macs. The full verification (`make verify`) runs on Linux x86_64 only.
+- **Release images** are published for `linux/amd64` only.
+- **The single-machine installation** runs Temporal without high availability and is meant for one Linux amd64 host. A consistent backup needs a short full stop.
+- **Upgrading from a pre-release.** Upgrading in place from a `2.0.0-alpha` release is not supported: start a fresh installation and send your documents again.
+
+## Scale
+
+Quivr has run about one million news articles on one installation. Ten million documents per collection is not yet measured. [Scale Quivr](/run-quivr/scale-quivr) gives capacity budgets and what to watch as you grow.
+
+## Operations
+
+- Quivr exposes Prometheus metrics and OpenTelemetry traces, but ships no dashboards or alerting rules. Its in-process counters reset when a process restarts.
