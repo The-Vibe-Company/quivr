@@ -17,7 +17,7 @@ jobs:
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
       with:
         go-version-file: go.mod
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       id: python
       with:
         python-version: 3.12.15
@@ -34,7 +34,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       id: failure-artifact
       with:
@@ -53,14 +53,14 @@ jobs:
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
       with:
         go-version-file: go.mod
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
         python-version: 3.12.15
     - run: python3 scripts/weaviate_upgrade.py
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       id: failure-artifact
       with:

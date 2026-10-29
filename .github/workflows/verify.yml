@@ -58,7 +58,7 @@ jobs:
           echo "base=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
         fi
         echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
         python-version: 3.12.15
         cache: pip
@@ -102,7 +102,7 @@ jobs:
         cache-dependency-path: '**/go.sum'
     - name: Fetch pinned Go modules
       run: python3 scripts/ci_fetch.py -- go mod download
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       id: python
       with:
         python-version: 3.12.15
@@ -134,7 +134,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-${{ matrix.group }}
@@ -176,7 +176,7 @@ jobs:
         cache-dependency-path: '**/go.sum'
     - name: Fetch pinned Go modules
       run: python3 scripts/ci_fetch.py -- go mod download
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
         python-version: 3.12.15
         cache: pip
@@ -187,7 +187,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-adapter-postgres
@@ -215,7 +215,7 @@ jobs:
         cache-dependency-path: '**/go.sum'
     - name: Fetch pinned Go modules
       run: python3 scripts/ci_fetch.py -- go mod download
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       id: python
       with:
         python-version: 3.12.15
@@ -251,7 +251,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-${{ matrix.part }}
@@ -280,7 +280,7 @@ jobs:
         cache-dependency-path: '**/go.sum'
     - name: Fetch pinned Go modules
       run: python3 scripts/ci_fetch.py -- go mod download
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       id: python
       with:
         python-version: 3.12.15
@@ -301,7 +301,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-migration-compatibility
@@ -337,7 +337,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-vulnerabilities
@@ -359,7 +359,7 @@ jobs:
       with:
         persist-credentials: false
         ref: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
         python-version: 3.12.15
         cache: pip
@@ -414,7 +414,7 @@ jobs:
           org.opencontainers.image.revision=${{ github.sha }}
         cache-from: type=gha,scope=scan-${{ matrix.component || matrix.plugin || 'engine' }}
         cache-to: type=gha,mode=max,scope=scan-${{ matrix.component || matrix.plugin || 'engine' }}
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       if: matrix.plugin == 'hosted-embed'
       with:
         python-version: 3.12.15
@@ -466,7 +466,7 @@ jobs:
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json scan-report.txt --output "${{ runner.temp }}/failure.tar.gz"
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: failure()
       with:
         name: failure-image-${{ matrix.component || matrix.plugin || 'engine' }}
