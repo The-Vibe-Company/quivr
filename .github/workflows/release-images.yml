@@ -182,6 +182,11 @@ jobs:
       contents: write
       packages: write
     steps:
+    # Check out first: checkout cleans the workspace and would delete the downloaded artifacts.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ needs.prepare.outputs.revision }}
+        persist-credentials: false
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         pattern: image-*
@@ -198,10 +203,6 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ needs.prepare.outputs.revision }}
-        persist-credentials: false
     - name: Advance the rolling tag only after every image passes and is signed
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
