@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0...v2.0.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deploy:** pin Weaviate 1.39.13 for CVE-2026-111943 ([#3973](https://github.com/The-Vibe-Company/quivr/issues/3973)) ([191d35f](https://github.com/The-Vibe-Company/quivr/commit/191d35f195c087852b5387e0887def9b95435bb8))
+* **images:** rebase on Python 3.12.16 and patch brotli in TEI ([#3974](https://github.com/The-Vibe-Company/quivr/issues/3974)) ([84e5c4e](https://github.com/The-Vibe-Company/quivr/commit/84e5c4ec5a45077952326d6387bf434d6dd175f9))
+
 ## [2.0.0](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.7...v2.0.0) (2026-10-29)
 
 
