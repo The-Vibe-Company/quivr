@@ -136,7 +136,7 @@
       "restart": "unless-stopped"
     },
     "weaviate": {
-      "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.13@sha256:ad2b986bbe4666fbd5302a5ee0cc6c74a048c4c769198d46147ea232d46a2dd8",
+      "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.14@sha256:6b66785a400f6e458cbc201aa18309d798008def5a7d6ab13a97cac6c3ada5ac",
       "hostname": "quivr-index",
       "environment": {
         "AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED": "true",
