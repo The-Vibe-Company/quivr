@@ -19,7 +19,7 @@ jobs:
         go-version-file: go.mod
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
-        python-version: 3.12.15
+        python-version: 3.12.16
     - run: make measure-upgrade
     - if: always()
       run: cat .scratch/quivr-measure-upgrade-*/upgrade-measurement.md | tee -a "$GITHUB_STEP_SUMMARY" || true
