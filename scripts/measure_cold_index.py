@@ -944,8 +944,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         resolved = infrastructure.resolve(profile="small", environ={})
         image = resolved["weaviate"]["image"]
-        if ":1.39.10@sha256:" not in image:
-            raise MeasurementError("infrastructure did not resolve pinned Weaviate 1.39.10")
+        if ":1.39.13@sha256:" not in image:
+            raise MeasurementError("infrastructure did not resolve pinned Weaviate 1.39.13")
         report["image"] = image
         report["dataset"] = dataset_manifest(args.objects)
 
