@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.2](https://github.com/The-Vibe-Company/quivr/compare/v2.0.1...v2.0.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deploy:** pin Weaviate 1.39.14 for filtered-search panics and RQ memory ([#3976](https://github.com/The-Vibe-Company/quivr/issues/3976)) ([90d7d88](https://github.com/The-Vibe-Company/quivr/commit/90d7d88e3f4287a0fa648834dbc1546ae2569cd4))
+
 ## [2.0.1](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0...v2.0.1) (2026-10-30)
 
 
