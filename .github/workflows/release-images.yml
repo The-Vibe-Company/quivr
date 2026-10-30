@@ -29,7 +29,7 @@ jobs:
         persist-credentials: false
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
-        python-version: 3.12.15
+        python-version: 3.12.16
     - run: python3 scripts/ci_fetch.py -- pip install --require-hashes -r scripts/ci-requirements-base.txt
     - uses: ./.github/actions/grype-database
     - id: release
@@ -85,7 +85,7 @@ jobs:
           org.opencontainers.image.revision=${{ needs.prepare.outputs.revision }}
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       with:
-        python-version: 3.12.15
+        python-version: 3.12.16
     - name: Prepare the pinned E5 tokenizer fixture
       if: matrix.plugin == 'hosted-embed'
       run: python3 scripts/prepare_tokenizer.py

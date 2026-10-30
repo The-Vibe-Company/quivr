@@ -30,7 +30,7 @@ RUN mkdir -p /out/bin /out/plugins \
     done
 
 # The pinned tokenizer the core.ingest plugin runs (core-entrypoint.py CONNECTORS).
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS tokenizer
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS tokenizer
 WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
@@ -44,7 +44,7 @@ RUN python scripts/prepare_tokenizer.py \
 
 # Optional offline text runtime. The default image contains neither CPU wheels
 # nor model weights; deployment builders opt in before enabling query routing.
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS query-encoder
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS query-encoder
 ARG QUIVR_BUILD_LOCAL_QUERY_ENCODER=0
 WORKDIR /app
 COPY scripts/prepare_query_encoder.py ./scripts/
@@ -64,7 +64,7 @@ RUN mkdir -p /opt/query-encoder/model /opt/query-encoder/venv \
 # API retrieval uses QUIVR_DEMO_JEV_RERANK=1 and TYPESAFE_API_KEY
 # (core-entrypoint.py). Each plugin reads the manifest next to its package, so
 # they are installed in editable mode at the path the final image keeps.
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS plugins
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS plugins
 COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
 COPY sdks/python /tmp/sdk
 COPY plugins/alerts /app/plugins/alerts
@@ -75,7 +75,7 @@ RUN python -m venv /opt/quivr-plugins \
  && /opt/quivr-plugins/bin/pip install --no-cache-dir --disable-pip-version-check -c /tmp/constraints.txt \
     /tmp/sdk -e /app/plugins/alerts -e /app/plugins/pdf-text -e /app/plugins/newsml-g2 -e /app/plugins/jev-rerank
 
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 WORKDIR /app
 COPY --from=build /quivr /usr/local/bin/quivr
 COPY --from=tokenizer /app /app
