@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3](https://github.com/The-Vibe-Company/quivr/compare/v2.0.2...v2.0.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **demo:** pin alerts to the plugin version the core serves ([#3980](https://github.com/The-Vibe-Company/quivr/issues/3980)) ([25e4edf](https://github.com/The-Vibe-Company/quivr/commit/25e4edf083c0fcd115ee952a048444de646604fd))
+
 ## [2.0.2](https://github.com/The-Vibe-Company/quivr/compare/v2.0.1...v2.0.2) (2026-10-30)
 
 
