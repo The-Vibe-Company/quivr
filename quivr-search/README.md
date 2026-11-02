@@ -86,14 +86,15 @@ QUIVR_DEMO_URL=https://… QUIVR_DEMO_PASSWORD=… npm run perf --prefix quivr-s
 
 ### Journeys with an AI test agent
 
-`journeys/` walks the demo's main journeys like a visitor, with the open-source TesterArmy [`e2e`](https://e2e.tester.army/docs) runner, on a demo that is already running (`make demo` or a deployment). It is run by hand, never in CI, and pins its own dependencies (Node `^22.22.3 || >=24.8`).
+`journeys/` walks the demo's main journeys like a visitor, with the open-source TesterArmy [`e2e`](https://e2e.tester.army/docs) runner. It is run by hand, never in CI, and pins its own dependencies (Node `^22.22.3 || >=24.8`). Journeys tagged `live` only read: the Fil, an article, search, the Explorer, sources, an alert preview and Admin. Journeys tagged `local` add and remove a source, save, pause and delete an alert, and paste a text; they skip themselves on any address other than this machine, so the live demo never collects test data. Outcomes are checked with exact locators, without a model.
 
 ```sh
+make demo-journeys    # every journey, on a throwaway stack fed by the local test site, removed afterwards
 npm ci --prefix quivr-search/journeys
-QUIVR_DEMO_URL=http://127.0.0.1:5183 QUIVR_DEMO_PASSWORD=… npm run journeys --prefix quivr-search/journeys   # -- --tag live: read-only journeys
+QUIVR_DEMO_URL=https://<live demo> npm run journeys:live --prefix quivr-search/journeys   # read-only journeys, after a deploy
 ```
 
-The runner posts the password itself, so neither the model nor the page sees it. On macOS it can come from the keychain instead: `security add-generic-password -s quivr-demo -a <demo origin> -w`. Steps where the agent acts or judges need a model, chosen with `QUIVR_JOURNEYS_MODEL=<provider>:<model id>` (`chatgpt`, `gateway` or `openai`); nothing is committed. We recommend a ChatGPT subscription: `npm run e2e --prefix quivr-search/journeys -- login openai`, then `-- models openai` for the ids. Both scripts set `E2E_TELEMETRY_DISABLED=1`, so nothing reaches e2e's usage tracking. Reports, screenshots and the replay cache stay in its `.e2e` folder, ignored by git. Its traces hold the demo's session cookie: share one only with people who may have the password.
+`journeys:live` refuses to start without `QUIVR_DEMO_URL`. The runner posts the password itself, so neither a model nor the page sees it: set `QUIVR_DEMO_PASSWORD`, or on macOS store it once with `security add-generic-password -s quivr-demo -a <demo origin> -w`. Agent steps and `npm run e2e -- explore '<goal>'` need a model, chosen with `QUIVR_JOURNEYS_MODEL=<provider>:<model id>` (`chatgpt`, `gateway` or `openai`); nothing is committed. We recommend a ChatGPT subscription: `npm run e2e --prefix quivr-search/journeys -- login openai`, then `-- models openai` for the ids. Every script sets `E2E_TELEMETRY_DISABLED=1`. Reports, screenshots and the replay cache stay in its `.e2e` folder, ignored by git. Its traces hold the demo's session cookie: share one only with people who may have the password.
 
 ## Server configuration
 

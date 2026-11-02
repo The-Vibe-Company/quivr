@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
+.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf demo-journeys measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -15,6 +15,9 @@ verify-demo:
 # The demo's speed against quivr-search/perf/budgets.json on a seeded stack of its own (THE-1041); not part of verify.
 demo-perf:
 	GO=$(GO) python3 scripts/demo.py perf
+# The demo's main journeys with the TesterArmy e2e runner on a stack of its own (Spec 26); not part of verify.
+demo-journeys:
+	GO=$(GO) python3 scripts/demo.py journeys
 # Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
 check:
 	GO=$(GO) python3 scripts/check.py $(if $(check-group),--group $(check-group))
