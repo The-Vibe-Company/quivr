@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -309,6 +309,22 @@ test("an alert is created without a destination in the demo corpus with its eval
   });
   assert.equal(deleted.status, 200);
   assert.deepEqual((await call("/demo/alerts")).data.items, []);
+});
+
+test("without a configured evaluator, an alert pins the alerts plugin version this repository ships", async (t) => {
+  const manifest = await readFile(new URL("../../plugins/alerts/quivr-plugin.yaml", import.meta.url), "utf8");
+  const shipped = manifest.match(/^version: (\S+)$/m)[1];
+  const { core, call } = await start(t, { QUIVR_DEMO_ALERTS_EVALUATOR: "" });
+  const created = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "Orages",
+    expression: { kind: "keywords", match: { term: "orage" } },
+  });
+  assert.equal(created.status, 201);
+  const [sub] = core.seen.filter(
+    (r) => r.url === "/v0/subscriptions" && r.method === "POST",
+  );
+  assert.deepEqual([sub.body.evaluator.plugin_id, sub.body.evaluator.version], ["alerts", shipped]);
 });
 
 test("renaming an alert renames its Subscription and Saved Query without a new Version, and keeps what it caught", async (t) => {

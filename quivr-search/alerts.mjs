@@ -86,7 +86,9 @@ export function alertRoutes({
   registry,
   described = false,
 }) {
-  const [pluginID, pluginVersion] = (evaluator || "alerts@0.2.0").split("@");
+  // Without a setting, the alerts plugin version this repository ships: a pin
+  // the core does not serve refuses every alert as unsupported_evaluator.
+  const [pluginID, pluginVersion] = (evaluator || "alerts@0.4.0").split("@");
   const pin = {
     plugin_id: pluginID,
     version: pluginVersion,
