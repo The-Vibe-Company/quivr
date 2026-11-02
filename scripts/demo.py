@@ -12,6 +12,7 @@ import urllib.request
 import uuid
 import ci_dependencies
 import connector_plugin
+import demo_journeys
 import demo_perf
 import fake_feeds
 import gotest
@@ -22,11 +23,11 @@ from local import ROOT, Stack, port, run
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['dev', 'verify', 'perf', 'reset'])
+    parser.add_argument('command', choices=['dev', 'verify', 'perf', 'journeys', 'reset'])
     args = parser.parse_args()
     verify = args.command == 'verify'
-    # verify and perf run on a stack of their own, removed afterwards.
-    isolated = args.command in ('verify', 'perf')
+    # verify, perf and journeys run on a stack of their own, removed afterwards.
+    isolated = args.command in ('verify', 'perf', 'journeys')
     suffix = uuid.uuid4().hex[:10] if isolated else hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
     stack = Stack(f'quivr-demo-{args.command}-' + suffix if isolated else 'quivr-demo-' + suffix)
     stack.verifying = isolated
@@ -103,6 +104,8 @@ def main():
                     raise
         elif args.command == 'perf':
             demo_perf.run(base, demo_password, feeds_url, stack.directory, ROOT)
+        elif args.command == 'journeys':
+            demo_journeys.run(base, demo_password, feeds_url, ROOT)
         else:
             print(f'Demo: {base} — Ctrl+C to stop; texts persist until make demo-reset.', flush=True)
             process.wait()
@@ -122,8 +125,8 @@ def main():
             stack.capture()
         finally:
             stack.down(isolated)
-        # perf writes its own report (perf.json); no return here, which would swallow its failure.
-        if args.command != 'perf':
+        # perf and journeys write their own reports; no return here, which would swallow a failure.
+        if args.command not in ('perf', 'journeys'):
             (stack.directory / 'demo-report.json').write_text(json.dumps({
                 'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
                 'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',

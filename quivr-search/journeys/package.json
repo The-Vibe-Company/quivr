@@ -8,6 +8,7 @@
   },
   "scripts": {
     "journeys": "E2E_TELEMETRY_DISABLED=1 e2e run --reporter list,junit",
+    "journeys:live": "node -e \"process.env.QUIVR_DEMO_URL || (console.error('Set QUIVR_DEMO_URL to the live demo address.'), process.exit(2))\" && E2E_TELEMETRY_DISABLED=1 e2e run --tag live --reporter list,junit",
     "e2e": "E2E_TELEMETRY_DISABLED=1 e2e"
   },
   "devDependencies": {
