@@ -1,0 +1,37 @@
+---
+title: "How Quivr stores documents"
+description: "Five diagrams: what Quivr keeps for one document, where information is added, how normalizers map source formats, how vectors are computed, and who reads what."
+keywords: ["storage", "record", "version", "manifest", "part", "extensions", "quivr.metadata", "normalizer", "segment", "vector space", "access"]
+---
+
+This page draws what [Core concepts](/concepts) and [How Quivr works](/how-quivr-works) describe in words: what Quivr keeps for one document, at which moment information is added, and who reads which layer. Each diagram links to the page that explains it in detail. Its Excalidraw source sits next to the image, in [`docs-site/images/storage/`](https://github.com/The-Vibe-Company/quivr/tree/main/docs-site/images/storage), so it can be opened on [excalidraw.com](https://excalidraw.com) and changed.
+
+## A version never changes
+
+![Diagram: a Quivr record, its immutable versions, and what one version holds (manifest, extensions, derived data).](/images/storage/1-data-model.png)
+
+A Record is known by its Corpus, its Source Namespace and its Record Key. Each text sent under that identity becomes a Record Version that never changes; a correction adds a new version, and search moves to it once it is searchable. A version holds a Manifest (its Parts and Relations, stored in object storage), version Extensions and provenance (in PostgreSQL), and derived data: segments and their vectors. Derived data can be rebuilt from the version; the version itself is never rewritten.
+
+## Information is added at two moments
+
+![Diagram: a document's 6 steps in Quivr; information is added at submission and by the normalizer.](/images/storage/2-ingestion.png)
+
+Your application, or a connector, adds the identity, an optional `source_revision`, Extensions such as [`quivr.metadata`](/guides/search#filter-by-document-metadata) and provenance when it [sends the document](/guides/add-content). For a file, the normalizer routed to its media type adds the Parts, Relations, language and its own Extensions. An Extension namespace owned by a plugin is written only by that plugin's normalizer. Once the version is published, segments and vectors are derived from it; a rebuild or a [backfill](/run-quivr/backfill-a-vector-space) never creates a new version.
+
+## One media type, one normalizer
+
+![Diagram: Quivr's media type → normalizer route, and the 4 steps to write a normalizer.](/images/storage/3-normalizers.png)
+
+Quivr reads `text/*` itself. Every other media type needs a [route](/reference/configuration#plugin-pins) to a normalizer, or the file is refused with `422 unverified_blob`. Several normalizers run side by side, one per media type, and one plugin can cover several media types, as [`newsml-g2`](/run-quivr/catalog#newsml-g2) does for NewsML-G2 items and messages. Routing one media type to two plugins refuses startup. [Build your first plugin](/plugins/first-plugin) walks through writing one, and [Plugin types](/plugins/types#normalizer) lists what it receives and returns.
+
+## Vectors are computed on segments
+
+![Diagram: Quivr cuts a version into segments, then computes one vector per segment in each vector space.](/images/storage/4-embeddings.png)
+
+The [ingestion plugin](/plugins/types#ingestion) routed to the document's source media type receives the version's text Parts, never its blobs or Extensions. It cuts them into segments, then encodes each segment in every vector space it declares; one space is served, the others are for evaluation. At search time the same plugin encodes the query. Another model is another vector space: [choose a model](/run-quivr/choose-an-embedding-model), then backfill and promote it, or rebuild the Corpus.
+
+## Only the core touches storage
+
+![Diagram: only the Quivr core reads and writes PostgreSQL, object storage and Weaviate; each actor gets its share.](/images/storage/5-access.png)
+
+The API and the worker are the only processes that read and write PostgreSQL, object storage and the search index. Your application reaches what its [API key](/reference/configuration#api-keys) allows. Each plugin gets only what its job needs: a normalizer a short-lived signed link to one blob, an ingestion plugin the text Parts or the query, a retrieval plugin candidates already filtered by access and withdrawals. The search index is a copy that can be rebuilt from PostgreSQL and object storage. [How plugins work](/plugins/overview) explains where your text goes.
