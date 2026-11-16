@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, CircleNotch, Plus } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
+import { randomKey } from "../../lib/key";
 import {
   connectorMessage,
   createConnector,
@@ -122,7 +123,7 @@ export function AddSource({
       const { feeds } = await discoverFeeds(normalise(value));
       // The address changed meanwhile: this answer is for another one.
       if (attempt !== lookup.current) return;
-      setFound({ feeds, key: crypto.randomUUID() });
+      setFound({ feeds, key: randomKey() });
       setChoice(0);
       setName(feeds[0].title.slice(0, MAX_NAME));
       setRenamed(false);
@@ -362,7 +363,7 @@ export function AddSource({
                         s,
                         s.title,
                         interval,
-                        crypto.randomUUID(),
+                        randomKey(),
                         marker,
                       )
                     }

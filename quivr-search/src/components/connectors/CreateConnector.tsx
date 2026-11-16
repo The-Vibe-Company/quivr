@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, Key, Plugs } from "@phosphor-icons/react";
 import { Dialog } from "../Dialog";
 import { APIError } from "../../lib/search";
+import { randomKey } from "../../lib/key";
 import {
   createConnector,
   type Connector,
@@ -120,7 +121,7 @@ function ConnectorForm({
   const [withCredential, setWithCredential] = useState(
     kind.credential === "required",
   );
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(randomKey());
   const { busy, failure, summary, run } = useSubmit(
     catalog.min_interval_seconds,
   );
@@ -173,7 +174,7 @@ function ConnectorForm({
                   error instanceof APIError &&
                   error.code === "idempotency_conflict"
                 )
-                  key.current = crypto.randomUUID();
+                  key.current = randomKey();
                 throw error;
               }
             };

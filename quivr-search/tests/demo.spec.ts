@@ -4,6 +4,11 @@ test("ajouter du texte, le retrouver et lire la source exacte", async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // Served over plain HTTP outside localhost, a browser has no
+  // crypto.randomUUID; the forms must still make their keys (THE-2356).
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", { value: undefined });
+  });
   const stamp = `Témoignage démo ${Date.now()}`;
   const source = `À Marseille, les ferries pour la Corse circulent normalement.\n\nLe navire Étoile 🌟 reprend ses traversées après inspection. ${stamp}.`;
   await page.goto("/");
