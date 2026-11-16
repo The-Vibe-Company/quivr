@@ -8,8 +8,8 @@
     "tag_metadata_url": "https://api.github.com/repos/seaweedfs/seaweedfs/git/ref/tags/4.45"
   },
   "builder": {
-    "image": "golang:1.27.3-bookworm",
-    "digest": "sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9",
+    "image": "golang:1.27.4-bookworm",
+    "digest": "sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
     "cgo_enabled": false,
     "parallelism": 2
   },
@@ -19,6 +19,7 @@
     "curl": "8.23.0-r0",
     "libcurl": "8.23.0-r0",
     "brotli-libs": "1.2.1-r0",
+    "zlib": "1.4-r0",
     "binary": "/usr/bin/weed",
     "upstream_entrypoint": "/entrypoint.sh",
     "upstream_command": ["mini", "-dir=/data"]
@@ -31,7 +32,8 @@
     "golang.org/x/tools": "v0.51.0",
     "golang.org/x/sync": "v0.24.0",
     "golang.org/x/mod": "v0.41.0",
-    "golang.org/x/term": "v0.47.0"
+    "golang.org/x/term": "v0.47.0",
+    "github.com/andybalholm/brotli": "v1.2.7"
   },
   "upstream_dockerfile": "https://raw.githubusercontent.com/seaweedfs/seaweedfs/4.45/docker/Dockerfile.go_build"
 }

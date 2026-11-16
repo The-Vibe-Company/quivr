@@ -154,8 +154,8 @@ async def dispatch(store, campaign, cfg, sha, invoke, outbox):
 
 COMPOSE_VERSION = '2.39.4'
 COMPOSE_SHA = '7af95166a730b87e172d4fc9aefea8725d3c6c7327d59149267b452114ddb7d4'
-# linux/amd64 golang:1.27.3-bookworm; immutable confirmation build inputs.
-CONFIRMATION_BASE = 'golang@sha256:e482b31b5d30c31f9e495f4b8cbdf41429b2d74955dfbcd9c0a904483d738390'
+# linux/amd64 golang:1.27.4-bookworm; immutable confirmation build inputs.
+CONFIRMATION_BASE = 'golang@sha256:fb7cceb528b47141eccd9b60bf3cbd27d5ef5f8cf5b7d338bec866da495b50dc'
 DEBIAN_SNAPSHOT = '20261003T000000Z'
 
 

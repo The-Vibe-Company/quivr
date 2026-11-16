@@ -1,6 +1,6 @@
 module github.com/The-Vibe-Company/quivr/plugins/object-storage-archive
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/The-Vibe-Company/quivr/sdks/go v0.0.0

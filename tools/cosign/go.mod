@@ -1,6 +1,6 @@
 module github.com/The-Vibe-Company/quivr/tools/cosign
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/go-openapi/strfmt v0.27.0
