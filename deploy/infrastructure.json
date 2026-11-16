@@ -1,7 +1,7 @@
 {
   "services": {
     "postgres": {
-      "image": "postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "image": "postgres:17.12-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7",
       "environment": {
         "QUIVR_POSTGRES_MAX_CONNECTIONS": "256",
         "QUIVR_POSTGRES_WORK_MEM": "4MB",
@@ -147,7 +147,7 @@
       }
     },
     "build_images": {
-      "go": "golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9",
+      "go": "golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
       "autoscaler_runtime": "gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab"
     },
     "services": {
