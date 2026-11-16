@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { APIError } from "../../lib/search";
+import { randomKey } from "../../lib/key";
 import {
   DESCRIPTION,
   alertMessage,
@@ -70,7 +71,7 @@ export function AlertForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // One key per alert being written, so a retried submit is not a second alert.
-  const idempotency = useRef(crypto.randomUUID());
+  const idempotency = useRef(randomKey());
   const parsed = useParsed(query);
   // Switching between the guided form and the advanced query removes the
   // button pressed: focus goes to the first field of the side shown.
@@ -83,7 +84,7 @@ export function AlertForm({
 
   const reset = (next: Alert | null) => {
     setError("");
-    idempotency.current = crypto.randomUUID();
+    idempotency.current = randomKey();
     setName(next?.name || "");
     setDescription(next?.kind === "described" ? next.expression.description : "");
     setKind(next?.kind === "described" ? "described" : "keywords");
@@ -98,7 +99,7 @@ export function AlertForm({
 
   const changed = () => {
     setError("");
-    if (!editing) idempotency.current = crypto.randomUUID();
+    if (!editing) idempotency.current = randomKey();
   };
   const built = build({ ...fields, sources: watched });
   const builtQuery = built ? (print(built.match) ?? "") : "";

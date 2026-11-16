@@ -3,6 +3,7 @@
 // destination; the browser only sends a name and an expression: keywords, or
 // a plain-language description when the deployment has a classifier.
 import { APIError, request } from "./search";
+import { randomKey } from "./key";
 import { pollChanges } from "./connectors";
 import { displayName } from "./sourceNames";
 import type { KeywordExpression } from "./notation";
@@ -112,7 +113,7 @@ export function catches(list: AlertList | null, feed: FeedItem[]) {
 }
 
 const path = (id: string) => `/demo/alerts/${encodeURIComponent(id)}`;
-const key = () => crypto.randomUUID();
+const key = () => randomKey();
 
 export const fetchAlerts = (signal?: AbortSignal) =>
   request<AlertList>("/demo/alerts", undefined, signal);

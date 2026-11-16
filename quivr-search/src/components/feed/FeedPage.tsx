@@ -13,6 +13,7 @@ import {
 } from "react";
 import { Broadcast, Coins, NotePencil, Plus } from "@phosphor-icons/react";
 import { APIError, search, tokenize } from "../../lib/search";
+import { randomKey } from "../../lib/key";
 import { asPercent, elapsed, explain, paid, type Why } from "../../lib/deep";
 import type { SearchUsage } from "../../types";
 import { HAND_NAMESPACE, newestFirst, type FeedItem } from "../../lib/feed";
@@ -608,7 +609,7 @@ export function FeedPage({
     }
     setFollowing(true);
     try {
-      await createAlert(query.slice(0, 120), expression, crypto.randomUUID());
+      await createAlert(query.slice(0, 120), expression, randomKey());
       await alerts.reload();
       notify(
         `C’est noté : vous serez prévenu dès qu’un nouvel article parlera de « ${query} ».`,

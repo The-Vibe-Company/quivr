@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Key } from "@phosphor-icons/react";
 import { Dialog } from "../Dialog";
 import { APIError } from "../../lib/search";
+import { randomKey } from "../../lib/key";
 import {
   changeSchedule,
   connectorMessage,
@@ -265,7 +266,7 @@ function CredentialSection({
 }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(randomKey());
   const { busy, failure, summary, run } = useSubmit(
     catalog.min_interval_seconds,
   );
@@ -312,7 +313,7 @@ function CredentialSection({
           type="button"
           className="button"
           onClick={() => {
-            key.current = crypto.randomUUID();
+            key.current = randomKey();
             setDone(false);
             setOpen(true);
           }}
@@ -345,7 +346,7 @@ function CredentialSection({
                       error instanceof APIError &&
                       error.code === "idempotency_conflict"
                     )
-                      key.current = crypto.randomUUID();
+                      key.current = randomKey();
                     throw error;
                   });
                   onChanged(next);

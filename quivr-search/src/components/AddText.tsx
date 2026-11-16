@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, FileText, Plus, ArrowRight } from "@phosphor-icons/react";
 import { addText, fetchReceipt } from "../lib/search";
+import { randomKey } from "../lib/key";
 import { Dialog } from "./Dialog";
 import type { Receipt } from "../types";
 const STORAGE = "quivr-demo-draft.v1";
 type Draft = { text: string; key: string; receipt?: Receipt };
 function fresh(): Draft {
-  return { text: "", key: crypto.randomUUID() };
+  return { text: "", key: randomKey() };
 }
 function readDraft(storage: string): Draft {
   try {
@@ -149,7 +150,7 @@ export function AddText({
                 id="source-text"
                 value={draft.text}
                 onChange={(event) => {
-                  save({ text: event.target.value, key: crypto.randomUUID() });
+                  save({ text: event.target.value, key: randomKey() });
                   setError("");
                 }}
                 disabled={sending}
