@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.3](https://github.com/The-Vibe-Company/quivr/compare/v2.0.2...v2.0.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* **demo:** make idempotency keys without crypto.randomUUID over plain HTTP ([#3991](https://github.com/The-Vibe-Company/quivr/issues/3991)) ([890b968](https://github.com/The-Vibe-Company/quivr/commit/890b9689ca5a8b8a422be7017aa29522a259fe5f))
+* **demo:** pin alerts to the plugin version the core serves ([#3980](https://github.com/The-Vibe-Company/quivr/issues/3980)) ([25e4edf](https://github.com/The-Vibe-Company/quivr/commit/25e4edf083c0fcd115ee952a048444de646604fd))
+* **images:** build on Go 1.27.4 and patch zlib and brotli in Postgres and SeaweedFS ([#3992](https://github.com/The-Vibe-Company/quivr/issues/3992)) ([b29e919](https://github.com/The-Vibe-Company/quivr/commit/b29e91957dfa9f12720478f344f628ea922d0101))
+
 ## [2.0.2](https://github.com/The-Vibe-Company/quivr/compare/v2.0.1...v2.0.2) (2026-10-30)
 
 
