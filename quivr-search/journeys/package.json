@@ -13,8 +13,8 @@
   },
   "devDependencies": {
     "@ai-sdk/openai": "4.0.89",
-    "@e2e-dev/web": "0.13.0",
+    "@e2e-dev/web": "0.16.0",
     "ai": "7.0.133",
-    "e2e": "0.18.0"
+    "e2e": "0.23.1"
   }
 }
