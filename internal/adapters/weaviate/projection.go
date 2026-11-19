@@ -96,7 +96,7 @@ func failed(err error) error {
 	if !errors.As(err, &request) {
 		return err
 	}
-	if lost(err) {
+	if unreachable(err) {
 		return unavailable{request}
 	}
 	return rejected{request}
@@ -297,6 +297,9 @@ func (s *Store) insertBatch(ctx context.Context, collection string, objects []pr
 	}
 	var request requestError
 	errors.As(err, &request)
+	if !request.grpc {
+		return fmt.Errorf("projection batch request failed: %w", failed(err))
+	}
 	return fmt.Errorf("projection batch request failed (%s): %w", request.code, failed(err))
 }
 
@@ -673,7 +676,7 @@ func (s *Store) rank(ctx context.Context, collection string, r ranked) ([]ranked
 
 // queryFailed keeps connection failures distinct from a refused query.
 func queryFailed(err error, message string) error {
-	if lost(err) {
+	if unreachable(err) {
 		return failed(err)
 	}
 	return errors.New(message)

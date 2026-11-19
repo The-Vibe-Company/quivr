@@ -15,10 +15,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	wv "github.com/weaviate/weaviate-go-client/v6"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
@@ -116,7 +118,8 @@ func (i index) rest(t *testing.T, method, path string, in, out any) int {
 	if i.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+i.APIKey)
 	}
-	res, err := http.DefaultClient.Do(req)
+	// Bounded, so an unreachable index fails the test instead of hanging it.
+	res, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +244,11 @@ func (i index) proxy(t *testing.T) *wireProxy {
 		t.Fatal(err)
 	}
 	forward := httputil.NewSingleHostReverseProxy(target)
-	backend, err := grpc.NewClient(i.GRPC, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{}), grpc.MaxCallRecvMsgSize(256<<20)))
+	transport := insecure.NewCredentials()
+	if target.Scheme == "https" {
+		transport = credentials.NewTLS(nil)
+	}
+	backend, err := grpc.NewClient(i.GRPC, grpc.WithTransportCredentials(transport), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{}), grpc.MaxCallRecvMsgSize(256<<20)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -569,7 +569,11 @@ func Run(command string, args ...string) error {
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection, err := weaviate.New(weaviate.Config{URL: cfg.WeaviateURL, GRPCAddress: cfg.WeaviateGRPCAddress, APIKey: cfg.WeaviateAPIKey, TLS: cfg.TLS.Weaviate})
 	if err != nil {
-		return badConfig(configInvalid, "weaviate_url", err.Error())
+		field := "weaviate_url"
+		if errors.Is(err, weaviate.ErrGRPCAddress) {
+			field = "weaviate_grpc_address"
+		}
+		return badConfig(configInvalid, field, err.Error())
 	}
 	closePool := closeResources
 	closeResources = func(deadline context.Context) {

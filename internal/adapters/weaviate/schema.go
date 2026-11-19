@@ -277,18 +277,20 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 		// A collection created before source routing, named spaces, or lexical
 		// plugin metadata gains the missing properties. Older objects lack a
 		// value, so their immutable anchors keep their original bytes.
+		var missing []collections.Property
 		for _, property := range []collections.Property{
 			filterable(projectionPluginProperty),
 			filterable(sourceMediaTypeProperty),
 			filterable(sourceNamespaceProperty),
 			searchable(lexicalProperty),
 		} {
-			if present[property.Name] {
-				continue
+			if !present[property.Name] {
+				missing = append(missing, property)
 			}
-			if err = s.addProperty(ctx, collection, property); err != nil {
-				return err
-			}
+		}
+		// Another process may be adding the same properties while it starts.
+		if err = s.ensureProperties(ctx, collection, missing); err != nil {
+			return err
 		}
 		// Bootstrap owns only the legacy default. Other named vectors require
 		// their generation's recorded settings, reconciled by ensureVectors.

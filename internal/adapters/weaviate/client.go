@@ -41,6 +41,10 @@ type Config struct {
 	TLS         outbound.TLS
 }
 
+// ErrGRPCAddress reports an invalid Config.GRPCAddress, so a caller can name
+// the setting at fault.
+var ErrGRPCAddress = errors.New("weaviate: gRPC address must be host:port")
+
 // New validates cfg without opening a connection; the first request connects.
 func New(cfg Config) (*Store, error) {
 	u, err := url.Parse(cfg.URL)
@@ -67,7 +71,7 @@ func New(cfg Config) (*Store, error) {
 	grpcHost, grpcPort := u.Hostname(), defaultGRPCPort
 	if cfg.GRPCAddress != "" {
 		if grpcHost, grpcPort, err = net.SplitHostPort(cfg.GRPCAddress); err != nil || grpcHost == "" || grpcPort == "" {
-			return nil, errors.New("weaviate: gRPC address must be host:port")
+			return nil, ErrGRPCAddress
 		}
 	}
 	options := []wv.Option{
@@ -92,19 +96,18 @@ func clientHost(host string) string {
 	return host
 }
 
-// connect opens the client on first use. A failed attempt is retried by the
-// next request, so a process may start before the index does.
+// connect opens the client on first use, within the caller's deadline. A
+// failed attempt is retried by the next request, so a process may start
+// before the index does.
 func (s *Store) connect(ctx context.Context) (*wv.Client, error) {
 	s.clientMu.Lock()
 	defer s.clientMu.Unlock()
 	if s.client != nil {
 		return s.client, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
 	client, err := wv.NewClient(ctx, s.options...)
 	if err != nil {
-		return nil, errors.New("projection connection unavailable")
+		return nil, err
 	}
 	s.client = client
 	return client, nil
@@ -122,20 +125,21 @@ func (s *Store) Close() error {
 	return client.Close()
 }
 
-// request runs one index request under its own deadline and trace span. Errors
-// keep the provider's explanation with the API key removed; callers that face
-// users replace them with fixed messages.
+// request runs one index request under its own deadline and trace span; the
+// first one also opens the connection inside both. Errors keep the provider's
+// explanation with the API key removed; callers that face users replace them
+// with fixed messages.
 func (s *Store) request(ctx context.Context, timeout time.Duration, call func(context.Context, *wv.Client) error) error {
-	client, err := s.connect(ctx)
-	if err != nil {
-		return err
-	}
 	caller := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ctx, span := telemetry.Start(ctx, "weaviate.request")
 	defer span.End()
-	err = call(ctx, client)
+	client, err := s.connect(ctx)
+	connected := err == nil
+	if connected {
+		err = call(ctx, client)
+	}
 	telemetry.Fail(span, err)
 	if err == nil {
 		return nil
@@ -143,7 +147,15 @@ func (s *Store) request(ctx context.Context, timeout time.Duration, call func(co
 	if caller.Err() == nil && (ctx.Err() == context.DeadlineExceeded || status.Code(err) == codes.DeadlineExceeded) {
 		return requestError{message: s.redact(err.Error()), timeout: true, cause: context.DeadlineExceeded}
 	}
-	return requestError{message: s.redact(err.Error()), cause: sentinel(err), code: status.Code(err), http: httpStatus(err)}
+	failure := requestError{message: s.redact(err.Error()), cause: sentinel(err), unconnected: !connected, http: httpStatus(err)}
+	if failure.cause == nil {
+		failure.cause = sentinel(caller.Err())
+	}
+	// Only the index's own gRPC status says how a call ended.
+	if answered, ok := status.FromError(err); ok {
+		failure.grpc, failure.code = true, answered.Code()
+	}
+	return failure
 }
 
 // call is request with the default deadline.
@@ -157,8 +169,12 @@ type requestError struct {
 	message string
 	timeout bool
 	cause   error
-	code    codes.Code
-	http    int
+	// grpc is set when the index answered with a gRPC status, held in code.
+	grpc bool
+	code codes.Code
+	http int
+	// unconnected is set when the client could not be opened at all.
+	unconnected bool
 }
 
 func (e requestError) Error() string   { return e.message }
@@ -171,6 +187,9 @@ func (e requestError) Is(target error) bool {
 var _ net.Error = requestError{}
 
 func sentinel(err error) error {
+	if err == nil {
+		return nil
+	}
 	for _, target := range []error{context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, target) {
 			return target
@@ -194,20 +213,32 @@ func notFound(err error) bool {
 }
 
 // lost reports that the index may have applied a request whose reply never
-// arrived: the request timed out, was cancelled, or the connection dropped.
+// arrived: the request timed out, was cancelled, or the connection dropped
+// with a gRPC status that says so. An error raised before sending, such as a
+// value the client could not encode, is a definite failure.
 func lost(err error) bool {
 	var failed requestError
-	if !errors.As(err, &failed) {
+	if !errors.As(err, &failed) || failed.unconnected {
 		return false
 	}
 	if failed.timeout || failed.cause != nil {
 		return true
 	}
-	return failed.http == 0 && (failed.code == codes.Unavailable || failed.code == codes.Canceled || failed.code == codes.Unknown)
+	return failed.grpc && (failed.code == codes.Unavailable || failed.code == codes.Canceled || failed.code == codes.DeadlineExceeded)
+}
+
+// unreachable reports a failure to reach the index at all, as opposed to a
+// request it refused.
+func unreachable(err error) bool {
+	var failed requestError
+	if !errors.As(err, &failed) {
+		return false
+	}
+	return failed.unconnected || lost(err) || (!failed.grpc && failed.http == 0)
 }
 
 // tooLarge reports a reply over the index's gRPC message limit.
 func tooLarge(err error) bool {
 	var failed requestError
-	return errors.As(err, &failed) && failed.code == codes.ResourceExhausted
+	return errors.As(err, &failed) && failed.grpc && failed.code == codes.ResourceExhausted
 }

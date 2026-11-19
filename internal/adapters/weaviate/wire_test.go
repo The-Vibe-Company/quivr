@@ -71,8 +71,13 @@ func TestConfigRefusesWhatTheClientCannotHonour(t *testing.T) {
 		"server name":        {URL: "https://index.example", TLS: outbound.TLS{ServerName: "index.internal"}},
 		"gRPC without port":  {URL: "https://index.example", GRPCAddress: "index.example"},
 	} {
-		if _, err := weaviate.New(cfg); err == nil {
+		_, err := weaviate.New(cfg)
+		if err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+		// Only a gRPC address failure names that setting to the operator.
+		if errors.Is(err, weaviate.ErrGRPCAddress) != (name == "gRPC without port") {
+			t.Errorf("%s: reported as %v", name, err)
 		}
 	}
 	for name, cfg := range map[string]weaviate.Config{
@@ -119,11 +124,16 @@ func TestNoRequestUsesGraphQL(t *testing.T) {
 			t.Fatalf("%s search: %v %v", mode, rows, err)
 		}
 	}
-	if _, err = store.PurgeVersion(ctx, collection, "org-wire", seg.VersionID); err != nil {
+	// Each purge needs objects to select, so the version is published again
+	// between them.
+	if purged, err := store.PurgeGeneration(ctx, collection, "org-wire", "corpus-wire", g.ID); err != nil || purged.Deleted == 0 {
+		t.Fatalf("generation purge: %+v %v", purged, err)
+	}
+	if err = store.Publish(ctx, g, "org-wire", "corpus-wire", "example-feed", content.Version{ID: seg.VersionID}, seg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.PurgeGeneration(ctx, collection, "org-wire", "corpus-wire", g.ID); err != nil {
-		t.Fatal(err)
+	if purged, err := store.PurgeVersion(ctx, collection, "org-wire", seg.VersionID); err != nil || purged.Deleted == 0 {
+		t.Fatalf("version purge: %+v %v", purged, err)
 	}
 	searches := 0
 	for _, request := range proxy.Requests() {

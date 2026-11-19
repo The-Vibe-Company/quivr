@@ -109,7 +109,13 @@ func (s *Store) purgeGenerationWindow(ctx context.Context, collection, org, corp
 	}); err != nil {
 		return result, fmt.Errorf("projection purge selection: %w", err)
 	}
+	if listed == nil {
+		return result, errors.New("projection purge selection missing or invalid")
+	}
 	result.RemainingAtLeast = matches
+	// The client returns no slice for an empty reply, so an empty window
+	// cannot be told from a missing one. Either way nothing is deleted and
+	// the purge stays incomplete until a later dry run matches nothing.
 	if len(listed.Objects) == 0 {
 		return result, nil
 	}
