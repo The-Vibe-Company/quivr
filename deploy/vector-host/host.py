@@ -67,6 +67,9 @@ def assets(settings, uuid='UNMOUNTED'):
     proxy_config = ('{\n  admin off\n  auto_https disable_redirects\n}\n'
                     + settings['hostname'] + ' {\n  tls {\n    issuer acme {\n'
                     '      disable_http_challenge\n    }\n  }\n'
+                    # The index client speaks REST and gRPC; both arrive on 443.
+                    '  @grpc header Content-Type application/grpc*\n'
+                    '  reverse_proxy @grpc h2c://weaviate:50051\n'
                     '  reverse_proxy weaviate:8080\n}\n')
     # Own table only; do not flush the machine's or Docker's rules. The forward
     # hook runs after Docker, so ACCEPT in Docker cannot bypass our policy.

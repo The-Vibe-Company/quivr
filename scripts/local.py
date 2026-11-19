@@ -121,6 +121,7 @@ class Stack:
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()
         s=self.state
         weaviate=self.compose('port','weaviate','8080',capture_output=True,text=True).stdout.strip()
+        weaviate_grpc=self.compose('port','weaviate','50051',capture_output=True,text=True).stdout.strip()
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
@@ -130,7 +131,7 @@ class Stack:
             tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
         s['tei_url']='http://'+tei;self.save()
-        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
+        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,weaviate_grpc_address=weaviate_grpc,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
             # api and worker follow a plugin activation within this delay (THE-781).
             plugin_plan_poll='200ms',
             # Verification exercises snapshots promptly; dev keeps deployment pacing.

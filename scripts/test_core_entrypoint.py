@@ -316,11 +316,12 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertNotIn('credential_key', config)
             self.assertEqual(config['cursor_key'], 'placeholder-cursor-key')
 
-    def test_weaviate_api_key_is_passed_when_set_and_omitted_when_empty(self):
-        config = core_entrypoint.build_config({**ENV, 'WEAVIATE_API_KEY': 'literal-weaviate-key'})
-        self.assertEqual(config['weaviate_api_key'], 'literal-weaviate-key')
-        for env in (ENV, {**ENV, 'WEAVIATE_API_KEY': ''}):
-            self.assertNotIn('weaviate_api_key', core_entrypoint.build_config(env))
+    def test_weaviate_settings_are_passed_when_set_and_omitted_when_empty(self):
+        for name, key in (('WEAVIATE_API_KEY', 'weaviate_api_key'), ('WEAVIATE_GRPC_ADDRESS', 'weaviate_grpc_address')):
+            config = core_entrypoint.build_config({**ENV, name: 'literal-weaviate-value'})
+            self.assertEqual(config[key], 'literal-weaviate-value')
+            for env in (ENV, {**ENV, name: ''}):
+                self.assertNotIn(key, core_entrypoint.build_config(env))
 
     def test_demo_records_query_text(self):
         # The engine default is off; the demo's usage view lists its most frequent queries.

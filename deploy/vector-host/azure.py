@@ -330,6 +330,7 @@ def _provision(args, context):
     if result.returncode:
         raise RuntimeError('Host initialization failed; inspect cloud-init and host services privately, then rerun')
     return {'status': json.loads(result.stdout)['status'], 'weaviate_url': 'https://' + hostname,
+            'weaviate_grpc_address': hostname + ':443',
             'resolved_weaviate_limits': {**desired, 'cpus': cpus},
             'host_check': 'Run host.py check on the VM; validate protected requests and engine searches.'}
 

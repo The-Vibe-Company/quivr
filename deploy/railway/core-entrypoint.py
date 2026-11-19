@@ -262,6 +262,10 @@ def build_config(env):
     weaviate_key = env.get('WEAVIATE_API_KEY', '')
     if weaviate_key:
         config['weaviate_api_key'] = weaviate_key
+    # Unset, the engine uses the WEAVIATE_URL host on port 50051.
+    weaviate_grpc = env.get('WEAVIATE_GRPC_ADDRESS', '')
+    if weaviate_grpc:
+        config['weaviate_grpc_address'] = weaviate_grpc
     # Optional operator key, never given to the web app: rebuilds a Corpus projection
     # (for example after a migration adds a projected field), reads the plugin
     # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)

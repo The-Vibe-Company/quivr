@@ -77,12 +77,15 @@ class LoadStack(Stack):
                      text=True).stdout.strip() for service, port in
                      [('postgres', '5432'), ('temporal', '7233'),
                       ('seaweed', '8333'), ('weaviate', '8080')]}
+        weaviate_grpc = self.compose('port', 'weaviate', '50051', capture_output=True,
+                                     text=True).stdout.strip()
         s = self.state
         latencies = self.scenario['fake_latency_ms']
         self.cfg = {
             'database_url': f"postgres://quivr:{s['password']}@{addresses['postgres']}/quivr?sslmode=disable",
             'temporal_address': addresses['temporal'],
             'weaviate_url': 'http://' + addresses['weaviate'],
+            'weaviate_grpc_address': weaviate_grpc,
             's3': {'endpoint': 'http://' + addresses['seaweed'], 'access_key': s['s3_access'],
                    'secret_key': s['s3_secret'], 'bucket': 'quivr-content'},
             'cursor_key': s['cursor_key'], 'credential_key': s['credential_key'],
