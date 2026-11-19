@@ -151,3 +151,32 @@ func TestNoRequestUsesGraphQL(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An index that cannot be reached and an index that refuses a request are
+// reported apart; only the first is an outage.
+func TestUnreachableIndexIsNotARefusedRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		schema func(http.ResponseWriter)
+		want   string
+	}{
+		"no reply": {func(http.ResponseWriter) { panic(http.ErrAbortHandler) }, "projection connection unavailable"},
+		"refused":  {func(w http.ResponseWriter) { w.WriteHeader(http.StatusUnprocessableEntity) }, "projection request failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := serve(t, func(w http.ResponseWriter, r *http.Request, _ wireRequest) {
+				if strings.HasPrefix(r.URL.Path, "/v1/schema") {
+					tc.schema(w)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"version":"1.39.14","grpcMaxMessageSize":104858000}`))
+			}, func(context.Context, wireRequest, []byte) ([]byte, error) {
+				return nil, status.Error(codes.Internal, "unused")
+			})
+			err := fake.open(t).Bootstrap(context.Background(), "QuivrTextV4")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

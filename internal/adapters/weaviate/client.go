@@ -147,7 +147,7 @@ func (s *Store) request(ctx context.Context, timeout time.Duration, call func(co
 	if caller.Err() == nil && (ctx.Err() == context.DeadlineExceeded || status.Code(err) == codes.DeadlineExceeded) {
 		return requestError{message: s.redact(err.Error()), timeout: true, cause: context.DeadlineExceeded}
 	}
-	failure := requestError{message: s.redact(err.Error()), cause: sentinel(err), unconnected: !connected, http: httpStatus(err)}
+	failure := requestError{message: s.redact(err.Error()), cause: sentinel(err), unconnected: !connected, http: httpStatus(err), transport: transportFailure(err)}
 	if failure.cause == nil {
 		failure.cause = sentinel(caller.Err())
 	}
@@ -175,6 +175,8 @@ type requestError struct {
 	http int
 	// unconnected is set when the client could not be opened at all.
 	unconnected bool
+	// transport is set when a REST request got no HTTP reply.
+	transport bool
 }
 
 func (e requestError) Error() string   { return e.message }
@@ -234,7 +236,20 @@ func unreachable(err error) bool {
 	if !errors.As(err, &failed) {
 		return false
 	}
-	return failed.unconnected || lost(err) || (!failed.grpc && failed.http == 0)
+	return failed.unconnected || failed.transport || lost(err)
+}
+
+// restUnanswered is how the client library reports a REST request that got
+// no HTTP reply. It formats the cause into the text, so the text is all
+// there is to match.
+const restUnanswered = "execute request: "
+
+// transportFailure reports a REST request that never got an HTTP reply. Any
+// other error without a status, such as a value the client could not encode,
+// is a refused request.
+func transportFailure(err error) bool {
+	var network net.Error
+	return errors.As(err, &network) || strings.Contains(err.Error(), restUnanswered)
 }
 
 // tooLarge reports a reply over the index's gRPC message limit.
