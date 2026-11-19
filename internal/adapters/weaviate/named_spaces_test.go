@@ -1,13 +1,14 @@
 package weaviate_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/weaviate/weaviate-go-client/v6/query"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -55,15 +56,14 @@ func TestNamedSpacesLiveBesideAGenerationBuiltBefore(t *testing.T) {
 	for _, name := range []string{"title", "body"} {
 		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true})
 	}
-	schema, _ := json.Marshal(map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": "cosine"}}}})
-	res, err := f.store.Client.Post(f.url+"/v1/schema", "application/json", bytes.NewReader(schema))
-	if err != nil || res.StatusCode != 200 {
-		t.Fatalf("create the legacy collection: %v %v", res, err)
+	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": "cosine"}}}}
+	if status := f.index.rest(t, http.MethodPost, "/v1/schema", schema, nil); status != http.StatusOK {
+		t.Fatalf("create the legacy collection: HTTP %d", status)
 	}
-	res.Body.Close()
 	legacy := content.Generation{ID: "generation-legacy", Collection: collection, ProfileVersion: retrieval.ProfileVersion, SpaceID: "builtin", SourceNamespaceProjected: true}
 	f.publish(legacy, f.segmentation("old", "harbour strike at dawn"))
-	if err = f.store.PublishEmbeddings(f.ctx, legacy, f.org, []content.EmbeddingData{spaceEmbedding(f, "builtin", "old", unitVector(1))}); err != nil {
+	err := f.store.PublishEmbeddings(f.ctx, legacy, f.org, []content.EmbeddingData{spaceEmbedding(f, "builtin", "old", unitVector(1))})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err = f.store.Bootstrap(f.ctx, collection); err != nil {
@@ -125,29 +125,18 @@ func TestNamedSpacesLiveBesideAGenerationBuiltBefore(t *testing.T) {
 		t.Fatalf("hybrid in the served space: %v", got)
 	}
 	// The anchor keeps the lexical text apart from the source text.
-	var object struct {
-		Properties map[string]any `json:"properties"`
-	}
-	where, _ := json.Marshal(map[string]any{"query": `{Get{` + collection + `(where:{path:["segmentId"],operator:Equal,valueText:"both"}){body lexicalText generationId}}}`})
-	res, err = f.store.Client.Post(f.url+"/v1/graphql", "application/json", bytes.NewReader(where))
+	rows, err := f.raw.Collections.Use(collection).Query.OverAll(f.ctx, query.OverAll{Filter: textEquals("segmentId", "both"), ReturnProperties: []string{"body", "lexicalText", "generationId"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rows struct {
-		Data struct {
-			Get map[string][]map[string]any `json:"Get"`
-		} `json:"data"`
-	}
-	_ = json.NewDecoder(res.Body).Decode(&rows)
-	res.Body.Close()
 	found := false
-	for _, row := range rows.Data.Get[collection] {
-		if row["generationId"] == named.ID && row["lexicalText"] == "harbour strike dawn" && row["body"] == "harbour strike at dawn" {
+	for _, row := range rows.Objects {
+		if row.Properties["generationId"] == named.ID && row.Properties["lexicalText"] == "harbour strike dawn" && row.Properties["body"] == "harbour strike at dawn" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("lexical text not projected beside the source text: %+v %+v", rows.Data.Get[collection], object)
+		t.Fatalf("lexical text not projected beside the source text: %+v", rows.Objects)
 	}
 
 	// A retrieval plugin's candidate requests: the lexical field ranks the

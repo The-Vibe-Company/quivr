@@ -22,8 +22,9 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
 | `telemetry` | no | Opt-in OTLP traces and metrics export. See [OpenTelemetry](#opentelemetry). |
 | `tls` | no | Outgoing connection encryption and trust. See [Outbound TLS](#outbound-tls). |
-| `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
-| `weaviate_api_key` | no | Secret sent as `Authorization: Bearer <key>` on every index request. Omitted or empty keeps anonymous access. Use HTTPS for an external index. |
+| `weaviate_url` | yes | The Weaviate search index's REST address: `http://` or `https://`, a host and an optional port, such as `http://weaviate:8080`. A path is refused. |
+| `weaviate_grpc_address` | no | The index's gRPC address as `host:port`. Defaults to the `weaviate_url` host on port `50051`. It uses the same scheme as `weaviate_url`: TLS for `https://`, plaintext for `http://`. |
+| `weaviate_api_key` | no | Secret sent as `Authorization: Bearer <key>` on every index request, REST and gRPC. Omitted or empty keeps anonymous access. Use HTTPS for an external index. |
 | `vector_index` | no | How the search index compresses each vector space. Default 8-bit compression. See [Search index compression](#search-index-compression). |
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
 | `listen` | no | Address of the public HTTP API. Default `127.0.0.1:8080`. |
@@ -177,9 +178,11 @@ Each dependency accepts these optional fields:
 
 Temporal defaults to plaintext; enable it with `tls.temporal.enabled: true`. Its address stays `host:port`. Weaviate and S3 select TLS from their `https://` endpoint when `enabled` is omitted. An explicit switch never rewrites a URL: `true` requires HTTPS and `false` requires HTTP. TLS settings on a disabled connection refuse startup.
 
-Railway maps optional `WEAVIATE_API_KEY` to `weaviate_api_key` for API and worker processes. The Compose local and load-stack configuration generators accept the same variable; installations with their own runtime file set `weaviate_api_key` there. Index reset and upgrade helpers and evaluation clients use the configured key. Keep it out of source control. The engine redacts it from logs and index error explanations.
+Weaviate accepts only `enabled`. Setting `ca_file`, `cert_file`, `key_file` or `server_name` under `tls.weaviate` refuses startup: Quivr reaches the index through the Weaviate Go client, which verifies the certificate against system roots and takes no other trust settings. Serve the index with a certificate the system trusts. Quivr needs Weaviate 1.38.8 or newer, with both the REST and the gRPC address reachable.
 
-Weaviate and S3 redirects must stay on the endpoint's origin (scheme, hostname and port). Redirects to plaintext or another origin are refused before connecting, so client certificates remain with the configured dependency.
+Railway maps optional `WEAVIATE_API_KEY` to `weaviate_api_key` and optional `WEAVIATE_GRPC_ADDRESS` to `weaviate_grpc_address` for API and worker processes. The Compose local and load-stack configuration generators accept the same variable; installations with their own runtime file set `weaviate_api_key` there. Index reset and upgrade helpers and evaluation clients use the configured key. Keep it out of source control. The engine redacts it from logs and index error explanations.
+
+S3 redirects must stay on the endpoint's origin (scheme, hostname and port). Redirects to plaintext or another origin are refused before connecting, so client certificates remain with the configured dependency. REST requests to Weaviate follow redirects as the Weaviate Go client does, without that check; put the index behind an address that does not redirect.
 
 PostgreSQL uses `database_url` when `tls.postgres` is omitted: `sslmode=verify-full` verifies the certificate and hostname, with system roots unless the URL supplies `sslrootcert`. `sslmode=disable` selects plaintext. Opportunistic or unverified modes (`prefer`, the driver's default, `allow`, `require`, `verify-ca`) are refused. Explicit `tls.postgres` settings override the URL's TLS policy for every configured host and remove plaintext fallbacks; omitted `enabled` with certificate settings enables TLS. Prefer configuring trust in one place. URL certificate file options are still parsed, so remove obsolete file paths when switching to `tls.postgres`.
 

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/weaviate/weaviate-go-client/v6/collections"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
@@ -28,12 +31,11 @@ func metadataValue(value any, typ string) any {
 	}
 	return value
 }
-func metadataSchema(f corpus.Field) map[string]any {
-	name := metadataProperty(f)
-	typ := map[string]string{"string": "text", "string_array": "text[]", "datetime": "date", "number": "number", "boolean": "boolean"}[f.Type]
-	property := map[string]any{"name": name, "dataType": []string{typ}, "indexFilterable": true, "indexSearchable": false}
+func metadataSchema(f corpus.Field) collections.Property {
+	typ := map[string]collections.DataType{"string": collections.DataTypeText, "string_array": collections.DataTypeTextArray, "datetime": collections.DataTypeDate, "number": collections.DataTypeNumber, "boolean": collections.DataTypeBool}[f.Type]
+	property := collections.Property{Name: metadataProperty(f), DataType: typ, IndexFilterable: flag(true), IndexSearchable: flag(false)}
 	if f.Type == "string" || f.Type == "string_array" {
-		property["tokenization"] = "field"
+		property.Tokenization = collections.TokenizationField
 	}
 	return property
 }
@@ -44,12 +46,12 @@ func (s *Store) ensureMetadata(ctx context.Context, g content.Generation) error 
 	if !g.MetadataProjected {
 		return nil
 	}
-	var props []map[string]any
+	var props []collections.Property
 	for _, f := range corpus.FilterFields(g.Fields) {
 		p := metadataSchema(f)
-		p["name"] = metadataPropertyFor(g, f)
+		p.Name = metadataPropertyFor(g, f)
 		if g.ItemKeywordsProjected && f.Type == "datetime" {
-			p["indexRangeFilters"] = true
+			p.IndexRangeable = flag(true)
 		}
 		props = append(props, p)
 	}
@@ -62,24 +64,22 @@ func metadataPropertyFor(g content.Generation, f corpus.Field) string {
 	}
 	return metadataProperty(f)
 }
-func metadataConditionFor(g content.Generation, f corpus.TypedFilter) string {
+func metadataConditionFor(g content.Generation, f corpus.TypedFilter) filter.Expr {
 	return metadataCondition(f, metadataPropertyFor(g, corpus.Field{Name: f.Field, Type: f.Type}))
 }
 
-func metadataCondition(f corpus.TypedFilter, name string) string {
-	key := map[string]string{"string": "valueText", "string_array": "valueText", "datetime": "valueDate", "number": "valueNumber", "boolean": "valueBoolean"}[f.Type]
-	condition := func(operator string, value any) string {
+func metadataCondition(f corpus.TypedFilter, name string) filter.Expr {
+	condition := func(operator filter.Operator, value any) filter.Expr {
 		if f.Type == "string" || f.Type == "string_array" {
 			value = metadataString(value.(string))
 		}
-		raw, _ := json.Marshal(value)
-		return "{path:[" + quote(name) + "],operator:" + operator + "," + key + ":" + string(raw) + "}"
+		return compare(operator, name, value)
 	}
-	operands := []string{}
+	operands := []filter.Expr{}
 	if len(f.AnyOf) > 0 {
-		values := []string{}
+		values := []filter.Expr{}
 		for _, v := range f.AnyOf {
-			values = append(values, condition("Equal", v))
+			values = append(values, condition(filter.Equal, v))
 		}
 		if len(values) == 1 {
 			operands = append(operands, values[0])
@@ -88,10 +88,10 @@ func metadataCondition(f corpus.TypedFilter, name string) string {
 		}
 	}
 	if f.Gte != "" {
-		operands = append(operands, condition("GreaterThanEqual", f.Gte))
+		operands = append(operands, condition(filter.GreaterThanEqual, f.Gte))
 	}
 	if f.Lte != "" {
-		operands = append(operands, condition("LessThanEqual", f.Lte))
+		operands = append(operands, condition(filter.LessThanEqual, f.Lte))
 	}
 	if len(operands) == 1 {
 		return operands[0]

@@ -1,8 +1,6 @@
 package weaviate_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -162,17 +160,12 @@ func TestBootstrapUpgradesCollectionWithoutSourceNamespace(t *testing.T) {
 	for _, name := range []string{"title", "body"} {
 		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true})
 	}
-	body, _ := json.Marshal(map[string]any{"class": legacy.Collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw"}}})
-	res, err := f.store.Client.Post(f.url+"/v1/schema", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("create legacy collection: HTTP %d", res.StatusCode)
+	class := map[string]any{"class": legacy.Collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw"}}}
+	if status := f.index.rest(t, http.MethodPost, "/v1/schema", class, nil); status != http.StatusOK {
+		t.Fatalf("create legacy collection: HTTP %d", status)
 	}
 	for i := 0; i < 2; i++ { // Bootstrap stays idempotent once upgraded.
-		if err = f.store.Bootstrap(f.ctx, legacy.Collection); err != nil {
+		if err := f.store.Bootstrap(f.ctx, legacy.Collection); err != nil {
 			t.Fatalf("bootstrap %d of a legacy collection: %v", i+1, err)
 		}
 	}
@@ -181,15 +174,9 @@ func TestBootstrapUpgradesCollectionWithoutSourceNamespace(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"properties"`
 	}
-	res, err = f.store.Client.Get(f.url + "/v1/schema/" + legacy.Collection)
-	if err != nil {
-		t.Fatal(err)
+	if status := f.index.rest(t, http.MethodGet, "/v1/schema/"+legacy.Collection, nil, &schema); status != http.StatusOK {
+		t.Fatalf("read upgraded schema: HTTP %d", status)
 	}
-	if err = json.NewDecoder(res.Body).Decode(&schema); err != nil {
-		res.Body.Close()
-		t.Fatal(err)
-	}
-	res.Body.Close()
 	propertyNames := map[string]bool{}
 	for _, property := range schema.Properties {
 		propertyNames[property.Name] = true
@@ -200,7 +187,7 @@ func TestBootstrapUpgradesCollectionWithoutSourceNamespace(t *testing.T) {
 		}
 	}
 	seg := f.segmentation("upgraded", "harbour notice")
-	if err = f.store.Publish(f.ctx, legacy, f.org, f.corpusID, "example-feed", content.Version{ID: seg.VersionID}, seg); err != nil {
+	if err := f.store.Publish(f.ctx, legacy, f.org, f.corpusID, "example-feed", content.Version{ID: seg.VersionID}, seg); err != nil {
 		t.Fatalf("publish into an upgraded collection: %v", err)
 	}
 	candidates, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: legacy}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour", Mode: "lexical", SourceNamespaces: []string{"example-feed"}})
@@ -212,15 +199,8 @@ func TestBootstrapUpgradesCollectionWithoutSourceNamespace(t *testing.T) {
 	// later publication of its segment: a rewrite re-indexes it.
 	anchor := lexicalObject(f.objects(legacy, "upgraded"))
 	old := map[string]any{"class": legacy.Collection, "id": anchor.ID, "properties": map[string]any{"organization": f.org, "corpusId": f.corpusID, "generationId": legacy.ID, "versionId": seg.VersionID, "segmentationId": seg.ID, "segmentId": "upgraded", "body": "harbour notice", "title": ""}}
-	body, _ = json.Marshal(old)
-	req, _ := http.NewRequest(http.MethodPut, f.url+"/v1/objects/"+legacy.Collection+"/"+anchor.ID, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if res, err = f.store.Client.Do(req); err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("rewrite anchor as legacy: HTTP %d", res.StatusCode)
+	if status := f.index.rest(t, http.MethodPut, "/v1/objects/"+legacy.Collection+"/"+anchor.ID, old, nil); status != http.StatusOK {
+		t.Fatalf("rewrite anchor as legacy: HTTP %d", status)
 	}
 	before := lexicalObject(f.objects(legacy, "upgraded"))
 	if err = f.store.Publish(f.ctx, legacy, f.org, f.corpusID, "example-feed", content.Version{ID: seg.VersionID}, seg); err != nil {
@@ -246,22 +226,11 @@ func TestPluginAnchorMissingRoutingMetadataRemainsImmutable(t *testing.T) {
 		"organization": f.org, "corpusId": f.corpusID, "generationId": f.gen.ID, "versionId": seg.VersionID,
 		"segmentationId": seg.ID, "segmentId": "plugin-anchor", "sourceNamespace": "example-feed", "body": "harbour plugin metadata", "title": "",
 	}}
-	body, _ := json.Marshal(old)
-	req, err := http.NewRequest(http.MethodPut, f.url+"/v1/objects/"+f.gen.Collection+"/"+anchor.ID, bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := f.store.Client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("rewrite plugin anchor as legacy: HTTP %d", res.StatusCode)
+	if status := f.index.rest(t, http.MethodPut, "/v1/objects/"+f.gen.Collection+"/"+anchor.ID, old, nil); status != http.StatusOK {
+		t.Fatalf("rewrite plugin anchor as legacy: HTTP %d", status)
 	}
 	before := lexicalObject(f.objects(f.gen, "plugin-anchor"))
-	if err = f.store.Publish(f.ctx, f.gen, f.org, f.corpusID, "example-feed", v, seg); err != nil {
+	if err := f.store.Publish(f.ctx, f.gen, f.org, f.corpusID, "example-feed", v, seg); err != nil {
 		t.Fatal(err)
 	}
 	if after := lexicalObject(f.objects(f.gen, "plugin-anchor")); after.Updated != before.Updated {

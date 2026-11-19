@@ -26,7 +26,7 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 | tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
 
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
-Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule maintenance and verify readiness before continuing. No public dependency domains are needed.
+Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule maintenance and verify readiness before continuing. No public dependency domains are needed. Quivr reaches Weaviate on REST port 8080 and gRPC port 50051 of the private network, and needs Weaviate 1.38.8 or newer; set `WEAVIATE_GRPC_ADDRESS` (`host:port`) on the API and workers only for an index that serves gRPC elsewhere.
 
 ## Apply shared infrastructure settings
 

@@ -1,8 +1,6 @@
 package weaviate_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -11,7 +9,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -45,10 +42,6 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := f.store.Client.Get(f.url + "/v1/schema/" + f.gen.Collection)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var schema struct {
 		VectorConfig map[string]struct {
 			VectorIndexType   string `json:"vectorIndexType"`
@@ -62,10 +55,8 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 			} `json:"vectorIndexConfig"`
 		} `json:"vectorConfig"`
 	}
-	err = json.NewDecoder(res.Body).Decode(&schema)
-	res.Body.Close()
-	if err != nil {
-		t.Fatal(err)
+	if status := f.index.rest(t, http.MethodGet, "/v1/schema/"+f.gen.Collection, nil, &schema); status != http.StatusOK {
+		t.Fatalf("read schema: status %d", status)
 	}
 	for _, want := range []struct {
 		name    string
@@ -99,14 +90,9 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 	// other settings. A rejected update must fail search and remain retryable.
 	readSchema := func() map[string]any {
 		t.Helper()
-		res, err := f.store.Client.Get(f.url + "/v1/schema/" + f.gen.Collection)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer res.Body.Close()
 		var class map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&class); err != nil {
-			t.Fatal(err)
+		if status := f.index.rest(t, http.MethodGet, "/v1/schema/"+f.gen.Collection, nil, &class); status != http.StatusOK {
+			t.Fatalf("read schema: status %d", status)
 		}
 		return class
 	}
@@ -116,18 +102,10 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 	for _, name := range []string{"semantic_text_v1", defaultName} {
 		configs[name].(map[string]any)["vectorIndexConfig"].(map[string]any)["rq"].(map[string]any)["rescoreLimit"] = 20
 	}
-	body, _ := json.Marshal(class)
-	req, _ := http.NewRequest("PUT", f.url+"/v1/schema/"+f.gen.Collection, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	res, err = f.store.Client.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	if status := f.index.rest(t, http.MethodPut, "/v1/schema/"+f.gen.Collection, class, nil); status != http.StatusOK {
+		t.Fatalf("restore old schema: status %d", status)
 	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("restore old schema: status %d", res.StatusCode)
-	}
-	reopened := weaviate.New(f.url, f.apiKey)
+	reopened := f.index.open(t)
 	if err := reopened.Bootstrap(f.ctx, f.gen.Collection); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +119,9 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 			t.Fatalf("bootstrap %s: rescoreLimit=%v, want %v", want.name, got, want.limit)
 		}
 	}
-	upstream, _ := url.Parse(f.url)
+	// Only schema updates are intercepted, and they are REST: queries keep
+	// going straight to the index over gRPC.
+	upstream, _ := url.Parse(f.index.URL)
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	var updates atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +139,7 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 		proxy.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	f.store = weaviate.New(server.URL, f.apiKey)
+	f.store = index{URL: server.URL, GRPC: f.index.GRPC, APIKey: f.index.APIKey}.open(t)
 	scope := corpus.Scope{Organization: f.org, Corpora: []string{"*"}}
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: before}}, scope,

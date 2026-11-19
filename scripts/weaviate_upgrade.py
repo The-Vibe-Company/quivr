@@ -41,12 +41,13 @@ def exercise(directory, negative_control=False):
         compose_file.write_text(json.dumps({'services': {'weaviate': {
             'image': image,
             'environment': {'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED': 'true', 'AUTOSCHEMA_ENABLED': 'false', 'CLUSTER_HOSTNAME': 'quivr-upgrade', 'DEFAULT_VECTORIZER_MODULE': 'none', 'PERSISTENCE_DATA_PATH': '/var/lib/weaviate'},
-            'ports': ['127.0.0.1::8080'], 'volumes': ['data:/var/lib/weaviate'],
+            'ports': ['127.0.0.1::8080', '127.0.0.1::50051'], 'volumes': ['data:/var/lib/weaviate'],
         }}, 'volumes': {'data': {}}}))
         compose('up', '-d', stdout=subprocess.DEVNULL)
         address = compose('port', 'weaviate', '8080', capture_output=True, text=True).stdout.strip()
         endpoint = 'http://' + address
-        config = {'weaviate_url': endpoint}
+        grpc = compose('port', 'weaviate', '50051', capture_output=True, text=True).stdout.strip()
+        config = {'weaviate_url': endpoint, 'weaviate_grpc_address': grpc}
         if api_key:
             config['weaviate_api_key'] = api_key
         config_file.write_text(json.dumps(config))

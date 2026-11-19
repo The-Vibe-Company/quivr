@@ -2,13 +2,10 @@
 package weaviate
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"maps"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,11 +14,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+	wv "github.com/weaviate/weaviate-go-client/v6"
+	"github.com/weaviate/weaviate-go-client/v6/data"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
+	"github.com/weaviate/weaviate-go-client/v6/types"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
-	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // InitialCollection is shared by every logical Projection Generation; objects carry
@@ -31,13 +33,14 @@ const InitialCollection = "QuivrTextV4"
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 type Store struct {
-	Endpoint string
-	Client   *http.Client
-	apiKey   string
+	apiKey string
+	// options configure the client library; clientMu guards the lazy client.
+	options  []wv.Option
+	clientMu sync.Mutex
+	client   *wv.Client
 	// PurgeTimeout bounds each purge selection/delete request independently of search.
 	PurgeTimeout time.Duration
 	purgeBatch   atomic.Int64
-	purgeLimit   atomic.Int64
 	// LegacySpace is the built-in space, whose named vector keeps the name it
 	// had before named spaces (legacyVector), so generations built before and
 	// after them stay searchable in one query.
@@ -84,264 +87,39 @@ func spaceIndex(g content.Generation, space string) *content.VectorIndex {
 	return nil
 }
 
-// distance maps a registry metric to the Weaviate distance.
-func distance(metric string) string {
-	switch metric {
-	case "dot":
-		return "dot"
-	case "l2":
-		return "l2-squared"
-	}
-	return "cosine"
-}
-
-// vectorConfig declares an HNSW named vector stored as index says; a nil
-// index (a space recorded before index settings) gets the default. "none"
-// also opts out of a quantization the database applies by default.
-func vectorConfig(metric string, index *content.VectorIndex) map[string]any {
-	if index == nil {
-		index = &content.DefaultVectorIndex
-	}
-	config := map[string]any{"distance": distance(metric)}
-	switch index.Quantization {
-	case content.QuantizationRQ8, content.QuantizationRQ1:
-		rq := map[string]any{"enabled": true, "bits": 8}
-		if index.Quantization == content.QuantizationRQ1 {
-			rq["bits"] = 1
-		}
-		if index.Quantization == content.QuantizationRQ8 || index.RescoreLimit > 0 {
-			rq["rescoreLimit"] = index.RescoreLimit
-		}
-		config["rq"] = rq
-	case content.QuantizationNone:
-		config["skipDefaultQuantization"] = true
-	}
-	return map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": config}
-}
-
-// rq8Setting identifies a mutable RQ-8 limit using the generation's recorded
-// setting. Other compression settings and unrelated vector options stay intact.
-func rq8Setting(raw any, index *content.VectorIndex) (map[string]any, int, bool) {
-	if index != nil && index.Quantization != content.QuantizationRQ8 {
-		return nil, 0, false
-	}
-	vector, _ := raw.(map[string]any)
-	config, _ := vector["vectorIndexConfig"].(map[string]any)
-	rq, _ := config["rq"].(map[string]any)
-	if vector["vectorIndexType"] != "hnsw" || rq["enabled"] != true || rq["bits"] != float64(8) {
-		return nil, 0, false
-	}
-	limit := 0
-	if index != nil {
-		limit = index.RescoreLimit
-	}
-	return rq, limit, true
-}
-
-// ensureVectors adds missing spaces and reconciles mutable RQ-8 limits before
-// caching a generation's named vectors. Vector names and graph contents stay
-// unchanged, including for generations recorded before index settings.
-func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
-	if !g.SpacesProjected {
-		return nil
-	}
-	known := s.vectors
-	if known == nil {
-		known = &sync.Map{}
-	}
-	missing := false
-	for _, sp := range g.Spaces {
-		if _, ok := known.Load(g.Collection + "/" + s.VectorName(g, sp.ID)); !ok {
-			missing = true
-		}
-	}
-	if !missing {
-		return nil
-	}
-	var class map[string]any
-	if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
-		return err
-	}
-	configs, _ := class["vectorConfig"].(map[string]any)
-	if configs == nil {
-		configs = map[string]any{}
-	}
-	changed := false
-	limits := map[string]int{}
-	for _, sp := range g.Spaces {
-		name := s.VectorName(g, sp.ID)
-		if _, ok := configs[name]; !ok {
-			configs[name] = vectorConfig(sp.Metric, sp.Index)
-			changed = true
-			if sp.Index == nil || sp.Index.Quantization == content.QuantizationRQ8 {
-				limit := 0
-				if sp.Index != nil {
-					limit = sp.Index.RescoreLimit
-				}
-				limits[name] = limit
-			}
-		} else if rq, limit, ok := rq8Setting(configs[name], sp.Index); ok {
-			limits[name] = limit
-			if rq["rescoreLimit"] != float64(limit) {
-				rq["rescoreLimit"] = limit
-				changed = true
-			}
-		}
-	}
-	if changed {
-		class["vectorConfig"] = configs
-		if _, err := s.call(ctx, "PUT", "/v1/schema/"+g.Collection, class, nil); err != nil {
-			return err
-		}
-		class = nil
-		if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
-			return err
-		}
-		configs, _ = class["vectorConfig"].(map[string]any)
-	}
-	for _, sp := range g.Spaces {
-		name := s.VectorName(g, sp.ID)
-		if _, ok := configs[name]; !ok {
-			return errors.New("projection named vector missing")
-		}
-		if limit, check := limits[name]; check {
-			rq, _, ok := rq8Setting(configs[name], sp.Index)
-			if !ok || rq["rescoreLimit"] != float64(limit) {
-				return errors.New("projection named vector rescore setting differs")
-			}
-		}
-	}
-	for _, sp := range g.Spaces {
-		name := s.VectorName(g, sp.ID)
-		known.Store(g.Collection+"/"+name, true)
-	}
-	return nil
-}
-
-func New(endpoint string, apiKey ...string) *Store {
-	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}}
-	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.authenticate(http.DefaultTransport, apiKey), "weaviate.request")}
-	if store.apiKey != "" {
-		store.Client.CheckRedirect = outbound.CheckRedirect
-	}
-	return store
-}
-func (s *Store) call(ctx context.Context, method, path string, in, out any) (int, error) {
-	return s.callLimit(ctx, method, path, in, out, 2<<20)
-}
-
-var errResponseLimit = errors.New("projection response exceeds byte limit")
-
-func (s *Store) callLimit(ctx context.Context, method, path string, in, out any, responseLimit int64) (int, error) {
-	var body []byte
-	var err error
-	if in != nil {
-		body, err = json.Marshal(in)
-		if err != nil {
-			return 0, err
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, method, s.Endpoint+path, bytes.NewReader(body))
-	if err != nil {
-		return 0, s.safeError(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := s.Client.Do(req)
-	if err != nil {
-		return 0, errors.New("projection connection unavailable")
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return res.StatusCode, errors.New("projection request failed")
-	}
-	if out != nil {
-		limited := &io.LimitedReader{R: res.Body, N: responseLimit}
-		err = json.NewDecoder(limited).Decode(out)
-		if err != nil && limited.N == 0 {
-			err = errResponseLimit
-		}
-	}
-	return res.StatusCode, s.safeError(err)
-}
-func (s *Store) Ready(ctx context.Context) error {
-	_, err := s.call(ctx, "GET", "/v1/.well-known/ready", nil, nil)
-	return err
-}
-func (s *Store) Bootstrap(ctx context.Context, collection string) error {
-	if !className.MatchString(collection) {
-		return errors.New("invalid projection route")
-	}
-	var existing struct {
-		VectorConfig map[string]any `json:"vectorConfig"`
-		Properties   []struct {
-			Name string `json:"name"`
-		} `json:"properties"`
-	}
-	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing)
+// failed hides the provider's explanation from errors callers may surface.
+func failed(err error) error {
 	if err == nil {
-		present := map[string]bool{}
-		for _, p := range existing.Properties {
-			present[p.Name] = true
-		}
-		// A collection created before source routing, named spaces, or lexical
-		// plugin metadata gains the missing properties. Older objects lack a
-		// value, so their immutable anchors keep their original bytes.
-		properties := []struct {
-			name   string
-			config map[string]any
-		}{
-			{projectionPluginProperty, filterable(projectionPluginProperty)},
-			{sourceMediaTypeProperty, filterable(sourceMediaTypeProperty)},
-			{sourceNamespaceProperty, filterable(sourceNamespaceProperty)},
-			{lexicalProperty, searchable(lexicalProperty)},
-		}
-		for _, property := range properties {
-			if present[property.name] {
-				continue
-			}
-			if _, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", property.config, nil); err != nil {
-				return err
-			}
-		}
-		// Bootstrap owns only the legacy default. Other named vectors require
-		// their generation's recorded settings, reconciled by ensureVectors.
-		if rq, _, ok := rq8Setting(existing.VectorConfig[legacyVector], nil); ok && rq["rescoreLimit"] != float64(0) {
-			var class map[string]any
-			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &class); err != nil {
-				return err
-			}
-			configs, _ := class["vectorConfig"].(map[string]any)
-			rq, _, ok = rq8Setting(configs[legacyVector], nil)
-			if !ok {
-				return errors.New("projection legacy vector setting changed")
-			}
-			rq["rescoreLimit"] = 0
-			if _, err = s.call(ctx, "PUT", "/v1/schema/"+collection, class, nil); err != nil {
-				return err
-			}
-			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing); err != nil {
-				return err
-			}
-			rq, _, ok = rq8Setting(existing.VectorConfig[legacyVector], nil)
-			if !ok || rq["rescoreLimit"] != float64(0) {
-				return errors.New("projection legacy vector rescore setting differs")
-			}
-		}
 		return nil
 	}
-	if status != 404 {
+	var request requestError
+	if !errors.As(err, &request) {
 		return err
 	}
-	properties := []any{}
-	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty} {
-		properties = append(properties, filterable(name))
+	if unreachable(err) {
+		return unavailable{request}
 	}
-	for _, name := range []string{"title", "body", lexicalProperty} {
-		properties = append(properties, searchable(name))
-	}
-	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine", nil)}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
-	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
-	return err
+	return rejected{request}
+}
+
+// unavailable and rejected keep the fixed messages of the adapter while
+// preserving timeout and cancellation classification.
+type unavailable struct{ requestError }
+
+func (unavailable) Error() string { return "projection connection unavailable" }
+
+type rejected struct{ requestError }
+
+func (rejected) Error() string { return "projection request failed" }
+
+func (s *Store) Ready(ctx context.Context) error {
+	return failed(s.call(ctx, func(ctx context.Context, c *wv.Client) error {
+		ready, err := c.IsReady(ctx)
+		if err == nil && !ready {
+			err = errors.New("index not ready")
+		}
+		return err
+	}))
 }
 
 // sourceNamespaceProperty holds the Record's Source Namespace for filtering.
@@ -355,16 +133,6 @@ const projectionPluginProperty = "projectionPlugin"
 // sourceMediaTypeProperty records the source Blob media type used to route a
 // plugin segmentation. Plugin recipes with no recorded type use text/plain.
 const sourceMediaTypeProperty = "sourceMediaType"
-
-// searchable declares a text property keyword search scores (BM25).
-func searchable(name string) map[string]any {
-	return map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true}
-}
-
-// filterable declares an exact-match text property that search never scores.
-func filterable(name string) map[string]any {
-	return map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "field", "indexFilterable": true, "indexSearchable": false}
-}
 
 func uuidOf(stable string) string {
 	h := content.Hash([]byte(stable))
@@ -386,18 +154,91 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, "body", "title", lexicalProperty, "recordId", itemKind, passageText}
 
 type storedObject struct {
-	Properties map[string]any       `json:"properties"`
-	Vectors    map[string][]float32 `json:"vectors"`
+	ID         string
+	Properties map[string]any
+	Vectors    map[string][]float32
 }
 
-// object reads one object by identity; found is false only on a definite 404.
-func (s *Store) object(ctx context.Context, collection, id string) (storedObject, bool, error) {
-	var stored storedObject
-	status, err := s.call(ctx, "GET", "/v1/objects/"+collection+"/"+id+"?include=vector", nil, &stored)
-	if status == http.StatusNotFound {
-		return stored, false, nil
+// projected is one object to write: a deterministic identity, its properties
+// and, for an enriched object, its named vectors.
+type projected struct {
+	id         string
+	properties map[string]any
+	vectors    map[string][]float32
+}
+
+// stored converts a query result to the adapter's own shape. Dates become the
+// strings they were written as, so a copied anchor keeps its bytes.
+func stored(o query.Object[map[string]any]) storedObject {
+	out := storedObject{ID: o.UUID.String(), Properties: map[string]any{}, Vectors: map[string][]float32{}}
+	for key, value := range o.Properties {
+		switch v := value.(type) {
+		case nil:
+		case time.Time:
+			out.Properties[key] = v.UTC().Format(time.RFC3339Nano)
+		case int64:
+			out.Properties[key] = float64(v)
+		default:
+			out.Properties[key] = value
+		}
 	}
-	return stored, err == nil, err
+	for name, vector := range o.Vectors {
+		out.Vectors[name] = vector.Single
+	}
+	return out
+}
+
+// object reads one object by identity, with the named vectors asked for.
+func (s *Store) object(ctx context.Context, collection, id string, vectors ...string) (storedObject, bool, error) {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return storedObject{}, false, errors.New("invalid projection identity")
+	}
+	rows, err := s.objects(ctx, collection, query.OverAll{Filter: identity(parsed), Limit: 1, ReturnVectors: vectors})
+	if err != nil || len(rows) == 0 {
+		return storedObject{}, false, err
+	}
+	return rows[0], true, nil
+}
+
+// writeVisibility bounds how long a just-written object may stay invisible to
+// a search by id.
+const writeVisibility = 2 * time.Second
+
+// written reads an object the caller just inserted. The index answers a read
+// by id with a filtered search, which can miss an object for a moment while
+// another writer replaces the same identity. Absence is therefore reported
+// only after it has held for writeVisibility.
+func (s *Store) written(ctx context.Context, collection, id string, vectors ...string) (storedObject, bool, error) {
+	deadline := time.Now().Add(writeVisibility)
+	for wait := 10 * time.Millisecond; ; wait = min(2*wait, 200*time.Millisecond) {
+		object, found, err := s.object(ctx, collection, id, vectors...)
+		if err != nil || found || !time.Now().Before(deadline) {
+			return object, found, err
+		}
+		select {
+		case <-ctx.Done():
+			return storedObject{}, false, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// objects lists objects without ranking them.
+func (s *Store) objects(ctx context.Context, collection string, request query.OverAll) ([]storedObject, error) {
+	var result *query.Result
+	err := s.call(ctx, func(ctx context.Context, c *wv.Client) (err error) {
+		result, err = c.Collections.Use(collection).Query.OverAll(ctx, request)
+		return err
+	})
+	if err != nil {
+		return nil, failed(err)
+	}
+	rows := make([]storedObject, len(result.Objects))
+	for i, o := range result.Objects {
+		rows[i] = stored(o)
+	}
+	return rows, nil
 }
 
 func sameProperties(stored, want map[string]any) bool {
@@ -423,43 +264,48 @@ func sameProperties(stored, want map[string]any) bool {
 // projectionBatch bounds request size and the number of unverified objects.
 const projectionBatch = 100
 
-// insertBatch checks every object result. A lost HTTP response is reconciled
-// by the caller reading deterministic identities; an explicit request or object
-// error or malformed successful response must never be treated as success.
-func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error {
-	var result []struct {
-		ID     string `json:"id"`
-		Result struct {
-			Status string `json:"status"`
-			Errors any    `json:"errors"`
-		} `json:"result"`
-	}
-	// Request only identities; returning properties/vectors can exceed the
-	// bounded response decoder even for a modest number of large objects.
-	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
-	if err != nil {
-		if status == 0 {
-			return nil
+// insertBatch checks every object result. A lost reply is reconciled by the
+// caller reading deterministic identities; an explicit request or object
+// error must never be treated as success.
+func (s *Store) insertBatch(ctx context.Context, collection string, objects []projected) error {
+	batch := make([]*data.Object, len(objects))
+	for i, o := range objects {
+		id, err := uuid.Parse(o.id)
+		if err != nil {
+			return errors.New("invalid projection identity")
 		}
-		if status >= 400 {
-			return fmt.Errorf("projection batch request failed (HTTP %d): %w", status, err)
+		object := &data.Object{UUID: &id, Properties: maps.Clone(o.properties)}
+		for name, vector := range o.vectors {
+			object.Vectors = append(object.Vectors, types.Vector{Name: name, Single: vector})
 		}
-		return errors.New("projection publication response invalid")
+		batch[i] = object
 	}
-	if len(result) != len(objects) {
+	refused := false
+	err := s.call(ctx, func(ctx context.Context, c *wv.Client) error {
+		_, err := c.Collections.Use(collection).Data.Insert(ctx, batch...)
+		var objectErrors data.InsertError
+		refused = errors.As(err, &objectErrors)
+		return err
+	})
+	switch {
+	case err == nil:
+		return nil
+	case refused:
 		return errors.New("projection publication failed")
+	case lost(err):
+		return nil
 	}
-	for i, r := range result {
-		if r.ID != objects[i]["id"] || r.Result.Status != "SUCCESS" || r.Result.Errors != nil {
-			return errors.New("projection publication failed")
-		}
+	var request requestError
+	errors.As(err, &request)
+	if !request.grpc {
+		return fmt.Errorf("projection batch request failed: %w", failed(err))
 	}
-	return nil
+	return fmt.Errorf("projection batch request failed (%s): %w", request.code, failed(err))
 }
 
 // insert uses the same checked batch path for a standalone item anchor.
-func (s *Store) insert(ctx context.Context, object map[string]any) error {
-	return s.insertBatch(ctx, []map[string]any{object})
+func (s *Store) insert(ctx context.Context, collection string, object projected) error {
+	return s.insertBatch(ctx, collection, []projected{object})
 }
 
 // Publish projects each segment's immutable anchor and, for item-capable
@@ -486,20 +332,20 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		}
 	}
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
-	objects := make([]map[string]any, 0, projectionBatch)
+	objects := make([]projected, 0, projectionBatch)
 	flush := func() error {
 		if len(objects) == 0 {
 			return nil
 		}
-		if err := s.insertBatch(ctx, objects); err != nil {
+		if err := s.insertBatch(ctx, g.Collection, objects); err != nil {
 			return err
 		}
 		for _, object := range objects {
-			stored, found, err := s.object(ctx, g.Collection, object["id"].(string))
+			stored, found, err := s.written(ctx, g.Collection, object.id)
 			if err != nil {
 				return err
 			}
-			if !found || !sameProperties(stored.Properties, object["properties"].(map[string]any)) {
+			if !found || !sameProperties(stored.Properties, object.properties) {
 				return errors.New("projection verification mismatch")
 			}
 		}
@@ -550,7 +396,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		if found && sameProperties(existing.Properties, properties) {
 			continue
 		}
-		objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": properties})
+		objects = append(objects, projected{id: id, properties: properties})
 		if len(objects) == projectionBatch {
 			if err := flush(); err != nil {
 				return err
@@ -566,25 +412,11 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	return nil
 }
 
-func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
-func equal(field, value string) string {
-	return "{path:[" + quote(field) + "],operator:Equal,valueText:" + quote(value) + "}"
-}
-func notEqual(field, value string) string {
-	return "{path:[" + quote(field) + "],operator:NotEqual,valueText:" + quote(value) + "}"
-}
-func and(operands ...string) string {
-	return "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
-}
-func or(operands ...string) string {
-	return "{operator:Or,operands:[" + strings.Join(operands, ",") + "]}"
-}
-
 // projectionOwnerFilter keeps normal search on the served projection(s) of a
 // generation. Legacy anchors without ownership remain searchable. An
 // evaluation query selects one exact owner and intentionally excludes those
 // legacy anchors.
-func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string {
+func projectionOwnerFilter(g content.Generation, evaluationPlugin string) filter.Expr {
 	if evaluationPlugin != "" {
 		return equal(projectionPluginProperty, evaluationPlugin)
 	}
@@ -610,11 +442,11 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string
 		ids = append(ids, owner)
 	}
 	sort.Strings(ids)
-	legacy := []string{equal("generationId", g.ID)}
+	legacy := []filter.Expr{equal("generationId", g.ID)}
 	for _, owner := range ids {
 		legacy = append(legacy, notEqual(projectionPluginProperty, owner))
 	}
-	operands := []string{and(legacy...)}
+	operands := []filter.Expr{and(legacy...)}
 	if routing := g.IngestionRouting; routing != nil && routing.Default != "" {
 		mediaTypes := make([]string, 0, len(routing.Routes))
 		for mediaType := range routing.Routes {
@@ -624,7 +456,7 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string
 		for _, mediaType := range mediaTypes {
 			operands = append(operands, and(equal(projectionPluginProperty, routing.Routes[mediaType]), equal(sourceMediaTypeProperty, mediaType)))
 		}
-		defaultOperands := []string{equal(projectionPluginProperty, routing.Default)}
+		defaultOperands := []filter.Expr{equal(projectionPluginProperty, routing.Default)}
 		for _, mediaType := range mediaTypes {
 			defaultOperands = append(defaultOperands, notEqual(sourceMediaTypeProperty, mediaType))
 		}
@@ -658,12 +490,12 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		return nil, errors.New("projection route missing")
 	}
 	collection := routes[0].Generation.Collection
-	filters := []string{}
+	filters := []filter.Expr{}
 	for _, r := range routes {
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		routeFilters := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		routeFilters := []filter.Expr{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
 		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
 		if err != nil {
 			return nil, err
@@ -689,18 +521,18 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	if len(filters) == 0 {
 		return []content.Candidate{}, nil
 	}
-	operands := []string{equal("organization", scope.Organization), "{operator:Or,operands:[" + strings.Join(filters, ",") + "]}"}
+	operands := []filter.Expr{equal("organization", scope.Organization), or(filters...)}
 	// The source filter is part of the candidate query, so ranking and the
 	// candidate limit apply within it in every mode.
 	if len(q.SourceNamespaces) > 0 {
-		sources := make([]string, 0, len(q.SourceNamespaces))
+		sources := make([]filter.Expr, 0, len(q.SourceNamespaces))
 		for _, ns := range q.SourceNamespaces {
 			sources = append(sources, equal(sourceNamespaceProperty, ns))
 		}
-		operands = append(operands, "{operator:Or,operands:["+strings.Join(sources, ",")+"]}")
+		operands = append(operands, or(sources...))
 	}
 	operands = append(operands, identityConditions(q)...)
-	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
+	where := and(operands...)
 	// For a vector search, every route names the space's vectors the same
 	// way, or the query cannot rank them together; a keyword search reads
 	// no vector.
@@ -727,70 +559,127 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	}
 	// The source field ranks the title and body as written; the lexical field
 	// ranks the lexical text an ingestion plugin produced.
-	properties := `["title^2","body"]`
+	properties := []string{"title^2", "body"}
 	if q.Field == retrieval.FieldLexical {
-		properties = `["` + lexicalProperty + `"]`
+		properties = []string{lexicalProperty}
 	}
-	alpha, fusion := 0.5, "relativeScoreFusion"
+	alpha, rankedFusion := float32(0.5), false
 	if q.Hybrid != nil {
-		alpha = q.Hybrid.Alpha
-		if q.Hybrid.Fusion == retrieval.FusionRanked {
-			fusion = "rankedFusion"
-		}
-	}
-	branch := fmt.Sprintf("bm25:{query:%s,properties:%s}", quote(q.Query), properties)
-	vector, _ := json.Marshal(q.Vector)
-	if q.Mode == "semantic" {
-		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]}", vector, quote(target))
-	}
-	if q.Mode == "hybrid" {
-		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:%s,fusionType:%s,properties:%s,targetVectors:[%s]}", quote(q.Query), vector, strconv.FormatFloat(alpha, 'f', -1, 64), fusion, properties, quote(target))
+		alpha, rankedFusion = float32(q.Hybrid.Alpha), q.Hybrid.Fusion == retrieval.FusionRanked
 	}
 	limit := retrieval.CandidateLimit
 	if q.K > 0 {
 		limit = q.K
 	}
-	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId _additional{score distance}}}}", collection, branch, where, limit)
-	var response struct {
-		Data struct {
-			Get map[string][]struct {
-				SegmentID    string `json:"segmentId"`
-				GenerationID string `json:"generationId"`
-				Additional   struct {
-					Score    *string  `json:"score"`
-					Distance *float64 `json:"distance"`
-				} `json:"_additional"`
-			} `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
+	search := ranked{filter: where, limit: limit, properties: []string{"segmentId", "generationId"}}
+	switch q.Mode {
+	case "semantic":
+		search.vector, search.target = q.Vector, target
+	case "hybrid":
+		search.keywords, search.keywordProperties = q.Query, properties
+		search.vector, search.target = q.Vector, target
+		search.hybrid, search.alpha, search.rankedFusion = true, alpha, rankedFusion
+	default:
+		search.keywords, search.keywordProperties = q.Query, properties
 	}
-	_, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response)
+	rows, err := s.rank(ctx, collection, search)
 	if err != nil {
-		return nil, err
-	}
-	if len(response.Errors) > 0 {
-		return nil, errors.New("projection query failed")
-	}
-	rows, ok := response.Data.Get[collection]
-	if !ok {
-		return nil, errors.New("projection response missing")
+		if errors.Is(err, errResponseLimit) {
+			return nil, err
+		}
+		return nil, queryFailed(err, "projection query failed")
 	}
 	result := make([]content.Candidate, 0, len(rows))
 	for _, r := range rows {
-		if r.SegmentID == "" || r.GenerationID == "" {
+		segment, _ := r.Properties["segmentId"].(string)
+		generation, _ := r.Properties["generationId"].(string)
+		if segment == "" || generation == "" {
 			return nil, errors.New("projection candidate invalid")
 		}
 		// Higher is better: the BM25F or fused score, or 1 minus the distance.
 		score := 0.0
 		switch {
-		case q.Mode == "semantic" && r.Additional.Distance != nil:
-			score = 1 - *r.Additional.Distance
-		case r.Additional.Score != nil:
-			score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+		case q.Mode == "semantic" && r.distance != nil:
+			score = 1 - *r.distance
+		case r.score != nil:
+			score = *r.score
 		}
-		result = append(result, content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, Score: score})
+		result = append(result, content.Candidate{SegmentID: segment, GenerationID: generation, Score: score})
 	}
 	return result, nil
+}
+
+// ranked is one scored index query: keyword (keywords), vector (vector), or
+// both fused by the index (hybrid).
+type ranked struct {
+	filter            filter.Expr
+	limit             int
+	properties        []string
+	keywords          string
+	keywordProperties []string
+	vector            []float32
+	target            string
+	hybrid            bool
+	alpha             float32
+	rankedFusion      bool
+}
+
+type rankedObject struct {
+	storedObject
+	score, distance *float64
+}
+
+// widen keeps the decimal value the index reported for a 32-bit number.
+func widen(v *float32) *float64 {
+	if v == nil {
+		return nil
+	}
+	out, _ := strconv.ParseFloat(strconv.FormatFloat(float64(*v), 'g', -1, 32), 64)
+	return &out
+}
+
+var errResponseLimit = errors.New("projection response exceeds byte limit")
+
+// rank runs one scored query.
+func (s *Store) rank(ctx context.Context, collection string, r ranked) ([]rankedObject, error) {
+	var result *query.Result
+	metadata := query.ReturnMetadata{Score: true, Distance: true}
+	err := s.call(ctx, func(ctx context.Context, c *wv.Client) (err error) {
+		search := c.Collections.Use(collection).Query
+		nearVector := query.NearVector{Target: types.Vector{Name: r.target, Single: r.vector}, Filter: r.filter, Limit: r.limit, ReturnProperties: r.properties, ReturnMetadata: metadata}
+		switch {
+		case r.hybrid:
+			alpha, fusion := r.alpha, query.HybridFusionRelativeScore
+			if r.rankedFusion {
+				fusion = query.HybridFusionRanked
+			}
+			result, err = search.Hybrid(ctx, query.Hybrid{Query: r.keywords, QueryProperties: r.keywordProperties, NearVector: &query.NearVector{Target: nearVector.Target}, Alpha: &alpha, Fusion: fusion, Filter: r.filter, Limit: r.limit, ReturnProperties: r.properties, ReturnMetadata: metadata})
+		case r.target != "":
+			result, err = search.NearVector(ctx, nearVector)
+		default:
+			result, err = search.BM25(ctx, query.BM25{Query: r.keywords, QueryProperties: r.keywordProperties, Filter: r.filter, Limit: r.limit, ReturnProperties: r.properties, ReturnMetadata: query.ReturnMetadata{Score: true}})
+		}
+		return err
+	})
+	if tooLarge(err) {
+		return nil, errResponseLimit
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]rankedObject, len(result.Objects))
+	for i, o := range result.Objects {
+		rows[i] = rankedObject{storedObject: stored(o), score: widen(o.Metadata.Score), distance: widen(o.Metadata.Distance)}
+	}
+	return rows, nil
+}
+
+// queryFailed keeps connection failures distinct from a refused query.
+func queryFailed(err error, message string) error {
+	if unreachable(err) {
+		return failed(err)
+	}
+	return errors.New(message)
 }
 
 // PublishEmbeddings attaches vectors without updating or deleting the segment's
@@ -828,17 +717,21 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		vectors     []content.EmbeddingData
 	}
 	pending := make([]attachment, 0, projectionBatch)
-	objects := make([]map[string]any, 0, projectionBatch)
+	objects := make([]projected, 0, projectionBatch)
 	flush := func() error {
 		if len(objects) > 0 {
-			if err := s.insertBatch(ctx, objects); err != nil {
+			if err := s.insertBatch(ctx, g.Collection, objects); err != nil {
 				return err
 			}
 		}
 		for _, a := range pending {
 			// Existing objects may disappear while the rest of the batch is built.
 			// Verify the current identity before cleanup or durable coverage.
-			stored, found, err := s.object(ctx, g.Collection, a.id)
+			names := make([]string, len(a.vectors))
+			for i, p := range a.vectors {
+				names[i] = s.VectorName(g, p.Artifact.SpaceID)
+			}
+			stored, found, err := s.written(ctx, g.Collection, a.id, names...)
 			if err != nil {
 				return err
 			}
@@ -872,7 +765,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			sort.Strings(keys)
 			payload = content.Hash([]byte(strings.Join(keys, "\n")))
 		}
-		named := map[string]any{}
+		named := map[string][]float32{}
 		for _, p := range vectors {
 			named[s.VectorName(g, p.Artifact.SpaceID)] = p.Vector
 		}
@@ -883,11 +776,11 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		}
 		if !found {
 			// Never create an enriched object for a segment without its lexical anchor.
-			anchor, projected, err := s.object(ctx, g.Collection, objectID(org, g.ID, segment))
+			anchor, anchored, err := s.object(ctx, g.Collection, objectID(org, g.ID, segment))
 			if err != nil {
 				return err
 			}
-			if !projected {
+			if !anchored {
 				return retrieval.ErrProjectionMissing
 			}
 			lexical := map[string]any{}
@@ -907,7 +800,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			}
 			// Matching identities were omitted above, so a completed retry does
 			// not rewrite the enriched object or its permanent lexical anchor.
-			objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named})
+			objects = append(objects, projected{id: id, properties: lexical, vectors: named})
 		}
 		pending = append(pending, attachment{id: id, segment: segment, vectors: vectors})
 		if len(pending) == projectionBatch {
@@ -933,33 +826,26 @@ const staleListLimit = 100
 // replaced. Segments belong to one Version, so no other Version's objects match.
 func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org, segment, keep string) error {
 	anchor := objectID(org, g.ID, segment)
-	where := "{operator:And,operands:[" + equal("organization", org) + "," + equal("generationId", g.ID) + "," + equal("segmentId", segment) + "]}"
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d){_additional{id}}}}", g.Collection, where, staleListLimit)
+	where := and(equal("organization", org), equal("generationId", g.ID), equal("segmentId", segment))
 	for {
-		var response struct {
-			Data struct {
-				Get map[string][]struct {
-					Additional struct {
-						ID string `json:"id"`
-					} `json:"_additional"`
-				} `json:"Get"`
-			} `json:"data"`
-			Errors []any `json:"errors"`
-		}
-		if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
-			return err
-		}
-		rows, ok := response.Data.Get[g.Collection]
-		if len(response.Errors) > 0 || !ok {
-			return errors.New("projection query failed")
+		rows, err := s.objects(ctx, g.Collection, query.OverAll{Filter: where, Limit: staleListLimit, ReturnProperties: []string{}})
+		if err != nil {
+			return queryFailed(err, "projection query failed")
 		}
 		for _, r := range rows {
-			if r.Additional.ID == keep || r.Additional.ID == anchor {
+			if r.ID == keep || r.ID == anchor {
 				continue
 			}
+			id, err := uuid.Parse(r.ID)
+			if err != nil {
+				return errors.New("invalid projection identity")
+			}
 			// A concurrent attachment may have deleted it first.
-			if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+r.Additional.ID, nil, nil); err != nil && status != http.StatusNotFound {
-				return err
+			err = s.call(ctx, func(ctx context.Context, c *wv.Client) error {
+				return c.Collections.Use(g.Collection).Data.Delete(ctx, id)
+			})
+			if err != nil && !notFound(err) {
+				return failed(err)
 			}
 		}
 		// A full listing may hide more stale objects behind the ones just deleted.
@@ -967,73 +853,6 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 			return nil
 		}
 	}
-}
-
-// deleteWhere runs one batch delete by filter. Weaviate deletes at most its
-// configured maximum matches per call; the result is complete only when fewer
-// objects matched than that limit and none failed.
-func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection string, where map[string]any) (retrieval.PurgeResult, error) {
-	if !className.MatchString(collection) {
-		return retrieval.PurgeResult{}, errors.New("invalid projection collection")
-	}
-	var response purgeResponse
-
-	scoped := Store{Endpoint: s.Endpoint, Client: client, apiKey: s.apiKey}
-	if err := scoped.purgeCall(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "verbose"}, &response); err != nil {
-		return retrieval.PurgeResult{}, err
-	}
-	r := response.Results
-	if r == nil || r.Matches == nil || r.Successful == nil || r.Failed == nil || *r.Matches < 0 || *r.Successful < 0 || *r.Successful > *r.Matches || *r.Failed < 0 {
-		return retrieval.PurgeResult{}, errors.New("projection purge result missing or invalid")
-	}
-	result := retrieval.PurgeResult{Deleted: *r.Successful}
-	// Failed slots may already have committed tombstones. Only matches beyond
-	// the server's admitted delete limit are known to be outside this attempt.
-	if r.Limit > 0 {
-		result.RemainingAtLeast = max(0, *r.Matches-r.Limit)
-	}
-	if *r.Failed > 0 {
-		reason := "provider reported failed objects"
-		for _, object := range r.Objects {
-			if object.Errors != nil && len(object.Errors.Error) > 0 {
-				reason = object.Errors.Error[0].Message
-				break
-			}
-		}
-		return result, fmt.Errorf("projection delete: %d failed, %d successful: %.1024s", *r.Failed, *r.Successful, s.redact(reason))
-	}
-	// Missing limits or incomplete success counts never prove completion.
-	result.Complete = *r.Successful == *r.Matches && (*r.Matches == 0 || (r.Limit > 0 && *r.Matches < r.Limit))
-	return result, nil
-}
-
-func (s *Store) purgeClient() *http.Client {
-	c := *s.Client
-	c.Timeout = s.purgeRequestTimeout()
-	return &c
-}
-
-func equalText(path, value string) map[string]any {
-	return map[string]any{"path": []string{path}, "operator": "Equal", "valueText": value}
-}
-
-// PurgeGeneration deletes every object of one Corpus in one logical
-// generation, lexical and enriched, by filter.
-func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
-	if org == "" || corpusID == "" || generationID == "" {
-		return retrieval.PurgeResult{}, errors.New("incomplete generation purge filter")
-	}
-	return s.purgeGenerationWindow(ctx, collection, org, corpusID, generationID)
-}
-
-// PurgeVersion deletes every object of one Record Version, lexical and
-// enriched, in every generation of the collection, by filter.
-func (s *Store) PurgeVersion(ctx context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {
-	if org == "" || versionID == "" {
-		return retrieval.PurgeResult{}, errors.New("incomplete version purge filter")
-	}
-	return s.deleteWhere(ctx, s.purgeClient(), collection, map[string]any{"operator": "And", "operands": []any{
-		equalText("organization", org), equalText("versionId", versionID)}})
 }
 
 var _ retrieval.PurgeProjection = (*Store)(nil)

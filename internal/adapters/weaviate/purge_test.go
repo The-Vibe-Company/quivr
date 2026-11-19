@@ -1,58 +1,31 @@
 package weaviate_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
-	"io"
-	"net/http"
+	"sync/atomic"
 	"testing"
+
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
-// count reports how many objects in the collection match an optional filter.
-func (f *attachFixture) count(collection, where string) int {
+// count reports how many objects in the collection match a filter; nil
+// counts them all. Fixtures stay far below the index's result limit.
+func (f *attachFixture) count(collection string, where filter.Expr) int {
 	f.t.Helper()
-	args := ""
-	if where != "" {
-		args = "(where:" + where + ")"
-	}
-	body, _ := json.Marshal(map[string]any{"query": fmt.Sprintf("{Aggregate{%s%s{meta{count}}}}", collection, args)})
-	res, err := f.store.Client.Post(f.url+"/v1/graphql", "application/json", bytes.NewReader(body))
+	const limit = 10000
+	result, err := f.raw.Collections.Use(collection).Query.OverAll(f.ctx, query.OverAll{Filter: where, Limit: limit, ReturnProperties: []string{}})
 	if err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("count: %v", err)
 	}
-	defer res.Body.Close()
-	var out struct {
-		Data struct {
-			Aggregate map[string][]struct {
-				Meta struct {
-					Count int `json:"count"`
-				} `json:"meta"`
-			} `json:"Aggregate"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
+	if len(result.Objects) == limit {
+		f.t.Fatalf("count reached the index's result limit of %d", limit)
 	}
-	if err = json.NewDecoder(res.Body).Decode(&out); err != nil || len(out.Errors) > 0 || len(out.Data.Aggregate[collection]) != 1 {
-		f.t.Fatalf("aggregate: %v %v", err, out.Errors)
-	}
-	return out.Data.Aggregate[collection][0].Meta.Count
-}
-
-func textFilter(pairs ...string) string {
-	operands := ""
-	for i := 0; i < len(pairs); i += 2 {
-		if i > 0 {
-			operands += ","
-		}
-		operands += fmt.Sprintf(`{path:[%q],operator:Equal,valueText:%q}`, pairs[i], pairs[i+1])
-	}
-	return "{operator:And,operands:[" + operands + "]}"
+	return len(result.Objects)
 }
 
 // Purges delete by filter: a generation purge removes one Corpus's lexical
@@ -86,21 +59,33 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 	extra.Segments = extra.Segments[1:]
 	f.publish(old, extra)
 	collection := f.gen.Collection
-	if n := f.count(collection, ""); n != 606 {
+	if n := f.count(collection, nil); n != 606 {
 		t.Fatalf("fixture objects %d, want 606", n)
 	}
 	// Lose one real delete response, as a process interruption after the
 	// provider committed would. A fresh adapter must drain the survivors.
-	interrupted := weaviate.New(f.url, f.apiKey)
-	interrupted.Client.Transport = lostPurgeReply{next: interrupted.Client.Transport}
+	// A generation purge counts, lists, then deletes: the delete is the
+	// request that follows a listing, and only its reply is lost.
+	proxy := f.index.proxy(t)
+	var listed atomic.Bool
+	proxy.Before = func(request wireRequest) error {
+		if request.Name == searchMethod {
+			listed.Store(true)
+		}
+		return nil
+	}
+	proxy.LoseReply = func(request wireRequest) bool {
+		return request.Name == batchDeleteMethod && listed.Swap(false)
+	}
+	interrupted := proxy.open(t)
 	if _, err := interrupted.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err == nil {
 		t.Fatal("lost delete reply must report failure")
 	}
-	afterInterruption := f.count(collection, textFilter("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID))
+	afterInterruption := f.count(collection, textEquals("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID))
 	if afterInterruption < 347 || afterInterruption >= 603 {
 		t.Fatalf("interrupted batch left %d of 603 objects, want at most 256 deleted", afterInterruption)
 	}
-	f.store = weaviate.New(f.url, f.apiKey)
+	f.store = f.index.open(t)
 	deleted, sweeps := 0, 0
 	var r retrieval.PurgeResult
 	var err error
@@ -117,16 +102,16 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 	if !r.Complete || sweeps < 1 || deleted != afterInterruption {
 		t.Fatalf("resumed purge: %d sweeps, %d deleted, %+v, want %d survivors drained", sweeps+1, deleted, r, afterInterruption)
 	}
-	if n := f.count(collection, textFilter("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID)); n != 0 {
+	if n := f.count(collection, textEquals("organization", f.org, "corpusId", f.corpusID, "generationId", old.ID)); n != 0 {
 		t.Fatalf("%d objects left in the purged generation", n)
 	}
-	for _, kept := range []string{
-		textFilter("organization", f.org, "generationId", next.ID),
-		textFilter("organization", f.org, "corpusId", "corpus-neighbour"),
-		textFilter("organization", "adapter-attach-other"),
+	for _, kept := range []filter.Expr{
+		textEquals("organization", f.org, "generationId", next.ID),
+		textEquals("organization", f.org, "corpusId", "corpus-neighbour"),
+		textEquals("organization", "adapter-attach-other"),
 	} {
 		if n := f.count(collection, kept); n != 1 {
-			t.Fatalf("purge touched %s: %d objects", kept, n)
+			t.Fatalf("purge touched %v: %d objects", kept, n)
 		}
 	}
 	if r, err = f.store.PurgeGeneration(f.ctx, collection, f.org, f.corpusID, old.ID); err != nil || !r.Complete || r.Deleted != 0 {
@@ -145,7 +130,7 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 	if err != nil || !r.Complete || r.Deleted != 1 {
 		t.Fatalf("version purge %+v %v, want the next generation's object", r, err)
 	}
-	if n := f.count(collection, ""); n != 2 {
+	if n := f.count(collection, nil); n != 2 {
 		t.Fatalf("objects after purges %d, want the neighbour Corpus and Organization", n)
 	}
 	if r, err = f.store.PurgeVersion(f.ctx, collection, f.org, a.VersionID); err != nil || !r.Complete || r.Deleted != 0 {
@@ -202,7 +187,7 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 		}
 		return len(distinct), len(candidates)
 	}
-	objectsBefore := f.count(f.gen.Collection, "")
+	objectsBefore := f.count(f.gen.Collection, nil)
 	liveBefore, slotsBefore := liveCandidates()
 	deleted := 0
 	for _, v := range deadVersions {
@@ -212,7 +197,7 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 		}
 		deleted += r.Deleted
 	}
-	objectsAfter := f.count(f.gen.Collection, "")
+	objectsAfter := f.count(f.gen.Collection, nil)
 	liveAfter, slotsAfter := liveCandidates()
 	t.Logf("THE-698 measurement: objects %d -> %d (%d deleted); distinct live Records in %d candidate slots: %d/%d before, %d/%d after (candidates returned %d -> %d)",
 		objectsBefore, objectsAfter, deleted, retrieval.CandidateLimit, liveBefore, records, liveAfter, records, slotsBefore, slotsAfter)
@@ -222,31 +207,4 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 	if liveBefore >= records || liveAfter != records {
 		t.Fatalf("live Records within the candidate window: %d before, %d after, want crowding then all %d", liveBefore, liveAfter, records)
 	}
-}
-
-// The dependency performs the delete; only its reply is interrupted.
-type lostPurgeReply struct{ next http.RoundTripper }
-
-func (f lostPurgeReply) RoundTrip(r *http.Request) (*http.Response, error) {
-	var request struct {
-		DryRun bool `json:"dryRun"`
-	}
-	if r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
-		}
-		r.Body.Close()
-		if err = json.Unmarshal(body, &request); err != nil {
-			return nil, err
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-	}
-	res, err := f.next.RoundTrip(r)
-	if err == nil && r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects" && !request.DryRun {
-		io.Copy(io.Discard, res.Body)
-		res.Body.Close()
-		return nil, errors.New("injected lost purge response")
-	}
-	return res, err
 }

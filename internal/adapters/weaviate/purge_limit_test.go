@@ -1,68 +1,140 @@
 package weaviate_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"github.com/google/uuid"
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
-// The dependency times out large deletes; adaptation belongs to the real Store.
-// No waits or production-only test hooks are needed at this HTTP boundary.
-func TestGenerationPurgeAdaptsToSlowStore(t *testing.T) {
-	provider := &slowPurgeStore{threshold: 64}
-	for i := 1; i <= 700; i++ {
-		provider.ids = append(provider.ids, fmt.Sprintf("00000000-0000-0000-0000-%012d", i))
+// slowPurgeStore is an index that times out deletes of more than threshold
+// objects. It records what the adapter asked of it; adaptation belongs to the
+// real Store, and no wait or production-only hook is needed at the wire.
+type slowPurgeStore struct {
+	*fakeIndex
+	mu               sync.Mutex
+	threshold        int
+	windows          []int
+	budgets          []time.Duration
+	failure          error
+	selectionFailure error
+}
+
+// errIndexTimeout is the reply of an index that gave up on a request.
+var errIndexTimeout = status.Error(codes.DeadlineExceeded, "context deadline exceeded")
+
+func newSlowPurgeStore(t *testing.T, objects, threshold int) *slowPurgeStore {
+	t.Helper()
+	s := &slowPurgeStore{fakeIndex: newFakeIndex(t), threshold: threshold}
+	for i := 1; i <= objects; i++ {
+		s.seed(fmt.Sprintf("00000000-0000-0000-0000-%012d", i), "organization", "org", "corpusId", "corpus", "generationId", "generation")
 	}
-	store := weaviate.New("http://index.example")
-	store.Client.Transport = provider
+	s.Call = func(ctx context.Context, method string, request proto.Message, apply func() (proto.Message, error)) (proto.Message, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Errorf("%s has no deadline", method)
+		}
+		s.budgets = append(s.budgets, time.Until(deadline))
+		var filters *pb.Filters
+		switch r := request.(type) {
+		case *pb.SearchRequest:
+			filters = r.Filters
+		case *pb.BatchDeleteRequest:
+			filters = r.Filters
+		}
+		// Every selection and delete stays inside one Corpus's generation.
+		if got := fences(filters); got["organization"] != "org" || got["corpusId"] != "corpus" || got["generationId"] != "generation" {
+			t.Errorf("%s without the ownership fence: %v", method, got)
+		}
+		if deletion, ok := request.(*pb.BatchDeleteRequest); ok {
+			if deletion.DryRun {
+				if s.selectionFailure != nil {
+					return nil, s.selectionFailure
+				}
+			} else {
+				window := len(filterIDs(deletion.Filters))
+				s.windows = append(s.windows, window)
+				if s.failure != nil {
+					return nil, s.failure
+				}
+				if window > s.threshold {
+					return nil, errIndexTimeout
+				}
+			}
+		}
+		return apply()
+	}
+	return s
+}
+
+func (s *slowPurgeStore) set(change func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	change()
+}
+
+func (s *slowPurgeStore) seen() (windows []int, budgets []time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int(nil), s.windows...), append([]time.Duration(nil), s.budgets...)
+}
+
+// The dependency times out large deletes; the window halves on each timeout
+// and grows again after full windows.
+func TestGenerationPurgeAdaptsToSlowStore(t *testing.T) {
+	provider := newSlowPurgeStore(t, 700, 64)
+	store := provider.open(t)
 	deleted, complete := 0, false
 	for attempt := 0; attempt < 80; attempt++ {
+		before := len(provider.ids())
 		result, err := store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
-		if err != nil && !strings.Contains(err.Error(), "context deadline exceeded") {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected purge failure: %v", err)
+		}
+		if err == nil && result.RemainingAtLeast != before-result.Deleted {
+			t.Fatalf("window of %d out of %d reported %d remaining", result.Deleted, before, result.RemainingAtLeast)
 		}
 		deleted += result.Deleted
 		if deleted >= 128 {
-			provider.threshold = 256
+			provider.set(func() { provider.threshold = 256 })
 		}
 		if result.Complete {
 			complete = true
 			break
 		}
 	}
-	if !complete || deleted != 700 || len(provider.ids) != 0 {
-		t.Fatalf("slow store did not drain: complete=%v confirmed=%d survivors=%d windows=%v", complete, deleted, len(provider.ids), provider.windows)
+	windows, budgets := provider.seen()
+	if survivors := len(provider.ids()); !complete || deleted != 700 || survivors != 0 {
+		t.Fatalf("slow store did not drain: complete=%v confirmed=%d survivors=%d windows=%v", complete, deleted, survivors, windows)
 	}
-	if len(provider.windows) < 4 || provider.windows[0] != 256 || provider.windows[1] != 128 || provider.windows[2] != 64 {
-		t.Fatalf("timeout windows %v, want initial 256 then 128 then 64", provider.windows)
+	if len(windows) < 4 || windows[0] != 256 || windows[1] != 128 || windows[2] != 64 {
+		t.Fatalf("timeout windows %v, want initial 256 then 128 then 64", windows)
 	}
 	grew := false
-	for _, n := range provider.windows[3:] {
+	for _, n := range windows[3:] {
 		grew = grew || n > 64
 		if n > 256 {
 			t.Fatalf("unbounded delete window %d", n)
 		}
 	}
-	for _, budget := range provider.budgets {
+	for _, budget := range budgets {
 		if budget < 59*time.Second || budget > time.Minute {
-			t.Fatalf("purge request budget %s, want 60s independently of ordinary 4s client", budget)
+			t.Fatalf("purge request budget %s, want 60s independently of ordinary 4s requests", budget)
 		}
 	}
-	if store.Client.Timeout != 4*time.Second {
-		t.Fatal("purge changed ordinary request timeout")
-	}
 	if !grew {
-		t.Fatalf("successful windows never recovered: %v", provider.windows)
+		t.Fatalf("successful windows never recovered: %v", windows)
 	}
 }
 
@@ -72,17 +144,14 @@ func TestGenerationPurgeTimeoutClassification(t *testing.T) {
 		failure error
 		floor   bool
 	}{
-		{"request timeout floor", context.DeadlineExceeded, true},
-		{"other provider error", errors.New("index unavailable"), false},
-		{"cancelled request", context.Canceled, false},
+		{"request timeout floor", errIndexTimeout, true},
+		{"other provider error", status.Error(codes.Unavailable, "index unavailable"), false},
+		{"cancelled request", status.Error(codes.Canceled, "context canceled"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			provider := &slowPurgeStore{threshold: 256, failure: tc.failure}
-			for i := 1; i <= 300; i++ {
-				provider.ids = append(provider.ids, fmt.Sprintf("00000000-0000-0000-0000-%012d", i))
-			}
-			store := weaviate.New("http://index.example")
-			store.Client.Transport = provider
+			provider := newSlowPurgeStore(t, 300, 256)
+			provider.failure = tc.failure
+			store := provider.open(t)
 			store.PurgeTimeout = 75 * time.Second
 			for i := 0; i < 7; i++ {
 				result, err := store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
@@ -94,15 +163,16 @@ func TestGenerationPurgeTimeoutClassification(t *testing.T) {
 			if tc.floor {
 				want = 16
 			}
-			if provider.windows[6] != want {
-				t.Fatalf("failure %v: windows %v, want last window %d", tc.failure, provider.windows, want)
+			windows, budgets := provider.seen()
+			if windows[6] != want {
+				t.Fatalf("failure %v: windows %v, want last window %d", tc.failure, windows, want)
 			}
-			for _, budget := range provider.budgets {
+			for _, budget := range budgets {
 				if budget < 74*time.Second || budget > 75*time.Second {
 					t.Fatalf("configured purge deadline: %s", budget)
 				}
 			}
-			provider.failure = nil
+			provider.set(func() { provider.failure = nil })
 			for i := 0; i < 40; i++ {
 				result, err := store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
 				if err != nil {
@@ -118,222 +188,104 @@ func TestGenerationPurgeTimeoutClassification(t *testing.T) {
 }
 
 func TestGenerationPurgeSelectionTimeoutRecovers(t *testing.T) {
-	provider := &slowPurgeStore{threshold: 256, selectionFailure: context.DeadlineExceeded, ids: []string{"00000000-0000-0000-0000-000000000001"}}
-	store := weaviate.New("http://index.example")
-	store.Client.Transport = provider
+	provider := newSlowPurgeStore(t, 1, 256)
+	provider.selectionFailure = errIndexTimeout
+	store := provider.open(t)
 	result, err := store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
-	if err == nil || result.Complete || result.Deleted != 0 || len(provider.windows) != 0 {
-		t.Fatalf("selection timeout: %+v %v deletes=%v", result, err, provider.windows)
+	if windows, _ := provider.seen(); err == nil || result.Complete || result.Deleted != 0 || len(windows) != 0 {
+		t.Fatalf("selection timeout: %+v %v deletes=%v", result, err, windows)
 	}
-	provider.selectionFailure = nil
-	provider.probeFailure = errors.New("cap probe unavailable")
+	provider.set(func() { provider.selectionFailure = nil })
 	result, err = store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
 	if err != nil || result.Deleted != 1 || result.Complete {
 		t.Fatalf("selection recovery: %+v %v", result, err)
 	}
+	// Only a zero-match selection proves completion.
 	result, err = store.PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
 	if err != nil || !result.Complete {
 		t.Fatalf("empty confirmation: %+v %v", result, err)
 	}
 }
 
-type slowPurgeStore struct {
-	ids              []string
-	threshold        int
-	windows          []int
-	budgets          []time.Duration
-	failure          error
-	selectionFailure error
-	probeFailure     error
-}
-
-func (s *slowPurgeStore) RoundTrip(req *http.Request) (*http.Response, error) {
-	if deadline, ok := req.Context().Deadline(); ok {
-		s.budgets = append(s.budgets, time.Until(deadline))
-	} else {
-		return nil, errors.New("purge request has no deadline")
-	}
-	var body map[string]any
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	var out any
-	if req.URL.Path == "/v1/graphql" {
-		// Baseline path reaches the same oversized-delete timeout.
-		rows := []any{}
-		for _, id := range s.ids[:min(len(s.ids), 257)] {
-			rows = append(rows, map[string]any{"_additional": map[string]any{"id": id}})
-		}
-		out = map[string]any{"data": map[string]any{"Get": map[string]any{"QuivrTextV4": rows}}}
-	} else if req.URL.Path == "/v1/batch/objects" && req.Method == http.MethodDelete {
-		where := body["match"].(map[string]any)["where"].(map[string]any)
-		identities := purgeFilterIDs(where)
-		selected := []string{}
-		for _, id := range s.ids {
-			if len(identities) == 0 || identities[id] {
-				selected = append(selected, id)
-			}
-		}
-		objects := []any{}
-		if dry, _ := body["dryRun"].(bool); dry {
-			if len(identities) > 0 && s.probeFailure != nil {
-				return nil, s.probeFailure
-			}
-			if len(identities) == 0 && s.selectionFailure != nil {
-				return nil, s.selectionFailure
-			}
-			for _, id := range selected {
-				objects = append(objects, map[string]any{"id": id, "status": "DRYRUN"})
-			}
-			out = map[string]any{"dryRun": true, "results": map[string]any{"matches": len(selected), "limit": 10000, "successful": 0, "failed": 0, "objects": objects}}
-		} else {
-			s.windows = append(s.windows, len(selected))
-			if s.failure != nil {
-				return nil, s.failure
-			}
-			if len(selected) > s.threshold {
-				return nil, context.DeadlineExceeded
-			}
-			remaining := []string{}
-			for _, id := range s.ids {
-				if !identities[id] {
-					remaining = append(remaining, id)
-				}
-			}
-			s.ids = remaining
-			out = map[string]any{"results": map[string]any{"matches": len(selected), "limit": 10000, "successful": len(selected), "failed": 0}}
-		}
-	} else {
-		return nil, fmt.Errorf("unexpected purge request %s %s", req.Method, req.URL.Path)
-	}
-	encoded, _ := json.Marshal(out)
-	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(encoded))}, nil
-}
-
-func purgeFilterIDs(where map[string]any) map[string]bool {
-	ids := map[string]bool{}
-	var walk func(map[string]any)
-	walk = func(filter map[string]any) {
-		if path, ok := filter["path"].([]any); ok && len(path) == 1 && path[0] == "id" {
-			if id, ok := filter["valueText"].(string); ok {
-				ids[id] = true
-			}
-		}
-		if operands, ok := filter["operands"].([]any); ok {
-			for _, operand := range operands {
-				walk(operand.(map[string]any))
-			}
-		}
-	}
-	walk(where)
-	return ids
-}
-
-// A delete is complete only when the engine proves nothing is left: fewer
-// matches than its per-call limit, or no match at all. A capped or
-// limit-less response keeps the purge item for the next sweep.
+// A Version purge is complete only when the index proves nothing is left: a
+// count after the delete finds no match, or the delete matched nothing. A
+// delete the index capped, a failed object or a count that cannot be read
+// keeps the purge item for the next sweep.
 func TestPurgeCompletenessFailsClosed(t *testing.T) {
+	const key = "index-secret"
+	// failed is a delete reply that could not delete the first failures
+	// objects out of matches.
+	failed := func(matches, failures int) *pb.BatchDeleteReply {
+		reason := "context deadline exceeded for " + key
+		reply := &pb.BatchDeleteReply{Matches: int64(matches), Successful: int64(matches - failures), Failed: int64(failures)}
+		for i := 1; i <= failures; i++ {
+			id := uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012d", i))
+			reply.Objects = append(reply.Objects, &pb.BatchDeleteObject{Uuid: id[:], Error: &reason})
+		}
+		return reply
+	}
 	for _, tc := range []struct {
-		name     string
-		results  map[string]any
-		deleted  int
-		complete bool
-		err      bool
-		reason   string
+		name string
+		// objects of the Version in the index, and the most one delete removes.
+		objects, deleteCap int
+		// delete and count answer for the index when set.
+		delete    func() (*pb.BatchDeleteReply, error)
+		count     func() (*pb.BatchDeleteReply, error)
+		deleted   int
+		remaining int
+		complete  bool
+		err       bool
+		reason    string
 	}{
-		{"under limit", map[string]any{"matches": 3, "limit": 10000, "successful": 3, "failed": 0}, 3, true, false, ""},
-		{"capped at limit", map[string]any{"matches": 10000, "limit": 10000, "successful": 10000, "failed": 0}, 10000, false, false, ""},
-		{"limit missing", map[string]any{"matches": 3, "successful": 3, "failed": 0}, 3, false, false, ""},
-		{"nothing left", map[string]any{"matches": 0, "successful": 0, "failed": 0}, 0, true, false, ""},
-		{"failed objects", map[string]any{"matches": 3, "limit": 10000, "successful": 2, "failed": 1, "objects": []any{map[string]any{"errors": map[string]any{"error": []any{map[string]any{"message": "context deadline exceeded"}}}}}}, 2, false, true, "context deadline exceeded"},
-		{"unaccounted objects", map[string]any{"matches": 3, "limit": 10000, "successful": 2, "failed": 0}, 2, false, false, ""},
-		{"missing failed count", map[string]any{"matches": 3, "limit": 10000, "successful": 3}, 0, false, true, "result missing"},
-		{"missing result", nil, 0, false, true, "result missing"},
-		{"missing counts", map[string]any{}, 0, false, true, "result missing"},
+		{name: "all deleted", objects: 3, deleted: 3, complete: true},
+		{name: "capped by the index", objects: 3, deleteCap: 2, deleted: 2, remaining: 1},
+		{name: "nothing left", complete: true},
+		{name: "failed objects", objects: 3, delete: func() (*pb.BatchDeleteReply, error) {
+			return failed(3, 1), nil
+		}, deleted: 2, err: true, reason: "context deadline exceeded"},
+		{name: "more failures than matches", objects: 3, delete: func() (*pb.BatchDeleteReply, error) {
+			return failed(1, 2), nil
+		}, err: true, reason: "result missing"},
+		{name: "count unavailable", objects: 3, count: func() (*pb.BatchDeleteReply, error) {
+			return nil, status.Error(codes.Unavailable, "index unavailable")
+		}, deleted: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var where any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != "DELETE" || r.URL.Path != "/v1/batch/objects" {
-					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			fake := newFakeIndex(t)
+			fake.APIKey, fake.DeleteCap = key, tc.deleteCap
+			for i := 1; i <= tc.objects; i++ {
+				fake.seed(fmt.Sprintf("00000000-0000-0000-0000-%012d", i), "organization", "org", "versionId", "version")
+			}
+			equal := func(property, value string) *pb.Filters {
+				return &pb.Filters{Operator: pb.Filters_OPERATOR_EQUAL, Target: &pb.FilterTarget{Target: &pb.FilterTarget_Property{Property: property}}, TestValue: &pb.Filters_ValueText{ValueText: value}}
+			}
+			want := &pb.Filters{Operator: pb.Filters_OPERATOR_AND, Filters: []*pb.Filters{equal("organization", "org"), equal("versionId", "version")}}
+			fake.Call = func(_ context.Context, method string, request proto.Message, apply func() (proto.Message, error)) (proto.Message, error) {
+				deletion, ok := request.(*pb.BatchDeleteRequest)
+				if !ok {
+					t.Errorf("unexpected %s", method)
+					return apply()
 				}
-				var body map[string]any
-				_ = json.NewDecoder(r.Body).Decode(&body)
-				where = body["match"].(map[string]any)["where"]
-				_ = json.NewEncoder(w).Encode(map[string]any{"results": tc.results})
-			}))
-			defer server.Close()
-			r, err := weaviate.New(server.URL).PurgeVersion(context.Background(), "QuivrTextV4", "org", "version")
-			if (err != nil) != tc.err || r.Deleted != tc.deleted || r.Complete != tc.complete {
+				if !proto.Equal(deletion.Filters, want) {
+					t.Errorf("filter %v, want %v", deletion.Filters, want)
+				}
+				if answer := tc.delete; answer != nil && !deletion.DryRun {
+					return answer()
+				}
+				if answer := tc.count; answer != nil && deletion.DryRun {
+					return answer()
+				}
+				return apply()
+			}
+			r, err := fake.open(t).PurgeVersion(context.Background(), "QuivrTextV4", "org", "version")
+			if (err != nil) != tc.err || r.Deleted != tc.deleted || r.Complete != tc.complete || r.RemainingAtLeast != tc.remaining {
 				t.Fatalf("result %+v %v", r, err)
 			}
 			if tc.reason != "" && (err == nil || !strings.Contains(err.Error(), tc.reason)) {
 				t.Fatalf("provider reason lost: %v", err)
 			}
-			if b, _ := json.Marshal(where); string(b) != `{"operands":[{"operator":"Equal","path":["organization"],"valueText":"org"},{"operator":"Equal","path":["versionId"],"valueText":"version"}],"operator":"And"}` {
-				t.Fatalf("filter %s", b)
-			}
-		})
-	}
-}
-
-// Only a valid zero-match dry run proves completion. Invalid caps are checked
-// with an ID fence before any generation-wide selection is admitted.
-func TestGenerationPurgeListingFailsClosed(t *testing.T) {
-	const empty = `{"dryRun":true,"results":{"matches":0,"limit":10000,"successful":0,"failed":0,"objects":[]}}`
-	for _, tc := range []struct {
-		name, body         string
-		complete           bool
-		preflight          bool
-		deleted, remaining int
-	}{
-		{name: "empty", body: empty, complete: true},
-		{name: "null", body: `{"dryRun":true,"results":null}`},
-		{name: "missing", body: `{}`},
-		{name: "missing dry run flag", body: `{"results":{"matches":0,"limit":10000,"successful":0,"failed":0}}`},
-		{name: "not dry run", body: `{"dryRun":false,"results":{"matches":0,"limit":10000,"successful":0,"failed":0}}`},
-		{name: "failed selection", body: `{"dryRun":true,"results":{"matches":1,"limit":10000,"successful":0,"failed":1}}`},
-		{name: "missing identities", body: `{"dryRun":true,"results":{"matches":1,"limit":10000,"successful":0,"failed":0}}`},
-		{name: "missing identity", body: `{"dryRun":true,"results":{"matches":1,"limit":10000,"successful":0,"failed":0,"objects":[{"status":"DRYRUN"}]}}`},
-		{name: "failed identity", body: `{"dryRun":true,"results":{"matches":1,"limit":10000,"successful":0,"failed":0,"objects":[{"id":"00000000-0000-0000-0000-000000000001","status":"FAILED"}]}}`},
-		{name: "duplicate identity", body: `{"dryRun":true,"results":{"matches":2,"limit":10000,"successful":0,"failed":0,"objects":[{"id":"00000000-0000-0000-0000-000000000001","status":"DRYRUN"},{"id":"00000000-0000-0000-0000-000000000001","status":"DRYRUN"}]}}`},
-		{name: "uncapped preflight", preflight: true, body: `{"dryRun":true,"results":{"matches":0,"limit":0,"successful":0,"failed":0,"objects":[]}}`},
-		{name: "excessive preflight cap", preflight: true, body: `{"dryRun":true,"results":{"matches":0,"limit":10001,"successful":0,"failed":0,"objects":[]}}`},
-		{name: "cap plus one", body: `{"dryRun":true,"results":{"matches":3,"limit":2,"successful":0,"failed":0,"objects":[{"id":"00000000-0000-0000-0000-000000000001","status":"DRYRUN"},{"id":"00000000-0000-0000-0000-000000000002","status":"DRYRUN"}]}}`, deleted: 2, remaining: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != "DELETE" || r.URL.Path != "/v1/batch/objects" {
-					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-				}
-				var request map[string]any
-				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-					t.Error(err)
-					return
-				}
-				where := request["match"].(map[string]any)["where"].(map[string]any)
-				ids := purgeFilterIDs(where)
-				dry, _ := request["dryRun"].(bool)
-				w.Header().Set("Content-Type", "application/json")
-				if !dry {
-					if tc.deleted == 0 {
-						t.Error("invalid selection admitted a real delete")
-					}
-					io.WriteString(w, `{"results":{"matches":2,"limit":10000,"successful":2,"failed":0}}`)
-				} else if len(ids) == 1 && !tc.preflight {
-					io.WriteString(w, empty)
-				} else {
-					if tc.preflight && len(ids) != 1 {
-						t.Error("unsafe cap allowed broad selection")
-					}
-					io.WriteString(w, tc.body)
-				}
-			}))
-			defer server.Close()
-			result, err := weaviate.New(server.URL).PurgeGeneration(context.Background(), "QuivrTextV4", "org", "corpus", "generation")
-			success := tc.complete || tc.deleted > 0
-			if result.Complete != tc.complete || (err == nil) != success || result.Deleted != tc.deleted || result.RemainingAtLeast != tc.remaining {
-				t.Fatalf("selection result %+v %v, want complete=%v deleted=%d remaining=%d", result, err, tc.complete, tc.deleted, tc.remaining)
+			if err != nil && strings.Contains(err.Error(), key) {
+				t.Fatalf("API key in the purge error: %v", err)
 			}
 		})
 	}
