@@ -2,17 +2,18 @@ package weaviate_test
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -189,37 +190,18 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, "feed", v, seg); err != nil {
 		t.Fatal(err)
 	}
-	query := unitVector(1)
-	if err := f.store.PublishEmbeddings(f.ctx, g, f.org, []content.EmbeddingData{f.embedding(g, "low", unitVector(2)), f.embedding(g, "zz-best", query), f.embedding(g, "other", unitVector(3))}); err != nil {
+	target := unitVector(1)
+	if err := f.store.PublishEmbeddings(f.ctx, g, f.org, []content.EmbeddingData{f.embedding(g, "low", unitVector(2)), f.embedding(g, "zz-best", target), f.embedding(g, "other", unitVector(3))}); err != nil {
 		t.Fatal(err)
 	}
 	// The lexical scan budget counts canonical passages even after vectors
 	// are attached: enriched physical copies must not occupy those slots.
-	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"passage"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
-	req, err := http.NewRequestWithContext(f.ctx, http.MethodPost, f.url+"/v1/graphql", strings.NewReader(string(queryJSON)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := f.store.Client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var scan struct {
-		Data struct {
-			Get map[string][]struct {
-				SegmentID string `json:"segmentId"`
-			} `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
-	}
-	err = json.NewDecoder(res.Body).Decode(&scan)
-	res.Body.Close()
-	if err != nil || len(scan.Errors) != 0 || len(scan.Data.Get[g.Collection]) != len(seg.Segments) {
-		t.Fatalf("lexical passage population after enrichment: %+v %v", scan, err)
+	scan, err := f.raw.Collections.Use(g.Collection).Query.OverAll(f.ctx, query.OverAll{Filter: textEquals("organization", f.org, "generationId", g.ID, "itemKind", "passage"), Limit: 100, ReturnProperties: []string{"segmentId"}})
+	if err != nil || len(scan.Objects) != len(seg.Segments) {
+		t.Fatalf("lexical passage population after enrichment: %d objects, %v; want %d", len(scan.Objects), err, len(seg.Segments))
 	}
 	for _, mode := range []string{"semantic", "hybrid"} {
-		hits, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour", Mode: mode, Vector: query, GroupBy: "record", K: 10})
+		hits, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour", Mode: mode, Vector: target, GroupBy: "record", K: 10})
 		if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-best" {
 			t.Fatalf("%s best passage %+v %v", mode, hits, err)
 		}
@@ -234,8 +216,18 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	// A partial match must still choose the best highlight within a bounded
 	// dependency budget. Exhausting that budget fails immediately, without
 	// sleeping or asserting machine-dependent latency.
-	f.store.Client.Transport = &searchRequestBudget{next: f.store.Client.Transport, remaining: 4}
-	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour harbour harbour ferries boat water", Mode: "lexical", GroupBy: "record", K: 1})
+	// The budget counts queries at the wire; real ranking, filtering and
+	// passage selection stay with the index.
+	proxy := f.index.proxy(t)
+	var remaining atomic.Int32
+	remaining.Store(4)
+	proxy.Before = func(request wireRequest) error {
+		if request.Name == searchMethod && remaining.Add(-1) < 0 {
+			return errInjected
+		}
+		return nil
+	}
+	hits, err = proxy.open(t).Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour harbour harbour ferries boat water", Mode: "lexical", GroupBy: "record", K: 1})
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-coverage" {
 		t.Fatalf("distinct query-term highlight %+v %v", hits, err)
 	}
@@ -298,11 +290,6 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 		}
 	}
 	// Range indexing is a schema contract, not a timing assertion.
-	res, err := f.store.Client.Get(f.url + "/v1/schema/" + g.Collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
 	var schema struct {
 		Properties []struct {
 			DataType   []string `json:"dataType"`
@@ -311,8 +298,8 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 			Filterable bool     `json:"indexFilterable"`
 		} `json:"properties"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&schema); err != nil {
-		t.Fatal(err)
+	if status := f.index.rest(t, http.MethodGet, "/v1/schema/"+g.Collection, nil, &schema); status != http.StatusOK {
+		t.Fatalf("read schema: status %d", status)
 	}
 	dates := 0
 	for _, p := range schema.Properties {
@@ -349,76 +336,51 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 	}
 }
 
-// Enforce the search's dependency budget while leaving real Weaviate ranking,
-// filtering and passage selection in the owner test.
-type searchRequestBudget struct {
-	next      http.RoundTripper
-	remaining int
-}
-
-func (b *searchRequestBudget) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Path == "/v1/graphql" {
-		b.remaining--
-		if b.remaining < 0 {
-			return nil, errors.New("search dependency request budget exhausted")
-		}
-	}
-	return b.next.RoundTrip(r)
-}
-
-// Owns bounded recovery when individually valid passages exceed a response's
-// byte budget. The transport models GraphQL limits, not passage selection.
+// Owns bounded recovery when individually valid passages exceed the reply
+// size the client accepts. The fake index models the size of a reply, not
+// passage selection: the client library itself refuses the oversized one.
 func TestItemPassageResponseBudget(t *testing.T) {
-	transport := &largePassageHTTP{text: strings.Repeat("harbour ", 1<<17)}
-	store := weaviate.New("http://index.invalid")
-	store.Client.Transport = transport
+	text := strings.Repeat("harbour ", 1<<17)
+	fake := newFakeIndex(t)
+	// The limit the index advertises: one passage fits, seventeen do not.
+	fake.Meta = `{"version":"1.39.14","grpcMaxMessageSize":4194304}`
+	var requests atomic.Int32
+	fake.Call = func(_ context.Context, method string, request proto.Message, _ func() (proto.Message, error)) (proto.Message, error) {
+		search, ok := request.(*pb.SearchRequest)
+		if !ok {
+			return nil, status.Error(codes.Unimplemented, method)
+		}
+		if requests.Add(1) > 3 {
+			return nil, status.Error(codes.Internal, "large-passage dependency budget exhausted")
+		}
+		passages := false
+		for _, name := range search.GetProperties().GetNonRefProperties() {
+			passages = passages || name == "passageText"
+		}
+		count := int(search.Limit)
+		if passages {
+			count = min(count, 17)
+		}
+		reply := &pb.SearchReply{}
+		for i := 0; i < count; i++ {
+			fields := map[string]*pb.Value{}
+			for name, value := range map[string]string{"segmentId": fmt.Sprintf("passage-%03d", i), "generationId": "generation", "versionId": fmt.Sprintf("version-%03d", i)} {
+				fields[name] = &pb.Value{Kind: &pb.Value_TextValue{TextValue: value}}
+			}
+			if passages {
+				fields["passageText"] = &pb.Value{Kind: &pb.Value_TextValue{TextValue: text}}
+			}
+			reply.Results = append(reply.Results, &pb.SearchResult{Metadata: &pb.MetadataResult{Score: 1, ScorePresent: true}, Properties: &pb.PropertiesResult{NonRefProps: &pb.Properties{Fields: fields}}})
+		}
+		return reply, nil
+	}
+	store := fake.open(t)
 	g := content.Generation{ID: "generation", Collection: "PassageBudget", ItemKeywordsProjected: true, Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}}}}
 	hits, err := store.Search(context.Background(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10})
 	if err != nil || len(hits) == 0 || hits[0].SegmentID != "passage-000" {
 		t.Fatalf("bounded large-passage search: %+v %v", hits, err)
 	}
-}
-
-type largePassageHTTP struct {
-	requests int
-	text     string
-}
-
-func (h *largePassageHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
-	if strings.HasPrefix(r.URL.Path, "/v1/schema/") {
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("index queries = %d, want the item query, the oversized passage window and one recovery", got)
 	}
-	if r.URL.Path != "/v1/graphql" {
-		return nil, errors.New("unexpected projection endpoint")
-	}
-	h.requests++
-	if h.requests > 3 {
-		return nil, errors.New("large-passage dependency budget exhausted")
-	}
-	var request struct{ Query string }
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return nil, err
-	}
-	match := regexp.MustCompile(`limit:(\d+)`).FindStringSubmatch(request.Query)
-	if len(match) != 2 {
-		return nil, errors.New("missing GraphQL limit")
-	}
-	limit, _ := strconv.Atoi(match[1])
-	count := limit
-	if strings.Contains(request.Query, "passageText") {
-		count = min(limit, 17)
-	}
-	rows := make([]map[string]any, 0, count)
-	for i := 0; i < count; i++ {
-		row := map[string]any{"segmentId": fmt.Sprintf("passage-%03d", i), "generationId": "generation", "versionId": fmt.Sprintf("version-%03d", i), "_additional": map[string]any{"score": "1"}}
-		if strings.Contains(request.Query, "passageText") {
-			row["passageText"] = h.text
-		}
-		rows = append(rows, row)
-	}
-	body, err := json.Marshal(map[string]any{"data": map[string]any{"Get": map[string]any{"PassageBudget": rows}}})
-	if err != nil {
-		return nil, err
-	}
-	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 }

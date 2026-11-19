@@ -2,11 +2,12 @@ package weaviate_test
 
 import (
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
-	"strings"
-	"testing"
 )
 
 // Owns engine filtering before ranking: more nonmatching anchors than the

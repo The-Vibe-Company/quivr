@@ -4,17 +4,17 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
-	"github.com/The-Vibe-Company/quivr/internal/content"
-	"github.com/The-Vibe-Company/quivr/internal/corpus"
-	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 //go:embed testdata/relevance-v1.json
@@ -24,18 +24,14 @@ var fixture []byte
 // Public tests separately verify authorization, canonical hydration and durability;
 // structured Manifest ingestion belongs to THE-648.
 func TestFR_ENRelevanceByMode(t *testing.T) {
+	projection := realIndex(t).open(t)
 	path := os.Getenv("QUIVR_ADAPTER_CONFIG")
-	if path == "" {
-		t.Skip("make verify real adapters")
-	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		TEIURL         string `json:"tei_url"`
-		WeaviateURL    string `json:"weaviate_url"`
-		WeaviateAPIKey string `json:"weaviate_api_key"`
+		TEIURL string `json:"tei_url"`
 	}
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
@@ -45,7 +41,6 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	model := tei.Encoder{Endpoint: cfg.TEIURL}
-	projection := weaviate.New(cfg.WeaviateURL, cfg.WeaviateAPIKey)
 	g := content.Generation{ID: "relevance-fixture", Collection: "QuivrRelevanceV1", ProfileVersion: retrieval.ProfileVersion, SpaceID: model.Space().ID}
 	if err = projection.Bootstrap(ctx, g.Collection); err != nil {
 		t.Fatal(err)

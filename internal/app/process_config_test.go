@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
-	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +15,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -83,28 +88,50 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeInvalidConfiguration, Message: "sentinel-bearer-secret"}}})
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeNamespaceConflict, Message: "sentinel-bearer-secret"}}})
 	slog.Info("index metadata", "detail", "sentinel-index-secret")
-	for _, body := range []string{
-		`{"error":[{"message":"denied sentinel-index-secret"}]}`,
-		`{"results":{"matches":1,"successful":0,"failed":1,"objects":[{"errors":{"error":[{"message":"denied sentinel-index-secret"}]}}]}}`,
+	// The index refuses once as a whole request and once per object; both
+	// explanations repeat the key.
+	denied := "denied sentinel-index-secret"
+	for _, reply := range []func() (*pb.BatchDeleteReply, error){
+		func() (*pb.BatchDeleteReply, error) { return nil, status.Error(codes.PermissionDenied, denied) },
+		func() (*pb.BatchDeleteReply, error) {
+			return &pb.BatchDeleteReply{Matches: 1, Failed: 1, Objects: []*pb.BatchDeleteObject{{Uuid: make([]byte, 16), Error: &denied}}}, nil
+		},
 	} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(body, `"message"`) && !strings.Contains(body, `"results"`) {
-				w.WriteHeader(http.StatusUnauthorized)
-			}
-			w.Write([]byte(body))
+		rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"version":"1.39.14","grpcMaxMessageSize":104858000}`))
 		}))
-		store, constructErr := weaviate.NewWithTLS(server.URL, outbound.TLS{}, cfg.WeaviateAPIKey)
+		listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+		if listenErr != nil {
+			t.Fatal(listenErr)
+		}
+		index := grpc.NewServer(grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
+			var request pb.BatchDeleteRequest
+			if err := stream.RecvMsg(&request); err != nil {
+				return err
+			}
+			out, err := reply()
+			if err != nil {
+				return err
+			}
+			return stream.SendMsg(out)
+		}))
+		go index.Serve(listener)
+		store, constructErr := weaviate.New(weaviate.Config{URL: rest.URL, GRPCAddress: listener.Addr().String(), APIKey: cfg.WeaviateAPIKey})
 		if constructErr != nil {
 			t.Fatal(constructErr)
 		}
 		_, requestErr := store.PurgeVersion(context.Background(), "QuivrTextV4", "org", "version")
-		store.Client.CloseIdleConnections()
-		server.Close()
+		store.Close()
+		index.Stop()
+		rest.Close()
 		if requestErr == nil {
 			t.Fatal("expected index refusal")
 		}
 		if strings.Contains(requestErr.Error(), "sentinel-index-secret") {
 			t.Errorf("index error leaked configured key")
+		}
+		if !strings.Contains(requestErr.Error(), "denied") {
+			t.Errorf("index error lost the provider explanation: %v", requestErr)
 		}
 		slog.Info("index refusal", "detail", requestErr.Error())
 	}

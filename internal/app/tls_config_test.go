@@ -46,3 +46,16 @@ func TestPluginTLSSwitchAppliesToNewEndpoints(t *testing.T) {
 		t.Fatalf("plaintext plugin error=%v", err)
 	}
 }
+
+// The index client library takes no trust settings of its own, so valid ones
+// refuse startup rather than being silently ignored.
+func TestWeaviateTrustSettingsRefuseStartup(t *testing.T) {
+	cfg := Config{WeaviateURL: "https://index.example", TLS: TLSConfig{Weaviate: outbound.TLS{ServerName: "index.internal"}}}
+	if _, err := cfg.validateTLS(); err == nil || !strings.Contains(err.Error(), "weaviate TLS") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error=%v, want a weaviate TLS refusal", err)
+	}
+	cfg.TLS.Weaviate = outbound.TLS{}
+	if _, err := cfg.validateTLS(); err != nil {
+		t.Fatalf("system trust refused: %v", err)
+	}
+}

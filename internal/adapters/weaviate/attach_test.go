@@ -1,20 +1,21 @@
 package weaviate_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	wv "github.com/weaviate/weaviate-go-client/v6"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -25,10 +26,12 @@ import (
 // attachFixture is one collection with lexical segments projected the way
 // promotion projects them, before any embedding is attached.
 type attachFixture struct {
-	t        *testing.T
-	ctx      context.Context
-	url      string
-	apiKey   string
+	t   *testing.T
+	ctx context.Context
+	// index is the real index; raw reads what the adapter stored without
+	// going through the adapter.
+	index    index
+	raw      *wv.Client
 	store    *weaviate.Store
 	gen      content.Generation
 	org      string
@@ -37,26 +40,12 @@ type attachFixture struct {
 
 func newAttachFixture(t *testing.T) *attachFixture {
 	t.Helper()
-	path := os.Getenv("QUIVR_ADAPTER_CONFIG")
-	if path == "" {
-		t.Skip("make verify real adapters")
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cfg struct {
-		WeaviateURL    string `json:"weaviate_url"`
-		WeaviateAPIKey string `json:"weaviate_api_key"`
-	}
-	if err = json.Unmarshal(b, &cfg); err != nil {
-		t.Fatal(err)
-	}
+	idx := realIndex(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
-	f := &attachFixture{t: t, ctx: ctx, url: strings.TrimRight(cfg.WeaviateURL, "/"), apiKey: cfg.WeaviateAPIKey, store: weaviate.New(cfg.WeaviateURL, cfg.WeaviateAPIKey), org: "adapter-attach", corpusID: "corpus-attach"}
+	f := &attachFixture{t: t, ctx: ctx, index: idx, raw: idx.client(t), store: idx.open(t), org: "adapter-attach", corpusID: "corpus-attach"}
 	collection := "QuivrAttach" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	if err = f.store.Bootstrap(ctx, collection); err != nil {
+	if err := f.store.Bootstrap(ctx, collection); err != nil {
 		t.Fatal(err)
 	}
 	f.gen = content.Generation{ID: "generation-attach", Collection: collection, ProfileVersion: retrieval.ProfileVersion, SpaceID: "space-attach"}
@@ -74,20 +63,6 @@ func (f *attachFixture) publish(g content.Generation, seg content.Segmentation) 
 	}
 }
 
-// unitVector returns a distinct normalized vector per seed.
-func unitVector(seed int) []float32 {
-	v := make([]float32, 384)
-	n := 0.0
-	for i := range v {
-		v[i] = float32(math.Sin(float64(seed*7+i) + 0.5))
-		n += float64(v[i]) * float64(v[i])
-	}
-	for i := range v {
-		v[i] = float32(float64(v[i]) / math.Sqrt(n))
-	}
-	return v
-}
-
 func (f *attachFixture) embedding(g content.Generation, segmentID string, vector []float32) content.EmbeddingData {
 	raw, err := content.VectorBytes(vector)
 	if err != nil {
@@ -102,35 +77,36 @@ type storedObject struct {
 	Vector  bool
 }
 
+// textEquals selects objects whose text properties equal the given
+// name/value pairs.
+func textEquals(pairs ...string) filter.Expr {
+	operands := filter.And{}
+	for i := 0; i < len(pairs); i += 2 {
+		operands = append(operands, filter.Cond{Operator: filter.Equal, Target: pairs[i], Value: pairs[i+1]})
+	}
+	return operands
+}
+
 // objects lists every physical object projected for a segment in a generation.
 func (f *attachFixture) objects(g content.Generation, segmentID string) []storedObject {
 	f.t.Helper()
-	where := fmt.Sprintf(`{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["segmentId"],operator:Equal,valueText:%q}]}`, f.org, g.ID, segmentID)
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:20){segmentId _additional{id lastUpdateTimeUnix vectors{semantic_text_v1}}}}}", g.Collection, where)
-	body, _ := json.Marshal(map[string]any{"query": query})
-	res, err := f.store.Client.Post(f.url+"/v1/graphql", "application/json", bytes.NewReader(body))
+	result, err := f.raw.Collections.Use(g.Collection).Query.OverAll(f.ctx, query.OverAll{
+		Filter:           textEquals("organization", f.org, "generationId", g.ID, "segmentId", segmentID),
+		Limit:            20,
+		ReturnProperties: []string{"segmentId"},
+		ReturnVectors:    []string{"semantic_text_v1"},
+		ReturnMetadata:   query.ReturnMetadata{LastUpdateAt: true},
+	})
 	if err != nil {
-		f.t.Fatal(err)
-	}
-	defer res.Body.Close()
-	var out struct {
-		Data struct {
-			Get map[string][]struct {
-				Additional struct {
-					ID      string               `json:"id"`
-					Updated string               `json:"lastUpdateTimeUnix"`
-					Vectors map[string][]float32 `json:"vectors"`
-				} `json:"_additional"`
-			} `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
-	}
-	if err = json.NewDecoder(res.Body).Decode(&out); err != nil || len(out.Errors) > 0 {
-		f.t.Fatalf("list objects: %v %v", err, out.Errors)
+		f.t.Fatalf("list objects: %v", err)
 	}
 	list := []storedObject{}
-	for _, o := range out.Data.Get[g.Collection] {
-		list = append(list, storedObject{ID: o.Additional.ID, Updated: o.Additional.Updated, Vector: len(o.Additional.Vectors["semantic_text_v1"]) > 0})
+	for _, o := range result.Objects {
+		updated := ""
+		if o.LastUpdatedAt != nil {
+			updated = strconv.FormatInt(o.LastUpdatedAt.UnixMilli(), 10)
+		}
+		list = append(list, storedObject{ID: o.UUID.String(), Updated: updated, Vector: len(o.Vectors["semantic_text_v1"].Single) > 0})
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	return list
@@ -245,17 +221,6 @@ func TestEmbeddingAttachmentKeepsSegmentsLexicallyVisible(t *testing.T) {
 	}
 }
 
-// failingDeletes drops the cleanup request, as a crash between inserting the
-// enriched object and removing the stale one would.
-type failingDeletes struct{ next http.RoundTripper }
-
-func (f failingDeletes) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.Method == http.MethodDelete {
-		return nil, errors.New("injected crash before cleanup")
-	}
-	return f.next.RoundTrip(r)
-}
-
 func TestEmbeddingAttachmentConvergesAfterInterruptedSwap(t *testing.T) {
 	f := newAttachFixture(t)
 	id := "segment-interrupted"
@@ -264,8 +229,16 @@ func TestEmbeddingAttachmentConvergesAfterInterruptedSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := []content.EmbeddingData{f.embedding(f.gen, id, unitVector(42))}
-	crashing := weaviate.New(f.url, f.apiKey)
-	crashing.Client.Transport = failingDeletes{next: crashing.Client.Transport}
+	// The cleanup request is dropped, as a crash between inserting the
+	// enriched object and removing the stale one would.
+	proxy := f.index.proxy(t)
+	proxy.Before = func(request wireRequest) error {
+		if strings.HasPrefix(request.Name, "DELETE ") {
+			return errInjected
+		}
+		return nil
+	}
+	crashing := proxy.open(t)
 	if err := crashing.PublishEmbeddings(f.ctx, f.gen, f.org, data); err == nil {
 		t.Fatal("attachment must report the interrupted cleanup")
 	}
@@ -404,28 +377,23 @@ func (f *attachFixture) awaitUnindexedIdentity(segmentID string, done chan error
 // still returns id.
 func (f *attachFixture) matchesExcluding(segmentID, id string) bool {
 	f.t.Helper()
-	query := fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["segmentId"],operator:Equal,valueText:%q},{path:["id"],operator:NotEqual,valueText:%q}]},limit:20){_additional{id}}}}`, f.gen.Collection, segmentID, id)
-	body, _ := json.Marshal(map[string]any{"query": query})
-	res, err := f.store.Client.Post(f.url+"/v1/graphql", "application/json", bytes.NewReader(body))
+	excluded, err := uuid.Parse(id)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	defer res.Body.Close()
-	var out struct {
-		Data struct {
-			Get map[string][]struct {
-				Additional struct {
-					ID string `json:"id"`
-				} `json:"_additional"`
-			} `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
+	result, err := f.raw.Collections.Use(f.gen.Collection).Query.OverAll(f.ctx, query.OverAll{
+		Filter: filter.And{
+			filter.Cond{Operator: filter.Equal, Target: "segmentId", Value: segmentID},
+			filter.Cond{Operator: filter.Operator(pb.Filters_OPERATOR_NOT_EQUAL), Target: filter.UUID, Value: excluded},
+		},
+		Limit:            20,
+		ReturnProperties: []string{},
+	})
+	if err != nil {
+		f.t.Fatalf("filter objects: %v", err)
 	}
-	if err = json.NewDecoder(res.Body).Decode(&out); err != nil || len(out.Errors) > 0 {
-		f.t.Fatalf("filter objects: %v %v", err, out.Errors)
-	}
-	for _, o := range out.Data.Get[f.gen.Collection] {
-		if o.Additional.ID == id {
+	for _, o := range result.Objects {
+		if o.UUID == excluded {
 			return true
 		}
 	}

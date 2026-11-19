@@ -1,8 +1,6 @@
 package weaviate_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -75,15 +73,8 @@ func (f *attachFixture) patchVector(segmentID string, vector []float32) {
 	if len(objects) != 1 {
 		f.t.Fatalf("baseline segment %s has %d objects", segmentID, len(objects))
 	}
-	body, _ := json.Marshal(map[string]any{"class": f.gen.Collection, "vectors": map[string]any{"semantic_text_v1": vector}})
-	req, _ := http.NewRequestWithContext(f.ctx, http.MethodPatch, f.url+"/v1/objects/"+f.gen.Collection+"/"+objects[0].ID, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	res, err := f.store.Client.Do(req)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode/100 != 2 {
-		f.t.Fatalf("baseline vector attach status %d", res.StatusCode)
+	body := map[string]any{"class": f.gen.Collection, "vectors": map[string]any{"semantic_text_v1": vector}}
+	if status := f.index.rest(f.t, http.MethodPatch, "/v1/objects/"+f.gen.Collection+"/"+objects[0].ID, body, nil); status/100 != 2 {
+		f.t.Fatalf("baseline vector attach status %d", status)
 	}
 }

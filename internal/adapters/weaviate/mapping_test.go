@@ -2,14 +2,11 @@ package weaviate_test
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"sort"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -19,26 +16,12 @@ import (
 // title reaches every segment, other mapped text only the first segment, and
 // an unmapped generation of the same Version stays canonical.
 func TestPinnedRetrievalFieldsShapeProjectedText(t *testing.T) {
-	path := os.Getenv("QUIVR_ADAPTER_CONFIG")
-	if path == "" {
-		t.Skip("make verify real adapters")
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cfg struct {
-		WeaviateURL    string `json:"weaviate_url"`
-		WeaviateAPIKey string `json:"weaviate_api_key"`
-	}
-	if err = json.Unmarshal(b, &cfg); err != nil {
-		t.Fatal(err)
-	}
+	store := realIndex(t).open(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store := weaviate.New(cfg.WeaviateURL, cfg.WeaviateAPIKey)
 	collection := "QuivrMapping" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	if err = store.Bootstrap(ctx, collection); err != nil {
+	err := store.Bootstrap(ctx, collection)
+	if err != nil {
 		t.Fatal(err)
 	}
 	fields := []corpus.Field{

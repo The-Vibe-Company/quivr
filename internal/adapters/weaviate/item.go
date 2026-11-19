@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	wv "github.com/weaviate/weaviate-go-client/v6"
+	"github.com/weaviate/weaviate-go-client/v6/collections"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -46,7 +50,7 @@ func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) erro
 	if !g.ItemKeywordsProjected {
 		return nil
 	}
-	props := []map[string]any{filterable(itemKind), filterable("recordId"), {"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false}}
+	props := []collections.Property{filterable(itemKind), filterable("recordId"), {Name: passageText, DataType: collections.DataTypeText, IndexSearchable: flag(false), IndexFilterable: flag(false)}}
 	for _, f := range content.ItemFields(g.Fields) {
 		props = append(props, searchable(itemProperty(f)))
 		if a, ok := keywords.Lookup(f.Analyzer); ok {
@@ -54,60 +58,6 @@ func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) erro
 		}
 	}
 	return s.ensureProperties(ctx, g.Collection, props)
-}
-
-// Reconcile additive schemas once per process, including concurrent creation.
-func (s *Store) ensureProperties(ctx context.Context, collection string, props []map[string]any) error {
-	s.metadataMu.Lock()
-	if s.metadataProperties == nil {
-		s.metadataProperties = map[string]bool{}
-	}
-	var missing []map[string]any
-	for _, p := range props {
-		if !s.metadataProperties[collection+"/"+p["name"].(string)] {
-			missing = append(missing, p)
-		}
-	}
-	s.metadataMu.Unlock()
-	if len(missing) == 0 {
-		return nil
-	}
-	var schema struct {
-		Properties []struct {
-			Name string `json:"name"`
-		} `json:"properties"`
-	}
-	if _, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &schema); err != nil {
-		return err
-	}
-	present := map[string]bool{}
-	for _, p := range schema.Properties {
-		present[p.Name] = true
-	}
-	for _, p := range missing {
-		name := p["name"].(string)
-		if !present[name] {
-			if _, err := s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", p, nil); err != nil {
-				schema.Properties = nil
-				if _, readErr := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &schema); readErr != nil {
-					return readErr
-				}
-				found := false
-				for _, p := range schema.Properties {
-					if p.Name == name {
-						found = true
-					}
-				}
-				if !found {
-					return err
-				}
-			}
-		}
-		s.metadataMu.Lock()
-		s.metadataProperties[collection+"/"+name] = true
-		s.metadataMu.Unlock()
-	}
-	return nil
 }
 
 func (s *Store) publishItem(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, metadata map[string]any) error {
@@ -135,10 +85,10 @@ func (s *Store) publishItem(ctx context.Context, g content.Generation, org, corp
 		}
 		return errors.New("immutable item projection mismatch")
 	}
-	if err := s.insert(ctx, map[string]any{"class": g.Collection, "id": id, "properties": props}); err != nil {
+	if err := s.insert(ctx, g.Collection, projected{id: id, properties: props}); err != nil {
 		return err
 	}
-	existing, found, err = s.object(ctx, g.Collection, id)
+	existing, found, err = s.written(ctx, g.Collection, id)
 	if err != nil {
 		return err
 	}
@@ -149,63 +99,63 @@ func (s *Store) publishItem(ctx context.Context, g content.Generation, org, corp
 }
 
 type itemRow struct {
-	SegmentID    string `json:"segmentId"`
-	GenerationID string `json:"generationId"`
-	VersionID    string `json:"versionId"`
-	Text         string `json:"passageText"`
-	Additional   struct {
-		Score    *string  `json:"score"`
-		Distance *float64 `json:"distance"`
-	} `json:"_additional"`
+	SegmentID    string
+	GenerationID string
+	VersionID    string
+	Text         string
+	score        *float64
+	distance     *float64
 }
 
 func (r itemRow) candidate(dense bool) content.Candidate {
 	score := 0.0
-	if dense && r.Additional.Distance != nil {
-		score = 1 - *r.Additional.Distance
-	} else if r.Additional.Score != nil {
-		score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+	if dense && r.distance != nil {
+		score = 1 - *r.distance
+	} else if r.score != nil {
+		score = *r.score
 	}
 	return content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, VersionID: r.VersionID, Score: score}
 }
-func (s *Store) itemQuery(ctx context.Context, collection, branch, where string, limit int, text bool) ([]itemRow, error) {
-	fields := "segmentId generationId versionId"
+
+func itemProperties(text bool) []string {
+	fields := []string{"segmentId", "generationId", "versionId"}
 	if text {
-		fields += " passageText"
+		fields = append(fields, passageText)
 	}
-	query := fmt.Sprintf("{Get{%s(%swhere:%s,limit:%d){%s _additional{score distance}}}}", collection, branch, where, limit, fields)
-	var out struct {
-		Data struct {
-			Get map[string][]itemRow `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
+	return fields
+}
+
+func itemRowOf(o storedObject) itemRow {
+	text := func(key string) string { v, _ := o.Properties[key].(string); return v }
+	return itemRow{SegmentID: text("segmentId"), GenerationID: text("generationId"), VersionID: text("versionId"), Text: text(passageText)}
+}
+
+// itemQuery runs one scored item query; search.properties is set here.
+func (s *Store) itemQuery(ctx context.Context, collection string, search ranked) ([]itemRow, error) {
+	search.properties = itemProperties(false)
+	objects, err := s.rank(ctx, collection, search)
+	if err != nil {
+		if errors.Is(err, errResponseLimit) {
+			return nil, err
+		}
+		return nil, queryFailed(err, "item projection query failed")
 	}
-	responseLimit := int64(2 << 20)
-	if text {
-		// The bounded window can carry more text than a 128-row page.
-		responseLimit = 16 << 20
-	}
-	if _, err := s.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, responseLimit); err != nil {
-		return nil, err
-	}
-	if len(out.Errors) > 0 {
-		return nil, errors.New("item projection query failed")
-	}
-	rows, ok := out.Data.Get[collection]
-	if !ok {
-		return nil, errors.New("item projection response missing")
+	rows := make([]itemRow, len(objects))
+	for i, o := range objects {
+		rows[i] = itemRowOf(o.storedObject)
+		rows[i].score, rows[i].distance = o.score, o.distance
 	}
 	return rows, nil
 }
 
-func identityConditions(q retrieval.Request) []string {
-	var out []string
+func identityConditions(q retrieval.Request) []filter.Expr {
+	var out []filter.Expr
 	for _, field := range []struct {
 		name   string
 		values []string
 	}{{"recordId", q.RecordIDs}, {"versionId", q.VersionIDs}} {
 		if len(field.values) > 0 {
-			var choices []string
+			var choices []filter.Expr
 			for _, v := range field.values {
 				choices = append(choices, equal(field.name, v))
 			}
@@ -215,26 +165,26 @@ func identityConditions(q retrieval.Request) []string {
 	return out
 }
 
-func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, kind string) (string, error) {
-	var clauses []string
+func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, kind string) (filter.Expr, error) {
+	var clauses []filter.Expr
 	for _, r := range routes {
 		if !className.MatchString(r.Generation.Collection) || r.Generation.ID == "" {
-			return "", errors.New("invalid projection route")
+			return nil, errors.New("invalid projection route")
 		}
 		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if len(missing) > 0 {
 			continue
 		}
 		if len(typed) > 0 && !r.Generation.MetadataProjected {
-			return "", retrieval.ErrMetadataFilterUnavailable
+			return nil, retrieval.ErrMetadataFilterUnavailable
 		}
 		if err = s.ensureMetadata(ctx, r.Generation); err != nil {
-			return "", err
+			return nil, err
 		}
-		values := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
+		values := []filter.Expr{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
 		if kind != "item" {
 			values = append(values, projectionOwnerFilter(r.Generation, q.EvaluationPlugin))
 		}
@@ -244,7 +194,7 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		clauses = append(clauses, and(values...))
 	}
 	if len(clauses) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	kinds := equal(itemKind, kind)
 	if kind == "vector" {
@@ -252,9 +202,9 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		// only scores objects carrying this target vector.
 		kinds = or(kinds, equal(itemKind, "passage"))
 	}
-	all := []string{equal("organization", scope.Organization), kinds, or(clauses...)}
+	all := []filter.Expr{equal("organization", scope.Organization), kinds, or(clauses...)}
 	if len(q.SourceNamespaces) > 0 {
-		var namespaces []string
+		var namespaces []filter.Expr
 		for _, v := range q.SourceNamespaces {
 			namespaces = append(namespaces, equal(sourceNamespaceProperty, v))
 		}
@@ -318,13 +268,30 @@ func termCoverage(text, query string, analyzers []keywords.Analyzer) int {
 
 // Fetch one deterministic, bounded passage window. Repeated offset queries
 // re-sort the same allow-list and can consume the entire search deadline.
-func (s *Store) itemPassages(ctx context.Context, collection, where string) ([]itemRow, bool, error) {
-	branch := `sort:[{path:["segmentId"],order:asc}],`
-	rows, err := s.itemQuery(ctx, collection, branch, where, maxItemPassages, true)
+func (s *Store) itemPassages(ctx context.Context, collection string, where filter.Expr) ([]itemRow, bool, error) {
+	window := func(limit int) ([]itemRow, error) {
+		var result *query.Result
+		err := s.call(ctx, func(ctx context.Context, c *wv.Client) (err error) {
+			result, err = c.Collections.Use(collection).Query.OverAll(ctx, query.OverAll{Filter: where, Limit: limit, Sort: []query.SortExpr{{Properties: []string{"segmentId"}}}, ReturnProperties: itemProperties(true)})
+			return err
+		})
+		if tooLarge(err) {
+			return nil, errResponseLimit
+		}
+		if err != nil {
+			return nil, queryFailed(err, "item projection query failed")
+		}
+		rows := make([]itemRow, len(result.Objects))
+		for i, o := range result.Objects {
+			rows[i] = itemRowOf(stored(o))
+		}
+		return rows, nil
+	}
+	rows, err := window(maxItemPassages)
 	if errors.Is(err, errResponseLimit) {
-		// One canonical passage is bounded by its 2 MiB source blob, even
-		// after JSON escaping. Recover once rather than retrying smaller pages.
-		rows, err = s.itemQuery(ctx, collection, branch, where, 1, true)
+		// One canonical passage is bounded by its 2 MiB source blob, well under
+		// the index's message limit. Recover once rather than retrying smaller pages.
+		rows, err = window(1)
 		return rows, true, err
 	}
 	return rows, len(rows) == maxItemPassages, err
@@ -372,7 +339,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 			if err != nil {
 				return nil, err
 			}
-			if where == "" {
+			if where == nil {
 				continue
 			}
 			// The unnamed request scores the fields' own text; each analyzer then
@@ -400,15 +367,14 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 						}
 						props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
 					}
-					query := q.Query
+					terms := q.Query
 					if analyzer.Name != "" {
-						query = analyzer.Analyze(query)
+						terms = analyzer.Analyze(terms)
 					}
-					if strings.TrimSpace(query) == "" {
+					if strings.TrimSpace(terms) == "" {
 						continue
 					}
-					encoded, _ := json.Marshal(props)
-					rows, err := s.itemQuery(ctx, collection, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(query), encoded), where, depth, false)
+					rows, err := s.itemQuery(ctx, collection, ranked{keywords: terms, keywordProperties: props, filter: where, limit: depth})
 					if err != nil {
 						return nil, err
 					}
@@ -425,7 +391,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 				if err != nil {
 					return nil, err
 				}
-				var ids []string
+				var ids []filter.Expr
 				for _, c := range ordered(items) {
 					ids = append(ids, equal("versionId", c.VersionID))
 				}
@@ -477,7 +443,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 		if err != nil {
 			return nil, err
 		}
-		if where != "" {
+		if where != nil {
 			target := ""
 			for _, r := range routes {
 				space := q.Space
@@ -493,10 +459,8 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 					return nil, err
 				}
 			}
-			vector, _ := json.Marshal(q.Vector)
-			branch := fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]},", vector, quote(target))
 			for depth := limit; ; depth = min(2400, depth*2) {
-				rows, err := s.itemQuery(ctx, collection, branch, where, depth, false)
+				rows, err := s.itemQuery(ctx, collection, ranked{vector: q.Vector, target: target, filter: where, limit: depth})
 				if err != nil {
 					return nil, err
 				}

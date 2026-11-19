@@ -60,6 +60,12 @@ func (cfg Config) validateTLS() (dependencyTLS, error) {
 			}
 		}
 		switch dep.name {
+		case "weaviate":
+			// The index client library builds its own connections and cannot
+			// take a custom trust store, client certificate or server name.
+			if dep.settings.HasSettings() {
+				return result, badConfig(configInvalid, "tls.weaviate", "weaviate TLS: a custom CA, client certificate or server name is not supported; use a certificate the system trusts")
+			}
 		case "temporal":
 			result.temporal = config
 		case "plugins":

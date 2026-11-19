@@ -1,44 +1,74 @@
 package weaviate
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
-	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	wv "github.com/weaviate/weaviate-go-client/v6"
+	"github.com/weaviate/weaviate-go-client/v6/data"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"github.com/weaviate/weaviate-go-client/v6/query/filter"
 
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 // Deletions keep a small adaptive window even when the server admits more IDs.
 const (
-	generationPurgeBatch  = 256
-	generationPurgeFloor  = 16
-	maximumPurgeSelection = 10000
+	generationPurgeBatch = 256
+	generationPurgeFloor = 16
 )
 
-type purgeResponse struct {
-	DryRun  *bool `json:"dryRun"`
-	Results *struct {
-		Matches    *int `json:"matches"`
-		Limit      int  `json:"limit"`
-		Successful *int `json:"successful"`
-		Failed     *int `json:"failed"`
-		Objects    []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Errors *struct {
-				Error []struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			} `json:"errors"`
-		} `json:"objects"`
-	} `json:"results"`
+func (s *Store) purgeRequestTimeout() time.Duration {
+	if s.PurgeTimeout <= 0 {
+		return retrieval.DefaultPurgeTimeout
+	}
+	return min(s.PurgeTimeout, retrieval.MaximumPurgeTimeout)
+}
+
+// deleteSelected deletes the objects matching where, or only counts them on a
+// dry run. matches is the number the index selected, which it caps per
+// request; failures lists the selected objects it could not delete. Provider
+// explanations are kept, with the API key removed, for the purge log.
+func (s *Store) deleteSelected(ctx context.Context, collection string, where filter.Expr, dryRun bool) (matches int, failures map[uuid.UUID]error, err error) {
+	operation := "delete"
+	if dryRun {
+		operation = "selection"
+	}
+	err = s.request(ctx, s.purgeRequestTimeout(), func(ctx context.Context, c *wv.Client) error {
+		result, err := c.Collections.Use(collection).Data.DeleteSelected(ctx, data.DeleteSelected{Filter: where, DryRun: dryRun, Verbose: true})
+		var objectErrors data.DeleteError
+		if errors.As(err, &objectErrors) {
+			failures, err = objectErrors.Errors, nil
+		}
+		if err != nil {
+			return err
+		}
+		if result == nil || result.Matches < 0 || int(result.Matches) < len(failures) {
+			return errors.New("result missing or invalid")
+		}
+		matches = int(result.Matches)
+		return nil
+	})
+	if err != nil {
+		return 0, nil, fmt.Errorf("projection purge %s: %w", operation, err)
+	}
+	return matches, failures, nil
+}
+
+// deleteFailure reports failed objects with the first provider explanation.
+func (s *Store) deleteFailure(deleted int, failures map[uuid.UUID]error) error {
+	reason := "provider reported failed objects"
+	for _, failure := range failures {
+		if failure != nil {
+			reason = failure.Error()
+			break
+		}
+	}
+	return fmt.Errorf("projection delete: %d failed, %d successful: %.1024s", len(failures), deleted, s.redact(reason))
 }
 
 func (s *Store) purgeGenerationWindow(ctx context.Context, collection, org, corpusID, generationID string) (result retrieval.PurgeResult, err error) {
@@ -61,111 +91,85 @@ func (s *Store) purgeGenerationWindow(ctx context.Context, collection, org, corp
 			s.purgeBatch.CompareAndSwap(int64(batch), int64(min(generationPurgeBatch, batch+16)))
 		}
 	}()
-	ctx, cancel := context.WithTimeout(ctx, 2*s.purgeRequestTimeout()+15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*s.purgeRequestTimeout()+15*time.Second)
 	defer cancel()
-	ownership := []any{equalText("organization", org), equalText("corpusId", corpusID), equalText("generationId", generationID)}
-	where := map[string]any{"operator": "And", "operands": ownership}
-	if s.purgeLimit.Load() == 0 {
-		// Read the global cap using at most one UUID, before resolving a generation.
-		probe := map[string]any{"operator": "And", "operands": append(append([]any{}, ownership...), equalText("id", "00000000-0000-0000-0000-000000000000"))}
-		var capReply purgeResponse
-		capReply, err = s.selectPurgeIDs(ctx, collection, probe)
-		if err != nil {
-			return result, err
-		}
-		s.purgeLimit.Store(int64(capReply.Results.Limit))
-	}
-	selection, err := s.selectPurgeIDs(ctx, collection, where)
+	ownership := []filter.Expr{equal("organization", org), equal("corpusId", corpusID), equal("generationId", generationID)}
+	// A zero-match dry run proves completion, including after a lost reply.
+	matches, _, err := s.deleteSelected(ctx, collection, and(ownership...), true)
 	if err != nil {
 		return result, err
 	}
-	rows := selection.Results
-	if *rows.Matches == 0 {
+	if matches == 0 {
 		return retrieval.PurgeResult{Complete: true}, nil
 	}
-	ids := make([]any, 0, min(len(rows.Objects), batch))
-	for _, row := range rows.Objects[:min(len(rows.Objects), batch)] {
-		ids = append(ids, equalText("id", row.ID))
+	var listed *query.Result
+	if err = s.request(ctx, s.purgeRequestTimeout(), func(ctx context.Context, c *wv.Client) (err error) {
+		listed, err = c.Collections.Use(collection).Query.OverAll(ctx, query.OverAll{Filter: and(ownership...), Limit: batch, ReturnProperties: []string{}})
+		return err
+	}); err != nil {
+		return result, fmt.Errorf("projection purge selection: %w", err)
+	}
+	result.RemainingAtLeast = matches
+	if len(listed.Objects) == 0 {
+		return result, nil
+	}
+	ids := make([]filter.Expr, len(listed.Objects))
+	for i, object := range listed.Objects {
+		ids[i] = identity(object.UUID)
 	}
 	// Keep every ownership fence even though selection returned object identities.
-	filter := map[string]any{"operator": "And", "operands": append(append([]any{}, ownership...), map[string]any{"operator": "Or", "operands": ids})}
-	result, err = s.deleteWhere(ctx, s.purgeClient(), collection, filter)
+	deleted, failures, err := s.deleteSelected(ctx, collection, and(append(append([]filter.Expr{}, ownership...), or(ids...))...), false)
 	// Unknown outcomes may have deleted every attempted slot. Only IDs outside the
 	// window establish a remaining lower bound; a capped match count is not a total.
-	result.RemainingAtLeast = max(0, *rows.Matches-len(ids))
-	// A later zero-match dry run proves completion, including after a lost reply.
-	result.Complete = false
-	return result, err
+	result.RemainingAtLeast = max(0, matches-len(ids))
+	if err != nil {
+		return result, err
+	}
+	result.Deleted = deleted - len(failures)
+	if len(failures) > 0 {
+		return result, s.deleteFailure(result.Deleted, failures)
+	}
+	return result, nil
 }
 
-func (s *Store) selectPurgeIDs(ctx context.Context, collection string, where map[string]any) (purgeResponse, error) {
-	var response purgeResponse
-	scoped := Store{Endpoint: s.Endpoint, Client: s.purgeClient(), apiKey: s.apiKey}
-	if err := scoped.purgeCall(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "dryRun": true, "output": "verbose"}, &response); err != nil {
-		return response, err
+// PurgeGeneration deletes every object of one Corpus in one logical
+// generation, lexical and enriched, by filter.
+func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
+	if org == "" || corpusID == "" || generationID == "" {
+		return retrieval.PurgeResult{}, errors.New("incomplete generation purge filter")
 	}
-	r := response.Results
-	if response.DryRun == nil || !*response.DryRun || r == nil || r.Matches == nil || r.Failed == nil || *r.Failed != 0 || r.Successful == nil || *r.Successful < 0 || *r.Matches < 0 || *r.Successful > *r.Matches {
-		return response, errors.New("projection purge selection missing or invalid")
-	}
-	// The server resolves at most limit+1 per shard, then clamps globally. Reject
-	// disabled or unusually large caps; shard count still multiplies selection IO.
-	if r.Limit <= 0 || r.Limit > maximumPurgeSelection {
-		s.purgeLimit.Store(0)
-		return response, errors.New("projection purge selection requires QUERY_MAXIMUM_RESULTS between 1 and 10000")
-	}
-	if *r.Matches > r.Limit+1 || len(r.Objects) != min(*r.Matches, r.Limit) {
-		return response, errors.New("projection purge selection identities missing or invalid")
-	}
-	seen := make(map[string]bool, len(r.Objects))
-	for _, object := range r.Objects {
-		if object.ID == "" || seen[object.ID] || object.Status != "DRYRUN" || object.Errors != nil {
-			return response, errors.New("projection purge selection identity missing or invalid")
-		}
-		seen[object.ID] = true
-	}
-	return response, nil
+	return s.purgeGenerationWindow(ctx, collection, org, corpusID, generationID)
 }
 
-func (s *Store) purgeRequestTimeout() time.Duration {
-	if s.PurgeTimeout <= 0 {
-		return retrieval.DefaultPurgeTimeout
+// PurgeVersion deletes every object of one Record Version, lexical and
+// enriched, in every generation of the collection, by filter. The index
+// deletes at most its configured maximum per request and does not report that
+// cap, so only a following zero-match count proves completion.
+func (s *Store) PurgeVersion(ctx context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {
+	if org == "" || versionID == "" {
+		return retrieval.PurgeResult{}, errors.New("incomplete version purge filter")
 	}
-	return min(s.PurgeTimeout, retrieval.MaximumPurgeTimeout)
-}
-
-// purgeCall retains bounded provider explanations. The purge service logs them
-// as strings through the normal secret/URL sanitizer, not as opaque errors.
-func (s *Store) purgeCall(ctx context.Context, method, path string, in, out any) error {
-	body, err := json.Marshal(in)
+	if !className.MatchString(collection) {
+		return retrieval.PurgeResult{}, errors.New("invalid projection collection")
+	}
+	where := and(equal("organization", org), equal("versionId", versionID))
+	matches, failures, err := s.deleteSelected(ctx, collection, where, false)
 	if err != nil {
-		return err
+		return retrieval.PurgeResult{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, s.Endpoint+path, bytes.NewReader(body))
+	result := retrieval.PurgeResult{Deleted: matches - len(failures)}
+	if len(failures) > 0 {
+		return result, s.deleteFailure(result.Deleted, failures)
+	}
+	if matches == 0 {
+		result.Complete = true
+		return result, nil
+	}
+	remaining, _, err := s.deleteSelected(ctx, collection, where, true)
 	if err != nil {
-		return s.safeError(err)
+		// The deletions happened; a later sweep proves completion.
+		return result, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := s.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("projection purge %s: %w", method, s.safeError(err))
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		var response struct {
-			Error []struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&response) == nil && len(response.Error) > 0 {
-			return fmt.Errorf("projection purge HTTP %d: %.1024s", res.StatusCode, s.redact(strings.TrimSpace(response.Error[0].Message)))
-		}
-		return fmt.Errorf("projection purge HTTP %d (%s)", res.StatusCode, http.StatusText(res.StatusCode))
-	}
-	if out != nil {
-		if err = json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(out); err != nil {
-			return fmt.Errorf("projection purge response: %w", s.safeError(err))
-		}
-	}
-	return nil
+	result.Complete, result.RemainingAtLeast = remaining == 0, remaining
+	return result, nil
 }
