@@ -2,6 +2,7 @@
 """Render, install or observe an authenticated index host (Ubuntu 24.04)."""
 import argparse
 import copy
+import http.client
 import ipaddress
 import json
 import os
@@ -22,6 +23,9 @@ DATA = Path('/var/lib/quivr-vector-host')
 SYSTEMD = Path('/etc/systemd/system')
 CADDY = 'caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb'
 AUTH = infra.VECTOR_HOST_AUTH
+KEY_ENV = 'AUTHENTICATION_APIKEY_ALLOWED_KEYS'
+KEY_PATTERN = r'[A-Za-z0-9_.-]{16,256}'
+PROJECT = 'quivr-vector-host'
 COMPOSE = ['docker', 'compose', '-f', str(CONFIG / 'compose.json')]
 HOST_UNIT = 'quivr-vector-host.service'
 FIREWALL_UNIT = 'quivr-vector-firewall.service'
@@ -67,7 +71,7 @@ def assets(settings, uuid='UNMOUNTED'):
     proxy = {'image': CADDY, 'restart': 'no', 'ports': ['443:443/tcp'], 'logging': logging,
              'volumes': [bind(CONFIG / 'Caddyfile', '/etc/caddy/Caddyfile', True),
                          bind(DATA / 'certificates', '/data')], 'networks': ['index']}
-    model = {'name': 'quivr-vector-host', 'services': {'weaviate': index, 'proxy': proxy},
+    model = {'name': PROJECT, 'services': {'weaviate': index, 'proxy': proxy},
              'networks': {'index': {'driver': 'bridge'}}}
     proxy_config = ('{\n  admin off\n  auto_https disable_redirects\n}\n'
                     + settings['hostname'] + ' {\n  tls {\n    issuer acme {\n'
@@ -184,7 +188,7 @@ def key(args):
         value = source.read_text().strip()
     else:
         value = os.environ.get('WEAVIATE_API_KEY', '')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]{16,256}', value):
+    if not re.fullmatch(KEY_PATTERN, value):
         raise ValueError('API key must be 16-256 URL-safe characters')
     return value
 
@@ -211,7 +215,7 @@ def apply(settings, args):
         path = SYSTEMD / name if name.endswith('.service') else CONFIG / name
         changed = write(path, content, 0o644 if name.endswith('.service') else 0o600) or changed
     if secret is not None:
-        changed = write(CONFIG / 'weaviate.env', 'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + secret + '\n') or changed
+        changed = write(CONFIG / 'weaviate.env', f'{KEY_ENV}={secret}\n') or changed
     # Validate before loading firewall rules or restarting containers.
     run(['nft', '--check', '-f', str(CONFIG / 'firewall.nft')])
     if secret is not None:
@@ -248,11 +252,43 @@ def wait_for_host(settings, timeout):
         time.sleep(min(2, remaining))
 
 
+def probe_index(networks, check_version):
+    ready = version = None
+    connection = None
+    try:
+        # Target the running container directly. No DNS, proxy, TLS setup
+        # or redirects are involved in this probe on the local Docker bridge.
+        address = ipaddress.IPv4Address(networks[f'{PROJECT}_index']['IPAddress'])
+        connection = http.client.HTTPConnection(str(address), 8080, timeout=5)
+        connection.request('GET', '/v1/.well-known/ready')
+        with connection.getresponse() as response:
+            if response.status != 200:
+                return ready, version
+            response.read()
+        ready = 'true'
+        if check_version:
+            text = (CONFIG / 'weaviate.env').read_text().strip()
+            key_match = re.fullmatch(KEY_ENV + '=(' + KEY_PATTERN + ')', text)
+            if key_match:
+                # Weaviate serves readiness before auth middleware, but /meta
+                # requires the installed key when anonymous access is disabled.
+                connection.request('GET', '/v1/meta', headers={'Authorization': 'Bearer ' + key_match[1]})
+                with connection.getresponse() as response:
+                    if response.status == 200:
+                        version = infra.weaviate_version_value(json.loads(response.read())['version'])
+    except (http.client.HTTPException, ValueError, OSError, KeyError, TypeError):
+        pass
+    finally:
+        if connection is not None:
+            connection.close()
+    return ready, version
+
+
 def observe(settings, probe=True):
     rows = []
     spec = settings['weaviate']
     actual = {}
-    container_id = None
+    networks = {}
     try:
         ids = run([*COMPOSE, 'ps', '-q', 'weaviate'], timeout=5).split()
         if len(ids) == 1:
@@ -262,7 +298,7 @@ def observe(settings, probe=True):
                 actual = {'image': container['Config']['Image'], 'environment': env,
                           'memory': str(container['HostConfig']['Memory']),
                           'cpus': str(container['HostConfig']['NanoCpus'] / 1e9)}
-                container_id = ids[0]
+                networks = container.get('NetworkSettings', {}).get('Networks', {})
     except (RuntimeError, ValueError, OSError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
         pass
     image = actual.get('image')
@@ -271,7 +307,7 @@ def observe(settings, probe=True):
     infra.observation(rows, 'weaviate', 'vector_host', 'image', spec['image'], image)
     for name, value in spec['environment'].items():
         observed = actual.get('environment', {}).get(name)
-        if observed is None and container_id:
+        if observed is None and actual:
             observed = '<missing>'
         elif name in AUTH and observed is not None:
             observed = observed if observed in (AUTH[name], 'true', 'false') else '<invalid>'
@@ -299,18 +335,8 @@ def observe(settings, probe=True):
     infra.observation(rows, 'weaviate', 'vector_host', 'mounted_uuid', expected_uuid, mounted)
     infra.storage_observation(rows, 'weaviate', spec, {'limits': {'storage': capacity}})
     if probe:
-        ready = version = None
         expected_version = infra.weaviate_version(spec['image'])
-        if container_id:
-            wget = ['docker', 'exec', container_id, 'wget', '-q', '-O', '-']
-            try:
-                run([*wget, 'http://127.0.0.1:8080/v1/.well-known/ready'], timeout=5)
-                ready = 'true'
-                if expected_version:
-                    meta = json.loads(run([*wget, 'http://127.0.0.1:8080/v1/meta'], timeout=5))
-                    version = infra.weaviate_version_value(meta['version'])
-            except (RuntimeError, ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired):
-                pass
+        ready, version = probe_index(networks, expected_version is not None)
         infra.observation(rows, 'weaviate', 'vector_host', 'ready', 'true', ready)
         if expected_version:
             infra.observation(rows, 'weaviate', 'vector_host', 'version', expected_version, version)

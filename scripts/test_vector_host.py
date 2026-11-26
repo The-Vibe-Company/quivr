@@ -3,7 +3,7 @@ import json
 import importlib.util
 import io
 import os
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
 import subprocess
 import sys
@@ -108,6 +108,25 @@ class VectorHost(unittest.TestCase):
                     'version': '1.39.10', 'ready': True, 'environment': {'ASYNC_INDEXING': 'true'}}
             restarts = []
 
+            class IndexHTTP:
+                def __init__(self, address, port, timeout):
+                    self.address, self.port = address, port
+
+                def request(self, method, route, headers=None):
+                    self.route, self.headers = route, headers or {}
+
+                def getresponse(self):
+                    if (self.address, self.port) != ('172.30.0.2', 8080):
+                        raise ConnectionError('unreachable index')
+                    if self.route == '/v1/.well-known/ready':
+                        return nullcontext(SimpleNamespace(status=200 if live['ready'] else 503, read=lambda: b''))
+                    if self.route == '/v1/meta' and self.headers.get('Authorization') == 'Bearer ' + key:
+                        return nullcontext(SimpleNamespace(status=200, read=lambda: json.dumps({'version': live['version']})))
+                    return nullcontext(SimpleNamespace(status=401))
+
+                def close(self):
+                    pass
+
             def run(command, **kwargs):
                 if command[-3:] == ['ps', '-q', 'weaviate']:
                     return 'index\n'
@@ -116,14 +135,8 @@ class VectorHost(unittest.TestCase):
                         'Config': {'Image': live['image'], 'Env': [
                             *(f'{name}={value}' for name, value in live['environment'].items()),
                             'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + key]},
-                        'HostConfig': {'Memory': 2147483648, 'NanoCpus': 2000000000}}])
-                if command[:2] == ['docker', 'exec']:
-                    if command[-1].endswith('/ready'):
-                        if not live['ready']:
-                            raise RuntimeError(key)
-                        return ''
-                    if command[-1].endswith('/meta'):
-                        return json.dumps({'version': live['version']})
+                        'HostConfig': {'Memory': 2147483648, 'NanoCpus': 2000000000},
+                        'NetworkSettings': {'Networks': {'quivr-vector-host_index': {'IPAddress': '172.30.0.2'}}}}])
                 if command[0] == 'findmnt':
                     return uuid
                 if command == ['systemctl', 'restart', host.HOST_UNIT]:
@@ -151,6 +164,7 @@ class VectorHost(unittest.TestCase):
                     patch.object(host, 'COMPOSE', ['docker', 'compose', '-f', str(config / 'compose.json')]), \
                     patch.object(host, 'mount_disk', return_value=uuid), patch.object(host, 'key', return_value=key), \
                     patch.object(host.os, 'geteuid', return_value=0), \
+                    patch.object(host.http.client, 'HTTPConnection', IndexHTTP), \
                     patch.object(host, 'run', side_effect=run), patch.object(Path, 'read_text', read):
                 self.assertEqual(cli('prepare')[0], 0)
                 host.write(config / 'weaviate.env', 'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + key + '\n')
