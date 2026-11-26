@@ -15,6 +15,8 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 )
 
+var ErrGRPCAddress = errors.New("weaviate_grpc_address must be a host and port")
+
 func NewWithTLS(endpoint string, settings outbound.TLS, apiKey ...string) (*Store, error) {
 	store, _, err := NewWithTransport(endpoint, "", settings, apiKey...)
 	return store, err
@@ -35,7 +37,7 @@ func NewWithTransport(endpoint, grpcAddress string, settings outbound.TLS, apiKe
 	host, port, err := net.SplitHostPort(grpcAddress)
 	portNumber, portErr := strconv.ParseUint(port, 10, 16)
 	if err != nil || host == "" || strings.ContainsAny(host, "/?#@ \\%\t\n\r") || portErr != nil || portNumber == 0 {
-		return nil, nil, errors.New("weaviate_grpc_address must be a host and port")
+		return nil, nil, ErrGRPCAddress
 	}
 	transport := insecure.NewCredentials()
 	if config != nil {
@@ -43,7 +45,7 @@ func NewWithTransport(endpoint, grpcAddress string, settings outbound.TLS, apiKe
 	}
 	conn, err := grpc.NewClient("dns:///"+grpcAddress, grpc.WithTransportCredentials(transport))
 	if err != nil {
-		return nil, nil, errors.New("invalid weaviate_grpc_address")
+		return nil, nil, ErrGRPCAddress
 	}
 	store.grpc = pb.NewWeaviateClient(conn)
 	return store, func() { _ = conn.Close() }, nil

@@ -444,6 +444,10 @@ type projectionObject struct {
 
 const embeddingRevision = "embeddingRevision"
 
+func embeddingRevisionProperty() map[string]any {
+	return map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
+}
+
 type projectionRow struct {
 	SegmentID  string `json:"segmentId"`
 	Kind       string `json:"itemKind"`
@@ -595,7 +599,7 @@ func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org st
 	if len(segments) > 0 {
 		scope := and(equal("organization", org), equal("generationId", g.ID), equal(itemKind, segmentKind))
 		rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
-			embeddingInventoryLimit, searchOrder{}, []string{"segmentId"}, true)
+			embeddingInventoryLimit, searchOrder{}, []string{"segmentId", embeddingRevision}, true)
 		if err != nil {
 			return err
 		}
@@ -609,7 +613,8 @@ func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org st
 				if _, ok := snapshots[segment]; ok {
 					continue
 				}
-				matched, err := s.projectionRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), 1, searchOrder{}, []string{"segmentId"}, false)
+				matched, err := s.projectionRows(ctx, g.Collection, and(scope, equal("segmentId", segment)),
+					1, searchOrder{field: embeddingRevision, desc: true}, []string{"segmentId"}, false)
 				if err != nil {
 					return err
 				}
@@ -965,9 +970,10 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	if len(order) == 0 {
 		return nil
 	}
-	revisionSchema := map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
-	if err := s.ensureProperties(ctx, g.Collection, []map[string]any{revisionSchema}); err != nil {
-		return err
+	if !g.ItemKeywordsProjected {
+		if err := s.ensureProperties(ctx, g.Collection, []map[string]any{embeddingRevisionProperty()}); err != nil {
+			return err
+		}
 	}
 	for segments := range slices.Chunk(order, projectionBatch) {
 		if err := s.publishEmbeddingBatch(ctx, g, org, segments, bySegment); err != nil {

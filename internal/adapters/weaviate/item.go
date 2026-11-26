@@ -80,7 +80,7 @@ func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) erro
 	if !g.ItemKeywordsProjected {
 		return nil
 	}
-	props := []map[string]any{filterable(itemKind), filterable("recordId"), {"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false}}
+	props := []map[string]any{filterable(itemKind), filterable("recordId"), embeddingRevisionProperty(), {"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false}}
 	for _, f := range content.ItemFields(g.Fields) {
 		props = append(props, searchable(itemProperty(f)))
 		if a, ok := keywords.Lookup(f.Analyzer); ok {
@@ -618,7 +618,8 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 	for _, row := range rows {
 		ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
 	}
-	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, or(ids...)), passageOrder, len(ids), true, true)
+	// Reserve room for the seed and replacement of a segment during a swap.
+	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, or(ids...)), passageOrder, 2*len(ids), true, true)
 	if errors.Is(err, errResponseLimit) {
 		// Retain the canonical first passage already captured per item in the
 		// metadata window for byte-limit recovery.

@@ -545,7 +545,11 @@ func Run(command string, args ...string) error {
 		return badConfig(configInvalid, "database_url", "invalid database configuration")
 	}
 	auditStore := postgres.AuditStore{Pool: pool}
+	var closeProjection func()
 	closeResources = func(deadline context.Context) {
+		if closeProjection != nil {
+			closeProjection()
+		}
 		done := make(chan struct{})
 		go func() { pool.Close(); close(done) }()
 		select {
@@ -591,13 +595,11 @@ func Run(command string, args ...string) error {
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection, closeProjection, err := weaviate.NewWithTransport(cfg.WeaviateURL, cfg.WeaviateGRPCAddress, cfg.TLS.Weaviate, cfg.WeaviateAPIKey)
+	if errors.Is(err, weaviate.ErrGRPCAddress) {
+		return invalidConfig("weaviate_grpc_address", "invalid Weaviate gRPC address", err)
+	}
 	if err != nil {
 		return err
-	}
-	closePool := closeResources
-	closeResources = func(deadline context.Context) {
-		closeProjection()
-		closePool(deadline)
 	}
 	projection.SetMetrics(dependencyMetrics)
 	projection.PurgeTimeout = purgeTimeout

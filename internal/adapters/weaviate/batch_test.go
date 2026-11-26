@@ -278,6 +278,7 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 						t.Fatalf("republish seed: %v", err)
 					}
 				}
+				// Every existing identity is immutable, including the BM25 item.
 				prior := map[string]bool{}
 				for id := range h.objects {
 					prior[id] = true
@@ -307,6 +308,20 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 				}
 				if len(h.objects) != wantObjects {
 					t.Fatalf("stored objects=%d want %d", len(h.objects), wantObjects)
+				}
+				if embedding {
+					vectorsBySegment := make(map[string]int)
+					for _, object := range h.objects {
+						if object["vectors"] != nil {
+							properties := object["properties"].(map[string]any)
+							vectorsBySegment[properties["segmentId"].(string)]++
+						}
+					}
+					for _, segment := range seg.Segments {
+						if count := vectorsBySegment[segment.ID]; count != 1 {
+							t.Fatalf("segment %s has %d vector objects, want 1", segment.ID, count)
+						}
+					}
 				}
 				writes := len(h.batches)
 				if err := publish(); err != nil {
