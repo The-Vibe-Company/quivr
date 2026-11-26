@@ -219,8 +219,12 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 }
 
 func New(endpoint string, apiKey ...string) *Store {
+	return newStore(endpoint, outbound.Transport(nil), apiKey)
+}
+
+func newStore(endpoint string, transport http.RoundTripper, apiKey []string) *Store {
 	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}}
-	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.authenticate(http.DefaultTransport, apiKey), "weaviate.request")}
+	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.authenticate(transport, apiKey), "weaviate.request")}
 	if store.apiKey != "" {
 		store.Client.CheckRedirect = outbound.CheckRedirect
 	}

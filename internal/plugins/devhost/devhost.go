@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
@@ -210,7 +211,10 @@ func (p *Process) Stop(grace time.Duration) error {
 // or 308 would resend a request body (a connector's credential) to another
 // address. A 3xx answer carries no error envelope, so it counts as plugin
 // unavailability, for the engine and the Contract Runner alike.
-var client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var client = &http.Client{
+	Transport:     outbound.Transport(nil),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -549,6 +553,11 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 		return nil, fmt.Errorf("POST %s: %w", route, err)
 	}
 	defer resp.Body.Close()
+	if checkResponse, ok := ctx.Value(responseCheckKey{}).(func(int, http.Header) error); ok {
+		if err := checkResponse(resp.StatusCode, resp.Header); err != nil {
+			return nil, err
+		}
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s response: %w", route, err)

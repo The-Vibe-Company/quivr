@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // TLS leaves protocol selection to the dependency when Enabled is omitted.
@@ -111,6 +112,9 @@ func (c TLS) ForURL(endpoint string) (*tls.Config, error) {
 func Transport(config *tls.Config) *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = config
+	transport.MaxIdleConns = 512
+	transport.MaxIdleConnsPerHost = 128
+	transport.IdleConnTimeout = 90 * time.Second
 	return transport
 }
 

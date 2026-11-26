@@ -71,8 +71,8 @@ func TestEngineSignsDiscoveryAndEveryContribution(t *testing.T) {
 			t.Fatalf("%s did not reach the wire: %v", op, err)
 		}
 	}
-	if received.Load() != int64(2*len(operations)) {
-		t.Errorf("received %d signed requests, want %d", received.Load(), 2*len(operations))
+	if received.Load() != int64(1+len(operations)) {
+		t.Errorf("received %d signed requests, want one discovery and %d Contribution calls", received.Load(), len(operations))
 	}
 	t.Setenv(plugins.EnvSigningKeys, "")
 	before := received.Load()
