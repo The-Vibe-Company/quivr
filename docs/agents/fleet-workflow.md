@@ -1,6 +1,6 @@
 # Agent fleet workflow
 
-Several coding agents may work on Quivr V2 at the same time. **Linear is the fleet's database:** claims, phases and hand-offs are written to and read from Linear only, never from local files, session memory or worktrees. The canonical protocol is the Linear document [Registre de la flotte d'agents — protocole](https://linear.app/thevibecompany/document/registre-de-la-flotte-dagents-protocole-fffbdd359a1d); this file mirrors it for agents working from the repository. Each agent takes exactly one of two roles.
+Several coding agents may work on Quivr V2 at the same time. **OpenBoard (`quivr`) is the mandatory source of truth for active agent claims, PR tracking, and review holds**; Linear tracks roadmap specs under `THE-531` and the program dashboard. Each agent takes exactly one of two roles.
 
 ## Roles
 
@@ -44,7 +44,8 @@ Keep exactly one label of each group on your ticket and change the phase label a
 
   Squash-merge pinned to the verified head, for example `gh pr merge <n> --squash --match-head-commit <sha>`. Merge one pull request at a time.
 - **After each merge:**
-  - move the ticket to Done and remove its Agent phase label and make sure the pull request is linked;
+  - finish the OpenBoard task (`ob tasks unblock <id> && ob tasks claim <id> && ob tasks complete <id> "Merged PR #<n>"`), and if a linked Linear ticket exists move it to Done and clear its Agent phase label;
+  - if a PR is closed without merging, run `ob tasks unblock <id>` (and `ob tasks cancel <id> "<reason>"` for dropped work, or leave ready for re-claim);
   - delete the branch and the worker's worktree;
   - tell every in-flight worker that `main` moved, including any migration number or shared file that changed;
   - dispatch the tickets the merge unblocked.
@@ -57,9 +58,8 @@ Keep exactly one label of each group on your ticket and change the phase label a
 
 ## OpenBoard (mandatory for every PR)
 - **Board API & channel**: `https://openboard.thevibecompany.co/api/tvc/main`, channel `quivr` (labels `area=<area>`, `pr=<N>`, `ci=green|running`, `cubic=0`). Check setup with `ob doctor` and `ob whoami`; never commit tokens or secrets.
-- **No PR without a task**: every worker or coordinator PR MUST have an OpenBoard task in `quivr` and reference `OpenBoard #<id>` in the PR body (never `Closes #<id>`). Workers self-claim in their sandbox (`ob tasks claim <id> --lease 3600`), renew before expiry (`ob tasks renew <id>`), and post progress + PR URL via `ob reply <id> "..."`.
-- **Never `complete` before merge**: once a PR is open and verified (CI green + 0 unresolved Cubic), set `ob label <id> pr=<N> ci=green cubic=0` and hold for human review/merge with `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review` so the task stays visible in the open view with its lease released. Only the merger runs `ob tasks unblock` + `ob tasks complete` after the PR merges.
+- **No PR without a task**: every worker or coordinator PR MUST have an OpenBoard task in `quivr` and reference `OpenBoard #<id>` in the PR body (never `Closes #<id>`). Workers self-claim (`ob tasks claim <id> --lease 3600`), renew with `ob tasks renew <id> --lease 3600`, and post progress + PR URL via `ob reply <id> "..."`.
+- **Never `complete` before merge**: once a PR is open and verified (CI green + 0 unresolved Cubic), set `ob label <id> pr=<N> ci=green cubic=0` and hold for review with `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review` (releases lease, keeps task open). After merge, the merger runs `ob tasks unblock <id> && ob tasks claim <id> && ob tasks complete <id> "Merged PR #<N>"` (since `block` ends the prior claim).
 
 ## Observing the fleet
-
-The dashboard at https://quivr-v2-dashboard.vercel.app is for humans; it is private, and agents do not need it. It reads the same Linear and GitHub signals that workers write. If a worker skips the phase label, the status line, the branch name, the assignment or the pull-request link, its phase can only be guessed. Linear is the source of truth for agents.
+The dashboard at https://quivr-v2-dashboard.vercel.app reads Linear roadmap specs; active agent claims and open PRs live in OpenBoard (`ob tasks quivr`).

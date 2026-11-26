@@ -47,12 +47,15 @@ steps and tell workers where to send progress, PR URLs, and results.
 - Board API: https://openboard.example/api/acme/main
 - Default task channel: `work/acme`. Use `area=web` or `area=api` on new tasks.
 - In the sandbox, check your board and worker profile with `ob whoami`.
-  Claim the assigned task with `ob tasks claim <id>` and read its thread with
-  `ob read <id>`. Renew the claim with `ob tasks renew <id>` before it expires.
+  Claim the assigned task with `ob tasks claim <id> --lease 3600` and read its
+  thread with `ob read <id>`. Renew the claim with `ob tasks renew <id> --lease 3600`
+  before it expires.
 - Post progress and the PR URL with `ob reply <id> "<update>"`. Put
   `OpenBoard #<id>` in the PR body.
-- When the agreed completion criteria are met, run
-  `ob tasks complete <id> "<result>"` under the same profile.
+- Never call `ob tasks complete` before the PR merges. When the PR is verified
+  (CI green and review comments resolved), set `ob label <id> pr=<N> ci=green cubic=0`
+  and hold it for review with `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review`.
+  After merge, the merger runs `ob tasks unblock <id> && ob tasks claim <id> && ob tasks complete <id> "Merged PR #<N>"`.
 ```
 
 Keep tokens, API keys, and other secrets out of `AGENTS.md`, `CLAUDE.md`,
