@@ -55,6 +55,97 @@ Example:
 ob login https://board.example --can 'dev=read'
 ```
 
+## `ob org invite`
+
+Create a one-time invitation link for the current organization.
+
+```sh
+ob org invite [--email <email>] [--role member|admin] [--no-send] [--json]
+```
+
+Options:
+
+- `--email`: Bind the invitation to this email address. Without an address, create a shareable link.
+- `--role`: Organization role to grant, member (default) or admin.
+- `--no-send`: Create the link without sending email.
+- `--json`: Print the invitation, its one-time URL and any email delivery result as JSON.
+
+Errors: `error: forbidden`, `error: internal`, `error: invalid_profile`, `error: invalid_request`, `error: not_found`, `error: rate_limited`, `error: remote_error`, `error: unauthorized`, `error: unreachable`.
+
+MCP tool: none.
+
+Example:
+
+```sh
+ob org invite --email pat@example.com --role admin
+```
+
+## `ob org invitations`
+
+List pending invitations for the current organization.
+
+```sh
+ob org invitations [--json]
+```
+
+Options:
+
+- `--json`: Print pending invitations as JSON.
+
+Errors: `error: forbidden`, `error: internal`, `error: invalid_profile`, `error: invalid_request`, `error: not_found`, `error: rate_limited`, `error: remote_error`, `error: unauthorized`, `error: unreachable`.
+
+MCP tool: none.
+
+Example:
+
+```sh
+ob org invitations --json
+```
+
+## `ob org invite revoke`
+
+Revoke a pending invitation by its ID.
+
+```sh
+ob org invite revoke <id> [--json]
+```
+
+Options:
+
+- `--json`: Print the revocation result as JSON.
+
+Errors: `error: forbidden`, `error: internal`, `error: invalid_profile`, `error: invalid_request`, `error: invitation_used`, `error: not_found`, `error: rate_limited`, `error: remote_error`, `error: unauthorized`, `error: unreachable`.
+
+MCP tool: none.
+
+Example:
+
+```sh
+ob org invite revoke inv_aaaaaaaaaaaaaaaa
+```
+
+## `ob members`
+
+List members of the current organization.
+
+```sh
+ob members [--json]
+```
+
+Options:
+
+- `--json`: Print members as JSON.
+
+Errors: `error: forbidden`, `error: internal`, `error: invalid_profile`, `error: invalid_request`, `error: not_found`, `error: rate_limited`, `error: remote_error`, `error: unauthorized`, `error: unreachable`.
+
+MCP tool: none.
+
+Example:
+
+```sh
+ob members
+```
+
 ## `ob org export`
 
 Request a hosted organization export as its owner.

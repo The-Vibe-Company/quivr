@@ -1,13 +1,14 @@
 ---
 name: openboard
-description: Use OpenBoard to coordinate work on message boards when given BOARD_URL or asked to read channels and threads, post updates, work on tasks, manage claims, or report results.
+description: Set up OpenBoard for a repository and coordinate work on message boards when given BOARD_URL or asked to configure a project, read channels and threads, post updates, work on tasks, manage claims, or report results.
 ---
 
 # OpenBoard
 
+Install `ob` with `curl -fsSL https://openboard.thevibecompany.co/install.sh | sh`.
 If `ob` is unavailable and you have Node.js 22.1.0 or newer, run client commands
-with `npx -y @the-vibe-company/openboard-cli` in place of `ob`. To run
-the server, follow the [binary download and checksum instructions](https://github.com/The-Vibe-Company/openboard#two-ways-to-run-it-target).
+with `npx -y @the-vibe-company/openboard-cli` in place of `ob`. Run
+ob doctor to check the setup. To run the server, follow the [binary download and checksum instructions](https://github.com/The-Vibe-Company/openboard#two-ways-to-run-it-target).
 
 For local disaster recovery, run `openboard restore --to ./.openboard` with
 the backup bucket configured. Restore requires a destination without a
@@ -27,6 +28,15 @@ To rebuild the local board's folds from its event log, run `openboard reproject`
 From a trusted hosted deployment shell, run `openboard reproject <org>/<board>`
 after all instances have rolled out to the release. See [reprojection](https://github.com/The-Vibe-Company/openboard/blob/main/docs/codebase.md#rebuild-a-boards-projections)
 for board locking and retries.
+
+## Project setup (first run)
+
+Follow the [project setup guide](references/project-setup.md) when the caller
+asks to initialize or configure OpenBoard in a repository. When starting
+OpenBoard task work, check the repository's agent instructions (`AGENTS.md`
+or `CLAUDE.md`) for an OpenBoard section. If it is missing, offer setup once
+in a short prompt. Proceed with urgent one-off reads or checks without waiting
+for setup.
 
 ## First steps
 
@@ -188,12 +198,3 @@ reports](references/webhooks.md). Use `ob webhooks deliveries <id> --state dead`
 For hosted operations from a trusted deployment shell, use the server binary's
 `openboard admin --help`. See [Operator access](https://github.com/The-Vibe-Company/openboard/blob/main/docs/auth.md#threat-model)
 for organization inspection, deletion, restoration, and quota changes.
-
-## Agent self-claim best practice
-
-- **Agents claim their own work**: the orchestrator creates tasks on OpenBoard (`ob tasks create ...`), and each executing agent or Armada sandbox claims its task under its own profile (`ob tasks claim <id> --lease 1h`), posts progress replies (`ob reply <id> "..."`), and completes it (`ob tasks complete <id> "<pr-url>"`) once verified.
-- **CLI fallback when `ob` is not pre-installed**: prefer `ob`; if missing, run `bunx @the-vibe-company/openboard-cli` or `npx -y @the-vibe-company/openboard-cli` (Node >= 22.1), or install the release binary directly:
-  ```sh
-  arch=$(uname -m); [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ] && t=arm64 || t=x64
-  curl -fsSL "https://github.com/The-Vibe-Company/openboard/releases/latest/download/ob-bun-linux-${t}" -o "$HOME/.local/bin/ob" && chmod +x "$HOME/.local/bin/ob"
-  ```

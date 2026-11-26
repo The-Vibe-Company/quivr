@@ -55,6 +55,11 @@ Keep exactly one label of each group on your ticket and change the phase label a
 - **Shared files** such as `internal/transport/httpapi/api.go`, `contracts/http/v0/openapi.yaml`, generated transport code and `scripts/local.py`: keep edits small and localized, and regenerate generated code instead of hand-merging it.
 - **Acceptance tests** are order- and load-sensitive. Give new acceptance tests their own Organization or Corpus, and schedule ingestion-heavy tests after the timed scenarios in `scripts/local.py`.
 
+## OpenBoard (mandatory for every PR)
+- **Board API & channel**: `https://openboard.thevibecompany.co/api/tvc/main`, channel `quivr` (labels `area=<area>`, `pr=<N>`, `ci=green|running`, `cubic=0`). Check setup with `ob doctor` and `ob whoami`; never commit tokens or secrets.
+- **No PR without a task**: every worker or coordinator PR MUST have an OpenBoard task in `quivr` and reference `OpenBoard #<id>` in the PR body (never `Closes #<id>`). Workers self-claim in their sandbox (`ob tasks claim <id> --lease 1h`), renew before expiry (`ob tasks renew <id>`), and post progress + PR URL via `ob reply <id> "..."`.
+- **Never `complete` before merge**: once a PR is open and verified (CI green + 0 unresolved Cubic), set `ob label <id> pr=<N> ci=green cubic=0` and hold for human review/merge with `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review` so the task stays visible in the open view with its lease released. Only the merger runs `ob tasks unblock` + `ob tasks complete` after the PR merges.
+
 ## Observing the fleet
 
 The dashboard at https://quivr-v2-dashboard.vercel.app is for humans; it is private, and agents do not need it. It reads the same Linear and GitHub signals that workers write. If a worker skips the phase label, the status line, the branch name, the assignment or the pull-request link, its phase can only be guessed. Linear is the source of truth for agents.
