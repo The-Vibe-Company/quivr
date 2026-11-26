@@ -154,9 +154,10 @@ def start_first_party(stack, only=None):
             continue
         directory, binary = stack.source / 'plugins' / row['id'], stack.directory / f"quivr-{row['id']}"
         log = stack.directory / f"{row['id']}-plugin.log"
-        subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, check=True)
+        inherited = plugin_environment.inherited()
+        subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, env=inherited, check=True)
         port = first_party_port(stack, row)
-        env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
+        env = {**inherited, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         if row.get('signing_id'):
             env['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(signing_ring(stack, row))
         with log.open('a') as out:

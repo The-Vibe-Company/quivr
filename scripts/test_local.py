@@ -94,9 +94,34 @@ class Isolation(unittest.TestCase):
         env = launch.call_args.kwargs['env']
         self.assertEqual(env['QUIVR_CONFIG'], str(stack.directory / 'config.json'))
         self.assertIn(stack.state['password'], pathlib.Path(env['DATABASE_URL_FILE']).read_text())
+        archive, = local.connector_plugin.first_party(stack)
         ring = json.loads(env['QUIVR_ENGINE_PLUGIN_KEYS'])['connector.object_storage_archive']
-        self.assertEqual(ring['active'], 'local')
-        self.assertTrue(ring['keys'][0]['secret'])
+        self.assertEqual(ring, local.connector_plugin.signing_ring(stack, archive))
+
+    def test_first_party_build_and_launch_filter_engine_secret_bindings(self):
+        stack = local.Stack(self.names[0])
+        plugins = local.connector_plugin
+        plugins.select_first_party(stack, ['object-storage-archive'])
+        archive, = plugins.first_party(stack)
+        engine_secrets = {
+            'QUIVR_ENGINE_PLUGIN_KEYS_FILE': '/fixture/engine-keys',
+            'QUIVR_ENGINE_PLUGIN_KEYS': 'fixture-engine-rings',
+            'DATABASE_URL_FILE': '/fixture/database-url',
+            'QUIVR_API_KEYS_FILE': '/fixture/api-keys',
+        }
+        with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True), \
+                mock.patch.object(plugins.subprocess, 'run') as build, \
+                mock.patch.object(plugins.subprocess, 'Popen', return_value=mock.Mock(pid=12345)) as launch, \
+                mock.patch.object(plugins, 'healthy_port', return_value=True):
+            plugins.start_first_party(stack)
+
+        build_env = build.call_args.kwargs['env']
+        launch_env = launch.call_args.kwargs['env']
+        for env in (build_env, launch_env):
+            self.assertTrue(engine_secrets.keys().isdisjoint(env))
+            self.assertEqual(env['PATH'], '/fixture/bin')
+        self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', build_env)
+        self.assertEqual(json.loads(launch_env['QUIVR_PLUGIN_SIGNING_KEYS']), plugins.signing_ring(stack, archive))
 
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])
