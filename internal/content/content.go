@@ -359,7 +359,7 @@ func (s Service) accept(ctx context.Context, scope corpus.Scope, c Command, reve
 		return Receipt{}, corpus.ErrNotFound
 	}
 	acl, ok := visibility.Normalize(c.ACL)
-	if !ok {
+	if !ok || c.ACL != nil && len(acl) == 0 {
 		return Receipt{}, ErrInvalid
 	}
 	c.ACL = acl

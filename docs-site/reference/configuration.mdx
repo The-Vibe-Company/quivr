@@ -256,7 +256,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 
 Keep an enforced key in a trusted application or gateway that authenticates the caller, derives their principals and replaces any caller-supplied visibility headers. Use opaque IDs throughout.
 
-Send exactly one `X-Quivr-Actor` with 32 lowercase hexadecimal characters and one `X-Quivr-Principals` with a comma-separated list, for example `user:8f31,group:readers`. The list accepts up to 64 distinct `kind:id` values and 8,192 bytes. Each component uses letters, digits, periods, underscores or hyphens. The actor identifies the request in the audit trail. Missing or invalid context yields an audited `403`.
+Send exactly one `X-Quivr-Actor` with 32 lowercase hexadecimal characters and one `X-Quivr-Principals` with a comma-separated list, for example `user:8f31,group:readers`. The list accepts up to 64 distinct `kind:id` values and 8,192 bytes. Each component uses letters, digits, periods, underscores or hyphens. Send an empty principals header for an actor with no principals. The actor identifies the request in the audit trail. Missing or invalid context yields an audited `403`.
 
 Manage a source at `/v0/corpora/{corpus_id}/visibility-grants?source_namespace=feed` with a separate management key. `GET` reads the grant, `PUT` creates or replaces it, and `DELETE` removes it. For example, send `{"visibility":"restricted","allowed_principals":["group:readers"]}`. Use `public` with an empty principal list for access by any valid caller. An absent grant denies source access.
 

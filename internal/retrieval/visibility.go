@@ -17,30 +17,27 @@ func visibilityCandidate(h content.Hydrated, q Request) content.Candidate {
 }
 
 // Recheck the transcript before it can be sent again in a later plugin round.
-func (sv *server) recheckServed(ctx context.Context, q Request, session *plugins.RetrievalSession) error {
-	if len(sv.hydrated) == 0 {
-		return nil
+func (sv *server) recheckServed(ctx context.Context, q Request, served []plugins.ServedRequest) (bool, error) {
+	if len(served) == 0 {
+		return true, nil
 	}
 	start := time.Now()
 	defer func() { sv.timing.Hydration += time.Since(start) }()
 	candidates := make([]content.Candidate, 0, len(sv.hydrated))
-	for _, h := range sv.hydrated {
-		candidates = append(candidates, visibilityCandidate(h, q))
+	seen := make(map[string]bool, len(sv.hydrated))
+	for _, batch := range served {
+		for _, candidate := range batch.Candidates {
+			if !seen[candidate.SegmentID] {
+				seen[candidate.SegmentID] = true
+				candidates = append(candidates, visibilityCandidate(sv.hydrated[candidate.SegmentID], q))
+			}
+		}
 	}
 	allowed, err := sv.s.Content.RecheckHydration(ctx, sv.scope, candidates)
 	if err != nil {
-		return ErrUnavailable
+		return false, ErrUnavailable
 	}
-	for i, c := range candidates {
-		if !allowed[i] {
-			delete(sv.hydrated, c.SegmentID)
-		}
-	}
-	session.KeepServed(func(id string) bool {
-		_, ok := sv.hydrated[id]
-		return ok
-	})
-	return nil
+	return len(allowed) == len(candidates), nil
 }
 
 // A ranker can derive scores and explanations from any candidate it received,

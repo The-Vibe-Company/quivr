@@ -81,7 +81,7 @@ type VisibilityStore struct {
 
 func (s *VisibilityStore) Grant(ctx context.Context, org, id, namespace string) (visibility.Grant, error) {
 	var grant visibility.Grant
-	err := s.Pool.QueryRow(ctx, `SELECT visibility,allowed_principals FROM visibility_grants
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT visibility,allowed_principals FROM visibility_grants
  WHERE organization=$1 AND corpus_id=$2 AND source_namespace=$3`, org, id, namespace).Scan(&grant.Visibility, &grant.AllowedPrincipals)
 	return grant, notFound(err)
 }

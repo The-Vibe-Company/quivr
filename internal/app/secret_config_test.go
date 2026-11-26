@@ -55,6 +55,13 @@ func TestLoadSecretBindings(t *testing.T) {
 	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" || scope.VisibilityMode != "enforce" || scope.ActorID != "0123456789abcdef0123456789abcdef" {
 		t.Fatal("API secret binding did not preserve the bearer token's scope")
 	}
+	invalidScope := scope
+	invalidScope.VisibilityMode = "enforced"
+	cfg.Keys[apiToken] = invalidScope
+	var invalid *configError
+	if err := cfg.validateAccessKeys(); !errors.As(err, &invalid) || invalid.code != configInvalid || invalid.field != "keys.visibility_mode" {
+		t.Fatalf("invalid API key visibility mode: %v", err)
+	}
 	adminScope, ok := cfg.AdminKeys[adminToken]
 	if !ok || len(cfg.AdminKeys) != 1 || !adminScope.Allows("plugins:admin") || adminScope.Organization != "example" || adminScope.VisibilityMode != "" || adminScope.ActorID != "fedcba9876543210fedcba9876543210" {
 		t.Fatal("admin secret binding did not preserve the bearer token's scope")

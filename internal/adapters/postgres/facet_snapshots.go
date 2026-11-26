@@ -72,11 +72,7 @@ type dayRange struct{ from, to time.Time }
 
 func (s RecordStore) CountFacetsFast(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
 	_, enforced := visibility.Principals(ctx)
-	if enforced {
-		items, err := s.CountFacets(ctx, org, q)
-		return content.FacetCounts{Items: items}, err
-	}
-	if days, ok := snapshotScope(q); ok && len(q.Records.FilterRoutes) > 0 {
+	if days, ok := snapshotScope(q); !enforced && ok && len(q.Records.FilterRoutes) > 0 {
 		counts, ok, err := s.snapshotFacets(ctx, org, q, days)
 		if err != nil || ok {
 			return counts, err
@@ -387,8 +383,9 @@ func (s RecordStore) sampleFacets(ctx context.Context, org string, q content.Fac
 	}
 	// 1/256 of the IDs tells the Corpora's size.
 	var probe int64
-	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM records WHERE organization=$1 AND corpus_id=ANY($2::text[]) AND id COLLATE "C">=$3 AND id COLLATE "C"<$4`,
-		org, ids, recordIDPrefix, recordIDPrefix+"01").Scan(&probe); err != nil {
+	args := []any{org, ids, recordIDPrefix, recordIDPrefix + "01"}
+	acl := visibilityPredicate(ctx, &args, "records")
+	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM records WHERE organization=$1 AND corpus_id=ANY($2::text[]) AND id COLLATE "C">=$3 AND id COLLATE "C"<$4`+acl, args...).Scan(&probe); err != nil {
 		return content.FacetCounts{}, err
 	}
 	const span = 1 << 16

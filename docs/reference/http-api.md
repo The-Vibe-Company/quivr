@@ -6,7 +6,7 @@
 
 Quivr V2 public text foundation contract, version `0.0.0-draft`.
 
-THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes. THE-640 adds text search and asynchronous Corpus projection rebuild initiation. On read routes a key configured with visibility_mode=enforce requires X-Quivr-Actor (32 lowercase hexadecimal characters) and X-Quivr-Principals (up to 64 distinct comma-separated kind:id values and 8192 bytes). Requests without valid caller context are refused with 403.
+THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes. THE-640 adds text search and asynchronous Corpus projection rebuild initiation. On read routes a key configured with visibility_mode=enforce requires X-Quivr-Actor (32 lowercase hexadecimal characters) and X-Quivr-Principals (up to 64 distinct comma-separated kind:id values and 8192 bytes). An empty header represents a caller without principals. Requests without valid caller context are refused with 403. Source grant management, upload session and Blob metadata, Operation status, and unscoped administrative aggregates or audit require non-delegated keys.
 
 ## Authentication
 
@@ -786,7 +786,7 @@ Same durable journal as SSE. Every durable event has one identity and appears ex
 
 Operation `streamChanges`. Requires `changes:read`.
 
-SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
+SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
 
 **Parameters**
 
@@ -3097,7 +3097,7 @@ Initial request shape. Same source identity creates or corrects a Record. Same e
 | --- | --- | --- | --- |
 | `idempotency_key` | string | yes | Minimum length `1`. |
 | `source` | [`SourceIdentity`](#sourceidentity) | yes |  |
-| `record_acl` | array of [`VisibilityPrincipal`](#visibilityprincipal) |  | Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set. At most `64` items. Items are unique. |
+| `record_acl` | array of [`VisibilityPrincipal`](#visibilityprincipal) |  | Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set. At least `1` items. At most `64` items. Items are unique. |
 | `source_revision` | string |  | Minimum length `1`. |
 | `source_position` | string |  | Optional monotonic source position, encoded as decimal text to avoid JSON numeric precision loss. Pattern `^[0-9]+$`. |
 | `content` | one of [`TextContent`](#textcontent), [`BlobContent`](#blobcontent), [`ManifestContent`](#manifestcontent) | yes |  |
@@ -3282,6 +3282,7 @@ properties:
   record_acl:
     description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
     type: array
+    minItems: 1
     uniqueItems: true
     maxItems: 64
     items:

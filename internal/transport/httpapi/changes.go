@@ -196,7 +196,13 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			continue
 		}
 		if time.Since(lastWrite) >= streamKeepalive {
-			if !write(": keepalive\n\n") {
+			// Send delegated checkpoints on the idle cadence, independent of
+			// whether concealed events advanced the journal.
+			if enforced {
+				if !write("id: %s\nevent: checkpoint\ndata: {\"cursor\":%q}\n\n", page.Next, page.Next) {
+					return
+				}
+			} else if !write(": keepalive\n\n") {
 				return
 			}
 			lastWrite = time.Now()

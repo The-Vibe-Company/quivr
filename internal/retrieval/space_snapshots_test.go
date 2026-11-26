@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 type snapshotRegistry struct {
@@ -74,6 +75,12 @@ func TestSpaceSnapshotsNeverWaitForCoverage(t *testing.T) {
 		synctest.Wait()
 		if sp := read("org"); sp.CoverageUnknown || sp.Segments != 7 || sp.CoverageAgeMS == nil || *sp.CoverageAgeMS != 0 {
 			t.Fatalf("completed snapshot %+v", sp)
+		}
+		delegated := visibility.WithPrincipals(ctx, []string{"group:reader"})
+		_, spaces, total, err := cache.VectorSpaces(delegated, "org", "corpus")
+		if err != nil || len(spaces) != 1 || total != 0 || spaces[0].Segments != 0 ||
+			!spaces[0].CoverageUnknown || spaces[0].CoverageAgeMS != nil {
+			t.Fatalf("delegated read exposed corpus snapshot: %v total=%d err=%v", spaces, total, err)
 		}
 		registry.complete = make(chan struct{})
 		time.Sleep(11 * time.Second) // advances only the synctest clock

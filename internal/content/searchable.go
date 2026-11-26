@@ -760,11 +760,11 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 
 // RecheckHydration verifies currentness and access without rereading Parts.
 func (s Service) RecheckHydration(ctx context.Context, scope corpus.Scope, candidates []Candidate) (map[int]bool, error) {
-	if len(candidates) == 0 {
-		return nil, nil
-	}
 	if err := scope.Require(corpus.ActionContentHydrate); err != nil {
 		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
 	}
 	if guard, ok := s.Baseline.(HydrationRechecker); ok {
 		return guard.RecheckHydration(ctx, scope, candidates)

@@ -13,8 +13,11 @@ import (
 )
 
 func callerPrincipals(values []string) ([]string, bool) {
-	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > visibility.MaxHeaderBytes {
+	if len(values) != 1 || len(values[0]) > visibility.MaxHeaderBytes {
 		return nil, false
+	}
+	if values[0] == "" {
+		return []string{}, true
 	}
 	tokens := strings.Split(values[0], ",")
 	for i := range tokens {
@@ -58,6 +61,10 @@ func WithVisibility(store visibility.Store) Option {
 }
 
 func (a *API) visibilityGrant(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id string) {
+	if scope.VisibilityMode == visibility.Enforce {
+		writeError(w, publicerr.Forbidden, nil)
+		return
+	}
 	permission := "visibility:write"
 	if r.Method == http.MethodGet {
 		permission = "visibility:read"

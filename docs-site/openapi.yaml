@@ -2356,9 +2356,9 @@ paths:
         as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID
         takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity.
         Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including
-        initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers
-        send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client.
-        See contract for checkpoint framing and resync.'
+        initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires
+        or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without
+        advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.'
       responses:
         '200':
           description: Successful response
@@ -5985,6 +5985,7 @@ components:
           description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the
             same nonempty set.
           type: array
+          minItems: 1
           uniqueItems: true
           maxItems: 64
           items:

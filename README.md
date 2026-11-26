@@ -33,7 +33,7 @@ created by the Quivr team.
   withdrawn document leaves search at once, and alerts that caught it are told.
 - **Plug in your own logic.** File formats, sources, embedding models, ranking and alert
   rules are plugins: small HTTP services you can replace, in any language.
-- **Enforce source and record visibility** on delegated reads using opaque caller
+- **Opt in to source and record visibility** on delegated reads using opaque caller
   principals. [Configure delegated access](https://docs.quivr.thevibecompany.co/reference/configuration#delegated-reads).
 - **Audit access and changes.** List or export sensitive actions and permission refusals
   by actor, and enable auditing for reads and searches through configuration.

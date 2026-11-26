@@ -511,16 +511,6 @@ func (s *RetrievalSession) Serve(invocationID string, requests []CandidateReques
 	s.request.InvocationID = invocationID
 }
 
-// KeepServed removes candidates whose access changed between rounds.
-func (s *RetrievalSession) KeepServed(allowed func(string) bool) {
-	for i := range s.request.Served {
-		names := s.request.Served[i].Candidates
-		s.request.Served[i].Candidates = slices.DeleteFunc(slices.Clone(names), func(c Candidate) bool {
-			return !allowed(c.SegmentID)
-		})
-	}
-}
-
 // Round is the number of the current round.
 func (s *RetrievalSession) Round() int { return s.request.Round }
 

@@ -137,10 +137,11 @@ type Page struct {
 
 // Service reads the journal for one authorized Corpus.
 type Service struct {
-	Corpora   corpus.Store
-	Journal   Journal
-	Key       []byte
-	Retention time.Duration
+	Corpora      corpus.Store
+	Journal      Journal
+	Key          []byte
+	Retention    time.Duration
+	cursorCipher cipher.AEAD
 }
 
 // Start resolves an optional cursor to a position. An empty cursor means start
@@ -302,12 +303,16 @@ func (s Service) CursorResume(scope corpus.Scope, corpusID string, resume Resume
 		version = 2
 	}
 	b, _ := json.Marshal(cursorPayload{Version: version, Corpus: corpusID, Scope: digest(scope), Position: resume.Position, StartID: resume.StartID})
-	if len(scope.Principals) > 0 {
+	if scope.Principals != nil {
 		// A cursor's encoded length must be independent of journal position
 		// and whether a short-lived start snapshot is still pinned.
 		size := 256 + 6*len(corpusID)
 		b = append(b, bytes.Repeat([]byte{' '}, max(0, size-len(b)))...)
-		sealed := s.visibilityCursorCipher().Seal(nil, nil, b, nil)
+		aead, err := s.visibilityCursorCipher()
+		if err != nil {
+			return ""
+		}
+		sealed := aead.Seal(nil, nil, b, nil)
 		return "v3." + base64.RawURLEncoding.EncodeToString(sealed)
 	}
 	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(s.sign(b))
@@ -324,7 +329,11 @@ func (s Service) decode(scope corpus.Scope, corpusID, token string) (Resume, err
 		if err != nil {
 			return Resume{}, ErrCursorInvalid
 		}
-		b, err = s.visibilityCursorCipher().Open(nil, nil, sealed, nil)
+		aead, err := s.visibilityCursorCipher()
+		if err != nil {
+			return Resume{}, ErrCursorInvalid
+		}
+		b, err = aead.Open(nil, nil, sealed, nil)
 		if err != nil {
 			return Resume{}, ErrCursorInvalid
 		}
@@ -373,14 +382,25 @@ func asResume(value any) (Resume, error) {
 	}
 }
 
-// A signed legacy cursor exposes its numeric position. Delegated callers
-// receive an authenticated encrypted cursor so hidden events leave no gap.
-func (s Service) visibilityCursorCipher() cipher.AEAD {
+// PrepareVisibilityCursors initializes the delegated cursor cipher once at
+// API startup. Legacy requests still use their signed cursor format.
+func (s Service) PrepareVisibilityCursors() (Service, error) {
+	aead, err := s.visibilityCursorCipher()
+	s.cursorCipher = aead
+	return s, err
+}
+
+func (s Service) visibilityCursorCipher() (cipher.AEAD, error) {
+	if s.cursorCipher != nil {
+		return s.cursorCipher, nil
+	}
 	key := hmac.New(sha256.New, s.Key)
 	key.Write([]byte("quivr/visibility-change-cursor/v3"))
-	block, _ := aes.NewCipher(key.Sum(nil))
-	sealed, _ := cipher.NewGCMWithRandomNonce(block)
-	return sealed
+	block, err := aes.NewCipher(key.Sum(nil))
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCMWithRandomNonce(block)
 }
 
 func (s Service) sign(b []byte) []byte {
@@ -405,7 +425,7 @@ func digest(s corpus.Scope) string {
 	sort.Strings(s.Actions)
 	sort.Strings(s.Corpora)
 	b, _ := json.Marshal(s)
-	if len(s.Principals) > 0 {
+	if s.Principals != nil {
 		principals, _ := json.Marshal(s.Principals)
 		b = append(b, principals...)
 	}

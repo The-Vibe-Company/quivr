@@ -75,6 +75,8 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 
 	// Failure matrix: every conflict, missing-key and syntax rule fails closed.
 	validScope := corpus.Scope{Organization: "org_a", Actions: []string{"plugins:admin"}, Corpora: []string{"*"}}
+	invalidVisibility := validScope
+	invalidVisibility.VisibilityMode = "enforced"
 	baseKeys := map[string]corpus.Scope{funcToken: validScope}
 	baseAdminKeys := map[string]corpus.Scope{adminToken: validScope}
 	for _, tc := range []struct {
@@ -94,6 +96,7 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 		{"admin_listen localhost collides ipv4 loopback probe", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "localhost:8081", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
 		{"admin_listen collides wildcard listen", Config{Listen: "0.0.0.0:8080", ProbeListen: "0.0.0.0:8081", AdminListen: "127.0.0.1:8080", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
 		{"admin_listen collides mismatched probe host", Config{Listen: "0.0.0.0:8080", ProbeListen: "0.0.0.0:8081", AdminListen: "127.0.0.1:8081", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
+		{"invalid admin visibility", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8082", Keys: baseKeys, AdminKeys: map[string]corpus.Scope{adminToken: invalidVisibility}}, configInvalid, "admin_keys.visibility_mode"},
 		{"short admin key", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8082", Keys: baseKeys, AdminKeys: map[string]corpus.Scope{"short-key": validScope}}, configInvalid, "admin_keys"},
 		{"reused functional key", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8082", Keys: baseKeys, AdminKeys: map[string]corpus.Scope{funcToken: validScope}}, configConflict, "admin_keys"},
 	} {

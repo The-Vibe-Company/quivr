@@ -295,8 +295,12 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if sv.chain.visibleCandidates != nil {
-			if err := sv.recheckServed(ctx, q, session); err != nil {
+			allowed, err := sv.recheckServed(ctx, q, session.Request().Served)
+			if err != nil {
 				return out, s.unserved(ctx, m.ID, err, timing)
+			}
+			if !allowed {
+				return out, nil
 			}
 		}
 		phase := time.Now()

@@ -129,6 +129,15 @@ func TestCanonicalVisibilityAndGrantRevocation(t *testing.T) {
 		t.Fatalf("legacy catalog got %d (%v), want %d", len(unrestricted), err, len(docs))
 	}
 
+	meta := corpus.MetadataFilter{Field: "kind", AnyOf: []any{"allowed", "withheld", "denied", "granted", "unconfigured"}}
+	matched, err := service.Records(caller, reader, c.ID, content.RecordQuery{
+		CorpusIDs: []string{c.ID}, Limit: 10, Metadata: []corpus.MetadataFilter{meta},
+		FilterRoutes: []content.CatalogFilterRoute{{CorpusID: c.ID, GenerationID: g.ID, Filters: []corpus.TypedFilter{{MetadataFilter: meta, Type: "string"}}}},
+	})
+	if err != nil || len(matched) != 2 || matched[0].ID != want[0] || matched[1].ID != want[1] {
+		t.Fatalf("delegated metadata page = %+v (%v), want %v", matched, err, want)
+	}
+
 	var candidates []content.Candidate
 	var wantHydrated []int
 	for _, key := range []string{"allowed", "withheld", "denied", "granted", "unconfigured"} {
@@ -192,6 +201,25 @@ func TestCanonicalVisibilityAndGrantRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, lookup := range []struct {
+		record, principals string
+		want               int
+	}{
+		{docs["allowed"].record, "group:readers", 200},
+		{docs["allowed"].record, "", 200},
+		{docs["granted"].record, "", 404},
+	} {
+		r := httptest.NewRequest("GET", "/v0/records/"+lookup.record, nil)
+		r.Header.Set("Authorization", "Bearer reader")
+		r.Header.Set("X-Quivr-Actor", "38e61a6d8a6f4849aca7b0f7dd7880d6")
+		r.Header.Set("X-Quivr-Principals", lookup.principals)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != lookup.want {
+			t.Fatalf("delegated GET with principal list %q: status=%d want %d, response %s", lookup.principals, w.Code, lookup.want, w.Body)
+		}
+	}
+
 	grantURL := "/v0/corpora/" + c.ID + "/visibility-grants?source_namespace=open"
 	request := func(method, path, key, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))

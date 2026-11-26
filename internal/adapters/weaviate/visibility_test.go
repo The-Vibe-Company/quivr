@@ -136,6 +136,22 @@ func TestVisibilityPrefilterOnSharedAndTenantCollections(t *testing.T) {
 			}
 		})
 	}
+	// An explicit empty set can see public sources, but cannot match a
+	// record ACL. The compiler must also avoid empty ContainsAny operands.
+	parts["native"] = visibility.Sources{Allowed: []string{"permitted", " permitted "}, Denied: []string{"blocked"}, RecordOverride: true}
+	for _, client := range []*Store{httpStore, grpcStore} {
+		actorOnly := visibility.WithPrincipals(ctx, []string{})
+		got, err := client.Search(actorOnly, []retrieval.Route{native}, scope, retrieval.Request{Mode: "lexical", Query: "harbour", K: 10})
+		var ids []string
+		for _, c := range got {
+			ids = append(ids, c.SegmentID)
+		}
+		slices.Sort(ids)
+		if err != nil || !slices.Equal(ids, []string{"native-padded", "native-visible"}) {
+			t.Fatalf("empty principal read grpc=%v: got %v (%v)", client.grpc != nil, ids, err)
+		}
+	}
+
 	changed := &changingSourcePartitions{}
 	httpStore.Visibility = changed
 	got, err := httpStore.Search(caller, []retrieval.Route{native}, scope, retrieval.Request{Mode: "lexical", Query: "harbour", K: 1})

@@ -118,6 +118,12 @@ func buildAPI(store corpus.Store, contents content.Service, search retrieval.Ser
 		option(a)
 	}
 	a.Changes.Corpora = store
+	if a.Changes.Journal != nil {
+		a.Changes, err = a.Changes.PrepareVisibilityCursors()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if surface == surfaceAdmin {
 		// The internal admin listener never trusts forwarding headers.
 		a.pushProxyCIDRs = nil
@@ -291,7 +297,7 @@ func scopeDigest(s corpus.Scope) string {
 	sort.Strings(s.Actions)
 	sort.Strings(s.Corpora)
 	b, _ := json.Marshal(s)
-	if len(s.Principals) > 0 {
+	if s.Principals != nil {
 		principals, _ := json.Marshal(s.Principals)
 		b = append(b, principals...)
 	}

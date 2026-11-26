@@ -9,7 +9,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -497,14 +496,12 @@ CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM proje
 
 func hydrationVisibility(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (string, []any) {
 	args := hydrationArgs(scope, cs)
-	principals, enforced := visibility.Principals(ctx)
-	if !enforced {
+	acl := visibilityPredicate(ctx, &args, "visible_record")
+	if acl == "" {
 		return "", args
 	}
-	args = append(args, principals)
 	return ` AND EXISTS (SELECT 1 FROM records visible_record
- WHERE (visible_record.organization,visible_record.id)=(c.organization,c.record_id) AND ` +
-		recordVisibilitySQL("visible_record", "$8") + ")", args
+ WHERE (visible_record.organization,visible_record.id)=(c.organization,c.record_id)` + acl + ")", args
 }
 
 var hydrationFenceSQL = `

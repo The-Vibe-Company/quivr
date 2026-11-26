@@ -224,7 +224,10 @@ func changeVisibilitySQL(principals string) string {
    WHEN 'record' THEN e.resource_id
    WHEN 'receipt' THEN (SELECT record_id FROM ingestion_receipts rc WHERE rc.organization=e.organization AND rc.id=e.resource_id)
    WHEN 'match' THEN (SELECT record_id FROM monitoring_notices n WHERE n.organization=e.organization AND n.event_id=e.event_id)
-   WHEN 'delivery' THEN (SELECT record_id FROM monitoring_notices n WHERE n.organization=e.organization AND n.event_id=e.event_id)
+   WHEN 'delivery' THEN (
+     SELECT m.record_id FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
+     WHERE (d.organization,d.id)=(e.organization,e.resource_id)
+   )
    ELSE (SELECT record_id FROM record_versions v WHERE v.organization=e.organization AND v.id=e.record_version_id)
  END AND ` + recordVisibilitySQL("r", principals) + ")"
 }

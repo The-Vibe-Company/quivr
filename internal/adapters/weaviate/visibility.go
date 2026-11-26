@@ -63,12 +63,19 @@ func compileVisibility(sources visibility.Sources, principals []string) (filter,
 }
 
 func compileRecordVisibility(source filter, sourceAllowed, recordOverride bool, principals []string) (filter, bool) {
-	override := containsAny(recordACLProperty, principals)
+	var override filter
+	if recordOverride && len(principals) > 0 {
+		override = containsAny(recordACLProperty, principals)
+	}
 	if !sourceAllowed {
-		return override, recordOverride
+		return override, override.operator != 0
 	}
 	unrestricted := filter{field: recordACLRestrictedProperty, operator: pb.Filters_OPERATOR_NOT_EQUAL, jsonKey: "valueBoolean", value: true}
-	return or(and(source, unrestricted), override), true
+	visibleSource := and(source, unrestricted)
+	if override.operator == 0 {
+		return visibleSource, true
+	}
+	return or(visibleSource, override), true
 }
 
 func (s *Store) resolveVisibility(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, principals []string) ([]retrieval.Route, map[string]filter, map[string]int64, error) {

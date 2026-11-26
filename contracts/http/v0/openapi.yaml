@@ -8,7 +8,10 @@ info:
     THE-640 adds text search and asynchronous Corpus projection rebuild initiation.
     On read routes a key configured with visibility_mode=enforce requires X-Quivr-Actor
     (32 lowercase hexadecimal characters) and X-Quivr-Principals (up to 64 distinct comma-separated
-    kind:id values and 8192 bytes). Requests without valid caller context are refused with 403.
+    kind:id values and 8192 bytes). An empty header represents a caller without principals.
+    Requests without valid caller context are refused with 403. Source grant management, upload session
+    and Blob metadata, Operation status, and unscoped administrative aggregates or audit require
+    non-delegated keys.
 security:
 - ApiKey: []
 # Public engine error classes and the operations that can return them.
@@ -1362,7 +1365,7 @@ paths:
         redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect.
         id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry
         ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including
-        initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP
+        initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP
         410/409; after headers send stream_error with Error JSON then close, without advancing id. Use
         authenticated streaming fetch/http client. See contract for checkpoint framing and resync.'
       responses:
@@ -4468,6 +4471,7 @@ components:
         record_acl:
           description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
           type: array
+          minItems: 1
           uniqueItems: true
           maxItems: 64
           items:
