@@ -95,9 +95,9 @@ configuration:
       request_timeout_ms:
         type: integer
         minimum: 500
-        maximum: 10000
-        default: 4000
-        description: Per-request HTTP timeout in milliseconds (bounded by query_timeout_ms 10000ms and timeout_ms 60000ms).
+        maximum: 5000
+        default: 3000
+        description: Per-request HTTP timeout in milliseconds (default 3000, max 5000). Each HTTP call also inherits the remaining invocation deadline (query_timeout_ms 10000ms for fail-fast text queries; timeout_ms 60000ms shared across sequential region calls in grid mode).
 secrets:
   - name: CROSSMODAL_API_KEY
     required: false

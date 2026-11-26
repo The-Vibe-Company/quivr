@@ -320,6 +320,51 @@ func TestHTTPBackendAuthAndErrorScrubbing(t *testing.T) {
 			t.Fatalf("status %d leaked secret or URL: %v", status, err)
 		}
 	}
+
+	// Verify EmbedQuery fails fast (1 attempt) on transient 5xx while SegmentAndEmbed retries and recovers.
+	var queryAttempts, ingestAttempts int
+	retrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input struct {
+				Modality string `json:"modality"`
+			} `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Input.Modality == "text" {
+			queryAttempts++
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		ingestAttempts++
+		if ingestAttempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		vec := make([]float64, vectorDims)
+		vec[0] = 1.0
+		_ = json.NewEncoder(w).Encode(map[string]any{"vector": vec})
+	}))
+	defer retrySrv.Close()
+	retryCfg := json.RawMessage(`{"backend":"http","base_url":"` + retrySrv.URL + `","auth":"none"}`)
+	_, err = pl.EmbedQuery(context.Background(), &quivrplugin.QueryRequest{
+		Configuration: retryCfg,
+		Space:         externalSpaceID,
+		Query: struct {
+			Modality string `json:"modality"`
+			Text     string `json:"text"`
+		}{Modality: "text", Text: "blue sky"},
+	})
+	if err == nil || queryAttempts != 1 {
+		t.Fatalf("EmbedQuery should fail fast on 1 attempt: err=%v attempts=%d", err, queryAttempts)
+	}
+	_, err = pl.SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
+		Configuration: retryCfg,
+		BlobParts:     []quivrplugin.IngestBlobPart{writeTempBlob(t, "retry.png", pngData)},
+		Spaces:        []string{externalSpaceID},
+	})
+	if err != nil || ingestAttempts != 2 {
+		t.Fatalf("SegmentAndEmbed should retry transient 503 and succeed on attempt 2: err=%v attempts=%d", err, ingestAttempts)
+	}
 }
 
 func TestInvalidImageSpaceBindingDecompressionBombAndSegmentLimit(t *testing.T) {

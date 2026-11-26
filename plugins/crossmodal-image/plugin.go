@@ -41,7 +41,7 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 		GridRows:         2,
 		GridCols:         2,
 		MaxImageBytes:    25 << 20,
-		RequestTimeoutMS: 4000,
+		RequestTimeoutMS: 3000,
 	}
 	if len(raw) > 0 && string(raw) != "{}" {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -66,8 +66,8 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	if cfg.MaxImageBytes < 1024 || cfg.MaxImageBytes > 25<<20 {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "max_image_bytes out of bounds")
 	}
-	if cfg.RequestTimeoutMS < 500 || cfg.RequestTimeoutMS > 10000 {
-		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "request_timeout_ms must be in 500..10000")
+	if cfg.RequestTimeoutMS < 500 || cfg.RequestTimeoutMS > 5000 {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "request_timeout_ms must be in 500..5000")
 	}
 	return cfg, nil
 }

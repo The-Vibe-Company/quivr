@@ -112,9 +112,7 @@ def main(out):
     stopped = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stopped.set())
-    print(norm_fixture, flush=True)
-    print(builtin_fixture, flush=True)
-    print(http_fixture, flush=True)
+    print(norm_fixture, builtin_fixture, http_fixture, flush=True)
     stopped.wait()
     server.shutdown()
 

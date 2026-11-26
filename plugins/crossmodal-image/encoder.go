@@ -561,27 +561,32 @@ func (e *httpEncoder) embedRegion(ctx context.Context, decoded decodedImage, raw
 			"data_uri": dataURI,
 			"region":   pr.region,
 		},
-	})
+	}, 3)
 }
 
 func (e *httpEncoder) embedQuery(ctx context.Context, text string) ([]float32, error) {
+	// Fail fast on the interactive query path (single attempt) so a slow or
+	// failing backend never burns the full query_timeout_ms budget in retries.
 	return e.call(ctx, map[string]any{
 		"model": e.model,
 		"input": map[string]any{
 			"modality": "text",
 			"text":     text,
 		},
-	})
+	}, 1)
 }
 
-func (e *httpEncoder) call(ctx context.Context, body map[string]any) ([]float32, error) {
+func (e *httpEncoder) call(ctx context.Context, body map[string]any, maxAttempts int) ([]float32, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, quivrplugin.TerminalIngestError("encode_request", "cannot serialize embedding request")
 	}
 	backoffs := [...]time.Duration{50 * time.Millisecond, 150 * time.Millisecond}
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
 		}

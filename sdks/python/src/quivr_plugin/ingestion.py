@@ -32,7 +32,6 @@ MAX_SOURCE_RANGES = 256
 MAX_SOURCE_RANGE_CODEPOINTS = 4096
 MAX_PACKED_TEXT_CODEPOINTS = 16384
 MAX_SOURCE_SEPARATOR_CODEPOINTS = 16
-MAX_REGION_LABEL_CODEPOINTS = 128
 MULTI_PART_SEGMENTS_API = FEATURE_SINCE.get("multi_part_segments", "0.17.0")
 MULTIMODAL_INGESTION_API = FEATURE_SINCE.get("multimodal_ingestion", "0.20.0")
 
@@ -89,25 +88,15 @@ def _supports_multimodal_ingestion(manifest: LoadedManifest) -> bool:
 
 
 def _region_problems(region: dict[str, Any], prefix: str) -> list[str]:
-    problems: list[str] = []
-    if region.get("coordinate_system") != "normalized_bbox":
-        problems.append(f"{prefix}/coordinate_system: coordinate_system must be normalized_bbox")
-    coords: dict[str, float] = {}
-    for name in ("x", "y", "width", "height"):
-        raw = region.get(name)
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
-            problems.append(f"{prefix}/{name}: region {name} must be finite")
-            return problems
-        coords[name] = float(raw)
-    x, y, width, height = coords["x"], coords["y"], coords["width"], coords["height"]
-    if x < 0 or x > 1 or y < 0 or y > 1 or width <= 0 or width > 1 or height <= 0 or height > 1:
-        problems.append(f"{prefix}: region coordinates must satisfy 0 <= x,y <= 1 and 0 < width,height <= 1")
-    elif x + width > 1 or y + height > 1:
-        problems.append(f"{prefix}: region extends outside the normalized [0, 1] image frame")
-    label = region.get("label")
-    if label is not None and ("\x00" in label or len(label) > MAX_REGION_LABEL_CODEPOINTS):
-        problems.append(f"{prefix}/label: region label contains NUL or exceeds {MAX_REGION_LABEL_CODEPOINTS} code points")
-    return problems
+    # ImageRegion schema validation already enforces coordinate_system, finite
+    # per-field ranges, and label constraints; enforce only the cross-field frame bounds here.
+    x = float(region["x"])
+    y = float(region["y"])
+    width = float(region["width"])
+    height = float(region["height"])
+    if x + width > 1 or y + height > 1:
+        return [f"{prefix}: region extends outside the normalized [0, 1] image frame"]
+    return []
 
 
 def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], prefix: str,

@@ -160,8 +160,7 @@ def main(out):
     stopped = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stopped.set())
-    print(key_fixture, flush=True)
-    print(ts_fixture, flush=True)
+    print(key_fixture, ts_fixture, flush=True)
     stopped.wait()
     server.shutdown()
 

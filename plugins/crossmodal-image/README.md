@@ -23,7 +23,7 @@ First-party Quivr plugin (`crossmodal.image`) that enriches image Blobs and embe
 | `grid_rows` | `2` | Grid rows (`1..4`) when `region_mode` is `grid`. |
 | `grid_cols` | `2` | Grid columns (`1..4`) when `region_mode` is `grid`. |
 | `max_image_bytes` | `26214400` | Maximum image size in bytes (`1024..26214400`). |
-| `request_timeout_ms` | `4000` | Per-request HTTP backend timeout in milliseconds (`500..10000`, bounded by `query_timeout_ms: 10000` and `timeout_ms: 60000`). |
+| `request_timeout_ms` | `3000` | Per-request HTTP backend timeout in milliseconds (`500..5000`), further bounded by the remaining invocation deadline (`query_timeout_ms: 10000` for single-attempt queries; `timeout_ms: 60000` shared across sequential grid region calls). |
 
 ## Local certification
 

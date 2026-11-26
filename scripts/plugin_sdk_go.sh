@@ -101,6 +101,9 @@ for mod in "$root"/plugins/*/go.mod; do
     for f in $(cat "$work/$id-fixtures.txt"); do fixtures+=(--fixture "$f"); done
     [ ${#fixtures[@]} -gt 0 ] || { echo "$helper wrote no fixtures" >&2; exit 1; }
   fi
+  # scripts/plugin_crossmodal_image_fixtures.py certifies both the builtin space
+  # and the authenticated HTTP bearer space using CROSSMODAL_API_KEY so the
+  # credentials leak check exercises the live secret-reading code path.
   env_prefix=()
   if grep -q "name: CROSSMODAL_API_KEY" quivr-plugin.yaml; then
     env_prefix=(CROSSMODAL_API_KEY=crossmodal-certify-secret)
