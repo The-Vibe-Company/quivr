@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
 
@@ -20,6 +22,35 @@ import (
 const itemKind = "itemKind"
 const passageText = "passageText"
 const maxItemPassages = 2400
+
+const (
+	// Bound text-based passage selection to the top items that can reach the
+	// caller, plus modest headroom for candidates replacing entries rejected
+	// during hydration. Tail items only need one valid segment for fusion and fallback.
+	maxPassageSelectionItems    = retrieval.MaxLimit
+	maxPassageSelectionHeadroom = 10
+	minTopKPassageScan          = 256
+	maxTopKPassageScan          = 512
+	passagesPerTopItem          = 16
+	maxTailPassageScan          = 512
+	passagesPerTailItem         = 4
+	missingPassageConcurrency   = 8
+	minDensePassageScan         = 64
+	maxDensePassageScan         = 600
+
+	// Minimum lexical information density for a substantive passage. Shorter
+	// boilerplate fragments (headers, footers, page markers) rank below
+	// substantive passages when both match (or neither matches) the query.
+	minSubstantiveTerms = 8
+	minSubstantiveRunes = 40
+
+	// Within-item passage BM25 parameters. Flooring substantive passage length
+	// keeps short notices from exploiting BM25 length normalization against
+	// richer paragraphs.
+	passageBM25K1       = 1.2
+	passageBM25B        = 0.4
+	passageBM25MinTerms = 24.0
+)
 
 func itemProperty(f corpus.Field) string {
 	b, _ := json.Marshal(f)
@@ -267,57 +298,220 @@ func ordered(pool map[string]content.Candidate) []content.Candidate {
 }
 
 // passageTerms compiles the distinct query terms once per analyzer. Passage
-// coverage is the most matches under any single analyzer.
+// selection scores each passage with minimum information density and within-item
+// BM25 tie-breaking, taking the best score under any single analyzer.
 type passageTerms struct {
-	analyzer keywords.Analyzer
-	terms    map[string]struct{}
+	analyzer     keywords.Analyzer
+	terms        map[string]struct{}
+	orderedTerms []string
 }
 
 func itemPassageTerms(query string, analyzers []keywords.Analyzer) []passageTerms {
-	if len(analyzers) == 0 {
-		analyzers = []keywords.Analyzer{keywords.Folded}
-	}
-	var out []passageTerms
-	for _, a := range analyzers {
-		terms := map[string]struct{}{}
-		for word := range strings.FieldsSeq(a.Analyze(query)) {
-			terms[word] = struct{}{}
-		}
-		if len(terms) > 0 {
-			out = append(out, passageTerms{a, terms})
-		}
-	}
-	return out
-}
-
-func termCoverage(text string, query []passageTerms) int {
-	best := 0
-	for _, q := range query {
-		if len(q.terms) <= best {
-			continue
-		}
-		matched := map[string]struct{}{}
-		for word := range strings.FieldsSeq(q.analyzer.Analyze(text)) {
-			if _, ok := q.terms[word]; ok {
-				matched[word] = struct{}{}
-				if len(matched) == len(q.terms) {
-					break
+	compile := func(list []keywords.Analyzer) []passageTerms {
+		var out []passageTerms
+		for _, a := range list {
+			terms := map[string]struct{}{}
+			for word := range strings.FieldsSeq(a.Analyze(query)) {
+				terms[word] = struct{}{}
+			}
+			if len(terms) > 0 {
+				ordered := make([]string, 0, len(terms))
+				for word := range terms {
+					ordered = append(ordered, word)
 				}
+				sort.Strings(ordered)
+				out = append(out, passageTerms{analyzer: a, terms: terms, orderedTerms: ordered})
 			}
 		}
-		best = max(best, len(matched))
+		return out
 	}
-	return best
+	if len(analyzers) == 0 {
+		return compile([]keywords.Analyzer{keywords.Folded})
+	}
+	if out := compile(analyzers); len(out) > 0 {
+		return out
+	}
+	// If configured analyzers drop every query token (for example, a query of
+	// stopwords under a stemming analyzer), fall back to language-neutral folding
+	// so passage selection still scores matches and information density.
+	return compile([]keywords.Analyzer{keywords.Folded})
+}
+
+type passageScore struct {
+	hasMatch    bool
+	substantive bool
+	coverage    int
+	bm25        float64
+	uniqueTerms int
+	uniqueRunes int
+}
+
+func passageDensity(text string) (uniqueTerms, uniqueRunes int, substantive bool) {
+	seen := map[string]struct{}{}
+	for word := range strings.FieldsSeq(keywords.Folded.Analyze(text)) {
+		if _, ok := seen[word]; !ok {
+			seen[word] = struct{}{}
+			uniqueRunes += utf8.RuneCountInString(word)
+		}
+	}
+	uniqueTerms = len(seen)
+	substantive = uniqueTerms >= minSubstantiveTerms && uniqueRunes >= minSubstantiveRunes
+	return uniqueTerms, uniqueRunes, substantive
+}
+
+func betterPassage(a, b passageScore, segA, segB string) bool {
+	if a.hasMatch != b.hasMatch {
+		return a.hasMatch
+	}
+	if a.substantive != b.substantive {
+		return a.substantive
+	}
+	if a.hasMatch {
+		if a.coverage != b.coverage {
+			return a.coverage > b.coverage
+		}
+		if a.bm25 != b.bm25 {
+			return a.bm25 > b.bm25
+		}
+	} else {
+		if a.uniqueTerms != b.uniqueTerms {
+			return a.uniqueTerms > b.uniqueTerms
+		}
+		if a.uniqueRunes != b.uniqueRunes {
+			return a.uniqueRunes > b.uniqueRunes
+		}
+	}
+	return segA < segB
+}
+
+func pickBestPassage(group []itemRow, query []passageTerms) itemRow {
+	n := len(group)
+	scores := make([]passageScore, n)
+	substantiveCount := 0
+	for i, row := range group {
+		uniqueTerms, uniqueRunes, substantive := passageDensity(row.Text)
+		scores[i] = passageScore{
+			substantive: substantive,
+			uniqueTerms: uniqueTerms,
+			uniqueRunes: uniqueRunes,
+		}
+		if substantive {
+			substantiveCount++
+		}
+	}
+	for _, q := range query {
+		tfs := make([]map[string]int, n)
+		dls := make([]float64, n)
+		df := make(map[string]int, len(q.terms))
+		totalDL := 0.0
+		substantiveDL := 0.0
+		for i, row := range group {
+			count := 0
+			var tf map[string]int
+			for word := range strings.FieldsSeq(q.analyzer.Analyze(row.Text)) {
+				count++
+				if _, ok := q.terms[word]; ok {
+					if tf == nil {
+						tf = map[string]int{}
+					}
+					tf[word]++
+				}
+			}
+			for word := range tf {
+				df[word]++
+			}
+			dl := float64(count)
+			if scores[i].substantive {
+				dl = max(dl, passageBM25MinTerms)
+				substantiveDL += dl
+			}
+			tfs[i] = tf
+			dls[i] = dl
+			totalDL += dl
+		}
+		avgdl := max(totalDL/float64(n), 1.0)
+		if substantiveCount > 0 {
+			avgdl = max(substantiveDL/float64(substantiveCount), passageBM25MinTerms)
+		}
+		for i := range group {
+			cov := len(tfs[i])
+			if cov == 0 || cov < scores[i].coverage {
+				continue
+			}
+			norm := 1 - passageBM25B + passageBM25B*(dls[i]/avgdl)
+			bm25 := 0.0
+			for _, term := range q.orderedTerms {
+				freq := tfs[i][term]
+				if freq == 0 {
+					continue
+				}
+				idf := math.Log(1 + (float64(n)-float64(df[term])+0.5)/(float64(df[term])+0.5))
+				tfNorm := (float64(freq) * (passageBM25K1 + 1)) / (float64(freq) + passageBM25K1*norm)
+				bm25 += idf * tfNorm
+			}
+			if cov > scores[i].coverage || (cov == scores[i].coverage && bm25 > scores[i].bm25) {
+				scores[i].hasMatch = true
+				scores[i].coverage = cov
+				scores[i].bm25 = bm25
+			}
+		}
+	}
+	bestIdx := 0
+	for i := 1; i < n; i++ {
+		if betterPassage(scores[i], scores[bestIdx], group[i].SegmentID, group[bestIdx].SegmentID) {
+			bestIdx = i
+		}
+	}
+	return group[bestIdx]
 }
 
 const passageOrder = `sort:[{path:["segmentId"],order:asc}],`
 
-// Choose a representative only where text affects the answer. Ungrouped
-// candidates all keep their segment IDs. With relative-score fusion a dense
-// match supplies the representative and the sparse score is independent of it.
-func (s *Store) selectItemPassages(ctx context.Context, collection, where string, rows []itemRow, query []passageTerms, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
+func passageSelectionLimit(q retrieval.Request, limit int) int {
+	if q.Limit > 0 {
+		// Keep modest headroom above q.Limit (including at retrieval.MaxLimit)
+		// for candidates replacing entries filtered during hydration.
+		headroom := min(q.Limit, maxPassageSelectionHeadroom)
+		return min(limit, min(q.Limit, maxPassageSelectionItems)+headroom)
+	}
+	return min(limit, maxPassageSelectionItems)
+}
+
+func topPassageScanLimit(itemCount int) int {
+	if itemCount <= 0 {
+		return 0
+	}
+	return min(maxTopKPassageScan, max(minTopKPassageScan, itemCount*passagesPerTopItem))
+}
+
+func tailPassageScanLimit(itemCount int) int {
+	if itemCount <= 0 {
+		return 0
+	}
+	return min(maxTailPassageScan, max(itemCount, itemCount*passagesPerTailItem))
+}
+
+func versionFilter(items []content.Candidate) string {
+	seen := make(map[string]bool, len(items))
+	ids := make([]string, 0, len(items))
+	for _, c := range items {
+		if seen[c.VersionID] {
+			continue
+		}
+		seen[c.VersionID] = true
+		ids = append(ids, equal("versionId", c.VersionID))
+	}
+	return or(ids...)
+}
+
+func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow) {
 	best := map[string]itemRow{}
 	ambiguous := map[string][]itemRow{}
+	addPassageRows(best, ambiguous, rows)
+	return best, ambiguous
+}
+
+func addPassageRows(best map[string]itemRow, ambiguous map[string][]itemRow, rows []itemRow) {
 	for _, row := range rows {
 		if row.SegmentID == "" {
 			continue
@@ -326,55 +520,100 @@ func (s *Store) selectItemPassages(ctx context.Context, collection, where string
 		first, seen := best[key]
 		if !seen {
 			best[key] = row
-		} else if len(query) > 0 {
+		} else {
 			if len(ambiguous[key]) == 0 {
 				ambiguous[key] = append(ambiguous[key], first)
 			}
 			ambiguous[key] = append(ambiguous[key], row)
 		}
 	}
-	if len(ambiguous) > 0 && densePassages != nil {
-		for key := range densePassages() {
-			delete(ambiguous, key)
+}
+
+func missingCandidates(items []content.Candidate, present map[string]itemRow) []content.Candidate {
+	var missing []content.Candidate
+	for _, c := range items {
+		if _, ok := present[candidateKey(c, true)]; !ok {
+			missing = append(missing, c)
 		}
 	}
-	if len(ambiguous) > 0 {
-		// Pin the text read to the canonical rows in the metadata window.
-		// The same segment ID can appear in more than one generation.
-		var ids []string
-		for _, group := range ambiguous {
-			for _, row := range group {
-				ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
-			}
+	return missing
+}
+
+// recoverMissingPassages guarantees that a high-passage item filling a shared
+// segmentId-ordered scan window cannot starve other ranked versions.
+func (s *Store) recoverMissingPassages(ctx context.Context, collection, passageWhere string, missing []content.Candidate, perVersionLimit int) ([]itemRow, error) {
+	seen := make(map[string]bool, len(missing))
+	versions := make([]string, 0, len(missing))
+	for _, c := range missing {
+		if c.VersionID == "" || seen[c.VersionID] {
+			continue
 		}
-		sort.Strings(ids)
-		textRows, err := s.itemQuery(ctx, collection, passageOrder, and(where, or(ids...)), len(ids), true)
-		if errors.Is(err, errResponseLimit) {
-			// The metadata window already holds the canonical first
-			// passage used for byte-limit recovery.
-			return rows[:1], true, nil
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		scores := map[string]int{}
-		for _, row := range textRows {
-			key := candidateKey(row.candidate(false), true)
-			if len(ambiguous[key]) == 0 {
-				continue
-			}
-			score := termCoverage(row.Text, query)
-			if score > scores[key] || (score == scores[key] && row.SegmentID < best[key].SegmentID) {
-				scores[key] = score
-				best[key] = row
-			}
+		seen[c.VersionID] = true
+		versions = append(versions, c.VersionID)
+	}
+	if len(versions) == 0 {
+		return nil, nil
+	}
+	results := make([][]itemRow, len(versions))
+	group, gctx := errgroup.WithContext(ctx)
+	group.SetLimit(missingPassageConcurrency)
+	for i, ver := range versions {
+		group.Go(func() error {
+			rows, err := s.itemQuery(gctx, collection, passageOrder, and(passageWhere, equal("versionId", ver)), perVersionLimit, false)
+			results[i] = rows
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	var out []itemRow
+	for _, rows := range results {
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+// Choose a representative only where text affects the answer. Ungrouped
+// candidates all keep their segment IDs. With relative-score fusion a dense
+// match supplies the representative and the sparse score is independent of it.
+func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection, where string, best map[string]itemRow, ambiguous map[string][]itemRow, query []passageTerms) (bool, error) {
+	if len(ambiguous) == 0 {
+		return false, nil
+	}
+	// Pin the text read to the canonical rows in the metadata window.
+	// The same segment ID can appear in more than one generation.
+	var ids []string
+	for _, group := range ambiguous {
+		for _, row := range group {
+			ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
 		}
 	}
-	selected := make([]itemRow, 0, len(best))
-	for _, row := range best {
-		selected = append(selected, row)
+	sort.Strings(ids)
+	textRows, err := s.itemQuery(ctx, collection, passageOrder, and(where, or(ids...)), len(ids), true)
+	if errors.Is(err, errResponseLimit) {
+		// Retain the canonical first passage already captured per item in the
+		// metadata window for byte-limit recovery.
+		return true, nil
 	}
-	return selected, len(rows) == maxItemPassages, nil
+	if err != nil {
+		return false, err
+	}
+	byItem := map[string][]itemRow{}
+	for _, row := range textRows {
+		if row.SegmentID == "" {
+			continue
+		}
+		key := candidateKey(row.candidate(false), true)
+		if len(ambiguous[key]) == 0 {
+			continue
+		}
+		byItem[key] = append(byItem[key], row)
+	}
+	for key, group := range byItem {
+		best[key] = pickBestPassage(group, query)
+	}
+	return false, nil
 }
 
 type itemPartition struct {
@@ -498,18 +737,21 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		if err != nil {
 			return err
 		}
-		var ids []string
-		for _, c := range ordered(items) {
-			ids = append(ids, equal("versionId", c.VersionID))
+		ranked := ordered(items)
+		if len(ranked) > depth {
+			ranked = ranked[:depth]
 		}
-		passageWhere = and(passageWhere, or(ids...))
-		rows, err := s.itemQuery(ctx, collection, passageOrder, passageWhere, maxItemPassages, false)
-		if err != nil {
-			return err
-		}
-		exhausted := len(rows) == maxItemPassages
-		if grouped {
-			rows, exhausted, err = s.selectItemPassages(ctx, collection, passageWhere, rows, query, densePassages)
+		var rows []itemRow
+		var exhausted bool
+		if !grouped {
+			scanLimit := min(maxItemPassages, max(limit, topPassageScanLimit(len(ranked))))
+			rows, err = s.itemQuery(ctx, collection, passageOrder, and(passageWhere, versionFilter(ranked)), scanLimit, false)
+			if err != nil {
+				return err
+			}
+			exhausted = len(rows) == scanLimit
+		} else {
+			rows, exhausted, err = s.selectSparseGroupedPassages(ctx, collection, passageWhere, ranked, query, passageSelectionLimit(q, limit), densePassages)
 			if err != nil {
 				return err
 			}
@@ -534,6 +776,158 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		}
 	}
 	return nil
+}
+
+func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, passageWhere string, ranked []content.Candidate, query []passageTerms, selectK int, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
+	topCount := min(len(ranked), selectK)
+	top := ranked[:topCount]
+	tail := ranked[topCount:]
+
+	topLimit := topPassageScanLimit(len(top))
+	topRows, err := s.itemQuery(ctx, collection, passageOrder, and(passageWhere, versionFilter(top)), topLimit, false)
+	if err != nil {
+		return nil, false, err
+	}
+	best, ambiguous := groupPassageRows(topRows)
+
+	var denseMap map[string]content.Candidate
+	if densePassages != nil && (len(ambiguous) > 0 || len(tail) > 0 || len(best) < len(top)) {
+		denseMap = densePassages()
+		for key := range denseMap {
+			delete(ambiguous, key)
+		}
+		for _, c := range top {
+			key := candidateKey(c, true)
+			if _, ok := best[key]; !ok {
+				if d, ok := denseMap[key]; ok {
+					best[key] = itemRow{SegmentID: d.SegmentID, GenerationID: d.GenerationID, VersionID: d.VersionID}
+				}
+			}
+		}
+	}
+
+	// If a high-passage version filled the shared segmentId-ordered scan cap,
+	// recover omitted top-ranked versions individually so none are starved.
+	if len(topRows) == topLimit {
+		if missingTop := missingCandidates(top, best); len(missingTop) > 0 {
+			recovered, err := s.recoverMissingPassages(ctx, collection, passageWhere, missingTop, passagesPerTopItem)
+			if err != nil {
+				return nil, false, err
+			}
+			addPassageRows(best, ambiguous, recovered)
+			for key := range denseMap {
+				delete(ambiguous, key)
+			}
+		}
+	}
+
+	topCovered := 0
+	for _, c := range top {
+		if _, ok := best[candidateKey(c, true)]; ok {
+			topCovered++
+		}
+	}
+
+	var tailNeed []content.Candidate
+	for _, c := range tail {
+		key := candidateKey(c, true)
+		if denseMap != nil {
+			if d, ok := denseMap[key]; ok {
+				best[key] = itemRow{SegmentID: d.SegmentID, GenerationID: d.GenerationID, VersionID: d.VersionID}
+				continue
+			}
+		}
+		tailNeed = append(tailNeed, c)
+	}
+
+	var exhausted bool
+	if len(tailNeed) > 0 {
+		tailLimit := tailPassageScanLimit(len(tailNeed))
+		tailWhere := and(passageWhere, versionFilter(tailNeed))
+		fetchTail := func(tailCtx context.Context, perMissing int) (map[string]itemRow, map[string][]itemRow, error) {
+			tailRows, err := s.itemQuery(tailCtx, collection, passageOrder, tailWhere, tailLimit, false)
+			if err != nil {
+				return nil, nil, err
+			}
+			tailBest, tailAmbiguous := groupPassageRows(tailRows)
+			if len(tailRows) == tailLimit {
+				if missingTail := missingCandidates(tailNeed, tailBest); len(missingTail) > 0 {
+					recovered, err := s.recoverMissingPassages(tailCtx, collection, passageWhere, missingTail, perMissing)
+					if err != nil {
+						return nil, nil, err
+					}
+					addPassageRows(tailBest, tailAmbiguous, recovered)
+				}
+			}
+			return tailBest, tailAmbiguous, nil
+		}
+		if topCovered >= selectK {
+			var tailBest map[string]itemRow
+			var textExhausted bool
+			group, gctx := errgroup.WithContext(ctx)
+			group.Go(func() error {
+				var err error
+				textExhausted, err = s.resolveAmbiguousPassages(gctx, collection, passageWhere, best, ambiguous, query)
+				return err
+			})
+			group.Go(func() error {
+				var err error
+				tailBest, _, err = fetchTail(gctx, 1)
+				return err
+			})
+			if err := group.Wait(); err != nil {
+				return nil, false, err
+			}
+			exhausted = textExhausted
+			for key, row := range tailBest {
+				if _, ok := best[key]; !ok {
+					best[key] = row
+				}
+			}
+		} else {
+			tailBest, tailAmbiguous, err := fetchTail(ctx, passagesPerTopItem)
+			if err != nil {
+				return nil, false, err
+			}
+			for _, c := range tail {
+				key := candidateKey(c, true)
+				if _, already := best[key]; already {
+					if topCovered < selectK {
+						topCovered++
+					}
+					continue
+				}
+				row, ok := tailBest[key]
+				if !ok {
+					continue
+				}
+				best[key] = row
+				if topCovered < selectK {
+					if g := tailAmbiguous[key]; len(g) > 0 {
+						ambiguous[key] = g
+					}
+					topCovered++
+				}
+			}
+			textExhausted, err := s.resolveAmbiguousPassages(ctx, collection, passageWhere, best, ambiguous, query)
+			if err != nil {
+				return nil, false, err
+			}
+			exhausted = textExhausted
+		}
+	} else {
+		textExhausted, err := s.resolveAmbiguousPassages(ctx, collection, passageWhere, best, ambiguous, query)
+		if err != nil {
+			return nil, false, err
+		}
+		exhausted = textExhausted
+	}
+
+	selected := make([]itemRow, 0, len(best))
+	for _, row := range best {
+		selected = append(selected, row)
+	}
+	return selected, exhausted, nil
 }
 
 func itemBM25(p *itemPartition, query string) []string {
@@ -586,7 +980,11 @@ func (s *Store) itemDense(ctx context.Context, collection string, routes []retri
 	vector, _ := json.Marshal(q.Vector)
 	branch := fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]},", vector, quote(target))
 	dense := map[string]content.Candidate{}
-	for depth := limit; ; depth = min(maxItemPassages, depth*2) {
+	maxDepth := limit
+	if grouped {
+		maxDepth = min(maxItemPassages, max(limit, min(maxDensePassageScan, max(minDensePassageScan, limit*4))))
+	}
+	for depth := limit; ; depth = min(maxDepth, depth*2) {
 		rows, err := s.itemQuery(ctx, collection, branch, where, depth, false)
 		if err != nil {
 			return nil, err
@@ -596,7 +994,7 @@ func (s *Store) itemDense(ctx context.Context, collection string, routes []retri
 				keepBest(dense, r.candidate(true), grouped)
 			}
 		}
-		if !grouped || len(dense) >= limit || len(rows) < depth || depth >= maxItemPassages {
+		if !grouped || len(dense) >= limit || len(rows) < depth || depth >= maxDepth {
 			return dense, nil
 		}
 	}
