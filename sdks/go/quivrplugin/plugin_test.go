@@ -437,3 +437,460 @@ func TestServeReadyNotifiesOnlyAfterBind(t *testing.T) {
 		t.Fatalf("bound address = %q, want resolved loopback port", bound)
 	}
 }
+
+func TestWithHealthCheck(t *testing.T) {
+	newPlugin := func(t *testing.T, fn func(context.Context) error) (http.Handler, *bytes.Buffer, string) {
+		t.Helper()
+		logs := &bytes.Buffer{}
+		opts := []Option{WithLogger(slog.New(slog.NewTextHandler(logs, nil)))}
+		if fn != nil {
+			opts = append(opts, WithHealthCheck(fn))
+		}
+		p, err := New("testdata/quivr-plugin.yaml", opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+		h, err := p.Handler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h, logs, p.m.digest
+	}
+
+	t.Run("default and passing check return 200 ok", func(t *testing.T) {
+		called := false
+		for _, fn := range []func(context.Context) error{
+			nil,
+			func(ctx context.Context) error {
+				called = true
+				if ctx == nil {
+					return errors.New("nil context")
+				}
+				return nil
+			},
+		} {
+			h, _, digest := newPlugin(t, fn)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/health", nil))
+			if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"status":"ok"}` {
+				t.Fatalf("HTTP %d %s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get(ManifestDigestHeader); got != digest {
+				t.Fatalf("manifest digest header = %q, want %q", got, digest)
+			}
+		}
+		if !called {
+			t.Fatal("configured health check was not invoked")
+		}
+	})
+
+	cases := []struct {
+		name           string
+		fn             func(context.Context) error
+		wantCode       string
+		wantMessage    string
+		wantClass      string
+		wantRetryAfter float64
+		forbidInBody   string
+		expectLog      string
+	}{
+		{
+			name:        "retryable contribution error",
+			fn:          func(context.Context) error { return RetryableError("warming_up", "loading models") },
+			wantCode:    "warming_up",
+			wantMessage: "loading models",
+		},
+		{
+			name:           "transient connector error with retry after",
+			fn:             func(context.Context) error { return TransientError("backend_busy", "waiting").WithRetryAfter(30 * time.Second) },
+			wantCode:       "backend_busy",
+			wantMessage:    "waiting",
+			wantClass:      "transient",
+			wantRetryAfter: 30,
+		},
+		{
+			name:        "source connector error stays retryable without conflicting class",
+			fn:          func(context.Context) error { return SourceError("not_ready", "index loading") },
+			wantCode:    "not_ready",
+			wantMessage: "index loading",
+		},
+		{
+			name:         "unclassified error hides detail from response and logs it",
+			fn:           func(context.Context) error { return errors.New("dial tcp 10.0.0.1:5432: connection refused") },
+			wantCode:     "unhealthy",
+			forbidInBody: "10.0.0.1:5432",
+			expectLog:    "health check failed",
+		},
+		{
+			name:         "panic is recovered, hidden from response, and logged",
+			fn:           func(context.Context) error { panic("boom internal pool state") },
+			wantCode:     "unhealthy",
+			forbidInBody: "boom",
+			expectLog:    "health check panicked",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, logs, digest := newPlugin(t, tc.fn)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/health", nil))
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("HTTP %d %s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get(ManifestDigestHeader); got != digest {
+				t.Fatalf("manifest digest header = %q, want %q", got, digest)
+			}
+			raw := rec.Body.Bytes()
+			if err := validate("plugins/v0/error.schema.json", raw); err != nil {
+				t.Fatalf("health error envelope failed schema: %v: %s", err, raw)
+			}
+			var out map[string]any
+			if err := json.Unmarshal(raw, &out); err != nil {
+				t.Fatal(err)
+			}
+			if out["code"] != tc.wantCode || out["retryable"] != true {
+				t.Fatalf("unexpected envelope: %s", raw)
+			}
+			if tc.wantMessage != "" && out["message"] != tc.wantMessage {
+				t.Fatalf("message = %v, want %q", out["message"], tc.wantMessage)
+			}
+			if tc.wantClass != "" {
+				if out["error_class"] != tc.wantClass {
+					t.Fatalf("error_class = %v, want %q", out["error_class"], tc.wantClass)
+				}
+			} else if _, has := out["error_class"]; has {
+				t.Fatalf("unexpected error_class in %s", raw)
+			}
+			if tc.wantRetryAfter > 0 && out["retry_after_seconds"] != tc.wantRetryAfter {
+				t.Fatalf("retry_after_seconds = %v, want %v", out["retry_after_seconds"], tc.wantRetryAfter)
+			}
+			if tc.forbidInBody != "" && strings.Contains(string(raw), tc.forbidInBody) {
+				t.Fatalf("response leaked internal detail: %s", raw)
+			}
+			if tc.expectLog != "" && !strings.Contains(logs.String(), tc.expectLog) {
+				t.Fatalf("expected log %q, got %q", tc.expectLog, logs.String())
+			}
+		})
+	}
+
+	t.Run("declared secret is redacted from health responses and logs", func(t *testing.T) {
+		rawManifest, err := os.ReadFile("testdata/quivr-plugin.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rawManifest = append(rawManifest, []byte("\nsecrets:\n  - name: TEST_HEALTH_SECRET\n    description: backend token\n  - name: TEST_SHORT_SECRET\n    description: short token\n")...)
+		manifestPath := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
+		if err := os.WriteFile(manifestPath, rawManifest, 0600); err != nil {
+			t.Fatal(err)
+		}
+		const shortSecret = "k9z"
+		const codeSecret = "tok_code_secret"
+		t.Setenv("TEST_HEALTH_SECRET", codeSecret)
+		t.Setenv("TEST_SHORT_SECRET", shortSecret)
+		// Malformed signing ring with duplicate "secret" keys and a syntax error.
+		t.Setenv(EnvSigningKeys, `{malformed, "secret": "dup_first_ring_secret", "secret": "dup_second_ring_secret"`)
+
+		for _, tc := range []struct {
+			name      string
+			fn        func(context.Context) error
+			forbid    []string
+			wantCode  string
+			expectLog bool
+		}{
+			{
+				name:      "unclassified error scrubs declared, short, and malformed ring secrets",
+				fn:        func(context.Context) error { return errors.New("dial: " + codeSecret + " " + shortSecret + " dup_first_ring_secret dup_second_ring_secret") },
+				forbid:    []string{codeSecret, shortSecret, "dup_first_ring_secret", "dup_second_ring_secret"},
+				wantCode:  "unhealthy",
+				expectLog: true,
+			},
+			{
+				name:      "panic scrubs declared, short, and malformed ring secrets",
+				fn:        func(context.Context) error { panic("boom " + codeSecret + " " + shortSecret + " dup_first_ring_secret") },
+				forbid:    []string{codeSecret, shortSecret, "dup_first_ring_secret"},
+				wantCode:  "unhealthy",
+				expectLog: true,
+			},
+			{
+				name:     "classified ingest error scrubs secret in code and message",
+				fn:       func(context.Context) error { return RetryableError(codeSecret, "using "+shortSecret+" dup_first_ring_secret") },
+				forbid:   []string{codeSecret, shortSecret, "dup_first_ring_secret"},
+				wantCode: "unhealthy",
+			},
+			{
+				name:     "classified connector error scrubs secret in code and message",
+				fn:       func(context.Context) error { return TransientError("err_"+shortSecret, "using "+codeSecret) },
+				forbid:   []string{codeSecret, shortSecret},
+				wantCode: "unhealthy",
+			},
+			{
+				name:     "classified search error scrubs secret in code and message",
+				fn:       func(context.Context) error { return &SearchError{Code: codeSecret, Message: "using " + shortSecret} },
+				forbid:   []string{codeSecret, shortSecret},
+				wantCode: "unhealthy",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				logs := &bytes.Buffer{}
+				p, err := New(manifestPath, WithLogger(slog.New(slog.NewTextHandler(logs, nil))), WithHealthCheck(tc.fn))
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+				h, err := p.Handler()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/health", nil))
+				if rec.Code != http.StatusServiceUnavailable {
+					t.Fatalf("HTTP %d %s", rec.Code, rec.Body.String())
+				}
+				raw := rec.Body.Bytes()
+				if err := validate("plugins/v0/error.schema.json", raw); err != nil {
+					t.Fatalf("health error envelope failed schema: %v: %s", err, raw)
+				}
+				var out map[string]any
+				if err := json.Unmarshal(raw, &out); err != nil {
+					t.Fatal(err)
+				}
+				if out["code"] != tc.wantCode || out["retryable"] != true {
+					t.Fatalf("unexpected envelope: %s", raw)
+				}
+				for _, forbidden := range tc.forbid {
+					if strings.Contains(string(raw), forbidden) || strings.Contains(logs.String(), forbidden) {
+						t.Fatalf("secret %q leaked in health response or logs:\nbody=%s\nlogs=%s", forbidden, raw, logs.String())
+					}
+				}
+				if tc.expectLog && !strings.Contains(logs.String(), Redacted) {
+					t.Fatalf("expected redacted marker in logs, got %q", logs.String())
+				}
+			})
+		}
+	})
+}
+
+func TestManifestDigestHeaderOnAllV0Responses(t *testing.T) {
+	p, err := New("testdata/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.MustConnector("feed", fake{func(*FetchRequest) (*Page, error) {
+		return &Page{Checkpoint: map[string]any{}}, nil
+	}}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := p.m.digest
+
+	for _, tc := range []struct {
+		method, path string
+		body         []byte
+		wantStatus   int
+		wantHeader   string
+	}{
+		{http.MethodGet, "/v0/discovery", nil, http.StatusOK, digest},
+		{http.MethodGet, "/v0/health", nil, http.StatusOK, digest},
+		{http.MethodPost, "/v0/contributions/connector/fetch", fetchBody(nil), http.StatusOK, digest},
+		{http.MethodPost, "/v0/contributions/connector/fetch", []byte("{"), http.StatusBadRequest, digest},
+		{http.MethodGet, "/v0/unknown", nil, http.StatusNotFound, digest},
+		{http.MethodGet, "/v0/contributions/connector/fetch", nil, http.StatusMethodNotAllowed, digest},
+		{http.MethodGet, "/not-v0", nil, http.StatusNotFound, ""},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, bytes.NewReader(tc.body)))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("HTTP %d, want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if got := rec.Header().Get(ManifestDigestHeader); got != tc.wantHeader {
+				t.Fatalf("%s = %q, want %q", ManifestDigestHeader, got, tc.wantHeader)
+			}
+		})
+	}
+
+	// Signed API 0.14.0 401 refusal also carries X-Quivr-Manifest-Digest.
+	raw, err := os.ReadFile("testdata/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = bytes.Replace(raw, []byte(`plugin_api: ">=0.1.0 <0.14.0"`), []byte(`plugin_api: ">=0.14.0 <0.15.0"`), 1)
+	manifestPath := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
+	if err := os.WriteFile(manifestPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	signed, err := New(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+	sh, err := signed.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	sh.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/discovery", nil))
+	if rec.Code != http.StatusUnauthorized || rec.Header().Get(ManifestDigestHeader) != signed.m.digest {
+		t.Fatalf("signed 401: status=%d header=%q want=%q", rec.Code, rec.Header().Get(ManifestDigestHeader), signed.m.digest)
+	}
+}
+
+func TestServerTimeoutsAndGracefulShutdown(t *testing.T) {
+	p, err := New("testdata/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.shutdownTimeout != 30*time.Second {
+		t.Fatalf("default shutdown timeout = %v, want 30s", p.shutdownTimeout)
+	}
+	pIgnore, err := New("testdata/quivr-plugin.yaml", WithShutdownTimeout(0), WithShutdownTimeout(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pIgnore.shutdownTimeout != 30*time.Second {
+		t.Fatalf("non-positive shutdown timeout overwrote default: %v", pIgnore.shutdownTimeout)
+	}
+	pCustom, err := New("testdata/quivr-plugin.yaml", WithShutdownTimeout(45*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pCustom.shutdownTimeout != 45*time.Second {
+		t.Fatalf("custom shutdown timeout = %v, want 45s", pCustom.shutdownTimeout)
+	}
+	srv := p.newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+	if srv.IdleTimeout != 120*time.Second || srv.ReadHeaderTimeout != 10*time.Second {
+		t.Fatalf("server timeouts: IdleTimeout=%v ReadHeaderTimeout=%v", srv.IdleTimeout, srv.ReadHeaderTimeout)
+	}
+
+	t.Run("drains in-flight request within shutdown timeout", func(t *testing.T) {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		plugin, err := New("testdata/quivr-plugin.yaml", WithHealthCheck(func(ctx context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plugin.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+		h, err := plugin.Handler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		serveDone := make(chan error, 1)
+		go func() { serveDone <- plugin.serveListener(ctx, ln, h) }()
+
+		respDone := make(chan *http.Response, 1)
+		errDone := make(chan error, 1)
+		client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+		go func() {
+			resp, err := client.Get("http://" + ln.Addr().String() + "/v0/health")
+			if err != nil {
+				errDone <- err
+				return
+			}
+			respDone <- resp
+		}()
+
+		<-entered
+		cancel()
+		// Wait until server.Shutdown closes the listener before releasing the in-flight request.
+		closed := false
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			conn, err := net.DialTimeout("tcp", ln.Addr().String(), 50*time.Millisecond)
+			if err != nil {
+				closed = true
+				break
+			}
+			_ = conn.Close()
+		}
+		if !closed {
+			close(release)
+			t.Fatal("listener remained open after shutdown began")
+		}
+		close(release)
+
+		select {
+		case err := <-errDone:
+			t.Fatalf("in-flight request failed during graceful shutdown: %v", err)
+		case resp := <-respDone:
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK || resp.Header.Get(ManifestDigestHeader) != plugin.m.digest {
+				t.Fatalf("unexpected response: status=%d digest=%q", resp.StatusCode, resp.Header.Get(ManifestDigestHeader))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for in-flight response")
+		}
+		select {
+		case err := <-serveDone:
+			if err != nil {
+				t.Fatalf("serveListener returned error on clean drain: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for serveListener to exit")
+		}
+	})
+
+	t.Run("enforces WithShutdownTimeout when request blocks past deadline", func(t *testing.T) {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		plugin, err := New(
+			"testdata/quivr-plugin.yaml",
+			WithShutdownTimeout(time.Nanosecond),
+			WithHealthCheck(func(ctx context.Context) error {
+				close(entered)
+				<-release
+				return nil
+			}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plugin.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+		h, err := plugin.Handler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		serveDone := make(chan error, 1)
+		go func() { serveDone <- plugin.serveListener(ctx, ln, h) }()
+
+		clientDone := make(chan struct{})
+		client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+		go func() {
+			defer close(clientDone)
+			if resp, err := client.Get("http://" + ln.Addr().String() + "/v0/health"); err == nil {
+				_ = resp.Body.Close()
+			}
+		}()
+
+		<-entered
+		cancel()
+		select {
+		case err := <-serveDone:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("serveListener error = %v, want context.DeadlineExceeded", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for serveListener shutdown timeout")
+		}
+		close(release)
+		<-clientDone
+	})
+}

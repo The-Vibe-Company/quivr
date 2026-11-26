@@ -1,0 +1,133 @@
+id: crossmodal.image
+version: 1.0.0
+description: Normalizes image Blobs with dimension metadata and embeds full images or spatial regions into a Cross-modal Vector Space searchable by natural language.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.20.0 <0.21.0"
+contributions:
+  normalizer:
+    media_types:
+      - image/png
+      - image/jpeg
+      - image/gif
+    timeout_ms: 30000
+    retry:
+      max_attempts: 2
+    limits:
+      max_response_bytes: 1048576
+      max_parts: 8
+  ingestion:
+    spaces:
+      crossmodal.image.vision:
+        version: "1"
+        model: crossmodal/builtin-vision-512
+        dimensions: 512
+        metric: cosine
+        indexes: [image]
+        query_modalities: [text]
+        description: Shared 512-dimensional cross-modal vector space computed by the deterministic builtin visual/text encoder.
+      crossmodal.image.external:
+        version: "1"
+        model: crossmodal/http-vision-512
+        dimensions: 512
+        metric: cosine
+        indexes: [image]
+        query_modalities: [text]
+        description: Shared 512-dimensional cross-modal vector space computed by an external HTTP cross-modal embedding endpoint.
+    # 120s total ingestion budget covers sequential region uploads in grid mode
+    # (up to 10 MiB images, request_timeout_ms <= 30s per call); 10s query budget
+    # covers fail-fast text queries (query_request_timeout_ms <= 8s).
+    timeout_ms: 120000
+    query_timeout_ms: 10000
+    limits:
+      max_segments: 256
+      max_response_bytes: 16777216
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    allOf:
+      - if:
+          properties:
+            backend:
+              const: http
+          required: [backend]
+        then:
+          required: [base_url]
+    properties:
+      backend:
+        type: string
+        enum: [builtin, http]
+        default: builtin
+        description: Embedding backend. builtin serves crossmodal.image.vision locally; http serves crossmodal.image.external via an external cross-modal embedding endpoint.
+      base_url:
+        type: string
+        pattern: '^https?://.+'
+        maxLength: 2048
+        description: Required when backend is http. Endpoint accepting POST requests for image-region and text-query embeddings.
+      auth:
+        type: string
+        enum: [none, bearer, api-key]
+        default: none
+        description: Authentication scheme for the http backend using CROSSMODAL_API_KEY.
+      model:
+        type: string
+        minLength: 1
+        maxLength: 256
+        description: Optional model identifier override; must match the requested space's declared model (crossmodal/builtin-vision-512 or crossmodal/http-vision-512).
+      region_mode:
+        type: string
+        enum: [full, grid]
+        default: full
+        description: full embeds the whole image as one region; grid embeds the full image plus a regular grid of spatial crops with bounding-box provenance.
+      grid_rows:
+        type: integer
+        minimum: 1
+        maximum: 4
+        default: 2
+      grid_cols:
+        type: integer
+        minimum: 1
+        maximum: 4
+        default: 2
+      max_image_bytes:
+        type: integer
+        minimum: 1024
+        maximum: 10485760
+        default: 10485760
+        description: Maximum raw image size in bytes (up to 10 MiB so base64 HTTP region uploads complete well within request_timeout_ms).
+      request_timeout_ms:
+        type: integer
+        minimum: 500
+        maximum: 30000
+        default: 15000
+        description: Per-attempt HTTP timeout in milliseconds for image-region embedding calls (default 15000, max 30000), bounded by the remaining 120000ms ingestion timeout_ms across sequential grid regions.
+      query_request_timeout_ms:
+        type: integer
+        minimum: 500
+        maximum: 8000
+        default: 4000
+        description: HTTP timeout in milliseconds for fail-fast single-attempt text query embeddings (default 4000, max 8000, strictly within query_timeout_ms 10000ms).
+secrets:
+  - name: CROSSMODAL_API_KEY
+    required: false
+    description: Optional API key for the HTTP cross-modal embedding backend when auth is bearer or api-key.
+extensions:
+  crossmodal.image.metadata:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [width, height, format, media_type, aspect_ratio, sha256]
+      properties:
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        format: {type: string, minLength: 1, maxLength: 32}
+        media_type: {type: string, minLength: 1, maxLength: 255}
+        aspect_ratio: {type: number, exclusiveMinimum: 0}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        text_metadata:
+          type: object
+          additionalProperties:
+            type: string
+run:
+  command: [go, run, .]

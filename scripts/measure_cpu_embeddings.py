@@ -56,8 +56,9 @@ def _health(url, token, timeout):
     return {
         key: body[key] for key in (
             'status', 'model', 'revision', 'model_revision', 'source_revision',
-            'dimensions', 'threads', 'torch_version', 'sentence_transformers_version',
-            'transformers_version', 'pillow_version',
+            'dimensions', 'threads', 'backend', 'precision', 'onnxruntime_version',
+            'tokenizers_version', 'numpy_version', 'torch_version',
+            'sentence_transformers_version', 'transformers_version', 'pillow_version',
         ) if key in body
     }
 

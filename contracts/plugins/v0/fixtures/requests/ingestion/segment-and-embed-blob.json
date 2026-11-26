@@ -1,0 +1,31 @@
+{
+  "invocation_id": "inv-vision-1",
+  "idempotency_key": "ingest:org-1:version-img-1",
+  "contribution": "ingestion",
+  "organization_id": "org-1",
+  "configuration": {},
+  "version": {
+    "corpus_id": "corpus-1",
+    "record_id": "record-img-1",
+    "record_version_id": "version-img-1"
+  },
+  "parts": [],
+  "blob_parts": [
+    {
+      "key": "image",
+      "role": "image",
+      "blob_id": "blob-img-1",
+      "media_type": "image/png",
+      "size_bytes": 128,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "reference": {
+        "kind": "signed_url",
+        "url": "https://storage.example/blobs/blob-img-1",
+        "expires_at": "2026-01-10T10:15:00Z"
+      }
+    }
+  ],
+  "spaces": [
+    "example.vision.image"
+  ]
+}

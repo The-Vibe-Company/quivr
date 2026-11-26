@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/normalization"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -23,7 +24,9 @@ type LiveIngestor struct {
 	Live *plugins.Live
 	// Owners retains the registry owners of spaces still carried by older
 	// generations after their plugin left the active plan.
-	Owners IngestionOwners
+	Owners     IngestionOwners
+	BlobSource content.BlobSource
+	Signer     normalization.Signer
 }
 
 var (
@@ -32,12 +35,14 @@ var (
 	_ retrieval.QueryEncoder     = LiveIngestor{}
 )
 
-func (l LiveIngestor) now() Ingestor { return Ingestor{Pin: l.Live.Set().Ingestion(), Live: l.Live} }
+func (l LiveIngestor) now() Ingestor {
+	return Ingestor{Pin: l.Live.Set().Ingestion(), Live: l.Live, BlobSource: l.BlobSource, Signer: l.Signer}
+}
 
 // Ingestor returns one pin bound to the work plan and source route.
 func (l LiveIngestor) Ingestor(ctx context.Context, mediaType string) processing.IngestionPlugin {
 	if pin := l.Live.Ingestor(ctx, mediaType); pin != nil {
-		return Ingestor{Pin: pin, Live: l.Live}
+		return Ingestor{Pin: pin, Live: l.Live, BlobSource: l.BlobSource, Signer: l.Signer}
 	}
 	return nil
 }
@@ -45,7 +50,7 @@ func (l LiveIngestor) Ingestor(ctx context.Context, mediaType string) processing
 // ForSpace resolves the declared owner rather than the deployment default.
 func (l LiveIngestor) ForSpace(ctx context.Context, space string) processing.IngestionPlugin {
 	if pin := l.Live.SetFor(ctx).SpaceOwner(space); pin != nil {
-		return Ingestor{Pin: pin, Live: l.Live}
+		return Ingestor{Pin: pin, Live: l.Live, BlobSource: l.BlobSource, Signer: l.Signer}
 	}
 	return nil
 }
@@ -83,6 +88,14 @@ func (l LiveIngestor) EncodeQuery(ctx context.Context, org, space, query string)
 		return nil, ErrUnavailable
 	}
 	return (Ingestor{Pin: pin, Live: l.Live}).EncodeQuery(ctx, org, space, query)
+}
+
+func (l LiveIngestor) ResolveQueryEncoder(ctx context.Context, space string) (retrieval.QueryEncoder, string) {
+	pin, err := l.queryOwner(ctx, space)
+	if err != nil || pin == nil {
+		return nil, ""
+	}
+	return (Ingestor{Pin: pin, Live: l.Live}).ResolveQueryEncoder(ctx, space)
 }
 
 // LiveRetriever routes deployment profile names in one snapshot of the active

@@ -103,8 +103,18 @@ for mod in "$root"/plugins/*/go.mod; do
     for f in $(cat "$work/$id-fixtures.txt"); do fixtures+=(--fixture "$f"); done
     [ ${#fixtures[@]} -gt 0 ] || { echo "$helper wrote no fixtures" >&2; exit 1; }
   fi
-  "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
+  # scripts/plugin_crossmodal_image_fixtures.py certifies both the builtin space
+  # and the authenticated HTTP bearer space (crossmodal.image.external) using
+  # CROSSMODAL_API_KEY so the credentials check exercises the live secret path.
+  env_prefix=()
+  if [ "$id" = crossmodal-image ]; then
+    env_prefix=(CROSSMODAL_API_KEY=crossmodal-certify-secret)
+  fi
+  env ${env_prefix[@]+"${env_prefix[@]}"} "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  if [ "$id" = crossmodal-image ]; then
+    grep -q "PASS  embed_query .*crossmodal.image.external" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  fi
   # A retrieval plugin (core-retrieve) declares no secret: its searches must replay instead.
   if grep -q "^  retrieval:" quivr-plugin.yaml; then
     grep -q "PASS  replay .*retrieval" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }

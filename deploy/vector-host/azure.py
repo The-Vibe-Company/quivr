@@ -5,6 +5,7 @@ import base64
 import gzip
 import hashlib
 import importlib.util
+import io
 import ipaddress
 import json
 import os
@@ -13,10 +14,16 @@ import re
 import shlex
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path('/opt/quivr-vector-host')
+HOST_SCRIPT = 'deploy/vector-host/host.py'
+SOURCES = ('deploy/infrastructure.py', 'deploy/infrastructure.json', 'deploy/report-resources.sh', HOST_SCRIPT)
+APPLIED_INTENT = 'applied-intent'
+APPLIED_TAG = 'quivr-vector-applied-intent'
+HOST_FILES = ('override.json', *SOURCES, APPLIED_INTENT)
 module_spec = importlib.util.spec_from_file_location('vector_host', Path(__file__).with_name('host.py'))
 host = importlib.util.module_from_spec(module_spec)
 module_spec.loader.exec_module(host)
@@ -42,23 +49,80 @@ def az(args):
     return json.loads(result.stdout or 'null')
 
 
+def host_flags(args, hostname, source=SOURCE):
+    flags = ['--hostname', hostname, '--profile', args.profile, '--overrides', str(source / 'override.json'),
+             '--data-device', '/dev/disk/azure/scsi1/lun0']
+    for cidr in args.operator_cidr:
+        flags.extend(['--operator-cidr', cidr])
+    return flags
+
+
 def cloud_init(args, hostname, override, fingerprint):
-    sources = ['deploy/vector-host/host.py', 'deploy/infrastructure.py',
-               'deploy/infrastructure.json', 'deploy/report-resources.sh']
     files = [{'path': str(SOURCE / name), 'permissions': '0644', 'encoding': 'gzip+b64',
               'content': base64.b64encode(gzip.compress((ROOT / name).read_bytes(), mtime=0)).decode()}
-             for name in sources]
+             for name in SOURCES]
     files.append({'path': str(SOURCE / 'override.json'), 'permissions': '0600',
                   'content': json.dumps(override)})
     files.append({'path': str(SOURCE / 'bootstrap-intent'), 'permissions': '0600', 'content': fingerprint})
-    prepare = ['python3', str(SOURCE / 'deploy/vector-host/host.py'), 'prepare',
-               '--hostname', hostname, '--profile', args.profile, '--overrides', str(SOURCE / 'override.json'),
-               '--data-device', '/dev/disk/azure/scsi1/lun0', '--initialize-empty-disk']
-    for cidr in args.operator_cidr:
-        prepare.extend(['--operator-cidr', cidr])
+    prepare = ['python3', str(SOURCE / HOST_SCRIPT), 'prepare', *host_flags(args, hostname),
+               '--initialize-empty-disk']
     return '#cloud-config\n' + json.dumps({'package_update': True,
         'packages': ['docker.io', 'docker-compose-v2', 'nftables', 'python3'],
         'write_files': files, 'runcmd': [prepare]}, indent=2) + '\n'
+
+
+def upload_host_sources(ssh, override, fingerprint):
+    buffer = io.BytesIO()
+    metadata = {'override.json': json.dumps(override), APPLIED_INTENT: fingerprint}
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        for name in HOST_FILES:
+            content = metadata[name].encode() if name in metadata else (ROOT / name).read_bytes()
+            entry = tarfile.TarInfo(name)
+            entry.mode = 0o600 if name in metadata else 0o644
+            entry.size = len(content)
+            archive.addfile(entry, io.BytesIO(content))
+    script = ('cd ' + shlex.quote(str(SOURCE)) + '\n'
+              'stage=$(mktemp -d .update.XXXXXXXX)\n'
+              'trap \'rm -rf -- "$stage"\' EXIT\n'
+              'tar -xzm -f - -C "$stage"\n'
+              'for file do test -f "$stage/$file"; done\n'
+              'trap - EXIT\n'
+              'printf "%s\\n" "$stage"')
+    result = subprocess.run([*ssh, shlex.join(['sudo', 'sh', '-eu', '-c', script, 'sh', *HOST_FILES])],
+                            input=buffer.getvalue(), capture_output=True, timeout=60)
+    stage = result.stdout.strip()
+    if result.returncode or not re.fullmatch(rb'\.update\.[A-Za-z0-9]{8}', stage):
+        raise RuntimeError('Host declaration upload failed')
+    return SOURCE / stage.decode('ascii')
+
+
+def applied_intent_check(fingerprint, bootstrap):
+    marker = shlex.quote(str(SOURCE / APPLIED_INTENT))
+    script = f'test "$(cat {marker})" = {shlex.quote(fingerprint)}'
+    if fingerprint == bootstrap:
+        return f'if test -e {marker}; then {script}; fi'
+    return script
+
+
+def host_apply_command(args, hostname, stage, fingerprint, bootstrap):
+    source = stage or SOURCE
+    command = ['python3', str(source / HOST_SCRIPT), 'apply', '--key-stdin',
+               '--startup-timeout', str(args.startup_timeout)]
+    if stage:
+        command.extend(host_flags(args, hostname, stage))
+        # Fence normal applies if this rollout fails after changing host files.
+        # Publish the verified intent last, after its inputs and observer.
+        script = ('cd ' + shlex.quote(str(SOURCE)) + '\n'
+                  'stage=$1\nshift\n'
+                  'trap \'rm -rf -- "$stage"\' EXIT\n'
+                  + shlex.join(['install', '-m', '0600', '/dev/null', APPLIED_INTENT]) + '\n'
+                  + shlex.join(command) + '\n'
+                  'for file do mv -T -- "$stage/$file" "$file"; done')
+        command = ['sh', '-eu', '-c', script, 'sh', str(stage), *HOST_FILES]
+    else:
+        script = applied_intent_check(fingerprint, bootstrap) + '\nexec ' + shlex.join(command)
+        command = ['sh', '-eu', '-c', script]
+    return shlex.join(['sudo', 'flock', '-w', '60', str(SOURCE / '.apply.lock'), *command])
 
 
 def provision(args):
@@ -145,24 +209,43 @@ def _provision(args, context):
                                     + (ROOT / 'deploy/infrastructure.json').read_bytes()
                                     + (ROOT / 'deploy/infrastructure.py').read_bytes()).hexdigest()
     fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True).encode()).hexdigest()
-    tags = {'quivr-vector-host': args.name, 'quivr-vector-intent': fingerprint}
-    tag_args = [f'{name}={value}' for name, value in tags.items()]
     group_flags = ['--resource-group', args.resource_group]
     context.at('inspect resource group', args.resource_group)
     if not az(['group', 'exists', '--name', args.resource_group]):
+        if args.reconcile:
+            raise ValueError('host reconciliation requires an existing resource group')
         context.at('create resource group', args.resource_group)
         az(['group', 'create', '--name', args.resource_group, '--location', args.location])
     # Enumerate instead of treating permission/transport errors as "not found".
     context.at('list resources', args.resource_group)
     resources = az(['resource', 'list', *group_flags])
+    vm_kind = 'Microsoft.Compute/virtualMachines'
+    bootstrap = fingerprint
+    vm_tags = [resource.get('tags') or {} for resource in resources
+               if resource['type'].lower() == vm_kind.lower() and resource['name'] == args.name]
+    applied = vm_tags[0].get(APPLIED_TAG) if len(vm_tags) == 1 else None
+    existing_only = args.reconcile or applied is not None
+    if existing_only:
+        # Keep the cloud ownership identity distinct from the installed release.
+        context.at('identify existing bootstrap intent', args.name)
+        bootstrap = vm_tags[0].get('quivr-vector-intent') if len(vm_tags) == 1 else None
+        if not isinstance(bootstrap, str) or not re.fullmatch(r'[0-9a-f]{64}', bootstrap):
+            raise ValueError('host reconciliation requires an owned, bootstrapped VM')
+        if not args.reconcile and applied != fingerprint:
+            raise ValueError('installed host intent differs from the declaration; use --reconcile')
+    tags = {'quivr-vector-host': args.name, 'quivr-vector-intent': bootstrap}
+    tag_args = [f'{name}={value}' for name, value in tags.items()]
+
     def existing(kind, name):
         context.at('validate resource ownership', name)
         found = [resource for resource in resources if resource['type'].lower() == kind.lower() and resource['name'] == name]
         if len(found) > 1 or (found and any(found[0].get('tags', {}).get(key) != value for key, value in tags.items())):
             raise ValueError('resource ownership or declaration drift; no replacement will be made')
+        if existing_only and not found:
+            raise ValueError('host reconciliation requires all declared resources')
         return found[0] if found else None
     # Check every selected existing resource before creating anything else.
-    kinds = {'vm': ('Microsoft.Compute/virtualMachines', args.name),
+    kinds = {'vm': (vm_kind, args.name),
              'disk': ('Microsoft.Compute/disks', args.disk_name),
              'nsg': ('Microsoft.Network/networkSecurityGroups', args.nsg_name),
              'ip': ('Microsoft.Network/publicIPAddresses', args.public_ip_name),
@@ -191,6 +274,8 @@ def _provision(args, context):
                 sorted(source), rule['direction']) != (priority, access, protocol.lower(), port, sorted(sources), 'Inbound'):
                 raise ValueError('NSG rule drift; refusing to alter existing network rules')
         else:
+            if existing_only:
+                raise ValueError('host reconciliation requires the declared network rules')
             context.at('create network security rule ' + name, args.nsg_name)
             az(['network', 'nsg', 'rule', 'create', *group_flags, '--nsg-name', args.nsg_name, '--name', name,
                 '--priority', priority, '--access', access, '--protocol', protocol, '--direction', 'Inbound',
@@ -318,18 +403,35 @@ def _provision(args, context):
     ssh = ['ssh', '-i', str(args.ssh_identity), '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
            '-o', 'UserKnownHostsFile=' + str(trust),
            '-o', 'ConnectTimeout=10', '-o', 'ConnectionAttempts=10', args.admin_user + '@' + hostname]
-    verified = subprocess.run([*ssh, 'sudo cloud-init status --wait >/dev/null && test "$(sudo cat '
-        + shlex.quote(str(SOURCE / 'bootstrap-intent')) + ')" = ' + shlex.quote(fingerprint)],
+    verify = ('sudo cloud-init status --wait >/dev/null && test "$(sudo cat '
+              + shlex.quote(str(SOURCE / 'bootstrap-intent')) + ')" = ' + shlex.quote(bootstrap))
+    if not args.reconcile:
+        verify += ' && ' + shlex.join(['sudo', 'sh', '-eu', '-c', applied_intent_check(fingerprint, bootstrap)])
+    verified = subprocess.run([*ssh, verify],
         capture_output=True, text=True, timeout=1800)
     if verified.returncode:
         raise RuntimeError('Host trust or bootstrap verification failed; no credential sent')
+    stage = None
+    if args.reconcile:
+        context.at('upload host declaration', args.name)
+        stage = upload_host_sources(ssh, override, fingerprint)
     context.at('apply host configuration', args.name)
-    result = subprocess.run([*ssh, 'sudo python3 '
-        + shlex.quote(str(SOURCE / 'deploy/vector-host/host.py')) + ' apply --key-stdin'],
-        input=secret, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run([*ssh, host_apply_command(args, hostname, stage, fingerprint, bootstrap)],
+                            input=secret, capture_output=True, text=True, timeout=1800 + args.startup_timeout)
     if result.returncode:
+        try:
+            status = json.loads(result.stdout)['check']['status']
+        except (KeyError, TypeError, ValueError):
+            status = None
+        if status in ('drift', 'unknown'):
+            context.at(f'verify running Weaviate ({status})', args.name)
         raise RuntimeError('Host initialization failed; inspect cloud-init and host services privately, then rerun')
-    return {'status': json.loads(result.stdout)['status'], 'weaviate_url': 'https://' + hostname,
+    status = json.loads(result.stdout)['status']
+    if args.reconcile and applied != fingerprint:
+        context.at('record verified host intent', args.name)
+        az(['tag', 'update', '--operation', 'Merge', '--resource-id', vm['id'],
+            '--tags', f'{APPLIED_TAG}={fingerprint}'])
+    return {'status': status, 'weaviate_url': 'https://' + hostname,
             'resolved_weaviate_limits': {**desired, 'cpus': cpus},
             'host_check': 'Run host.py check on the VM; validate protected requests and engine searches.'}
 
@@ -346,6 +448,9 @@ def main():
     parser.add_argument('--ssh-public-key', type=Path, required=True)
     parser.add_argument('--ssh-identity', type=Path, required=True)
     parser.add_argument('--known-hosts', type=Path, help='private Azure-verified trust file; defaults beside SSH identity')
+    parser.add_argument('--reconcile', action='store_true', help='apply current host settings to an existing owned VM')
+    parser.add_argument('--startup-timeout', type=int, default=600, metavar='SECONDS',
+                        help='maximum wait for Weaviate startup after apply (default: 600)')
     parser.add_argument('--vm-size', default='Standard_E8s_v5')
     parser.add_argument('--image', default='Canonical:ubuntu-24_04-lts:server:latest')
     parser.add_argument('--disk-size', type=int, default=512, help='GiB')
@@ -360,6 +465,8 @@ def main():
     parser.add_argument('--api-key-file', type=Path)
     parser.set_defaults(key_stdin=False)
     args = parser.parse_args()
+    if args.startup_timeout < 0:
+        parser.error('startup timeout must be nonnegative')
     for name in ('disk', 'nsg', 'public_ip', 'vnet', 'nic', 'subnet'):
         if getattr(args, name + '_name') is None:
             setattr(args, name + '_name', args.name + '-' + name.replace('_', '-'))

@@ -9,8 +9,13 @@
     }
   },
   "temporal": {
-    "dockerfile": "temporal",
-    "volume": "/data"
+    "variables": {
+      "POSTGRES_USER": "quivr",
+      "POSTGRES_SEEDS": "postgres.railway.internal",
+      "BIND_ON_IP": "::",
+      "TEMPORAL_BROADCAST_ADDRESS": "127.0.0.1",
+      "TEMPORAL_ADDRESS": "127.0.0.1:7233"
+    }
   },
   "seaweed": {
     "dockerfile": "seaweed",

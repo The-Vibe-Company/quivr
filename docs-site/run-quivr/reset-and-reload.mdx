@@ -12,7 +12,7 @@ The reset preflight refuses an external or unverifiable vector index before stop
 - A checkout of the same Quivr revision your installation runs, Python 3.12+ (`python3 --version`), and the built `quivr` binary (`quivr --version`).
 - For Compose, the running `make dev` Stack from this checkout and Docker Compose (`docker compose version`). Use its project name from `.scratch/`. Standalone Compose layouts and externally managed API processes are unsupported.
 - For Railway, the [checked-in deployment layout](/run-quivr/deploy), Railway CLI with `railway api` and `railway ssh`, and an account/workspace `RAILWAY_API_TOKEN` with operator access to every environment. Unset project-scoped `RAILWAY_TOKEN`; it cannot prove project-wide volume isolation. Every service must use one stable, redeployable artifact; stop deployment automation during maintenance.
-- Four data volumes dedicated to this installation: PostgreSQL, Temporal, Weaviate and SeaweedFS. The object store must contain only the engine's `quivr-content` bucket. Source archives belong in a separate store.
+- Three data volumes dedicated to this installation: PostgreSQL (including Temporal persistence), Weaviate and SeaweedFS. The object store must contain only the engine's `quivr-content` bucket. Source archives belong in a separate store.
 - `QUIVR_API_URL` and `QUIVR_API_KEY` for one organization, with `corpora:read`, `corpora:write`, `corpora:rename`, `connectors:read` and `connectors:write`. Install the required connector providers; credential deposits need the installation's credential encryption key.
 - If you declare plugins, `QUIVR_OPERATOR_KEY` with `plugins:admin`. Run the plugin hosts before applying; this command registers and activates them through the public API.
 
@@ -32,7 +32,7 @@ A Corpus may select an existing `retrieval_profile` by name at creation. Apply r
 
 Optional `plugins` entries contain `idempotency_key`, `endpoint`, `manifest_file`, and nonsecret `configuration`. They accept `fixture_files` (fixture name to local path), `routes`, `kinds` and `spaces` from the [public registration API](/api-reference/overview). Manifests and fixtures resolve beside the declaration. Conflicting declared plugin roles are refused before writes; a changed registration needs a new key. Plugin host secrets stay in the host environment.
 
-Copy either [the Compose installation example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.compose.json) or [the Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.railway.json). Set your deployment name and selectors. `dedicated: true` asserts exclusive use of all four selected data volumes. Compose verifies project/service volume labels and refuses additional container attachments. Railway also verifies that no other environment attaches them; it refuses incomplete or unreadable ownership checks. Declare every Railway service with a supported role, including `autoscaler` when present.
+Copy either [the Compose installation example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.compose.json) or [the Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/examples/installation.railway.json). Set your deployment name and selectors. `dedicated: true` asserts exclusive use of all three selected data volumes. Compose verifies project/service volume labels and refuses additional container attachments. Railway also verifies that no other environment attaches them; it refuses incomplete or unreadable ownership checks. Declare every Railway service with a supported role, including `autoscaler` when present.
 
 ### 2. Preview and reset
 
@@ -49,7 +49,7 @@ python3 deploy/reset.py -f /private/installation.json \
   --confirm --deployment-name 'your declared deployment name'
 ```
 
-Both confirmation inputs are required. Reset stops writers, terminates running workflows, replaces the four data volumes, applies startup migrations and restarts writers. Compose reports deleted volumes and storage counts. Railway restores the same deployed artifacts and reports detached old volumes whose deletion was acknowledged; provider retention can delay physical deletion.
+Both confirmation inputs are required. Reset stops writers, terminates running workflows, replaces the three data volumes, applies startup migrations and restarts writers. Compose reports deleted volumes and storage counts. Railway restores the same deployed artifacts and reports detached old volumes whose deletion was acknowledged; provider retention can delay physical deletion.
 
 If Railway acknowledges a stop but leaves instances running after 30 seconds, reset removes that recorded deployment and verifies shutdown before replacing volumes. Restore redeploys the original recorded artifact, including a removed deployment.
 

@@ -189,10 +189,12 @@ type Service struct {
 	// Registry describes the vector spaces a ranker may request.
 	Registry SpaceRegistry
 	// Coverage, when set, keeps the Registry's answers for a short time.
-	Coverage   *CoverageCache
-	Routing    Routing
-	Projection Projection
-	Content    content.Service
+	Coverage *CoverageCache
+	// QueryVectors is shared by searches using these encoders.
+	QueryVectors *QueryVectorCache
+	Routing      Routing
+	Projection   Projection
+	Content      content.Service
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
@@ -345,6 +347,8 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		m := s.Ranker.Manifest()
 		out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
+		elapsed := time.Since(started)
+		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}, OverObjective: elapsed > m.Contributions.Retrieval.Profiles[q.Profile].Objective()}
 		return out, nil
 	}
 	return s.rank(ctx, scope, q, routes, out, started)

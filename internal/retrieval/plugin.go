@@ -447,7 +447,7 @@ type server struct {
 	plan   spacePlan
 	// hydrated caches the segments hydrated earlier in the search.
 	hydrated map[string]content.Hydrated
-	// vectors caches query encodings by space and text.
+	// vectors caches query encodings when no pin-aware encoder is configured.
 	vectors map[string][]float32
 	// keywordCandidates avoids querying the same fallback partition for every
 	// healthy space. Keys include the full effective lexical request.
@@ -512,7 +512,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		if c.Vector != nil {
 			pq.Vector = plugins.Float32s(c.Vector)
 		} else {
-			vector, err := sv.encode(ctx, c.Space, text)
+			vector, err := sv.encode(ctx, c.Space, text, routes)
 			if err != nil {
 				return nil, err
 			}
@@ -679,46 +679,86 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 // encode encodes a query with the owner of a space: the engine's E5 encoder
 // for the legacy space that Corpora not yet rebuilt since THE-777 serve, the
 // pinned ingestion plugin for its own.
-func (sv *server) encode(ctx context.Context, space, text string) ([]float32, error) {
-	key := space + "\x00" + text
-	if v, ok := sv.vectors[key]; ok {
-		return v, nil
+func (sv *server) encode(ctx context.Context, space, text string, routes []Route) ([]float32, error) {
+	generations := queryGenerations(routes)
+	// The serving registration can change between candidate rounds. Let
+	// encodeQuery resolve it before consulting the shared cache.
+	_, pinAware := sv.s.Spaces.(pinnedQueryEncoder)
+	var key string
+	if !pinAware {
+		key = queryVectorKey(space, generations, text)
+		if v, ok := sv.vectors[key]; ok {
+			return v, nil
+		}
 	}
 	started := time.Now()
 	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
-	vector, err := sv.s.EncodeQuery(ctx, sv.scope.Organization, space, text)
+	vector, err := sv.s.encodeQuery(ctx, sv.scope.Organization, space, generations, text)
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) {
 			return nil, ErrModelUnavailable
 		}
 		return nil, err
 	}
-	sv.vectors[key] = vector
+	if !pinAware {
+		sv.vectors[key] = vector
+	}
 	return vector, nil
 }
 
 func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
-	var vector []float32
-	var err error
+	return s.encodeQuery(ctx, org, space, "", text)
+}
+
+// A live encoder must return the actual serving encoder alongside its identity.
+// Looking them up separately would allow a plan change to cache a vector under
+// the previous pin.
+type pinnedQueryEncoder interface {
+	ResolveQueryEncoder(context.Context, string) (QueryEncoder, string)
+}
+
+func (s Service) encodeQuery(ctx context.Context, org, space, generations, text string) ([]float32, error) {
 	switch {
 	case s.Embedder != nil && space == s.Embedder.Space().ID:
-		vector, err = s.Embedder.Embed(ctx, "query: "+text)
-	case s.Spaces != nil && s.Spaces.Owns(space):
-		vector, err = s.Spaces.EncodeQuery(ctx, org, space, text)
-		if errors.Is(err, ErrQueryTooLong) {
-			return nil, err
+		// The legacy space ID identifies the engine's pinned model and template.
+		return s.QueryVectors.encode(ctx, queryVectorKey("engine", org, space, generations, text), func(ctx context.Context) ([]float32, error) {
+			vector, err := s.Embedder.Embed(ctx, "query: "+text)
+			if err != nil {
+				return nil, ErrUnavailable
+			}
+			return vector, nil
+		})
+	case s.Spaces != nil:
+		// Pinned work must pass the plugin invocation's per-work rollback guard.
+		_, pinnedWork := plugins.WorkOf(ctx)
+		if resolver, ok := s.Spaces.(pinnedQueryEncoder); ok && s.QueryVectors != nil && !pinnedWork {
+			if encoder, pin := resolver.ResolveQueryEncoder(ctx, space); encoder != nil {
+				return s.QueryVectors.encode(ctx, queryVectorKey("plugin", org, space, generations, pin, text), func(ctx context.Context) ([]float32, error) {
+					return encodePluginQuery(ctx, encoder, org, space, text)
+				})
+			}
 		}
-		if errors.Is(err, content.ErrInvalid) {
-			return nil, ErrUnsupported
+		// Preserve the ordinary path for encoders without a stable identity
+		// and for owner lookup failures.
+		if s.Spaces.Owns(space) {
+			return encodePluginQuery(ctx, s.Spaces, org, space, text)
 		}
-	default:
-		// No pinned owner can encode a query into this space.
+	}
+	return nil, ErrUnsupported
+}
+
+func encodePluginQuery(ctx context.Context, encoder QueryEncoder, org, space, text string) ([]float32, error) {
+	vector, err := encoder.EncodeQuery(ctx, org, space, text)
+	switch {
+	case errors.Is(err, ErrQueryTooLong):
+		return nil, err
+	case errors.Is(err, content.ErrInvalid):
 		return nil, ErrUnsupported
-	}
-	if err != nil {
+	case err != nil:
 		return nil, ErrUnavailable
+	default:
+		return vector, nil
 	}
-	return vector, nil
 }
 
 func ownerTotal(c content.SpaceCoverage, legacy int64) int64 {
@@ -737,6 +777,19 @@ func (sv *server) candidate(h content.Hydrated, score float64, explanation strin
 		c.SourceSeparator = h.Segment.Derivation.SourceSeparator
 		for _, r := range h.Segment.Derivation.SourceRanges {
 			c.SourceRanges = append(c.SourceRanges, plugins.SourceRange{PartKey: r.PartKey, Start: r.Start, End: r.End})
+		}
+	}
+	if h.Segment.Derivation.Region != nil && sv.s.Ranker.Manifest().SupportsMultimodalIngestion() {
+		r := h.Segment.Derivation.Region
+		c.Region = &plugins.ImageRegion{
+			CoordinateSystem: r.CoordinateSystem,
+			X:                r.X,
+			Y:                r.Y,
+			Width:            r.Width,
+			Height:           r.Height,
+			ImageWidth:       r.ImageWidth,
+			ImageHeight:      r.ImageHeight,
+			Label:            r.Label,
 		}
 	}
 	return c

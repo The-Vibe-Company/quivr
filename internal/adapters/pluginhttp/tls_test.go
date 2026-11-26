@@ -27,7 +27,7 @@ func TestPluginDiscoveryAndCallOverTLS(t *testing.T) {
 	transport := outbound.Transport(config)
 	defer transport.CloseIdleConnections()
 	devhost.SetTransport(transport)
-	defer devhost.SetTransport(http.DefaultTransport)
+	defer devhost.SetTransport(nil)
 	var pin *plugins.Pin
 	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveDiscovery(w, r, pin) {

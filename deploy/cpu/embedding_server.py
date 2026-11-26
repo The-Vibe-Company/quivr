@@ -51,8 +51,9 @@ def _health_metadata(metadata):
         'source_revision': SOURCE_REVISION,
         'dimensions': DIMENSIONS,
     }
-    for key in ('threads', 'torch_version', 'sentence_transformers_version',
-                'transformers_version', 'pillow_version'):
+    for key in ('threads', 'backend', 'precision', 'onnxruntime_version',
+                'tokenizers_version', 'numpy_version', 'torch_version',
+                'sentence_transformers_version', 'transformers_version', 'pillow_version'):
         if key in metadata:
             health[key] = metadata[key]
     return health

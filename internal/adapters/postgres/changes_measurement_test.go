@@ -56,7 +56,7 @@ CASE WHEN i%1000000=0 THEN 'sparse' ELSE 'busy' END,
 		t.Fatal(err)
 	}
 	t.Logf("corpus index setup=%s bytes=%d", time.Since(started), indexBytes)
-	trace := &changeReadTrace{}
+	trace := &lastReadTrace{}
 	cfg := pool.Config().Copy()
 	cfg.ConnConfig.Tracer = trace
 	traced, err := pgxpool.NewWithConfig(ctx, cfg)
