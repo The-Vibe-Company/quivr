@@ -409,7 +409,9 @@ def _type(node, defs):
     if node is False:
         return 'reserved'
     if isinstance(node, dict) and '#/$defs/' in str(node.get('$ref', '')) and not node['$ref'].startswith('#'):
-        return f'`{node["$ref"].rsplit("/", 1)[1]}` (shared Manifest schema)'
+        ref_file, def_name = node['$ref'].split('#/$defs/', 1)
+        source = 'shared Manifest schema' if ref_file.endswith('shared/v0/manifest.schema.json') else ref_file.rsplit('/', 1)[-1]
+        return f'`{def_name.rsplit("/", 1)[-1]}` ({source})'
     if not isinstance(node, dict) or node is True:
         return 'any'
     if 'const' in node:

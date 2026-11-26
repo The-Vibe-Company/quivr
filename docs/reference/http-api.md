@@ -11182,6 +11182,7 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `source_excerpts[].end` | integer | yes | Minimum `0`. |
 | `source_excerpts[].coordinate_system` | string | yes | One of `unicode_codepoint`. |
 | `availability` | [`Availability`](#availability) | yes |  |
+| `region` | [`ImageRegion`](#imageregion) |  |  |
 | `explanation` | string |  | Why the retrieval plugin ranked this hit here, when it says so. Minimum length `1`. Maximum length `1024`. |
 
 Further rules (conditional requirements or combinations) are in the full schema below.
@@ -11257,6 +11258,8 @@ properties:
         - coordinate_system
   availability:
     $ref: '#/components/schemas/Availability'
+  region:
+    $ref: '#/components/schemas/ImageRegion'
   explanation:
     type: string
     minLength: 1
@@ -11283,6 +11286,70 @@ else:
   not:
     required:
       - vector_space_id
+```
+
+</details>
+
+### `ImageRegion`
+
+Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `coordinate_system` | string | yes | One of `normalized_bbox`. |
+| `x` | number | yes | Minimum `0`. Maximum `1`. |
+| `y` | number | yes | Minimum `0`. Maximum `1`. |
+| `width` | number | yes | Maximum `1`. Greater than `0`. |
+| `height` | number | yes | Maximum `1`. Greater than `0`. |
+| `image_width` | integer |  | Minimum `1`. |
+| `image_height` | integer |  | Minimum `1`. |
+| `label` | string |  | Pattern `^[^\x00]*$`. Minimum length `1`. Maximum length `128`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  coordinate_system:
+    type: string
+    enum:
+      - normalized_bbox
+  x:
+    type: number
+    minimum: 0
+    maximum: 1
+  y:
+    type: number
+    minimum: 0
+    maximum: 1
+  width:
+    type: number
+    exclusiveMinimum: 0
+    maximum: 1
+  height:
+    type: number
+    exclusiveMinimum: 0
+    maximum: 1
+  image_width:
+    type: integer
+    minimum: 1
+  image_height:
+    type: integer
+    minimum: 1
+  label:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: ^[^\x00]*$
+required:
+  - coordinate_system
+  - x
+  - y
+  - width
+  - height
+description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 ```
 
 </details>

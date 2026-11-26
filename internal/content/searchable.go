@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,9 +89,48 @@ func (p *sourceParts) resolve(ranges []SourceRange) ([]SourceRange, []SourceExce
 	return append([]SourceRange(nil), ranges...), out, nil
 }
 
+// ImageRegion is normalized bounding-box provenance for a segment derived
+// from a Blob Part (for example an image or crop).
+type ImageRegion struct {
+	CoordinateSystem string  `json:"coordinate_system"`
+	X                float64 `json:"x"`
+	Y                float64 `json:"y"`
+	Width            float64 `json:"width"`
+	Height           float64 `json:"height"`
+	ImageWidth       int     `json:"image_width,omitempty"`
+	ImageHeight      int     `json:"image_height,omitempty"`
+	Label            string  `json:"label,omitempty"`
+}
+
+// Valid reports whether the region has valid normalized [0, 1] bounds.
+func (r *ImageRegion) Valid() bool {
+	if r == nil || r.CoordinateSystem != "normalized_bbox" {
+		return false
+	}
+	for _, v := range []float64{r.X, r.Y, r.Width, r.Height} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return false
+		}
+	}
+	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
+		return false
+	}
+	if r.X+r.Width > 1 || r.Y+r.Height > 1 {
+		return false
+	}
+	if r.ImageWidth < 0 || r.ImageHeight < 0 {
+		return false
+	}
+	if r.Label != "" && (!utf8.ValidString(r.Label) || strings.ContainsRune(r.Label, 0) || utf8.RuneCountInString(r.Label) > 128) {
+		return false
+	}
+	return true
+}
+
 type SegmentDerivation struct {
 	SourceRanges     []SourceRange `json:"source_ranges,omitempty"`
 	SourceSeparator  string        `json:"source_separator,omitempty"`
+	Region           *ImageRegion  `json:"region,omitempty"`
 	Ordinal          int           `json:"ordinal"`
 	UTF8Start        int           `json:"utf8_start"`
 	UTF8End          int           `json:"utf8_end"`
@@ -303,11 +343,39 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 		return ErrInvalid
 	}
 	parts := map[string][]rune{}
+	blobParts := map[string]string{}
 	for _, p := range v.Manifest.Parts {
+		if p.Content.Kind == "blob" {
+			blobParts[p.Key] = p.Content.BlobSHA256
+			continue
+		}
 		parts[p.Key] = []rune(p.Content.Text)
 	}
 	for i := range result.Segments {
 		p := &result.Segments[i]
+		if blobSHA, isBlob := blobParts[p.PartKey]; isBlob {
+			if p.Start != 0 || p.End != 0 || p.Text != "" || len(p.Derivation.SourceRanges) > 0 || !p.Derivation.Region.Valid() {
+				return ErrInvalid
+			}
+			if p.TitleKey != "" {
+				title, ok := parts[p.TitleKey]
+				if !ok || string(title) != p.Title {
+					return ErrInvalid
+				}
+			}
+			d := p.Derivation
+			if d.UTF8Start != 0 || d.UTF8End != 0 || d.NormalizedSHA256 != blobSHA || d.ModelInputSHA256 != Hash([]byte(d.ModelInput)) || d.ModelTokens > 512 {
+				return ErrInvalid
+			}
+			expected := SegmentID(org, result.ID, *p)
+			if p.ID != expected {
+				return ErrInvalid
+			}
+			continue
+		}
+		if p.Derivation.Region != nil {
+			return ErrInvalid
+		}
 		text, ok := parts[p.PartKey]
 		if !ok || p.Start < 0 || p.End < p.Start || p.End > len(text) {
 			return ErrInvalid
@@ -437,7 +505,12 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		source           LocatedSource
 	}
 	byBlob := map[string][]request{}
+	regionOnly := map[int]bool{}
 	for i, l := range located {
+		if len(l.Sources) == 0 && l.Blob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0 {
+			regionOnly[i] = true
+			continue
+		}
 		sources := l.Sources
 		if len(sources) == 0 {
 			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob}}
@@ -448,6 +521,9 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 	}
 	slices := map[int][]SourceExcerpt{}
 	for i, l := range located {
+		if regionOnly[i] {
+			continue
+		}
 		n := len(l.Sources)
 		if n == 0 {
 			n = 1
@@ -491,6 +567,12 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		return nil, failure
 	}
 	out := map[int]string{}
+	for i := range regionOnly {
+		if Hash(nil) != located[i].TextSHA256 {
+			return nil, errors.New("canonical excerpt mismatch")
+		}
+		out[i] = ""
+	}
 	for i, pieces := range slices {
 		texts := make([]string, len(pieces))
 		for k, p := range pieces {
@@ -512,6 +594,10 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 
 func SegmentID(org, segmentation string, p Segment) string {
 	base := StableID("segment", org, segmentation, p.PartKey, strconv.Itoa(p.Derivation.Ordinal), strconv.Itoa(p.Start), strconv.Itoa(p.End), strconv.Itoa(p.Derivation.UTF8Start), strconv.Itoa(p.Derivation.UTF8End), p.Derivation.NormalizedSHA256, Hash([]byte(p.Text)))
+	if p.Derivation.Region != nil {
+		raw, _ := json.Marshal(p.Derivation.Region)
+		return StableID("region-segment", base, string(raw))
+	}
 	if len(p.Derivation.SourceRanges) == 0 {
 		return base
 	}

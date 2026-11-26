@@ -93,6 +93,26 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	for i, h := range result.Hits {
 		hit := transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.AnchorText(), Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)}
+		if h.Segment.Derivation.Region != nil {
+			r := h.Segment.Derivation.Region
+			region := transport.ImageRegion{
+				CoordinateSystem: transport.ImageRegionCoordinateSystem(r.CoordinateSystem),
+				X:                float32(r.X),
+				Y:                float32(r.Y),
+				Width:            float32(r.Width),
+				Height:           float32(r.Height),
+				Label:            optionalString(r.Label),
+			}
+			if r.ImageWidth > 0 {
+				w := r.ImageWidth
+				region.ImageWidth = &w
+			}
+			if r.ImageHeight > 0 {
+				ht := r.ImageHeight
+				region.ImageHeight = &ht
+			}
+			hit.Region = &region
+		}
 		if len(h.Segment.SourceExcerpts) > 0 {
 			hit.PassageText = optionalString(h.Segment.Text)
 			excerpts := []struct {

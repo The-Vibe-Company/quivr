@@ -882,7 +882,7 @@ func Run(command string, args ...string) error {
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
-	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore}
+	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore, BlobSource: uploadStore, Signer: blobs}
 	deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search

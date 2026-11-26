@@ -1,0 +1,16 @@
+id: example.vision
+version: 0.1.0
+description: Image vector space declared under an older Plugin API range.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.19.0 <0.20.0"
+contributions:
+  ingestion:
+    spaces:
+      example.vision.image:
+        version: "1"
+        model: example/vision-4
+        dimensions: 4
+        metric: cosine
+        indexes: [image]
+        query_modalities: [text]

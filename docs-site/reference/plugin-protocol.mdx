@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.19.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`, `0.19.0`.
+Latest Plugin API: `0.20.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`, `0.19.0`, `0.20.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -36,6 +36,7 @@ Latest Plugin API: `0.19.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Ingestion segments spanning ordered ranges from multiple Parts | `0.17.0` |
 | Bounded ingestion pages with complete source coverage and durable negotiated cuts | `0.18.0` |
 | Optional connector pages with ordered revisions of each record | `0.19.0` |
+| Multimodal image ingestion with Blob Part references and segment region provenance | `0.20.0` |
 
 ## Trace context
 
@@ -143,8 +144,8 @@ manifest_digest is sha256 over the exact bytes of the quivr-plugin.yaml the plug
 | --- | --- | --- | --- |
 | `plugin_api` | string | yes | Plugin API version the plugin implements. |
 | `plugin` | object | yes | — |
-| `plugin.id` | `PluginId` (shared Manifest schema) | yes | — |
-| `plugin.version` | `Version` (shared Manifest schema) | yes | — |
+| `plugin.id` | `PluginId` (plugin-manifest.schema.json) | yes | — |
+| `plugin.version` | `Version` (plugin-manifest.schema.json) | yes | — |
 | `manifest_digest` | string | yes | — |
 | `contributions` | array of `normalizer`, `subscription`, `connector`, `ingestion`, `retrieval` | yes | — |
 
@@ -307,7 +308,7 @@ Since Plugin API 0.4. The core asks for the exact size and SHA-256 of one attach
 | `item.record_key` | string | yes | 1 to 1024 characters. |
 | `item.revision` | string | no | 1 to 256 characters. |
 | `item.extensions` | `Extensions` (shared Manifest schema) | no | The item's current extensions. |
-| `attachment` | `Attachment` (shared Manifest schema) | yes | The attachment descriptor, as the plugin returned it. |
+| `attachment` | `Attachment` (connector-fetch-response.schema.json) | yes | The attachment descriptor, as the plugin returned it. |
 
 **Response body (200)** (`connector-describe-attachment-response.schema.json`)
 
@@ -417,7 +418,7 @@ For a push kind. Since Plugin API 0.5 the core relays public webhook requests fo
 | `response.status` | integer | yes | 200 to 499. |
 | `response.content_type` | string | no | At most 256 characters. |
 | `response.body` | string | no | Text body returned to the source. At most 65536 characters. |
-| `items` | array of `Item` (shared Manifest schema) | no | Items the delivery carries, at most the declared max_items. Only with verdict accepted; attachments are not supported in a delivery. At most 1000 items. |
+| `items` | array of `Item` (connector-fetch-response.schema.json) | no | Items the delivery carries, at most the declared max_items. Only with verdict accepted; attachments are not supported in a delivery. At most 1000 items. |
 | `reads` | integer | no | Source resources the delivery counts as read; feeds the per-UTC-day usage counters. Default `0`. |
 
 ### `POST /v0/contributions/connector/upload_attachment`
@@ -439,7 +440,7 @@ Since Plugin API 0.4. The plugin uploads the bytes it described to the grant, th
 | `item.record_key` | string | yes | 1 to 1024 characters. |
 | `item.revision` | string | no | 1 to 256 characters. |
 | `item.extensions` | `Extensions` (shared Manifest schema) | no | The item's current extensions. |
-| `attachment` | `Attachment` (shared Manifest schema) | yes | The attachment descriptor, as the plugin returned it. |
+| `attachment` | `Attachment` (connector-fetch-response.schema.json) | yes | The attachment descriptor, as the plugin returned it. |
 | `grant` | object | yes | One presigned PUT for one storage object. Storage refuses any other length, checksum or media type. Send exactly these headers, never log the URL or the headers, and do not reuse the grant. |
 | `grant.url` | string | yes | 1 to 8192 characters. |
 | `grant.method` | `"PUT"` | yes | — |
@@ -469,7 +470,7 @@ Since Plugin API 0.6. Encode one query into one of the plugin's spaces, so a que
 | `contribution` | `"ingestion"` | yes | — |
 | `organization_id` | string | yes | — |
 | `configuration` | object | yes | The validated plugin (installer) configuration. |
-| `space` | `SpaceId` (shared Manifest schema) | yes | — |
+| `space` | `SpaceId` (plugin-manifest.schema.json) | yes | — |
 | `query` | object | yes | — |
 | `query.modality` | `text` | yes | One of the space's query_modalities. Plugin API 0.6 knows only text. |
 | `query.text` | string | yes | The query, trimmed, with line breaks normalized to LF. 1 to 32768 characters. |
@@ -498,11 +499,19 @@ Since Plugin API 0.6. One Record Version's text Parts and the enabled vector spa
 | `version.record_id` | string | yes | — |
 | `version.record_version_id` | string | yes | — |
 | `language` | string | no | BCP 47 language hint, when the core knows one. |
-| `parts` | array of object | yes | The Version's canonical text Parts, in Manifest order, with unique keys. Blob Parts are not sent. Segment offsets address these texts. 1 to 256 items. |
+| `parts` | array of object | yes | The Version's canonical text Parts, in Manifest order, with unique keys. Segment offsets address these texts. 0 to 256 items. |
 | `parts[].key` | string | yes | — |
 | `parts[].role` | string | yes | — |
 | `parts[].text` | string | yes | — |
-| `spaces` | array of `SpaceId` (shared Manifest schema) | yes | The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same. 0 to 8 items. |
+| `blob_parts` | array of object | no | Since Plugin API 0.20. The Version's verified Blob Parts (for example images) with read references; bodies are never inline. 0 to 256 items. |
+| `blob_parts[].key` | string | yes | — |
+| `blob_parts[].role` | string | yes | — |
+| `blob_parts[].blob_id` | string | yes | — |
+| `blob_parts[].media_type` | string | yes | At most 255 characters. |
+| `blob_parts[].size_bytes` | integer | yes | — |
+| `blob_parts[].sha256` | string | yes | — |
+| `blob_parts[].reference` | any | yes | — |
+| `spaces` | array of `SpaceId` (plugin-manifest.schema.json) | yes | The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same. 0 to 8 items. |
 | `page` | object | no | Since Plugin API 0.18. Bounded ingestion of exactly one source window. Offsets remain in that request Part. The host durably records each negotiated page before requesting the next. |
 | `page.start` | integer | yes | Unicode code-point offset into the request Part at which this bounded page begins. |
 | `page.max_segments` | integer | yes | Upper bound on the number of segments returned in this page; remaining source continues in later pages. 1 to 1024. |
@@ -522,6 +531,7 @@ Since Plugin API 0.6. One Record Version's text Parts and the enabled vector spa
 | `segments[].source_separator` | string | no | Optional Unicode separator used between source ranges when constructing the packed passage. Missing and empty separators are equivalent. At most 16 characters. |
 | `segments[].vectors` | map of array of number | yes | One vector per requested space, by space id; empty when the request asks for no space (since Plugin API 0.8). 0 to 8 entries. |
 | `segments[].lexical_text` | string | no | Optional keyword-search text for the segment (for example lower-cased, folded or stemmed words). The core indexes it in a separate keyword field; excerpts always come from the source text. At most 16384 code points, no NUL. |
+| `segments[].region` | `ImageRegion` (plugin-manifest.schema.json) | no | Since Plugin API 0.20. Required on segments referencing a Blob Part (start = end = 0); normalized bounding-box provenance with 0 &lt;= x, y &lt;= 1, 0 &lt; width, height &lt;= 1, x + width &lt;= 1 and y + height &lt;= 1. |
 | `segments[].provenance` | object | no | Optional details of how the segment was made (token counts, the embedded text's template), at most 4 KiB once serialized. Stored with the segmentation, never interpreted. |
 | `next_start` | integer | no | First uncovered Unicode code point in the request Part. When present it equals the last segment range end, strictly advances past page.start, and remains below the Part length. Omit only when the entire suffix is covered. |
 
@@ -539,7 +549,7 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `contribution` | `"retrieval"` | yes | — |
 | `organization_id` | string | yes | — |
 | `configuration` | object | yes | The validated plugin (installer) configuration. |
-| `profile` | `ProfileName` (shared Manifest schema) | yes | One of the manifest's profiles. |
+| `profile` | `ProfileName` (plugin-manifest.schema.json) | yes | One of the manifest's profiles. |
 | `round` | integer | yes | 1 for the first call of a search; the last round the manifest allows must answer a ranking. 1 to 3. |
 | `query` | object | yes | — |
 | `query.text` | string | yes | 1 to 8192 characters. |
@@ -552,8 +562,8 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `spaces[].id` | string | yes | The space id near_vector and hybrid name (vector_space_id in the HTTP API). 1 to 200 characters. |
 | `spaces[].owner` | object | yes | — |
 | `spaces[].owner.kind` | `engine`, `plugin` | yes | — |
-| `spaces[].owner.plugin_id` | `PluginId` (shared Manifest schema) | no | — |
-| `spaces[].owner.plugin_version` | `Version` (shared Manifest schema) | no | — |
+| `spaces[].owner.plugin_id` | `PluginId` (plugin-manifest.schema.json) | no | — |
+| `spaces[].owner.plugin_version` | `Version` (plugin-manifest.schema.json) | no | — |
 | `spaces[].model` | string | yes | — |
 | `spaces[].dimensions` | integer | yes | — |
 | `spaces[].metric` | `cosine`, `dot`, `l2` | yes | — |
@@ -600,6 +610,7 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].candidates[].source_ranges[].start` | integer | yes | — |
 | `served[].candidates[].source_ranges[].end` | integer | yes | — |
 | `served[].candidates[].source_separator` | string | no | Optional Unicode separator used between source_ranges; missing and empty are equivalent. At most 16 characters. |
+| `served[].candidates[].region` | `ImageRegion` (plugin-manifest.schema.json) | no | Since Plugin API 0.20. Optional image region provenance when the candidate comes from a Blob Part (0 &lt;= x, y &lt;= 1, 0 &lt; width, height &lt;= 1, x + width &lt;= 1 and y + height &lt;= 1). |
 | `served[].candidates[].explanation` | string | no | The inner profile explanation, when profile candidates supply one. 1 to 1024 characters. |
 | `budget` | object | no | Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only. |
 | `budget.remaining_time_ms` | integer | yes | — |
@@ -609,7 +620,7 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `requests` | array of `CandidateRequest` (shared Manifest schema) | no | At most limits.max_requests; refused in the last round. 1 to 8 items. |
+| `requests` | array of `CandidateRequest` (retrieval-search-request.schema.json) | no | At most limits.max_requests; refused in the last round. 1 to 8 items. |
 | `ranking` | object | no | — |
 | `ranking.hits` | array of object | yes | Best first, at most the request's limit, each segment once. At most 50 items. |
 | `ranking.hits[].segment_id` | string | yes | A candidate the core served in this search. |
@@ -691,12 +702,13 @@ Schema: `ingestion-fixture.schema.json`.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `description` | string | no | — |
-| `ingestion` | object | yes | — |
-| `ingestion.parts` | any | yes | — |
+| `ingestion` | any | yes | — |
+| `ingestion.parts` | any | no | — |
+| `ingestion.blob_parts` | array of object | no | Local Blob Parts referenced relative to the fixture file. 0 to 256 items. |
 | `ingestion.language` | any | no | — |
 | `ingestion.configuration` | object | no | Plugin configuration; default &#123;&#125;. |
-| `ingestion.spaces` | array of `SpaceId` (shared Manifest schema) | no | Spaces to request; default every declared space. |
-| `ingestion.queries` | array of string | no | Queries to encode in every requested space; default the first 200 code points of the first non-empty Part. 1 to 16 items. |
+| `ingestion.spaces` | array of `SpaceId` (plugin-manifest.schema.json) | no | Spaces to request; default every declared space. |
+| `ingestion.queries` | array of string | no | Queries to encode in every requested space; default the first 200 code points of the first non-empty text Part, or the first Blob Part's role when no text Part is present. 1 to 16 items. |
 | `ingestion.expect` | object | no | — |
 
 ### Normalizer fixture
@@ -730,8 +742,8 @@ Schema: `retrieval-fixture.schema.json`.
 | `retrieval.mode` | `lexical`, `semantic`, `hybrid` | no | Default `"hybrid"`. |
 | `retrieval.limit` | integer | no | 1 to 50. Default `10`. |
 | `retrieval.configuration` | object | no | Plugin configuration; default &#123;&#125;. |
-| `retrieval.profiles` | array of `ProfileName` (shared Manifest schema) | no | Profiles to certify; default every declared profile. |
-| `retrieval.spaces` | array of `space` (shared Manifest schema) | no | Ids of the spaces offered (served first); default one served space, fixture.served@1. At most 16 items. |
+| `retrieval.profiles` | array of `ProfileName` (plugin-manifest.schema.json) | no | Profiles to certify; default every declared profile. |
+| `retrieval.spaces` | array of `space` (retrieval-search-request.schema.json) | no | Ids of the spaces offered (served first); default one served space, fixture.served@1. At most 16 items. |
 | `retrieval.candidates` | array of object | yes | The segments the runner may serve. Unless order says otherwise, every primitive serves them ranked by how many query words they contain, ties in catalogue order. 1 to 200 items. |
 | `retrieval.order` | object | no | The exact segment order a primitive serves, whatever its query. profile supplies an offline dependency ranking; no other plugin is contacted. |
 | `retrieval.expect` | object | no | — |
