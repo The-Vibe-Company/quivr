@@ -632,7 +632,8 @@ def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connec
     try:
         result = response.to_dict() if isinstance(response, response_type) else response_type.from_dict(response).to_dict()
         problems = _response_problems(manifest, result, operation, kind=kind, request=request)
-        if redactor.redact(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) != json.dumps(result, ensure_ascii=False, separators=(",", ":")):
+        encoded_text = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        if redactor.redact(encoded_text) != encoded_text:
             problems.append("the response contains credential or grant data")
     except (AttributeError, TypeError, ValueError):
         problems = ["the connector response is not a JSON-encodable protocol response"]

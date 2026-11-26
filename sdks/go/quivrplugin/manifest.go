@@ -30,6 +30,11 @@ type Manifest struct {
 		Schema        json.RawMessage `json:"schema"`
 		ExecutionKeys []string        `json:"execution_keys,omitempty"`
 	} `json:"configuration,omitempty"`
+	Secrets []struct {
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		Required    *bool  `json:"required,omitempty"`
+	} `json:"secrets,omitempty"`
 
 	// Connector is the decoded connector Contribution, with defaults; nil
 	// when the manifest declares none.
