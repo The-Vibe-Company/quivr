@@ -554,10 +554,23 @@ def supervise(commands, grace=10.0, poll=0.2, readiness=None):
             signal.signal(s, handler)
 
 
+def validate_image_role(env, mode):
+    image_role = env.get('QUIVR_IMAGE_ROLE', '')
+    if not image_role:
+        return
+    if image_role not in ('core', 'api', 'worker'):
+        raise ValueError('QUIVR_IMAGE_ROLE must be core, api or worker')
+    if image_role == 'api' and mode == 'worker':
+        raise ValueError('QUIVR_ROLE=worker requires the worker or core image')
+    if image_role == 'worker' and mode == 'api':
+        raise ValueError('QUIVR_ROLE=api requires the api or core image')
+
+
 def main():
     mode = os.environ.get('QUIVR_ROLE', 'api')
     if mode not in ('api', 'worker', 'migrate'):
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
+    validate_image_role(os.environ, mode)
     config = build_config(os.environ)
     settings = encoder_settings(os.environ) if mode == 'api' else None
     readiness = None

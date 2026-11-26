@@ -518,11 +518,8 @@ func (p *Plugin) contributions() []string {
 	return names
 }
 
-// Serve listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default
-// 127.0.0.1:8080) until SIGINT or SIGTERM.
-func (p *Plugin) Serve() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+// listenAddr returns QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default 127.0.0.1:8080).
+func listenAddr() string {
 	host, port := os.Getenv(EnvHost), os.Getenv(EnvPort)
 	if host == "" {
 		host = "127.0.0.1"
@@ -530,7 +527,22 @@ func (p *Plugin) Serve() error {
 	if port == "" {
 		port = "8080"
 	}
-	return p.ServeAddr(ctx, net.JoinHostPort(host, port))
+	return net.JoinHostPort(host, port)
+}
+
+// Serve listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default
+// 127.0.0.1:8080) until SIGINT or SIGTERM.
+func (p *Plugin) Serve() error {
+	return p.ServeReady(nil)
+}
+
+// ServeReady listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default
+// 127.0.0.1:8080) until SIGINT or SIGTERM, calling onReady with the bound
+// address once the listener is open.
+func (p *Plugin) ServeReady(onReady func(addr string)) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return p.serveAddr(ctx, listenAddr(), onReady)
 }
 
 func (p *Plugin) newHTTPServer(addr string, handler http.Handler) *http.Server {
@@ -544,6 +556,10 @@ func (p *Plugin) newHTTPServer(addr string, handler http.Handler) *http.Server {
 
 // ServeAddr listens on addr until ctx ends.
 func (p *Plugin) ServeAddr(ctx context.Context, addr string) error {
+	return p.serveAddr(ctx, addr, nil)
+}
+
+func (p *Plugin) serveAddr(ctx context.Context, addr string, onReady func(addr string)) error {
 	handler, err := p.Handler()
 	if err != nil {
 		return err
@@ -554,6 +570,9 @@ func (p *Plugin) ServeAddr(ctx context.Context, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
+	}
+	if onReady != nil {
+		onReady(ln.Addr().String())
 	}
 	return p.serveListener(ctx, ln, handler)
 }

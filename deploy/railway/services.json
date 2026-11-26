@@ -42,6 +42,7 @@
     "healthcheck": "/readyz",
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "api",
       "QUIVR_ROLE": "api"
     }
   },
@@ -52,6 +53,7 @@
     "replicas": 1,
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "worker",
       "QUIVR_ROLE": "worker",
       "QUIVR_WORKER_QUEUES": "live"
     }
@@ -63,6 +65,7 @@
     "replicas": 1,
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "worker",
       "QUIVR_ROLE": "worker",
       "QUIVR_WORKER_QUEUES": "bulk"
     }

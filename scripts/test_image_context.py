@@ -78,6 +78,66 @@ class ConnectorPluginImageContextTest(unittest.TestCase):
         root = self.repo('')
         self.assertIn('no "connectors" stage', image_context.check(root, root / 'Dockerfile', GO))
 
+    def test_multicall_module_must_be_copied_into_connectors_stage(self):
+        root = self.repo('FROM golang AS connectors\nWORKDIR /src\nCOPY sdks/go ./sdks/go\nCOPY plugins ./plugins\n')
+        (root / 'deploy' / 'plugins').mkdir(parents=True)
+        (root / 'deploy' / 'plugins' / 'go.mod').write_text('module example.test/multicall\n\ngo 1.21\n')
+        for cmd in ('quivr-plugins', 'quivr-plugins-api', 'quivr-plugins-worker'):
+            (root / 'deploy' / 'plugins' / 'cmd' / cmd).mkdir(parents=True)
+            (root / 'deploy' / 'plugins' / 'cmd' / cmd / 'main.go').write_text('package main\n\nfunc main() {}\n')
+        self.assertIn('does not copy deploy/plugins', image_context.check(root, root / 'Dockerfile', GO))
+        (root / 'Dockerfile').write_text(
+            self.BUILD + 'FROM golang AS connectors\nWORKDIR /src\nCOPY sdks/go ./sdks/go\nCOPY plugins ./plugins\nCOPY deploy/plugins ./deploy/plugins\n')
+        self.assertIsNone(image_context.check(root, root / 'Dockerfile', GO))
+
+
+class CoreRoleTargetsTest(unittest.TestCase):
+    """Slim api and worker stages carry only the runtime binaries and plugins their role runs."""
+
+    def stage_block(self, text, name):
+        lines, active = [], False
+        for words in image_context.instructions(text):
+            if words[0].upper() == 'FROM':
+                label = words[-1] if len(words) >= 4 and words[-2].upper() == 'AS' else None
+                if active:
+                    break
+                active = label == name
+            elif active:
+                lines.append(words)
+        return lines
+
+    def test_core_dockerfile_separates_api_and_worker_runtimes(self):
+        text = image_context.DOCKERFILE.read_text()
+        self.assertIn('ARG QUIVR_IMAGE_ROLE=core', text)
+        self.assertIn('FROM ${QUIVR_IMAGE_ROLE} AS final', text)
+
+        api = self.stage_block(text, 'api')
+        worker = self.stage_block(text, 'worker')
+        self.assertTrue(any('--from=connectors-api' in words for words in api))
+        self.assertTrue(any('--from=plugins-api' in words for words in api))
+        self.assertTrue(any('--from=query-encoder' in words for words in api))
+        self.assertFalse(any('--from=connectors-worker' in words or '--from=plugins-worker' in words for words in api))
+
+        self.assertTrue(any('--from=connectors-worker' in words for words in worker))
+        self.assertTrue(any('--from=plugins-worker' in words for words in worker))
+        self.assertFalse(any('--from=query-encoder' in words or 'deploy/cpu' in words or 'deploy/modal/embedding_api.py' in words for words in worker))
+        self.assertFalse(any('--from=connectors-api' in words or '--from=plugins-api' in words for words in worker))
+
+        plugins_api = ' '.join(' '.join(words) for words in self.stage_block(text, 'plugins-api'))
+        plugins_worker = ' '.join(' '.join(words) for words in self.stage_block(text, 'plugins-worker'))
+        self.assertIn('-e /app/plugins/alerts', plugins_api)
+        self.assertIn('-e /app/plugins/jev-rerank', plugins_api)
+        self.assertNotIn('-e /app/plugins/pdf-text', plugins_api)
+        self.assertNotIn('-e /app/plugins/newsml-g2', plugins_api)
+        self.assertIn('-e /app/plugins/alerts', plugins_worker)
+        self.assertIn('-e /app/plugins/pdf-text', plugins_worker)
+        self.assertIn('-e /app/plugins/newsml-g2', plugins_worker)
+        self.assertNotIn('-e /app/plugins/jev-rerank', plugins_worker)
+
+        for stage in ('connectors-core', 'connectors-api', 'connectors-worker'):
+            body = ' '.join(' '.join(words) for words in self.stage_block(text, stage))
+            self.assertIn('-ldflags -s -w', body)
+
 
 class WebImageContextTest(unittest.TestCase):
     def repo(self, copy_line):
