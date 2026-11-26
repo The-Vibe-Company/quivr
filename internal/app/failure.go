@@ -20,7 +20,7 @@ func LogFailure(err error) {
 	}
 	var prerequisite *postgres.PrerequisiteError
 	if errors.As(err, &prerequisite) {
-		slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic("postgres_prerequisite"), "field", logging.Diagnostic("database_url"), "problem", logging.Diagnostic(prerequisite.Error()))
+		slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic("postgres_prerequisite"), "problem", logging.Diagnostic(prerequisite.Error()))
 		return
 	}
 	code := "process_failed"

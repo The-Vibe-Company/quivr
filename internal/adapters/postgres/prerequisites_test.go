@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
@@ -77,4 +78,54 @@ func TestExternalPostgresPrerequisites(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("ledger access differs for startup and migrations", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, "GRANT SELECT ON public.schema_migrations TO quivr_ledger_reader"); err != nil {
+			t.Fatal(err)
+		}
+		cfg := pool.Config()
+		cfg.ConnConfig.User = "quivr_ledger_reader"
+		reader, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Close()
+		if err := postgres.CheckPrerequisites(ctx, reader, false); err != nil {
+			t.Fatalf("startup preflight with SELECT on the ledger: %v", err)
+		}
+		err = postgres.Migrate(ctx, reader)
+		var prerequisite *postgres.PrerequisiteError
+		if !errors.As(err, &prerequisite) || !strings.Contains(prerequisite.Error(), "cannot insert into public.schema_migrations") {
+			t.Fatalf("migration with SELECT alone must report missing ledger INSERT: %v", err)
+		}
+	})
+
+	t.Run("ledger write refused after preflight", func(t *testing.T) {
+		// The owner retains table-level INSERT, but row security denies the write.
+		if _, err := pool.Exec(ctx, `ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;
+			ALTER TABLE public.schema_migrations FORCE ROW LEVEL SECURITY;
+			CREATE POLICY migration_ledger_read ON public.schema_migrations FOR SELECT USING (true)`); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := pool.Exec(ctx, `DROP POLICY migration_ledger_read ON public.schema_migrations;
+				ALTER TABLE public.schema_migrations NO FORCE ROW LEVEL SECURITY;
+				ALTER TABLE public.schema_migrations DISABLE ROW LEVEL SECURITY`); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := postgres.CheckPrerequisites(ctx, pool, true); err != nil {
+			t.Fatalf("table-level preflight must pass before testing the row policy: %v", err)
+		}
+		pending := fstest.MapFS{"99991231T2359Z_ledger_probe.sql": {Data: []byte("CREATE TABLE migration_ledger_probe (id int)")}}
+		err := postgres.MigrateFS(ctx, pool, pending)
+		var prerequisite *postgres.PrerequisiteError
+		if !errors.As(err, &prerequisite) || !strings.Contains(prerequisite.Error(), "cannot insert into public.schema_migrations") {
+			t.Fatalf("denied ledger write must report DBA guidance: %v", err)
+		}
+		var rolledBack bool
+		if err := pool.QueryRow(ctx, "SELECT to_regclass('public.migration_ledger_probe') IS NULL").Scan(&rolledBack); err != nil || !rolledBack {
+			t.Fatalf("denied ledger write must roll back the migration: rolled back=%t, err=%v", rolledBack, err)
+		}
+	})
 }

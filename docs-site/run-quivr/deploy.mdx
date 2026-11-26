@@ -103,10 +103,11 @@ switching the login. Stock PostgreSQL includes `plpgsql` by default. If the DBA
 removed it from the database template, provision it with `CREATE EXTENSION IF NOT EXISTS plpgsql`
 before applying its language grant.
 
-Startup checks the writable session and schema access. Migrations also check
-schema creation and language privileges. A `postgres_prerequisite` startup
-diagnostic gives the provisioning change to make. Run `quivr migrate` with the
-ordinary Quivr login after provisioning, then start the API and worker.
+Startup checks the writable session, schema access and migration ledger reads.
+Migrations also check schema creation, language privileges and ledger inserts.
+A `postgres_prerequisite` startup diagnostic gives the provisioning change to
+make. Run `quivr migrate` with the ordinary Quivr login after provisioning, then
+start the API and worker.
 
 Quivr's ingestion and search rollups work with stock PostgreSQL settings. The
 DBA can enable [`pg_stat_statements`](https://www.postgresql.org/docs/17/pgstatstatements.html)
