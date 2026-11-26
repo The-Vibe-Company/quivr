@@ -29,7 +29,7 @@ Do not send activation reports, run tracking commands, or install hooks during t
 
 ## Distribution setup (local adaptation)
 
-This is Alibaba's `open-code-review-delegate` skill from release v1.13.12,
+This is Alibaba's `open-code-review-delegate` skill from release v1.14.4,
 distributed under the existing `review-code-dev` name. The upstream workflow below
 is preserved. See `UPSTREAM.md` for attribution and the local changes.
 
@@ -54,7 +54,7 @@ report the error from the wrapper.
 Delegation does not require model credentials for OCR.
 
 For a standalone `ocr` command on macOS/Linux, the upstream alternative is
-`npm install -g @alibaba-group/open-code-review@1.13.12` (Node/npm required), or
+`npm install -g @alibaba-group/open-code-review@1.14.4` (Node/npm required), or
 `brew install open-code-review` when Homebrew is installed. Use `OCR_NO_UPDATE=1`
 for manual npm-installed CLI invocations to disable automatic background updates.
 

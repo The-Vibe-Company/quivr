@@ -4,7 +4,7 @@
   "version": "2.2.0",
   "title": "Review Code — Alibaba",
   "description": "Alibaba Open Code Review delegation: deterministic file selection and rules, host-agent review, and automatic macOS/Linux CLI setup without additional LLM configuration.",
-  "notes": "## Alibaba delegation workflow\n\nBased on Alibaba open-code-review-delegate at v1.13.12 (Apache-2.0). Retains the upstream workflow with portable CLI bootstrap and delivery-caller handoff compatibility.\n\n## Setup\n\nPython 3.9+, compatible Git and first-install internet access. No additional LLM API key, Node or sudo required for the bundled bootstrap. macOS Intel/Apple Silicon and Linux x86_64/ARM64 supported.\n\n## Version 2 change\n\nReplaces the previous custom orchestration, specialist lenses, native fallback and recurring PR-watch implementation. Uses upstream critical/high/medium/low severity. No dependency on another skill. This release does not claim measured superiority over the previous review.",
+  "notes": "## Alibaba delegation workflow\n\nBased on Alibaba open-code-review-delegate at v1.14.4 (Apache-2.0). Retains the upstream workflow with portable CLI bootstrap and delivery-caller handoff compatibility.\n\n## Setup\n\nPython 3.9+, compatible Git and first-install internet access. No additional LLM API key, Node or sudo required for the bundled bootstrap. macOS Intel/Apple Silicon and Linux x86_64/ARM64 supported.\n\n## Version 2 change\n\nReplaces the previous custom orchestration, specialist lenses, native fallback and recurring PR-watch implementation. Uses upstream critical/high/medium/low severity. No dependency on another skill. This release does not claim measured superiority over the previous review.",
   "metadata": {
     "companionSkillId": "b0780a97-6972-4a2b-8e88-f41a528900c7",
     "usage": {
@@ -18,7 +18,7 @@
         "version": "2.2.0",
         "date": "2026-11-18",
         "changes": [
-          "Update the bundled delegation workflow and checksum-pinned CLI to open-code-review v1.13.12."
+          "Update the bundled delegation workflow and checksum-pinned CLI to open-code-review v1.14.4."
         ]
       },
       {

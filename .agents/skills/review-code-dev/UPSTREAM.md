@@ -1,7 +1,7 @@
 # Upstream attribution and local changes
 
-Source: https://github.com/alibaba/open-code-review/blob/v1.13.12/skills/open-code-review-delegate/SKILL.md
-Release: v1.13.12
+Source: https://github.com/alibaba/open-code-review/blob/v1.14.4/skills/open-code-review-delegate/SKILL.md
+Release: v1.14.4
 Commit: f921d6a0de3b71befce15d8edf589cd3609968fa
 Author: Alibaba / open-code-review contributors
 License: Apache-2.0 (see LICENSE)
