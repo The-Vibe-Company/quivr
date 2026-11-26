@@ -279,7 +279,7 @@ def verify_cache(directory, values, images):
         raise RuntimeError('model cache volume is missing or unreadable; inspect Docker privately or run setup.py prepare before setup.py upgrade') from error
     labels = (info[0].get('Labels') or {}) if info else {}
     if labels.get('quivr.model') != values['QUIVR_EMBEDDING']:
-        raise ValueError('cache model differs; run setup.py prepare or use a fresh installation')
+        raise ValueError('cache model differs from this installation; use a fresh installation')
     command = ['run', '--rm', '-v', volume + ':/models:ro', '--entrypoint',
                '/opt/query-encoder/venv/bin/python',
                images['cpu-embeddings'], '/app/deploy/single-machine/cache.py',
