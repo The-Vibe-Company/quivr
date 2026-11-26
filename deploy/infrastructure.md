@@ -50,6 +50,7 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | `AUTOSCHEMA_ENABLED` / `DEFAULT_VECTORIZER_MODULE` | false / none; the engine owns schema and embeddings. |
 | `PERSISTENCE_DATA_PATH` | /var/lib/weaviate; match the persistent volume mount. |
 | `AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED` | true; private-network example access, never expose this port publicly. |
+| API `QUIVR_ADMIN_LISTEN` | `0.0.0.0:8082`; isolate `/v0/admin/*` off port 8080 onto a dedicated internal listener (valid `host:port` outside 8080, or `off`). |
 | Autoscaler `QUIVR_AUTOSCALER_QUEUE` / `QUIVR_AUTOSCALER_BACKEND` | bulk / railway in large; keep live work separate, or override the backend to kubernetes. |
 | `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | 1 / 8; retain a worker and bound dependency pressure. |
 | `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | 20000; proportional backlog target, combined with the bulk prefetch demand rule below. |
@@ -138,11 +139,7 @@ python3 deploy/railway/infrastructure.py check \
   --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 ```
 
-The Railway adapter targets PostgreSQL and Weaviate by default; large adds API, worker and
-worker-bulk with their 32,000,000,000-byte/32-vCPU limits. Without `--service`, an existing
-uniquely named `autoscaler` is included automatically, never created or replica-reset.
-Repeated `--service ROLE=NAME_OR_ID` is an exact replacement for defaults. `apply` does not
-deploy or reset scaler-owned replicas.
+The Railway adapter targets PostgreSQL, Weaviate and API by default; large adds worker, worker-bulk and API's 32,000,000,000-byte/32-vCPU limits. Without `--service`, an existing uniquely named `autoscaler` is included automatically, never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` is an exact replacement for defaults. `apply` does not deploy or reset scaler-owned replicas.
 `initialize-monitoring` runs the deployment-owned PostgreSQL script; fresh databases already run `init.sql`, while existing ones receive
 the statistics extension. It is separate from the Quivr core migration.
 

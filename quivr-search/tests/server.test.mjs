@@ -1708,3 +1708,45 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   assert.equal((await get("/demo/session")).corpus_id, "demo-3");
   assert.equal(errors.length, 1);
 });
+
+test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", async (t) => {
+  const functionalSeen = [];
+  const adminSeen = [];
+  const functional = http.createServer((req, res) => {
+    functionalSeen.push({ url: req.url, auth: req.headers.authorization });
+    if (req.url.startsWith("/v0/admin")) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ code: "not_found", message: "not found", retryable: false }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ items: [] }));
+  });
+  const admin = http.createServer((req, res) => {
+    adminSeen.push({ url: req.url, auth: req.headers.authorization });
+    if (req.headers.authorization !== "Bearer fixture-admin-key") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ code: "invalid_api_key", message: "invalid api key", retryable: false }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/v0/admin/active-plugins") {
+      return res.end(JSON.stringify({ items: [] }));
+    }
+    res.end(JSON.stringify({ items: [] }));
+  });
+  for (const server of [functional, admin]) {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+  }
+  const base = await startDemo(t, functional.address().port, {
+    QUIVR_ADMIN_URL: `http://127.0.0.1:${admin.address().port}`,
+    QUIVR_ADMIN_KEY: "fixture-admin-key",
+  });
+  const response = await fetch(base + "/demo/admin/plugins");
+  assert.equal(response.status, 200);
+  assert.ok(adminSeen.some((entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-admin-key"));
+  assert.ok(!functionalSeen.some((entry) => entry.url.startsWith("/v0/admin")));
+});

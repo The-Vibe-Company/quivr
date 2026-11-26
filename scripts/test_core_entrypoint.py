@@ -548,6 +548,44 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])
 
+    def test_admin_listener_separates_admin_keys_from_functional_keys(self):
+        separated = core_entrypoint.build_config({
+            **ENV,
+            'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082',
+            'QUIVR_DEMO_ADMIN': '1',
+            'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
+            'QUIVR_ADMIN_KEY': 'placeholder-admin-key',
+            'QUIVR_QUEUE_KEY': 'placeholder-queue-key',
+            'QUIVR_DEMO_ADMIN_KEY': 'placeholder-demo-admin-key',
+        })
+        self.assertEqual(separated['admin_listen'], '0.0.0.0:8082')
+        # Functional key never receives observability:read or admin actions when separated.
+        self.assertNotIn('observability:read', separated['keys'][ENV['QUIVR_API_KEY']]['actions'])
+        # Operator key retains functional operator actions while dedicated keys own admin_keys.
+        self.assertEqual(set(separated['keys']), {ENV['QUIVR_API_KEY'], 'placeholder-operator-key'})
+        self.assertNotIn('plugins:admin', separated['keys']['placeholder-operator-key']['actions'])
+        self.assertIn('projections:rebuild', separated['keys']['placeholder-operator-key']['actions'])
+        self.assertEqual(set(separated['admin_keys']), {'placeholder-admin-key', 'placeholder-queue-key', 'placeholder-demo-admin-key'})
+        self.assertEqual(separated['admin_keys']['placeholder-queue-key']['actions'], ['queues:read'])
+        self.assertEqual(separated['admin_keys']['placeholder-demo-admin-key']['actions'], ['observability:read'])
+        for action in ('plugins:admin', 'observability:read', 'queues:read', 'audit:read'):
+            self.assertIn(action, separated['admin_keys']['placeholder-admin-key']['actions'])
+        # Without QUIVR_ADMIN_KEY, QUIVR_OPERATOR_KEY moves cleanly into admin_keys without token reuse.
+        operator_only = core_entrypoint.build_config({
+            **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8081', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})
+        self.assertEqual(set(operator_only['keys']), {ENV['QUIVR_API_KEY']})
+        self.assertEqual(set(operator_only['admin_keys']), {'placeholder-operator-key'})
+        # QUIVR_ADMIN_LISTEN=off keeps combined mode.
+        self.assertEqual(core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': 'off'}), core_entrypoint.build_config(ENV))
+        # Missing admin keys, port 8080, invalid bind, or key reuse fail fast.
+        with self.assertRaisesRegex(ValueError, 'dedicated admin key'):
+            core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082'})
+        for bad in ('0.0.0.0:8080', '127.0.0.1:8080', 'bad-host:8082', '0.0.0.0:0'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'QUIVR_ADMIN_LISTEN'):
+                core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': bad, 'QUIVR_ADMIN_KEY': 'placeholder-admin-key'})
+        with self.assertRaisesRegex(ValueError, 'must differ'):
+            core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', 'QUIVR_ADMIN_KEY': ENV['QUIVR_API_KEY']})
+
 
 class SuperviseTest(unittest.TestCase):
     def command(self, name, code):

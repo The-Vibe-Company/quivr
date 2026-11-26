@@ -75,11 +75,13 @@ type Config struct {
 	DatabaseURL             string                  `json:"database_url"`
 	Listen                  string                  `json:"listen"`
 	ProbeListen             string                  `json:"probe_listen"`
+	AdminListen             string                  `json:"admin_listen"`
 	CursorKey               string                  `json:"cursor_key"`
 	RetainImportAuditDetail bool                    `json:"retain_import_audit_detail"`
 	AuditRetentionMonths    int                     `json:"audit_retention_months"`
 	ChangeRetention         string                  `json:"change_retention"`
 	Keys                    map[string]corpus.Scope `json:"keys"`
+	AdminKeys               map[string]corpus.Scope `json:"admin_keys"`
 	// Destinations are deployment-configured webhook receivers. Real
 	// deployments reference their signing secret through secret_env.
 	Destinations map[string]monitoring.Destination `json:"destinations"`
@@ -404,6 +406,10 @@ func Run(command string, args ...string) error {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
 		}
+	}
+	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
+	if err != nil {
+		return err
 	}
 	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {
 		return err
@@ -937,8 +943,17 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithLoadMetrics(loadMetrics), httpapi.WithVectorSpaces(spaceSnapshots),
+		apiOptions := []httpapi.Option{
+			httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll),
+			httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}),
+			httpapi.WithOperations(operations.Service{Store: operationStore}),
+			httpapi.WithQueues(queueSnapshots),
+			httpapi.WithLifecycle(loops),
+			httpapi.WithAudit(auditStore),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}),
+			httpapi.WithCommands(commands),
+			httpapi.WithLoadMetrics(loadMetrics),
+			httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
@@ -952,11 +967,29 @@ func Run(command string, args ...string) error {
 			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithTrustedPushProxies(pushConfig.TrustedProxyCIDRs),
-			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents, Protection: connectorStore, PushConfig: pushConfig, Replays: connectorStore}))
-		if err != nil {
-			return fmt.Errorf("compile public request schema: %w", err)
+			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents, Protection: connectorStore, PushConfig: pushConfig, Replays: connectorStore}),
 		}
-		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
+		if adminSeparated {
+			publicHandler, adminHandler, err := httpapi.NewSplit(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, cfg.AdminKeys, []byte(cfg.CursorKey), apiOptions...)
+			if err != nil {
+				return fmt.Errorf("compile public request schema: %w", err)
+			}
+			if shareProbeAdmin {
+				servers[0] = &http.Server{Addr: cfg.ProbeListen, Handler: httpapi.CombineProbeAndAdmin(httpapi.AccessLog(probes, loadMetrics), adminHandler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
+				servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: publicHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
+			} else {
+				servers = append(servers,
+					&http.Server{Addr: cfg.Listen, Handler: publicHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384},
+					&http.Server{Addr: cfg.AdminListen, Handler: adminHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384},
+				)
+			}
+		} else {
+			handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), apiOptions...)
+			if err != nil {
+				return fmt.Errorf("compile public request schema: %w", err)
+			}
+			servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
+		}
 	} else {
 		if workerSettings.Serves(workqueue.Live) {
 			// Monitoring evaluation keeps its durable state in PostgreSQL and runs

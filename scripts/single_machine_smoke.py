@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import shutil
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -18,9 +19,13 @@ def http(base, key, method, path, body=None, expected=200):
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(base + path, data=data, method=method,
         headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(request, timeout=15) as response:
+    try:
+        response = urllib.request.urlopen(request, timeout=15)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
         if response.status != expected:
-            raise RuntimeError('unexpected public API response status')
+            raise RuntimeError(f'unexpected HTTP response status {response.status} (expected {expected})')
         return json.load(response)
 
 
@@ -42,7 +47,7 @@ def run(directory, model):
     spec.loader.exec_module(setup)
     project = 'compose-smoke-' + uuid.uuid4().hex[:12]
     values, _ = setup.initialize(directory, directory / 'release.json', project, model, 'small', {})
-    values.update(QUIVR_API_PORT='0', QUIVR_DEMO_PORT='0')
+    values.update(QUIVR_API_PORT='0', QUIVR_ADMIN_PORT='0', QUIVR_DEMO_PORT='0')
     setup.write_private(directory / '.env', ''.join(k + '=' + v + '\n' for k, v in values.items()))
     compose = ['docker', 'compose', '--project-directory', str(directory), '--profile', 'demo']
     def command(*args):
@@ -90,7 +95,15 @@ def run(directory, model):
         failed_migration()
         command('up', '-d', '--wait', '--wait-timeout', '360')
         port = command('port', 'api', '8080')
-        base, key = 'http://' + port, values['QUIVR_API_KEY']
+        admin_port = command('port', 'api', '8082')
+        base, admin_base, key = 'http://' + port, 'http://' + admin_port, values['QUIVR_API_KEY']
+        admin_key = values['QUIVR_ADMIN_KEY']
+        # Admin routes must be refused on the functional API port and served only on the dedicated admin listener.
+        http(base, key, 'GET', '/v0/admin/plugins', expected=404)
+        http(base, admin_key, 'GET', '/v0/admin/plugins', expected=404)
+        http(admin_base, key, 'GET', '/v0/admin/plugins', expected=401)
+        http(admin_base, admin_key, 'GET', '/v0/admin/plugins', expected=200)
+        http(admin_base, admin_key, 'GET', '/v0/corpora', expected=404)
         corpus = http(base, key, 'POST', '/v0/corpora', {
             'name': 'Compose smoke', 'idempotency_key': project}, 201)['corpus_id']
         cursor = http(base, key, 'GET', '/v0/changes?corpus_id=' + corpus)['next_cursor']

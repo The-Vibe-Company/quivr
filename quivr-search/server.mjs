@@ -20,6 +20,8 @@ import { createExplorer, createHistory } from "./explore.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
 const key = process.env.QUIVR_API_KEY;
+const adminCore = process.env.QUIVR_ADMIN_URL?.replace(/\/$/, "") || core;
+const adminKey = process.env.QUIVR_ADMIN_KEY || key;
 const password = process.env.DEMO_PASSWORD;
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 5183);
@@ -266,10 +268,13 @@ async function upstream(path, method = "GET", body, timeout = 8000, signal) {
   }
 }
 async function upstreamCall(path, method, body, timeout, signal) {
-  const response = await fetch(core + path, {
+  const isAdmin = path === "/v0/admin" || path.startsWith("/v0/admin/");
+  const targetCore = isAdmin ? adminCore : core;
+  const targetKey = isAdmin ? adminKey : key;
+  const response = await fetch(targetCore + path, {
     method,
     headers: {
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${targetKey}`,
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),

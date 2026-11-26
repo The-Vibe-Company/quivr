@@ -28,7 +28,7 @@ In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the inst
 ## Create the autoscaler
 
 1. Add a service named `autoscaler` from the same repository and branch, with repository root as the build context and `cmd/quivr-autoscaler/Dockerfile` as its Dockerfile. Keep it at one replica, always running, with no cron, volume, public domain or HTTP healthcheck. Disable Railway serverless sleeping. Never run two controllers against the same target.
-2. Set `QUIVR_AUTOSCALER_BACKEND=railway`, `QUIVR_QUEUE_URL` (for example `http://api.railway.internal:8080/v0/admin/queues`), `QUIVR_QUEUE_KEY`, and the Railway variables below. Copy service and environment IDs from Railway's dashboard. Store both keys as secrets, never in source control or command output.
+2. Set `QUIVR_AUTOSCALER_BACKEND=railway`, `QUIVR_QUEUE_URL` (for example `http://api.railway.internal:8082/v0/admin/queues` on the internal admin listener, or `:8080` when combined), `QUIVR_QUEUE_KEY`, and the Railway variables below. Copy service and environment IDs from Railway's dashboard. Store both keys as secrets, never in source control or command output.
 3. Deploy the autoscaler. Watch its JSON logs for `autoscaler started` followed by `autoscaling decision`. On Railway, `applied` is the acknowledged setting after an update and deploy request; it does not mean every replica is running yet.
 
 | Railway variable | Value |

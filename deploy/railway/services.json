@@ -69,7 +69,8 @@
       "PORT": "3000",
       "HOST": "0.0.0.0",
       "DEMO_SECURE_COOKIE": "true",
-      "QUIVR_API_URL": "http://api.railway.internal:8080"
+      "QUIVR_API_URL": "http://api.railway.internal:8080",
+      "QUIVR_ADMIN_URL": "http://api.railway.internal:8082"
     }
   }
 }

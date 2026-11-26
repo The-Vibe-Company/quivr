@@ -32,6 +32,6 @@ COPY third_party/french-light /usr/share/quivr/notices/french-light
 ENV TMPDIR=/tmp
 VOLUME ["/tmp"]
 USER 10001:10001
-EXPOSE 8080 8081
+EXPOSE 8080 8081 8082
 ENTRYPOINT ["/usr/local/bin/quivr"]
 CMD ["api"]

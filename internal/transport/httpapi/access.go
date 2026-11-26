@@ -22,16 +22,23 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 	if a.processWork != nil {
 		r = r.WithContext(lifecycle.WithWorkContext(r.Context(), a.processWork))
 	}
+	surfaceBlocked := a.surfaceBlocked(r.URL.Path)
 	keyID := ""
-	if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		if _, valid := a.Keys[token]; valid {
-			keyID = apiKeyID(token)
+	if !surfaceBlocked {
+		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			if _, valid := a.Keys[token]; valid {
+				keyID = apiKeyID(token)
+			}
 		}
 	}
 	r.Pattern = a.router.Pattern(r)
 	logRequest(w, r, keyID, a.pushClientIP(r).String(), a.loadMetrics, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.draining != nil && a.draining() {
 			writeError(w, publicerr.ContentUnavailable, nil)
+			return
+		}
+		if surfaceBlocked {
+			writeError(w, publicerr.NotFound, nil)
 			return
 		}
 		a.serveSensitive(w, r)

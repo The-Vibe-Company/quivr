@@ -226,6 +226,9 @@
         "DATABASE_URL": "postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable",
         "QUIVR_API_KEY": "${QUIVR_API_KEY:?}",
         "QUIVR_OPERATOR_KEY": "${QUIVR_OPERATOR_KEY:?}",
+        "QUIVR_ADMIN_KEY": "${QUIVR_ADMIN_KEY:?}",
+        "QUIVR_DEMO_ADMIN_KEY": "${QUIVR_DEMO_ADMIN_KEY:?}",
+        "QUIVR_ADMIN_LISTEN": "0.0.0.0:8082",
         "QUIVR_CURSOR_KEY": "${QUIVR_CURSOR_KEY:?}",
         "QUIVR_CREDENTIAL_KEY": "${QUIVR_CREDENTIAL_KEY:?}",
         "TEMPORAL_ADDRESS": "temporal:7233",
@@ -285,6 +288,9 @@
         "DATABASE_URL": "postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable",
         "QUIVR_API_KEY": "${QUIVR_API_KEY:?}",
         "QUIVR_OPERATOR_KEY": "${QUIVR_OPERATOR_KEY:?}",
+        "QUIVR_ADMIN_KEY": "${QUIVR_ADMIN_KEY:?}",
+        "QUIVR_DEMO_ADMIN_KEY": "${QUIVR_DEMO_ADMIN_KEY:?}",
+        "QUIVR_ADMIN_LISTEN": "0.0.0.0:8082",
         "QUIVR_CURSOR_KEY": "${QUIVR_CURSOR_KEY:?}",
         "QUIVR_CREDENTIAL_KEY": "${QUIVR_CREDENTIAL_KEY:?}",
         "TEMPORAL_ADDRESS": "temporal:7233",
@@ -310,7 +316,8 @@
         }
       },
       "ports": [
-        "127.0.0.1:${QUIVR_API_PORT:-8080}:8080"
+        "127.0.0.1:${QUIVR_API_PORT:-8080}:8080",
+        "127.0.0.1:${QUIVR_ADMIN_PORT:-8082}:8082"
       ],
       "tmpfs": [
         "/tmp:mode=1777,size=128m"
@@ -348,6 +355,9 @@
         "DATABASE_URL": "postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable",
         "QUIVR_API_KEY": "${QUIVR_API_KEY:?}",
         "QUIVR_OPERATOR_KEY": "${QUIVR_OPERATOR_KEY:?}",
+        "QUIVR_ADMIN_KEY": "${QUIVR_ADMIN_KEY:?}",
+        "QUIVR_DEMO_ADMIN_KEY": "${QUIVR_DEMO_ADMIN_KEY:?}",
+        "QUIVR_ADMIN_LISTEN": "0.0.0.0:8082",
         "QUIVR_CURSOR_KEY": "${QUIVR_CURSOR_KEY:?}",
         "QUIVR_CREDENTIAL_KEY": "${QUIVR_CREDENTIAL_KEY:?}",
         "TEMPORAL_ADDRESS": "temporal:7233",
@@ -396,6 +406,8 @@
       "environment": {
         "QUIVR_API_URL": "http://api:8080",
         "QUIVR_API_KEY": "${QUIVR_API_KEY:?}",
+        "QUIVR_ADMIN_URL": "http://api:8082",
+        "QUIVR_ADMIN_KEY": "${QUIVR_DEMO_ADMIN_KEY:?}",
         "DEMO_PASSWORD": "${DEMO_PASSWORD:?}",
         "DEMO_SECURE_COOKIE": "false",
         "HOST": "0.0.0.0",

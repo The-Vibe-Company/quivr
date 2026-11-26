@@ -319,7 +319,7 @@ def main():
         services = infra.resolve(args.profile, args.overrides)
         selectors = dict(item.split('=', 1) for item in args.service) if args.service else {
             name: name for name, spec in services.items() if name != 'autoscaler'
-            and (spec.get('image') or spec.get('deploy'))}
+            and (spec.get('image') or spec.get('deploy') or spec.get('environment'))}
         adapter = Railway(args.project_id, args.environment_id)
         adapter.select(selectors, include_autoscaler=not args.service, allow_missing_index=not args.service)
         inspect_index = 'weaviate' in selectors or args.vector_host is not None

@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import pathlib
@@ -214,9 +215,36 @@ def connector_pins(env):
              'configuration': configuration(c)} for c in runtime_connectors(env)]
 
 
+def parse_admin_listen(raw):
+    value = (raw or '').strip()
+    if not value or value == 'off':
+        return ''
+    if value.startswith('['):
+        host, sep, port_text = value[1:].partition(']:')
+        if not sep:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off') from None
+    else:
+        host, sep, port_text = value.rpartition(':')
+        if not sep or not host:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+        if host != 'localhost':
+            try:
+                ipaddress.IPv4Address(host)
+            except ValueError:
+                raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off') from None
+    if not port_text.isascii() or not port_text.isdigit() or port_text.startswith('0') or not 1 <= int(port_text) <= 65535 or int(port_text) == 8080:
+        raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+    return value
+
+
 def build_config(env):
     """Build the core configuration from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
+    admin_listen = parse_admin_listen(env.get('QUIVR_ADMIN_LISTEN', ''))
     organization = env.get('QUIVR_ORGANIZATION', 'quivr-demo').strip()
     if not organization:
         raise ValueError('QUIVR_ORGANIZATION must not be empty')
@@ -232,8 +260,9 @@ def build_config(env):
     # Opt-in: the Alertes tab creates Saved Queries and Subscriptions and reads their Matches.
     if plugins_enabled(env):
         actions += ['monitoring:read', 'monitoring:write']
-    # Opt-in: the read-only Admin tab follows documents through their steps.
-    if env.get('QUIVR_DEMO_ADMIN') == '1':
+    # Opt-in: in combined mode, the read-only Admin tab uses the API key; when
+    # separated onto admin_listen, observability:read belongs only to admin_keys.
+    if not admin_listen and env.get('QUIVR_DEMO_ADMIN') == '1':
         actions += ['observability:read']
     pool_limit = env.get('QUIVR_POSTGRES_MAX_CONNECTIONS', '16').strip()
     if not pool_limit.isdecimal() or not 1 <= int(pool_limit) <= 2147483647:
@@ -262,23 +291,55 @@ def build_config(env):
     weaviate_key = env.get('WEAVIATE_API_KEY', '')
     if weaviate_key:
         config['weaviate_api_key'] = weaviate_key
-    # Optional operator key, never given to the web app: rebuilds a Corpus projection
-    # (for example after a migration adds a projected field), reads the plugin
-    # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)
-    # Corpora from inside the deployment.
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
-    if operator:
-        if operator == key:
-            raise ValueError('API and operator keys must differ')
-        config['keys'][operator] = {'organization': organization, 'corpora': ['*'],
-                                    'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
-                                                'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
     queue_key = env.get('QUIVR_QUEUE_KEY', '').strip()
-    if queue_key:
-        if queue_key in config['keys']:
-            raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
-        config['keys'][queue_key] = {'organization': organization, 'corpora': ['*'],
-                                     'actions': ['queues:read']}
+    admin_key = env.get('QUIVR_ADMIN_KEY', '').strip()
+    demo_admin_key = env.get('QUIVR_DEMO_ADMIN_KEY', '').strip()
+    if admin_listen:
+        config['admin_listen'] = admin_listen
+        seen = {key}
+        for name, value in (('QUIVR_OPERATOR_KEY', operator), ('QUIVR_ADMIN_KEY', admin_key),
+                            ('QUIVR_QUEUE_KEY', queue_key), ('QUIVR_DEMO_ADMIN_KEY', demo_admin_key)):
+            if not value:
+                continue
+            if value in seen:
+                raise ValueError(name + ' must differ from other API, operator and admin keys')
+            seen.add(value)
+        admin_keys = {}
+        admin_actions = ['plugins:admin', 'observability:read', 'queues:read', 'audit:read']
+        if admin_key:
+            admin_keys[admin_key] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
+        if operator:
+            if admin_key:
+                config['keys'][operator] = {'organization': organization, 'corpora': ['*'],
+                                            'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
+                                                        'operations:write', 'corpora:archive', 'corpora:rename']}
+            else:
+                admin_keys[operator] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
+        if queue_key:
+            admin_keys[queue_key] = {'organization': organization, 'corpora': ['*'], 'actions': ['queues:read']}
+        if demo_admin_key and env.get('QUIVR_DEMO_ADMIN') == '1':
+            admin_keys[demo_admin_key] = {'organization': organization, 'corpora': ['*'],
+                                          'actions': ['observability:read']}
+        if not admin_keys:
+            raise ValueError('QUIVR_ADMIN_LISTEN requires at least one dedicated admin key')
+        config['admin_keys'] = admin_keys
+    else:
+        # Optional operator key, never given to the web app: rebuilds a Corpus projection
+        # (for example after a migration adds a projected field), reads the plugin
+        # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)
+        # Corpora from inside the deployment.
+        if operator:
+            if operator == key:
+                raise ValueError('API and operator keys must differ')
+            config['keys'][operator] = {'organization': organization, 'corpora': ['*'],
+                                        'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
+                                                    'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
+        if queue_key:
+            if queue_key in config['keys']:
+                raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
+            config['keys'][queue_key] = {'organization': organization, 'corpora': ['*'],
+                                         'actions': ['queues:read']}
     # Omitted queue variables keep one worker serving both queues.
     worker = {}
     if 'QUIVR_WORKER_QUEUES' in env:

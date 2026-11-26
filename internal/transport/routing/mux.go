@@ -30,16 +30,26 @@ type Mux struct {
 	routes   []route
 	aliases  map[string]string
 	fallback func(http.ResponseWriter, *http.Request, PathMatch)
+	allow    func(string) bool
 }
 
 func New(fallback func(http.ResponseWriter, *http.Request, PathMatch)) *Mux {
 	return &Mux{fallback: fallback, aliases: map[string]string{}}
 }
 
+// NewFiltered creates a Mux that registers only contract routes and aliases
+// whose canonical path satisfies allow.
+func NewFiltered(fallback func(http.ResponseWriter, *http.Request, PathMatch), allow func(string) bool) *Mux {
+	return &Mux{fallback: fallback, aliases: map[string]string{}, allow: allow}
+}
+
 func (m *Mux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	method, path, ok := strings.Cut(pattern, " ")
 	if !ok || method == "" || path == "" || handler == nil {
 		panic("contract route requires method, path and handler")
+	}
+	if m.allow != nil && !m.allow(path) {
+		return
 	}
 	for _, r := range m.routes {
 		if r.method == method && r.path == path {
@@ -59,6 +69,9 @@ func (m *Mux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http
 // HandleAlias records a contract-declared exact alias after route registration.
 // A missing canonical target fails startup instead of becoming a dead route.
 func (m *Mux) HandleAlias(alias, target string) error {
+	if m.allow != nil && !m.allow(target) {
+		return nil
+	}
 	for _, route := range m.routes {
 		if route.path == target {
 			m.aliases[alias] = target

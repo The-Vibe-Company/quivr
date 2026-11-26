@@ -56,14 +56,28 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual(compose['services']['worker']['depends_on']['migrate']['condition'],
                              'service_completed_successfully')
             self.assertEqual(compose['services']['demo']['profiles'], ['demo'])
+            self.assertEqual(compose['services']['api']['environment']['QUIVR_ADMIN_LISTEN'], '0.0.0.0:8082')
+            self.assertEqual(compose['services']['api']['ports'], [
+                '127.0.0.1:${QUIVR_API_PORT:-8080}:8080',
+                '127.0.0.1:${QUIVR_ADMIN_PORT:-8082}:8082',
+            ])
+            self.assertEqual(compose['services']['demo']['environment']['QUIVR_ADMIN_URL'], 'http://api:8082')
+            self.assertEqual(compose['services']['demo']['environment']['QUIVR_ADMIN_KEY'], '${QUIVR_DEMO_ADMIN_KEY:?}')
             self.assertNotIn('build', compose['services']['api'])
             self.assertTrue(all('@sha256:' in s['image'] for s in compose['services'].values()))
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
             self.assertEqual((directory / '.env').read_text(), env)
-            # Two protected files must not collapse application and operator permissions.
+            # Two protected files must not collapse application and operator/admin permissions.
             duplicated = env.replace(env.split('QUIVR_OPERATOR_KEY=')[1].splitlines()[0],
                                      env.split('QUIVR_API_KEY=')[1].splitlines()[0])
             (directory / '.env').write_text(duplicated)
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('must differ', result.stderr)
+            self.assertEqual(json.loads((directory / 'compose.yaml').read_text()), compose)
+            dup_admin = env.replace(env.split('QUIVR_ADMIN_KEY=')[1].splitlines()[0],
+                                    env.split('QUIVR_API_KEY=')[1].splitlines()[0])
+            (directory / '.env').write_text(dup_admin)
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('must differ', result.stderr)
