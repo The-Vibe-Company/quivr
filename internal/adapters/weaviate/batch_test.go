@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 // batchProjectionHTTP supplies only the remote object API. Publication,
@@ -100,6 +101,29 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 			results = results[:len(results)-1]
 		}
 		return reply(200, results)
+	case r.Method == "DELETE" && r.URL.Path == "/v1/batch/objects":
+		var body struct {
+			Match struct {
+				Where struct {
+					Operands []struct {
+						ID string `json:"valueText"`
+					} `json:"operands"`
+				} `json:"where"`
+			} `json:"match"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		deleted := 0
+		for _, operand := range body.Match.Where.Operands {
+			if _, ok := h.objects[operand.ID]; ok {
+				delete(h.objects, operand.ID)
+				deleted++
+			}
+		}
+		return reply(200, map[string]any{"results": map[string]any{
+			"matches": deleted, "successful": deleted, "failed": 0, "limit": 10000,
+		}})
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/objects/"):
 		id := r.URL.Path[strings.LastIndexByte(r.URL.Path, '/')+1:]
 		if _, ok := h.objects[id]; !ok {
@@ -138,8 +162,11 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 		for id, object := range h.objects {
 			props := object["properties"].(map[string]any)
 			segment, _ := props["segmentId"].(string)
+			if strings.Contains(body.Query, `path:["itemKind"],operator:Equal,valueText:"segment"`) && props["itemKind"] != "segment" {
+				continue
+			}
 			if filter[1] == "id" && selected[id] || filter[1] == "segmentId" && selected[segment] {
-				rows = append(rows, map[string]any{"segmentId": segment, "embeddingRevision": props["embeddingRevision"], "_additional": map[string]any{"id": id}})
+				rows = append(rows, map[string]any{"segmentId": segment, "itemKind": props["itemKind"], "embeddingRevision": props["embeddingRevision"], "_additional": map[string]any{"id": id}})
 			}
 		}
 		return reply(200, map[string]any{"data": map[string]any{"Get": map[string]any{"BatchObjects": rows}}})
@@ -178,9 +205,10 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					}
 					data = append(data, content.EmbeddingData{Artifact: content.Embedding{Organization: "organization", SpaceID: "space", SegmentID: id, Payload: content.Blob{SHA256: content.Hash(raw)}}, Vector: vector})
 				}
-				publish := func() error {
+				publishSegments := func() error {
 					return s.Publish(context.Background(), g, "organization", "corpus", "example-feed", content.Version{ID: "version"}, seg)
 				}
+				publish := publishSegments
 				if embedding {
 					if err := publish(); err != nil {
 						t.Fatal(err)
@@ -224,9 +252,13 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					if mode.item && !embedding {
 						lastBatch = 2
 					}
-					if h.reads != wantReads || h.lists != 2 || fmt.Sprint(h.batches) != fmt.Sprintf("[%d %d]", firstBatch, lastBatch) {
-						t.Fatalf("acknowledged publication: reads=%d lists=%d batches=%v, want %d reads, 2 lists, [%d %d] batches",
-							h.reads, h.lists, h.batches, wantReads, firstBatch, lastBatch)
+					wantLists := 2
+					if mode.item {
+						wantLists = 4 // Check snapshots on publish, or confirm replacements after attachment.
+					}
+					if h.reads != wantReads || h.lists != wantLists || fmt.Sprint(h.batches) != fmt.Sprintf("[%d %d]", firstBatch, lastBatch) {
+						t.Fatalf("acknowledged publication: reads=%d lists=%d batches=%v, want %d reads, %d lists, [%d %d] batches",
+							h.reads, h.lists, h.batches, wantReads, wantLists, firstBatch, lastBatch)
 					}
 				}
 				if fault == "lost response with bad vector" {
@@ -236,6 +268,17 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					// Repair the corrupted provider fixture before exercising the normal restart.
 					h.objects[h.submitted[0]]["vectors"] = map[string]any{"semantic_text_v1": []float32{1}}
 				}
+				if mode.item && fault == "removed while batching" {
+					// A unified segment disappeared with its vectors. A
+					// subsequent embedding replay requires publication first.
+					if err := publish(); !errors.Is(err, retrieval.ErrProjectionMissing) {
+						t.Fatalf("retry without segment = %v", err)
+					}
+					if err := publishSegments(); err != nil {
+						t.Fatalf("republish seed: %v", err)
+					}
+				}
+				// Every existing identity is immutable, including the BM25 item.
 				prior := map[string]bool{}
 				for id := range h.objects {
 					prior[id] = true
@@ -257,7 +300,7 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					}
 				}
 				wantObjects := segmentCount
-				if embedding {
+				if embedding && !mode.item {
 					wantObjects *= 2
 				}
 				if mode.item {
@@ -265,6 +308,20 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 				}
 				if len(h.objects) != wantObjects {
 					t.Fatalf("stored objects=%d want %d", len(h.objects), wantObjects)
+				}
+				if embedding {
+					vectorsBySegment := make(map[string]int)
+					for _, object := range h.objects {
+						if object["vectors"] != nil {
+							properties := object["properties"].(map[string]any)
+							vectorsBySegment[properties["segmentId"].(string)]++
+						}
+					}
+					for _, segment := range seg.Segments {
+						if count := vectorsBySegment[segment.ID]; count != 1 {
+							t.Fatalf("segment %s has %d vector objects, want 1", segment.ID, count)
+						}
+					}
 				}
 				writes := len(h.batches)
 				if err := publish(); err != nil {

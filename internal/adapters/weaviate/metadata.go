@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
@@ -62,24 +64,23 @@ func metadataPropertyFor(g content.Generation, f corpus.Field) string {
 	}
 	return metadataProperty(f)
 }
-func metadataConditionFor(g content.Generation, f corpus.TypedFilter) string {
+func metadataConditionFor(g content.Generation, f corpus.TypedFilter) filter {
 	return metadataCondition(f, metadataPropertyFor(g, corpus.Field{Name: f.Field, Type: f.Type}))
 }
 
-func metadataCondition(f corpus.TypedFilter, name string) string {
+func metadataCondition(f corpus.TypedFilter, name string) filter {
 	key := map[string]string{"string": "valueText", "string_array": "valueText", "datetime": "valueDate", "number": "valueNumber", "boolean": "valueBoolean"}[f.Type]
-	condition := func(operator string, value any) string {
+	condition := func(operator pb.Filters_Operator, value any) filter {
 		if f.Type == "string" || f.Type == "string_array" {
 			value = metadataString(value.(string))
 		}
-		raw, _ := json.Marshal(value)
-		return "{path:[" + quote(name) + "],operator:" + operator + "," + key + ":" + string(raw) + "}"
+		return filter{operator: operator, field: name, jsonKey: key, value: value}
 	}
-	operands := []string{}
+	var operands []filter
 	if len(f.AnyOf) > 0 {
-		values := []string{}
+		var values []filter
 		for _, v := range f.AnyOf {
-			values = append(values, condition("Equal", v))
+			values = append(values, condition(pb.Filters_OPERATOR_EQUAL, v))
 		}
 		if len(values) == 1 {
 			operands = append(operands, values[0])
@@ -88,10 +89,10 @@ func metadataCondition(f corpus.TypedFilter, name string) string {
 		}
 	}
 	if f.Gte != "" {
-		operands = append(operands, condition("GreaterThanEqual", f.Gte))
+		operands = append(operands, condition(pb.Filters_OPERATOR_GREATER_THAN_EQUAL, f.Gte))
 	}
 	if f.Lte != "" {
-		operands = append(operands, condition("LessThanEqual", f.Lte))
+		operands = append(operands, condition(pb.Filters_OPERATOR_LESS_THAN_EQUAL, f.Lte))
 	}
 	if len(operands) == 1 {
 		return operands[0]

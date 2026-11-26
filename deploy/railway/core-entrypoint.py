@@ -442,6 +442,8 @@ def build_config(env):
         # Its queries are demo traffic; a deployment with private queries leaves this off.
         'observability': {'record_query_text': recording == '1'},
     }
+    if grpc_address := env.get('WEAVIATE_GRPC_ADDRESS', '').strip():
+        config['weaviate_grpc_address'] = grpc_address
     if admin_listen:
         config['admin_listen'] = admin_listen
     # Omitted queue variables keep one worker serving both queues.

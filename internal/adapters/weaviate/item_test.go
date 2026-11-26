@@ -198,7 +198,7 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	}
 	// The lexical scan budget counts canonical passages even after vectors
 	// are attached: enriched physical copies must not occupy those slots.
-	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"passage"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
+	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"segment"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
 	req, err := http.NewRequestWithContext(f.ctx, http.MethodPost, f.url+"/v1/graphql", strings.NewReader(string(queryJSON)))
 	if err != nil {
 		t.Fatal(err)
@@ -1062,4 +1062,94 @@ func runItemSearch(ctx context.Context, transport http.RoundTripper, q retrieval
 		Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}},
 	}
 	return store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, q)
+}
+
+func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
+	f := newAttachFixture(t)
+	g := f.gen
+	g.ItemKeywordsProjected, g.SpacesProjected = true, true
+	f.store.LegacySpace = g.SpaceID
+	routes := []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}
+	scope := corpus.Scope{Organization: f.org}
+	vector := unitVector(1)
+	for _, name := range []string{"legacy", "unified"} {
+		seg := f.segmentation(name, "harbour ferry")
+		seg.Segments[0].Derivation.LexicalText = name + " harbour ferry"
+		v := content.Version{ID: seg.VersionID, RecordID: name, Manifest: content.Manifest{
+			Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "harbour ferry"}}},
+		}}
+		publish := func() error { return f.store.Publish(f.ctx, g, f.org, f.corpusID, "feed", v, seg) }
+		if err := publish(); err != nil {
+			t.Fatal(err)
+		}
+		anchor := lexicalObject(f.objects(g, name))
+		if name == "legacy" {
+			// Restore the 2.x seed layout before attachment. It must keep
+			// the same UUID and its separate enriched object on replay.
+			path := f.url + "/v1/objects/" + g.Collection + "/" + anchor.ID
+			req, err := http.NewRequestWithContext(f.ctx, http.MethodPatch, path,
+				strings.NewReader(`{"properties":{"itemKind":"passage"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := f.store.Client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("restore legacy passage: %s", res.Status)
+			}
+		}
+		transport := f.store.Client.Transport
+		var checkedSwap bool
+		if name == "unified" {
+			f.store.Client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodDelete && req.URL.Path == "/v1/batch/objects" {
+					// Just before the seed is retired, both immutable
+					// snapshots must be visible to plugin lexical search.
+					objects := f.objects(g, name)
+					if plain, enriched := shape(objects); plain != 1 || enriched != 1 {
+						t.Errorf("segment swap visibility: %+v", objects)
+					}
+					hits, err := f.store.Search(f.ctx, routes, scope, retrieval.Request{
+						Query: name, Mode: "lexical", Field: retrieval.FieldLexical, RecordIDs: []string{name}, K: 3,
+					})
+					if err != nil || len(hits) == 0 || hits[0].SegmentID != name {
+						t.Errorf("plugin lexical during segment swap: %+v, %v", hits, err)
+					}
+					checkedSwap = true
+				}
+				return transport.RoundTrip(req)
+			})
+		}
+		data := []content.EmbeddingData{f.embedding(g, name, vector)}
+		for _, write := range []func() error{
+			func() error { return f.store.PublishEmbeddings(f.ctx, g, f.org, data) },
+			publish,
+			func() error { return f.store.PublishEmbeddings(f.ctx, g, f.org, data) },
+		} {
+			if err := write(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.store.Client.Transport = transport
+		objects := f.objects(g, name)
+		if name == "legacy" {
+			if lexical, enriched := shape(objects); lexical != 1 || enriched != 1 || lexicalObject(objects).ID != anchor.ID {
+				t.Fatalf("legacy segment after replay: %+v", objects)
+			}
+		} else if !checkedSwap || len(objects) != 1 || objects[0].ID == anchor.ID || !objects[0].Vector {
+			t.Fatalf("unified segment after replay: %+v", objects)
+		}
+	}
+	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
+		hits, err := f.store.Search(f.ctx, routes, scope, retrieval.Request{
+			Query: "harbour", Vector: vector, Mode: mode, GroupBy: "record", K: 2,
+		})
+		if err != nil || len(hits) != 2 || hits[0].SegmentID == hits[1].SegmentID {
+			t.Fatalf("mixed %s search: %+v, %v", mode, hits, err)
+		}
+	}
 }

@@ -80,6 +80,7 @@ services:
       CLUSTER_HOSTNAME: quivr-local
     ports:
       - "127.0.0.1::8080"
+      - "127.0.0.1::50051"
     volumes:
       - weaviate-data:/var/lib/weaviate
     logging:

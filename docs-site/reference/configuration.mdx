@@ -42,6 +42,7 @@ Required fields can come from a secret binding where listed above. Existing inli
 | `telemetry` | no | Opt-in OTLP traces and metrics export. See [OpenTelemetry](#opentelemetry). |
 | `tls` | no | Outgoing connection encryption and trust. See [Outbound TLS](#outbound-tls). |
 | `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
+| `weaviate_grpc_address` | no | Weaviate gRPC host and port, such as `weaviate:50051`. `WEAVIATE_GRPC_ADDRESS` overrides this field. When set, batch writes, searches and filtered projection reads use gRPC. Schema, readiness, point reads and purge deletes use HTTP. With no address, all requests use HTTP. gRPC follows the TLS mode of `weaviate_url` and shares its `tls.weaviate` settings and API key. |
 | `weaviate_api_key` | no | Secret sent as `Authorization: Bearer <key>` on every index request. Omitted or empty keeps anonymous access. Use HTTPS for an external index. |
 | `vector_index` | no | How the search index compresses each vector space. Default 8-bit compression. See [Search index compression](#search-index-compression). |
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |

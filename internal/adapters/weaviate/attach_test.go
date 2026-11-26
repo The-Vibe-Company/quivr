@@ -19,6 +19,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -46,15 +47,21 @@ func newAttachFixture(t *testing.T) *attachFixture {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		WeaviateURL    string `json:"weaviate_url"`
-		WeaviateAPIKey string `json:"weaviate_api_key"`
+		WeaviateURL         string `json:"weaviate_url"`
+		WeaviateGRPCAddress string `json:"weaviate_grpc_address"`
+		WeaviateAPIKey      string `json:"weaviate_api_key"`
 	}
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
-	f := &attachFixture{t: t, ctx: ctx, url: strings.TrimRight(cfg.WeaviateURL, "/"), apiKey: cfg.WeaviateAPIKey, store: weaviate.New(cfg.WeaviateURL, cfg.WeaviateAPIKey), org: "adapter-attach", corpusID: "corpus-attach"}
+	store, closeStore, err := weaviate.NewWithTransport(cfg.WeaviateURL, cfg.WeaviateGRPCAddress, outbound.TLS{}, cfg.WeaviateAPIKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+	f := &attachFixture{t: t, ctx: ctx, url: strings.TrimRight(cfg.WeaviateURL, "/"), apiKey: cfg.WeaviateAPIKey, store: store, org: "adapter-attach", corpusID: "corpus-attach"}
 	collection := "QuivrAttach" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err = f.store.Bootstrap(ctx, collection); err != nil {
 		t.Fatal(err)

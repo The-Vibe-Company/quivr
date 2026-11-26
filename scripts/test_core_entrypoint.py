@@ -24,6 +24,12 @@ ENV = {'QUIVR_API_KEY': 'placeholder-api-key', 'DATABASE_URL': 'postgres://place
 
 
 class CoreEntrypointTest(unittest.TestCase):
+    def test_weaviate_transport_is_optional_and_keeps_the_address(self):
+        self.assertNotIn('weaviate_grpc_address', core_entrypoint.build_config(ENV))
+        self.assertNotIn('weaviate_grpc_address', core_entrypoint.build_config({**ENV, 'WEAVIATE_GRPC_ADDRESS': ' '}))
+        env = {**ENV, 'WEAVIATE_GRPC_ADDRESS': ' weaviate:50051 '}
+        self.assertEqual(core_entrypoint.build_config(env)['weaviate_grpc_address'], 'weaviate:50051')
+
     def test_single_machine_uses_private_cpu_provider_without_query_recording(self):
         env = {**ENV, 'QUIVR_SINGLE_MACHINE': '1', 'QUIVR_ORGANIZATION': 'example',
                'QUIVR_DEMO_EMBEDDING': 'gemma', 'QUIVR_DEMO_CORE_INGEST': '0',

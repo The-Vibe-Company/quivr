@@ -134,6 +134,7 @@ def main():
         'S3_ACCESS_KEY': values['s3_access'], 'S3_SECRET_KEY': values['s3_secret'],
         'S3_ENDPOINT': 'http://seaweed.railway.internal:8333',
         'TEMPORAL_ADDRESS': 'temporal.railway.internal:7233',
+        'WEAVIATE_GRPC_ADDRESS': 'weaviate.railway.internal:50051',
         'WEAVIATE_URL': 'http://weaviate.railway.internal:8080', 'TEI_URL': 'http://tei.railway.internal:80',
     }
     volumes = json.loads(cli('volume', 'list', '--json')).get('volumes', [])

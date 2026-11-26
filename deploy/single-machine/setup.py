@@ -100,6 +100,7 @@ def stack(images, settings, values, initialized=False):
         'QUIVR_ADMIN_LISTEN': admin_listen,
         'QUIVR_CURSOR_KEY': '${QUIVR_CURSOR_KEY:?}', 'QUIVR_CREDENTIAL_KEY': '${QUIVR_CREDENTIAL_KEY:?}',
         'TEMPORAL_ADDRESS': 'temporal:7233', 'WEAVIATE_URL': 'http://weaviate:8080',
+        'WEAVIATE_GRPC_ADDRESS': f"weaviate:{settings['weaviate']['environment']['GRPC_PORT']}",
         'TEI_URL': 'http://embeddings:80' if model == 'e5' else 'http://embeddings:8080',
         'S3_ENDPOINT': 'http://seaweed:8333', 'S3_ACCESS_KEY': '${S3_ACCESS_KEY:?}',
         'S3_SECRET_KEY': '${S3_SECRET_KEY:?}', 'QUIVR_DEMO_PLUGINS': '1',

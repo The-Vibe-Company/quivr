@@ -53,6 +53,11 @@ class SingleMachineTest(unittest.TestCase):
             compose = json.loads((directory / 'compose.yaml').read_text())
             self.assertEqual(compose['name'], 'example-evaluation')
             self.assertEqual(len(compose['volumes']), 4)
+            for model in (compose, json.loads((ROOT / 'deploy/single-machine/compose.yaml').read_text())):
+                self.assertEqual(model['services']['weaviate']['environment']['GRPC_PORT'], '50051')
+                for process in ('api', 'worker', 'migrate'):
+                    self.assertEqual(model['services'][process]['environment']['WEAVIATE_GRPC_ADDRESS'],
+                                     'weaviate:50051')
             self.assertNotIn('temporal-data', compose['volumes'])
             temporal = compose['services']['temporal']
             self.assertIn('temporalio/auto-setup:', temporal['image'])

@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/keywords"
@@ -35,6 +37,7 @@ const InitialCollection = "QuivrTextV4"
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 type Store struct {
+	grpc     pb.WeaviateClient
 	Endpoint string
 	Client   *http.Client
 	apiKey   string
@@ -441,8 +444,13 @@ type projectionObject struct {
 
 const embeddingRevision = "embeddingRevision"
 
+func embeddingRevisionProperty() map[string]any {
+	return map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
+}
+
 type projectionRow struct {
 	SegmentID  string `json:"segmentId"`
+	Kind       string `json:"itemKind"`
 	Revision   int64  `json:"embeddingRevision"`
 	Additional struct {
 		ID      string `json:"id"`
@@ -451,8 +459,21 @@ type projectionRow struct {
 }
 
 // projectionRows lists identities without fetching text or vectors.
-func (s *Store) projectionRows(ctx context.Context, collection, where string, limit int, order, fields string) ([]projectionRow, error) {
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, order, fields)
+func (s *Store) projectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
+	if s.grpc != nil {
+		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created)
+	}
+	sortClause := strings.TrimSuffix(order.graphql(), ",")
+	if sortClause != "" {
+		sortClause = "," + sortClause
+	}
+	fields := append([]string{}, properties...)
+	additional := "_additional{id}"
+	if created {
+		additional = "_additional{id creationTimeUnix}"
+	}
+	fields = append(fields, additional)
+	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, sortClause, strings.Join(fields, " "))
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`
@@ -474,11 +495,6 @@ func (s *Store) projectionRows(ctx context.Context, collection, where string, li
 	return rows, nil
 }
 
-func containsAny(field string, values []string) string {
-	raw, _ := json.Marshal(values)
-	return "{path:[" + quote(field) + "],operator:ContainsAny,valueText:" + string(raw) + "}"
-}
-
 func (s *Store) verifyObject(ctx context.Context, want projectionObject) error {
 	stored, found, err := s.object(ctx, want.Class, want.ID)
 	if err != nil {
@@ -487,11 +503,27 @@ func (s *Store) verifyObject(ctx context.Context, want projectionObject) error {
 	if !found || !sameProperties(stored.Properties, want.Properties) {
 		return errors.New("projection verification mismatch")
 	}
-	for name, vector := range want.Vectors {
+	if !sameVectors(stored.Vectors, want.Vectors) {
+		return errors.New("embedding projection verification failed")
+	}
+	return nil
+}
+
+func sameVectors(stored, want map[string][]float32) bool {
+	for name, vector := range want {
 		expected, expectedErr := content.VectorBytes(vector)
-		recovered, err := content.VectorBytes(stored.Vectors[name])
+		recovered, err := content.VectorBytes(stored[name])
 		if expectedErr != nil || err != nil || !bytes.Equal(recovered, expected) {
-			return errors.New("embedding projection verification failed")
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) verifyBatch(ctx context.Context, objects []projectionObject) error {
+	for _, object := range objects {
+		if err := s.verifyObject(ctx, object); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -502,6 +534,9 @@ func (s *Store) verifyObject(ctx context.Context, want projectionObject) error {
 func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) error {
 	if len(objects) == 0 {
 		return nil
+	}
+	if s.grpc != nil {
+		return s.grpcInsertBatch(ctx, objects)
 	}
 	var result []struct {
 		ID     string `json:"id"`
@@ -515,12 +550,7 @@ func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) err
 	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
 	if err != nil {
 		if status == 0 {
-			for _, object := range objects {
-				if err := s.verifyObject(ctx, object); err != nil {
-					return err
-				}
-			}
-			return nil
+			return s.verifyBatch(ctx, objects)
 		}
 		if status >= 400 {
 			return fmt.Errorf("projection batch request failed (HTTP %d): %w", status, err)
@@ -541,7 +571,7 @@ func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) err
 // publishAnchors leaves matching anchors untouched, including anchors written
 // before routing properties were introduced. Batch upserts can change the
 // document ID of an existing anchor, so on replay inspect only IDs that exist.
-func (s *Store) publishAnchors(ctx context.Context, collection string, objects []projectionObject) error {
+func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org string, objects []projectionObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -549,7 +579,7 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	for i, object := range objects {
 		ids[i] = object.ID
 	}
-	rows, err := s.projectionRows(ctx, collection, containsAny("id", ids), len(ids), "", "_additional{id}")
+	rows, err := s.projectionRows(ctx, g.Collection, containsAny("id", ids), len(ids), searchOrder{}, nil, false)
 	if err != nil {
 		return err
 	}
@@ -557,10 +587,53 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	for _, row := range rows {
 		exists[row.Additional.ID] = true
 	}
+	// A unified snapshot replaces the seed after enrichment. Find it by
+	// segment when the seed ID is absent, so Publish replay does not restore it.
+	var segments []string
+	for _, object := range objects {
+		if !exists[object.ID] && object.Properties[itemKind] == segmentKind {
+			segments = append(segments, object.Properties["segmentId"].(string))
+		}
+	}
+	snapshots := map[string]projectionRow{}
+	if len(segments) > 0 {
+		scope := and(equal("organization", org), equal("generationId", g.ID), equal(itemKind, segmentKind))
+		rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
+			embeddingInventoryLimit, searchOrder{}, []string{"segmentId", embeddingRevision}, true)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if best, ok := snapshots[row.SegmentID]; !ok || compareEmbeddings(row, best) > 0 {
+				snapshots[row.SegmentID] = row
+			}
+		}
+		if len(rows) == embeddingInventoryLimit {
+			for _, segment := range segments {
+				if _, ok := snapshots[segment]; ok {
+					continue
+				}
+				matched, err := s.projectionRows(ctx, g.Collection, and(scope, equal("segmentId", segment)),
+					1, searchOrder{field: embeddingRevision, desc: true}, []string{"segmentId"}, false)
+				if err != nil {
+					return err
+				}
+				if len(matched) > 0 {
+					snapshots[segment] = matched[0]
+				}
+			}
+		}
+	}
 	pending := objects[:0]
 	for _, object := range objects {
-		if exists[object.ID] {
-			stored, found, err := s.object(ctx, collection, object.ID)
+		id := object.ID
+		if object.Properties[itemKind] == segmentKind {
+			if row, ok := snapshots[object.Properties["segmentId"].(string)]; ok {
+				id = row.Additional.ID
+			}
+		}
+		if exists[object.ID] || id != object.ID {
+			stored, found, err := s.object(ctx, g.Collection, id)
 			if err != nil {
 				return err
 			}
@@ -573,12 +646,24 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 						}
 					}
 				}
+				// A replay can encounter a legacy passage at this segment ID.
+				// Its separate vectors still reference the legacy layout.
+				if object.Properties[itemKind] == segmentKind && stored.Properties[itemKind] == "passage" {
+					object.Properties[itemKind] = "passage"
+				}
 				if sameProperties(stored.Properties, object.Properties) {
 					continue
 				}
 				if item {
 					return errors.New("immutable item projection mismatch")
 				}
+				if object.Properties[itemKind] == segmentKind {
+					return errors.New("unified segment projection mismatch")
+				}
+			} else if object.Properties[itemKind] == segmentKind {
+				// Embedding publication may have retired the selected
+				// snapshot. Reconcile its successor on the next attempt.
+				return retrieval.ErrProjectionMissing
 			}
 		}
 		pending = append(pending, object)
@@ -586,10 +671,9 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	return s.insertBatch(ctx, pending)
 }
 
-// Publish projects each segment's immutable anchor and, for item-capable
-// generations, a separate keyword anchor for the Version. Weaviate re-indexes an updated object under a new
-// document id, and a BM25 query does not read its index atomically, so an
-// update or a delete of the object serving a segment can hide it.
+// Publish seeds segments and, for item-keyword generations, writes a separate
+// immutable BM25 anchor for the Version. Older generations serve BM25 from
+// immutable passage anchors, so their vectors remain in separate objects.
 func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
@@ -612,7 +696,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
 	objects := make([]projectionObject, 0, projectionBatch)
 	flush := func() error {
-		err := s.publishAnchors(ctx, g.Collection, objects)
+		err := s.publishAnchors(ctx, g, org, objects)
 		objects = objects[:0]
 		return err
 	}
@@ -623,7 +707,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		if g.ItemKeywordsProjected {
 			delete(properties, "body")
 			delete(properties, "title")
-			properties[itemKind] = "passage"
+			properties[itemKind] = segmentKind
 			properties[passageText] = p.Text
 			properties["recordId"] = v.RecordID
 		}
@@ -673,25 +757,11 @@ func itemAnchor(g content.Generation, org, corpusID, namespace string, v content
 	return projectionObject{Class: g.Collection, ID: id, Properties: props}
 }
 
-func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
-func equal(field, value string) string {
-	return "{path:[" + quote(field) + "],operator:Equal,valueText:" + quote(value) + "}"
-}
-func notEqual(field, value string) string {
-	return "{path:[" + quote(field) + "],operator:NotEqual,valueText:" + quote(value) + "}"
-}
-func and(operands ...string) string {
-	return "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
-}
-func or(operands ...string) string {
-	return "{operator:Or,operands:[" + strings.Join(operands, ",") + "]}"
-}
-
 // projectionOwnerFilter keeps normal search on the served projection(s) of a
 // generation. Legacy anchors without ownership remain searchable. An
 // evaluation query selects one exact owner and intentionally excludes those
 // legacy anchors.
-func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string {
+func projectionOwnerFilter(g content.Generation, evaluationPlugin string) filter {
 	if evaluationPlugin != "" {
 		return equal(projectionPluginProperty, evaluationPlugin)
 	}
@@ -717,11 +787,11 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string
 		ids = append(ids, owner)
 	}
 	sort.Strings(ids)
-	legacy := []string{equal("generationId", g.ID)}
+	legacy := []filter{equal("generationId", g.ID)}
 	for _, owner := range ids {
 		legacy = append(legacy, notEqual(projectionPluginProperty, owner))
 	}
-	operands := []string{and(legacy...)}
+	operands := []filter{and(legacy...)}
 	if routing := g.IngestionRouting; routing != nil && routing.Default != "" {
 		mediaTypes := make([]string, 0, len(routing.Routes))
 		for mediaType := range routing.Routes {
@@ -731,7 +801,7 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string
 		for _, mediaType := range mediaTypes {
 			operands = append(operands, and(equal(projectionPluginProperty, routing.Routes[mediaType]), equal(sourceMediaTypeProperty, mediaType)))
 		}
-		defaultOperands := []string{equal(projectionPluginProperty, routing.Default)}
+		defaultOperands := []filter{equal(projectionPluginProperty, routing.Default)}
 		for _, mediaType := range mediaTypes {
 			defaultOperands = append(defaultOperands, notEqual(sourceMediaTypeProperty, mediaType))
 		}
@@ -765,12 +835,12 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		return nil, errors.New("projection route missing")
 	}
 	collection := routes[0].Generation.Collection
-	filters := []string{}
+	filters := []filter{}
 	for _, r := range routes {
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		routeFilters := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		routeFilters := []filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
 		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
 		if err != nil {
 			return nil, err
@@ -796,18 +866,18 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	if len(filters) == 0 {
 		return []content.Candidate{}, nil
 	}
-	operands := []string{equal("organization", scope.Organization), "{operator:Or,operands:[" + strings.Join(filters, ",") + "]}"}
+	operands := []filter{equal("organization", scope.Organization), or(filters...)}
 	// The source filter is part of the candidate query, so ranking and the
 	// candidate limit apply within it in every mode.
 	if len(q.SourceNamespaces) > 0 {
-		sources := make([]string, 0, len(q.SourceNamespaces))
+		sources := make([]filter, 0, len(q.SourceNamespaces))
 		for _, ns := range q.SourceNamespaces {
 			sources = append(sources, equal(sourceNamespaceProperty, ns))
 		}
-		operands = append(operands, "{operator:Or,operands:["+strings.Join(sources, ",")+"]}")
+		operands = append(operands, or(sources...))
 	}
 	operands = append(operands, identityConditions(q)...)
-	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
+	where := and(operands...)
 	// For a vector search, every route names the space's vectors the same
 	// way, or the query cannot rank them together; a keyword search reads
 	// no vector.
@@ -834,80 +904,47 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	}
 	// The source field ranks the title and body as written; the lexical field
 	// ranks the lexical text an ingestion plugin produced.
-	properties := `["title^2","body"]`
+	properties := []string{"title^2", "body"}
 	if q.Field == retrieval.FieldLexical {
-		properties = `["` + lexicalProperty + `"]`
+		properties = []string{lexicalProperty}
 	}
-	alpha, fusion := 0.5, "relativeScoreFusion"
+	branch := searchBranch{mode: q.Mode, query: q.Query, properties: properties, vector: q.Vector, target: target, alpha: 0.5}
 	if q.Hybrid != nil {
-		alpha = q.Hybrid.Alpha
-		if q.Hybrid.Fusion == retrieval.FusionRanked {
-			fusion = "rankedFusion"
-		}
+		branch.alpha = q.Hybrid.Alpha
+		branch.ranked = q.Hybrid.Fusion == retrieval.FusionRanked
 	}
-	branch := fmt.Sprintf("bm25:{query:%s,properties:%s}", quote(q.Query), properties)
-	vector, _ := json.Marshal(q.Vector)
-	if q.Mode == "semantic" {
-		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]}", vector, quote(target))
-	}
-	if q.Mode == "hybrid" {
-		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:%s,fusionType:%s,properties:%s,targetVectors:[%s]}", quote(q.Query), vector, strconv.FormatFloat(alpha, 'f', -1, 64), fusion, properties, quote(target))
+	if branch.mode != "semantic" && branch.mode != "hybrid" {
+		branch.mode = "lexical"
 	}
 	limit := retrieval.CandidateLimit
 	if q.K > 0 {
 		limit = q.K
 	}
-	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId _additional{score distance}}}}", collection, branch, where, limit)
-	var response struct {
-		Data struct {
-			Get map[string][]struct {
-				SegmentID    string `json:"segmentId"`
-				GenerationID string `json:"generationId"`
-				Additional   struct {
-					Score    *string  `json:"score"`
-					Distance *float64 `json:"distance"`
-				} `json:"_additional"`
-			} `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
-	}
-	_, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response)
+	rows, err := s.searchRows(ctx, collection, branch, where, searchOrder{}, limit, false, false)
 	if err != nil {
 		return nil, err
-	}
-	if len(response.Errors) > 0 {
-		return nil, errors.New("projection query failed")
-	}
-	rows, ok := response.Data.Get[collection]
-	if !ok {
-		return nil, errors.New("projection response missing")
 	}
 	result := make([]content.Candidate, 0, len(rows))
 	for _, r := range rows {
 		if r.SegmentID == "" || r.GenerationID == "" {
 			return nil, errors.New("projection candidate invalid")
 		}
-		// Higher is better: the BM25F or fused score, or 1 minus the distance.
-		score := 0.0
-		switch {
-		case q.Mode == "semantic" && r.Additional.Distance != nil:
-			score = 1 - *r.Additional.Distance
-		case r.Additional.Score != nil:
-			score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
-		}
-		result = append(result, content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, Score: score})
+		candidate := r.candidate(q.Mode == "semantic")
+		candidate.VersionID = ""
+		result = append(result, candidate)
 	}
 	return result, nil
 }
 
-// PublishEmbeddings attaches vectors without updating or deleting the segment's
-// lexical anchor. For each segment it creates one enriched object beside the
-// anchor carrying the segment's vector in every space of data, each under its
-// named vector. After the write is confirmed, it removes stale enriched
-// objects. Search sees the anchor throughout and retrieval deduplicates by segment.
+// PublishEmbeddings attaches named vectors by publishing a replacement
+// snapshot before retiring the unified segment's seed or an older snapshot.
+// Legacy passage and item keyword anchors remain immutable.
 func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid embedding projection")
+	}
+	if err := s.ensureItemSchema(ctx, g); err != nil {
+		return err
 	}
 	if err := s.ensureVectors(ctx, g); err != nil {
 		return err
@@ -933,9 +970,10 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	if len(order) == 0 {
 		return nil
 	}
-	revisionSchema := map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
-	if err := s.ensureProperties(ctx, g.Collection, []map[string]any{revisionSchema}); err != nil {
-		return err
+	if !g.ItemKeywordsProjected {
+		if err := s.ensureProperties(ctx, g.Collection, []map[string]any{embeddingRevisionProperty()}); err != nil {
+			return err
+		}
 	}
 	for segments := range slices.Chunk(order, projectionBatch) {
 		if err := s.publishEmbeddingBatch(ctx, g, org, segments, bySegment); err != nil {
@@ -971,15 +1009,16 @@ func (s *Store) embeddingObject(g content.Generation, org, segment string, vecto
 	}, nil
 }
 
-const (
-	// The common case is an anchor and one enriched object per segment.
-	embeddingInventoryLimit  = 3 * projectionBatch
-	embeddingInventoryFields = "segmentId " + embeddingRevision + " _additional{id creationTimeUnix}"
-	embeddingRevisionOrder   = ",sort:[{path:[\"" + embeddingRevision + "\"],order:desc}]"
-)
+// A legacy segment has an anchor and an enriched object. Allow room for
+// partial writes and in-flight replacements in the bounded inventory.
+const embeddingInventoryLimit = 3 * projectionBatch
 
-func (s *Store) embeddingRows(ctx context.Context, collection, where, order string) ([]projectionRow, error) {
-	rows, err := s.projectionRows(ctx, collection, where, embeddingInventoryLimit, order, embeddingInventoryFields)
+func (s *Store) embeddingRows(ctx context.Context, g content.Generation, where filter, order searchOrder) ([]projectionRow, error) {
+	properties := []string{"segmentId", embeddingRevision}
+	if g.ItemKeywordsProjected {
+		properties = append(properties, itemKind)
+	}
+	rows, err := s.projectionRows(ctx, g.Collection, where, embeddingInventoryLimit, order, properties, true)
 	if err != nil {
 		return nil, err
 	}
@@ -994,7 +1033,7 @@ func (s *Store) embeddingRows(ctx context.Context, collection, where, order stri
 func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
 	scope := and(equal("organization", org), equal("generationId", g.ID))
 	inventory := func(segments []string) ([]projectionRow, error) {
-		return s.embeddingRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)), "")
+		return s.embeddingRows(ctx, g, and(scope, containsAny("segmentId", segments)), searchOrder{})
 	}
 	rows, err := inventory(segments)
 	if err != nil {
@@ -1019,25 +1058,30 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		if full {
 			// Read the highest revisions for each segment independently when
 			// the bounded inventory could have omitted them.
-			rows, err = s.embeddingRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), embeddingRevisionOrder)
+			rows, err = s.embeddingRows(ctx, g, and(scope, equal("segmentId", segment)), searchOrder{field: embeddingRevision, desc: true})
 			if err != nil {
 				return err
 			}
 		}
 		var revision int64
-		var found, replacing bool
+		var found, replacing, hasSeed bool
+		var snapshot projectionRow
 		for _, row := range rows {
 			switch row.Additional.ID {
 			case anchorID:
-				continue
+				hasSeed = row.Kind == segmentKind
 			case object.ID:
 				found = true
 			default:
 				replacing = true
 				revision = max(revision, row.Revision)
 			}
+			if row.Additional.ID != anchorID && row.Kind == segmentKind &&
+				(snapshot.Additional.ID == "" || compareEmbeddings(row, snapshot) > 0) {
+				snapshot = row
+			}
 		}
-		if replacing {
+		if replacing || hasSeed {
 			replacements = append(replacements, segment)
 		}
 		if len(rows) >= embeddingInventoryLimit && !found {
@@ -1049,6 +1093,9 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		if found {
 			existing = append(existing, object)
 			continue
+		}
+		if snapshot.Additional.ID != "" {
+			anchorID = snapshot.Additional.ID
 		}
 		anchor, projected, err := s.object(ctx, g.Collection, anchorID)
 		if err != nil {
@@ -1063,7 +1110,7 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 				object.Properties[key] = value
 			}
 		}
-		if g.ItemKeywordsProjected {
+		if g.ItemKeywordsProjected && anchor.Properties[itemKind] != segmentKind {
 			object.Properties[itemKind] = "vector"
 		}
 		for key, value := range anchor.Properties {
@@ -1134,9 +1181,17 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 			winners[row.SegmentID] = row
 		}
 	}
+	var seeds []string
 	for _, row := range rows {
 		id := row.Additional.ID
-		if id == objectID(org, g.ID, row.SegmentID) || id == winners[row.SegmentID].Additional.ID {
+		winner, ok := winners[row.SegmentID]
+		if !ok || id == winner.Additional.ID {
+			continue
+		}
+		if id == objectID(org, g.ID, row.SegmentID) {
+			if row.Kind == segmentKind && winner.Kind == segmentKind {
+				seeds = append(seeds, id)
+			}
 			continue
 		}
 		// Delete observed identities. A filter excluding the winner's ID could
@@ -1145,14 +1200,38 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 			return err
 		}
 	}
+	return s.removeSegmentSeeds(ctx, g.Collection, seeds)
+}
+
+// Retire only the seed identities observed alongside a confirmed snapshot.
+func (s *Store) removeSegmentSeeds(ctx context.Context, collection string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	operands := make([]any, 0, len(ids))
+	for _, id := range ids {
+		operands = append(operands, equalText("id", id))
+	}
+	where := map[string]any{"operator": "Or", "operands": operands}
+	result, err := s.deleteWhere(ctx, s.Client, collection, where)
+	if err != nil || result.Complete {
+		return err
+	}
+	// The deployment may cap a batch below our write size. Delete the
+	// observed identities directly so truncation never leaves seeds behind.
+	for _, id := range ids {
+		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+			return err
+		}
+	}
 	return nil
 }
 
 // An interrupted series of replacements can exceed the shared inventory.
-func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org, scope, segment string) error {
+func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org string, scope filter, segment string) error {
 	where := and(scope, equal("segmentId", segment))
 	for {
-		rows, err := s.embeddingRows(ctx, g.Collection, where, "")
+		rows, err := s.embeddingRows(ctx, g, where, searchOrder{})
 		if err != nil {
 			return err
 		}
