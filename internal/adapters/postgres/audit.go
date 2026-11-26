@@ -80,34 +80,48 @@ func (s AuditStore) recordAttempt(ctx context.Context, e *audit.Event, command f
 	if err != nil {
 		return err
 	}
-	detail, err := json.Marshal(e.Detail)
-	if err != nil {
-		return err
-	}
-	err = tx.QueryRow(ctx, `INSERT INTO audit_events(actor,action,target_type,target_id,organization,outcome,request_id,detail)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,occurred_at`, e.Actor, e.Action, e.TargetType, e.TargetID, e.Organization, e.Outcome, e.RequestID, detail).Scan(&e.ID, &e.Time)
-	if err != nil {
+	if err := appendAudit(ctx, tx, e); err != nil {
 		return err
 	}
 	err = tx.Commit(ctx)
 	committed = err == nil && e.Outcome == "accepted"
 	return err
 }
+
+func (s AuditStore) Append(ctx context.Context, e *audit.Event) error {
+	return appendAudit(ctx, s.Pool, e)
+}
+
+func appendAudit(ctx context.Context, db querier, e *audit.Event) error {
+	detail, err := json.Marshal(e.Detail)
+	if err != nil {
+		return err
+	}
+	return db.QueryRow(ctx, `INSERT INTO audit_events(actor,actor_id,action,target_type,target_id,organization,outcome,request_id,detail)
+ VALUES($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9) RETURNING id,occurred_at`, e.Actor, e.ActorID, e.Action,
+		e.TargetType, e.TargetID, e.Organization, e.Outcome, e.RequestID, detail).Scan(&e.ID, &e.Time)
+}
 func (s AuditStore) List(ctx context.Context, org string, f audit.Filter) ([]audit.Event, error) {
 	if f.Limit < 1 || f.Limit > 201 {
 		return nil, errors.New("invalid audit limit")
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id,occurred_at,actor,action,target_type,target_id,organization,outcome,request_id,detail FROM audit_events
+	query := `SELECT id,occurred_at,actor,COALESCE(actor_id,actor),action,target_type,target_id,organization,outcome,request_id,detail FROM audit_events
  WHERE organization=$1 AND ($2::timestamptz IS NULL OR occurred_at >= $2) AND ($3::timestamptz IS NULL OR occurred_at < $3)
  AND ($4='' OR actor=$4) AND ($5='' OR action=$5) AND ($6='' OR target_type=$6) AND ($7='' OR target_id=$7)
- AND ($8::bigint=0 OR id<$8) ORDER BY id DESC LIMIT $9`, org, auditTime(f.Since), auditTime(f.Until), f.Actor, f.Action, f.TargetType, f.TargetID, f.After, f.Limit)
+ AND ($8::bigint=0 OR id<$8)`
+	args := []any{org, auditTime(f.Since), auditTime(f.Until), f.Actor, f.Action, f.TargetType, f.TargetID, f.After, f.Limit}
+	if f.ActorID != "" {
+		query += ` AND COALESCE(actor_id,actor)=$10`
+		args = append(args, f.ActorID)
+	}
+	rows, err := s.Pool.Query(ctx, query+` ORDER BY id DESC LIMIT $9`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (audit.Event, error) {
 		var e audit.Event
 		var detail []byte
-		err := row.Scan(&e.ID, &e.Time, &e.Actor, &e.Action, &e.TargetType, &e.TargetID, &e.Organization, &e.Outcome, &e.RequestID, &detail)
+		err := row.Scan(&e.ID, &e.Time, &e.Actor, &e.ActorID, &e.Action, &e.TargetType, &e.TargetID, &e.Organization, &e.Outcome, &e.RequestID, &detail)
 		if err == nil {
 			err = json.Unmarshal(detail, &e.Detail)
 		}

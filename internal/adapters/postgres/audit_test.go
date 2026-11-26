@@ -184,6 +184,50 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 	if err != nil || len(events) != 6 {
 		t.Fatalf("retention removed live entries: %+v %v", events, err)
 	}
+	// Standalone access and refusal events commit without a command transaction.
+	// Match the actor across distinct keys, and keep legacy rows filterable.
+	const actorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+	const otherActorID = "a64ae2fe48aa443d80c757d5b02eaf26"
+	var issued []int64
+	for _, row := range []struct{ org, actorID, key string }{
+		{org, actorID, "key-1"},
+		{org, actorID, "key-2"},
+		{org, otherActorID, "key-1"},
+		{"other-" + org, actorID, "key-1"},
+	} {
+		event := audit.Event{Organization: row.org, ActorID: row.actorID, Actor: row.key,
+			Action: "permission.refused", TargetType: "http_route", Outcome: "refused", RequestID: "correlation-1",
+			Detail: audit.Detail{Status: 403, Route: "/v0/records"}}
+		if err := store.Append(ctx, &event); err != nil {
+			t.Fatal(err)
+		}
+		issued = append(issued, event.ID)
+	}
+	byActor, err := store.List(ctx, org, audit.Filter{ActorID: actorID, Limit: 10})
+	if err != nil || len(byActor) != 2 || byActor[0].ID != issued[1] ||
+		byActor[1].ID != issued[0] || byActor[0].Actor != "key-2" ||
+		byActor[0].ActorID != actorID || byActor[0].RequestID != "correlation-1" ||
+		byActor[0].Detail.Status != 403 || byActor[0].Detail.Route != "/v0/records" {
+		t.Fatalf("actor results: %+v (%v), want IDs %v", byActor, err, issued[:2])
+	}
+	paged, err := store.List(ctx, org, audit.Filter{ActorID: actorID, Limit: 1, After: issued[1]})
+	if err != nil || len(paged) != 1 || paged[0].ID != issued[0] {
+		t.Fatalf("actor next page: %+v (%v), want ID %d", paged, err, issued[0])
+	}
+	legacy, err := store.List(ctx, org, audit.Filter{ActorID: "key-id", Action: "corpus.create", Limit: 10})
+	if err != nil || len(legacy) != 2 || legacy[0].ActorID != "key-id" {
+		t.Fatalf("legacy actor fallback: %+v (%v)", legacy, err)
+	}
+	anonymous := audit.Event{Action: "auth.refused", TargetType: "http_route", Outcome: "refused",
+		RequestID: "anonymous-" + org, Detail: audit.Detail{Status: 401}}
+	if err := store.Append(ctx, &anonymous); err != nil {
+		t.Fatal(err)
+	}
+	unassigned, err := store.List(ctx, "", audit.Filter{Action: "auth.refused", Limit: 1})
+	if err != nil || len(unassigned) != 1 || unassigned[0].ID != anonymous.ID ||
+		unassigned[0].ActorID != "" || unassigned[0].Actor != "" {
+		t.Fatalf("anonymous refusal: %+v (%v)", unassigned, err)
+	}
 	// A real PostgreSQL transaction abort, after the nested command wrote its
 	// Record, must replay the parent and its hooks. HTTP-like callbacks can
 	// translate that storage error into a refusal instead of returning it.

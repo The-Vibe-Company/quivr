@@ -1525,13 +1525,25 @@ type AdminDocumentPage struct {
 type AuditEvent struct {
 	Action string `json:"action"`
 
-	// Actor SHA-256-derived API key identifier; empty for unauthenticated attempts.
-	Actor  string `json:"actor"`
-	Detail struct {
+	// Actor Legacy field for the API key identifier; empty when no API key is authenticated.
+	Actor string `json:"actor"`
+
+	// ActorId Opaque actor identifier. Omitted when no actor could be authenticated.
+	ActorId *string `json:"actor_id,omitempty"`
+
+	// ApiKeyId SHA-256-derived identifier of the authenticated API key.
+	ApiKeyId *string `json:"api_key_id,omitempty"`
+
+	// CorrelationId Request correlation identifier from X-Request-ID.
+	CorrelationId *string `json:"correlation_id,omitempty"`
+	Detail        struct {
 		CredentialVersion *int    `json:"credential_version,omitempty"`
 		ErrorCode         *string `json:"error_code,omitempty"`
 		PlanId            *string `json:"plan_id,omitempty"`
-		Status            int     `json:"status"`
+
+		// Route Registered HTTP route template or unmatched.
+		Route  *string `json:"route,omitempty"`
+		Status int     `json:"status"`
 	} `json:"detail"`
 
 	// Id Decimal audit identifier, represented as text to preserve bigint precision.
@@ -3802,6 +3814,35 @@ type ListAuditEventsParams struct {
 	// Actor Exact API key identifier; no substring matching.
 	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
 
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// Action Exact audit action name; no substring matching.
+	Action *string `form:"action,omitempty" json:"action,omitempty"`
+
+	// TargetType Exact target type; no substring matching.
+	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
+
+	// TargetId Exact target identifier; no substring matching.
+	TargetId   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+}
+
+// ExportAuditEventsParams defines parameters for ExportAuditEvents.
+type ExportAuditEventsParams struct {
+	// Since Inclusive RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until Exclusive RFC3339 timestamp.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// Actor Exact API key identifier; no substring matching.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
 	// Action Exact audit action name; no substring matching.
 	Action *string `form:"action,omitempty" json:"action,omitempty"`
 
@@ -4566,6 +4607,9 @@ type ServerInterface interface {
 	// (GET /v0/admin/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
 
+	// (GET /v0/admin/audit/export)
+	ExportAuditEvents(w http.ResponseWriter, r *http.Request, params ExportAuditEventsParams)
+
 	// (POST /v0/admin/backfills)
 	RequestBackfill(w http.ResponseWriter, r *http.Request)
 
@@ -4882,6 +4926,17 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 	var params ListAuditEventsParams
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) ExportAuditEvents(w http.ResponseWriter, r *http.Request) {
+	var params ExportAuditEventsParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportAuditEvents(w, r, params)
 	}))
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
@@ -6137,6 +6192,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/audit", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/audit/export", wrapper.ExportAuditEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins", wrapper.RegisterPlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}", wrapper.GetPluginRegistration)
@@ -6258,6 +6314,65 @@ type ListAuditEventsdefaultJSONResponse struct {
 }
 
 func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportAuditEventsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ExportAuditEventsParams
+}
+
+type ExportAuditEventsResponseObject interface {
+	VisitExportAuditEventsResponse(w http.ResponseWriter) error
+}
+
+// ExportAuditEventsResponseFunc writes a deferred response, including streams and plugin answers.
+type ExportAuditEventsResponseFunc func(http.ResponseWriter)
+
+func (response ExportAuditEventsResponseFunc) VisitExportAuditEventsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type ExportAuditEvents200ResponseHeaders struct {
+	ContentDisposition *string
+}
+
+type ExportAuditEvents200JSONResponse struct {
+	Body    AuditEventPage
+	Headers ExportAuditEvents200ResponseHeaders
+}
+
+func (response ExportAuditEvents200JSONResponse) VisitExportAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportAuditEventsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ExportAuditEventsdefaultJSONResponse) VisitExportAuditEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -11299,6 +11414,9 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
 
+	// (GET /v0/admin/audit/export)
+	ExportAuditEvents(ctx context.Context, request ExportAuditEventsRequestObject) (ExportAuditEventsResponseObject, error)
+
 	// (POST /v0/admin/backfills)
 	RequestBackfill(ctx context.Context, request RequestBackfillRequestObject) (RequestBackfillResponseObject, error)
 
@@ -11678,6 +11796,34 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportAuditEvents operation middleware
+func (sh *strictHandler) ExportAuditEvents(w http.ResponseWriter, r *http.Request, params ExportAuditEventsParams) {
+	var request ExportAuditEventsRequestObject
+
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportAuditEvents(ctx, request.(ExportAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportAuditEventsResponseObject); ok {
+		if err := validResponse.VisitExportAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -48,7 +48,7 @@ func (a *API) ingestCommand(ctx context.Context, submit content.Submitter, raw a
 // only correlates the outcome; the entry's own key carries its identity. An
 // entry is held to the single-request bound on its raw bytes, so the same entry
 // submitted alone is never refused for size.
-func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index int, entry any, size int) transport.BatchItem {
+func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index int, entry any, size int) (transport.BatchItem, int) {
 	// Each entry gets a fresh budget, bounded by the batch and caller deadlines.
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -63,14 +63,14 @@ func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index in
 		}
 	}
 	if err != nil {
-		_, e := errorResponse(err, publicerr.ContentUnavailable)
+		status, e := errorResponse(err, publicerr.ContentUnavailable)
 		correlateError(ctx, &e)
 		item.Error = &e
-		return item
+		return item, status
 	}
 	wire := receiptToTransport(receipt)
 	item.Receipt = &wire
-	return item
+	return item, http.StatusAccepted
 }
 
 // handleIngestRecord accepts one record command after the strict dispatcher
@@ -125,11 +125,17 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 		result := transport.BatchResult{Items: make([]transport.BatchItem, 0, len(entries))}
 		receipts, retryable := 0, 0
 		for i, entry := range entries {
-			item := a.batchEntry(r.Context(), submit, i, entry, len(sized.Items[i]))
+			item, status := a.batchEntry(r.Context(), submit, i, entry, len(sized.Items[i]))
 			if item.Receipt != nil {
 				receipts++
-			} else if item.Error.Retryable {
-				retryable++
+			} else {
+				if err := a.auditEmbeddedRefusal(r.Context(), status, item.Error.Code); err != nil {
+					writeError(w, publicerr.StorageUnavailable, nil)
+					return nil
+				}
+				if item.Error.Retryable {
+					retryable++
+				}
 			}
 			result.Items = append(result.Items, item)
 		}

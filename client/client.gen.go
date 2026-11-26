@@ -1525,13 +1525,25 @@ type AdminDocumentPage struct {
 type AuditEvent struct {
 	Action string `json:"action"`
 
-	// Actor SHA-256-derived API key identifier; empty for unauthenticated attempts.
-	Actor  string `json:"actor"`
-	Detail struct {
+	// Actor Legacy field for the API key identifier; empty when no API key is authenticated.
+	Actor string `json:"actor"`
+
+	// ActorId Opaque actor identifier. Omitted when no actor could be authenticated.
+	ActorId *string `json:"actor_id,omitempty"`
+
+	// ApiKeyId SHA-256-derived identifier of the authenticated API key.
+	ApiKeyId *string `json:"api_key_id,omitempty"`
+
+	// CorrelationId Request correlation identifier from X-Request-ID.
+	CorrelationId *string `json:"correlation_id,omitempty"`
+	Detail        struct {
 		CredentialVersion *int    `json:"credential_version,omitempty"`
 		ErrorCode         *string `json:"error_code,omitempty"`
 		PlanId            *string `json:"plan_id,omitempty"`
-		Status            int     `json:"status"`
+
+		// Route Registered HTTP route template or unmatched.
+		Route  *string `json:"route,omitempty"`
+		Status int     `json:"status"`
 	} `json:"detail"`
 
 	// Id Decimal audit identifier, represented as text to preserve bigint precision.
@@ -3802,6 +3814,35 @@ type ListAuditEventsParams struct {
 	// Actor Exact API key identifier; no substring matching.
 	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
 
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// Action Exact audit action name; no substring matching.
+	Action *string `form:"action,omitempty" json:"action,omitempty"`
+
+	// TargetType Exact target type; no substring matching.
+	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
+
+	// TargetId Exact target identifier; no substring matching.
+	TargetId   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+}
+
+// ExportAuditEventsParams defines parameters for ExportAuditEvents.
+type ExportAuditEventsParams struct {
+	// Since Inclusive RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until Exclusive RFC3339 timestamp.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// Actor Exact API key identifier; no substring matching.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
 	// Action Exact audit action name; no substring matching.
 	Action *string `form:"action,omitempty" json:"action,omitempty"`
 
@@ -4638,8 +4679,13 @@ type ClientInterface interface {
 
 	// ListAuditEvents performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 	//
-	// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+	// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 	ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportAuditEvents performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+	//
+	// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+	ExportAuditEvents(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestBackfillWithBody performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
 	// with any type of body and a specified content type.
@@ -5451,9 +5497,24 @@ func (c *Client) ListActivePlugins(ctx context.Context, reqEditors ...RequestEdi
 
 // ListAuditEvents performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 //
-// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 func (c *Client) ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAuditEventsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportAuditEvents performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+//
+// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+func (c *Client) ExportAuditEvents(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportAuditEventsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7718,6 +7779,168 @@ func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*h
 		if params.Actor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor", *params.Actor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Action != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "action", *params.Action, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.TargetType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "target_type", *params.TargetType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.TargetId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "target_id", *params.TargetId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PageCursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page_cursor", *params.PageCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportAuditEventsRequest constructs an http.Request for the ExportAuditEvents method
+func NewExportAuditEventsRequest(server string, params *ExportAuditEventsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/audit/export")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "since", *params.Since, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Until != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "until", *params.Until, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Actor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor", *params.Actor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -12539,10 +12762,17 @@ type ClientWithResponsesInterface interface {
 
 	// ListAuditEventsWithResponse performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 	//
-	// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+	// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error)
+
+	// ExportAuditEventsWithResponse performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+	//
+	// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ExportAuditEventsWithResponse(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*ExportAuditEventsResponse, error)
 
 	// RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
 	// with any type of body and a specified content type.
@@ -13619,6 +13849,61 @@ func (r ListAuditEventsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListAuditEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ExportAuditEventsResponse200Headers the declared response headers of an HTTP 200 response for ExportAuditEvents
+type ExportAuditEventsResponse200Headers struct {
+	ContentDisposition *string
+}
+
+type ExportAuditEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AuditEventPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ExportAuditEventsResponse200Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ExportAuditEventsResponse) GetJSON200() *AuditEventPage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ExportAuditEventsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportAuditEventsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportAuditEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportAuditEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportAuditEventsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -18380,7 +18665,7 @@ func (c *ClientWithResponses) ListActivePluginsWithResponse(ctx context.Context,
 
 // ListAuditEventsWithResponse performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 //
-// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error) {
@@ -18389,6 +18674,19 @@ func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, p
 		return nil, err
 	}
 	return ParseListAuditEventsResponse(rsp)
+}
+
+// ExportAuditEventsWithResponse performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+//
+// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ExportAuditEventsWithResponse(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*ExportAuditEventsResponse, error) {
+	rsp, err := c.ExportAuditEvents(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportAuditEventsResponse(rsp)
 }
 
 // RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
@@ -20264,6 +20562,52 @@ func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse,
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseExportAuditEventsResponse parses an HTTP response from a ExportAuditEventsWithResponse call
+func ParseExportAuditEventsResponse(rsp *http.Response) (*ExportAuditEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportAuditEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AuditEventPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ExportAuditEventsResponse200Headers
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		response.Headers200 = &headers
 	}
 
 	return response, nil
