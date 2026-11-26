@@ -68,7 +68,7 @@ including on macOS; direct Compose uses a rendered overlay for non-default setti
 The Compose adapter manages PostgreSQL, Temporal and Weaviate; API and worker processes stay
 native host processes.
 
-Use the Compose adapter to apply settings for an existing `make dev` project. Launch a fresh
+Use the Compose adapter to apply settings for an existing `make dev` project (it waits for readiness; switching an existing SQLite-backed stack to PostgreSQL Temporal starts fresh workflow history, so drain work first and retire any unused `temporal-data` volume). Launch a fresh
 local project with `make dev`; external Compose projects provide `QUIVR_DB_PASSWORD` through the environment.
 If it is unset, `apply` reuses the selected `.scratch/PROJECT/state.json` password, supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately, and never creates or rotates credentials:
 

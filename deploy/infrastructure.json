@@ -118,6 +118,7 @@
         },
         "temporal": {
           "environment": {
+            "NUM_HISTORY_SHARDS": "64",
             "SQL_MAX_CONNS": "50",
             "SQL_MAX_IDLE_CONNS": "50",
             "SQL_VIS_MAX_CONNS": "20",

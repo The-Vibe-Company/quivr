@@ -45,6 +45,8 @@ AUTOSCALER_KEYS = {
 }
 KEYS = {'postgres': POSTGRES_KEYS, 'temporal': TEMPORAL_KEYS, 'weaviate': WEAVIATE_KEYS,
         'autoscaler': AUTOSCALER_KEYS, 'api': set(), 'worker': set(), 'worker-bulk': set()}
+# Unprefixed Temporal container keys such as DB or DB_PORT collide with common shell/CI variables.
+ENV_PREFIX = {'temporal': 'QUIVR_TEMPORAL_'}
 VECTOR_HOST_AUTH = {'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED': 'false',
     'AUTHENTICATION_APIKEY_ENABLED': 'true', 'AUTHENTICATION_APIKEY_USERS': 'quivr-engine',
     'AUTHORIZATION_ADMINLIST_ENABLED': 'true', 'AUTHORIZATION_ADMINLIST_USERS': 'quivr-engine',
@@ -128,8 +130,11 @@ def resolve(profile='small', overrides=None, environ=None, declaration_path=DECL
     services = merge(services, profiles[profile])
     if environ is not None:
         for name, service in services.items():
-            service.setdefault('environment', {}).update({key: environ[key] for key in KEYS[name]
-                                                         if environ.get(key)})
+            prefix = ENV_PREFIX.get(name, '')
+            service.setdefault('environment', {}).update({
+                key: environ[prefix + key] for key in KEYS[name]
+                if environ.get(prefix + key)
+            })
     if overrides:
         override = json.loads(Path(overrides).read_text())
         if not isinstance(override, dict) or set(override) != {'services'}:

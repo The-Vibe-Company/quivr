@@ -178,6 +178,10 @@ class Infrastructure(unittest.TestCase):
                          {'postgres': {'condition': 'service_healthy'}})
         self.assertEqual(direct['services']['temporal']['environment']['POSTGRES_SEEDS'], 'postgres')
         self.assertEqual(direct['services']['temporal']['environment']['POSTGRES_PWD'], '${QUIVR_DB_PASSWORD:?}')
+        self.assertEqual(direct['services']['temporal']['healthcheck']['test'], [
+            'CMD-SHELL',
+            'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"',
+        ])
         self.assertNotIn('command', direct['services']['temporal'])
         self.assertNotIn('volumes', direct['services']['temporal'])
         self.assertNotIn('temporal-data', direct['volumes'])
@@ -208,7 +212,7 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '16GiB')
         self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '64000000000', 'cpus': '32'})
         self.assertEqual(large['temporal']['environment']['DB'], 'postgres12')
-        self.assertEqual(large['temporal']['environment']['NUM_HISTORY_SHARDS'], '4')
+        self.assertEqual(large['temporal']['environment']['NUM_HISTORY_SHARDS'], '64')
         self.assertEqual(large['temporal']['environment']['SQL_MAX_CONNS'], '50')
         self.assertEqual(large['temporal']['environment']['SQL_VIS_MAX_CONNS'], '20')
         self.assertEqual(large['temporal']['deploy']['resources']['limits'], {'memory': '4000000000', 'cpus': '4'})
@@ -233,12 +237,19 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(large['weaviate']['environment']['PERSISTENCE_MEMTABLES_MAX_SIZE_MB'], '1024')
         rendered = subprocess.run([sys.executable, str(ROOT / 'deploy/infrastructure.py'), 'render'],
                                   env={**os.environ, 'QUIVR_POSTGRES_MAX_CONNECTIONS': '321',
-                                       'QUIVR_POSTGRES_AUTOPREWARM': 'off'},
+                                       'QUIVR_POSTGRES_AUTOPREWARM': 'off',
+                                       'DB': 'sqlite', 'DB_PORT': '3306',
+                                       'QUIVR_TEMPORAL_DB': 'postgres12_pgx',
+                                       'QUIVR_TEMPORAL_SQL_MAX_CONNS': '32'},
                                   capture_output=True, text=True, timeout=5, check=True)
-        self.assertEqual(json.loads(rendered.stdout)['services']['postgres']['environment']
-                         ['QUIVR_POSTGRES_MAX_CONNECTIONS'], '321')
-        self.assertEqual(json.loads(rendered.stdout)['services']['postgres']['environment']
-                         ['QUIVR_POSTGRES_AUTOPREWARM'], 'off')
+        rendered_services = json.loads(rendered.stdout)['services']
+        self.assertEqual(rendered_services['postgres']['environment']['QUIVR_POSTGRES_MAX_CONNECTIONS'], '321')
+        self.assertEqual(rendered_services['postgres']['environment']['QUIVR_POSTGRES_AUTOPREWARM'], 'off')
+        # Stray unprefixed shell variables (DB, DB_PORT) must not override or break Temporal render;
+        # only explicit QUIVR_TEMPORAL_* host overrides are read from os.environ.
+        self.assertEqual(rendered_services['temporal']['environment']['DB'], 'postgres12_pgx')
+        self.assertEqual(rendered_services['temporal']['environment']['DB_PORT'], '5432')
+        self.assertEqual(rendered_services['temporal']['environment']['SQL_MAX_CONNS'], '32')
         with tempfile.TemporaryDirectory() as directory:
             override = Path(directory) / 'installation.json'
             override.write_text('''{"services":{"weaviate":{"environment":{"GOMEMLIMIT":"3500MiB"},
@@ -255,11 +266,12 @@ class Infrastructure(unittest.TestCase):
                 override.write_text(json.dumps({'services': {role: {'image': 'registry/image@sha256:' + 'a' * 64}}}))
                 with self.assertRaisesRegex(ValueError, 'image overrides'):
                     infra.resolve(overrides=override)
-            # Valid PostgreSQL driver variants and bootstrap overrides are accepted.
-            override.write_text('{"services":{"temporal":{"environment":{"DB":"postgres12_pgx","SKIP_DB_CREATE":"true"}}}}')
-            pgx = infra.resolve(overrides=override)
+            # Valid PostgreSQL driver variants and bootstrap/shard overrides are accepted.
+            override.write_text('{"services":{"temporal":{"environment":{"DB":"postgres12_pgx","SKIP_DB_CREATE":"true","NUM_HISTORY_SHARDS":"4"}}}}')
+            pgx = infra.resolve('large', overrides=override)
             self.assertEqual(pgx['temporal']['environment']['DB'], 'postgres12_pgx')
             self.assertEqual(pgx['temporal']['environment']['SKIP_DB_CREATE'], 'true')
+            self.assertEqual(pgx['temporal']['environment']['NUM_HISTORY_SHARDS'], '4')
             for key, value in (
                 ('DB', 'sqlite'), ('DB', 'cassandra'), ('DB', 'mysql8'),
                 ('DB_PORT', '0'), ('DB_PORT', '65536'),
@@ -572,7 +584,8 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(environment['QUIVR_DB_PASSWORD'], 'fixture-password')
             self.assertEqual(environment['QUIVR_LOCAL_ROOT'], str(project))
             self.assertEqual(environment['QUIVR_MODEL_ROOT'], str(root / '.scratch/e5-model'))
-            self.assertEqual(run.call_args.args[0][-5:], ['up', '-d', 'postgres', 'temporal', 'weaviate'])
+            self.assertEqual(run.call_args.args[0][-8:],
+                             ['up', '-d', '--wait', '--wait-timeout', '120', 'postgres', 'temporal', 'weaviate'])
             with patch.object(compose_module.infra, 'ROOT', root):
                 with self.assertRaisesRegex(RuntimeError, 'local project state'):
                     Compose('missing', run=run).apply(root / 'overlay.json')
@@ -618,6 +631,9 @@ class Infrastructure(unittest.TestCase):
         self.assertNotIn('numReplicas', existing)
         self.assertNotIn('multiRegionConfig', existing)
         self.assertEqual(existing['dockerfilePath'], 'deploy/railway/core.Dockerfile')
+        temporal_config = deployment_config(services['temporal'], new=False)
+        self.assertIsNone(temporal_config['dockerfilePath'])
+        self.assertEqual(temporal_config['source'], {'image': services['temporal']['image']})
 
 
 if __name__ == '__main__':

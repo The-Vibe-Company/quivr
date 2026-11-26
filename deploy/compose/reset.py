@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = {'postgres': ('data', '/var/lib/postgresql/data'),
            'seaweed': ('seaweed-data', '/data'),
            'weaviate': ('weaviate-data', '/var/lib/weaviate')}
+LEGACY_VOLUMES = {'temporal': 'temporal-data'}
 
 
 def check_tracked_processes(state, directory, prune=False):
@@ -50,6 +51,7 @@ class ComposeReset:
         self.adapter = Compose(spec['project'])
         self.directory = ROOT / '.scratch' / spec['project']
         self.volumes = {}
+        self.legacy_volumes = {}
 
     def preview(self):
         if sys.version_info < (3, 12):
@@ -92,13 +94,35 @@ class ComposeReset:
             self.volumes[role] = name
         if not self.adapter.configured('temporal'):
             raise RuntimeError('reset requires the selected Stack dependencies running')
+        for role, logical in LEGACY_VOLUMES.items():
+            candidates = self.adapter.run([
+                'volume', 'ls', '-q',
+                '--filter', 'label=com.docker.compose.project=' + self.spec['project'],
+                '--filter', 'label=com.docker.compose.volume=' + logical,
+            ]).split()
+            if not candidates:
+                continue
+            if len(candidates) != 1:
+                raise RuntimeError('legacy data volume is ambiguous')
+            name = candidates[0]
+            volume = json.loads(self.adapter.run(['volume', 'inspect', name]))[0]
+            labels = volume.get('Labels') or {}
+            if labels.get('com.docker.compose.project') != self.spec['project'] or labels.get('com.docker.compose.volume') != logical:
+                raise RuntimeError('legacy data volume is outside the selected Compose declaration')
+            attached = self.adapter.run(['ps', '-aq', '--filter', 'volume=' + name]).split()
+            if any(cid != self.adapter.containers.get(role) for cid in attached):
+                raise RuntimeError('legacy data volume is attached outside the selected service')
+            self.legacy_volumes[role] = name
         # An archive used as a source must live outside the storage being reset.
         from deploy.reset_storage import inventory
         self.storage = inventory(self.config['s3'])
         self.index_count = vector_objects(WeaviateClient.from_config(self.config).request_json('/v1/objects?limit=1'))
-        return {'volumes': self.volumes, 'object_store': self.storage,
-                'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
-                'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
+        preview = {'volumes': self.volumes, 'object_store': self.storage,
+                   'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
+                   'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
+        if self.legacy_volumes:
+            preview['legacy_volumes'] = self.legacy_volumes
+        return preview
 
     def reset(self):
         checkpoint = Checkpoint(self.directory / 'reset-state.json', self.spec)
@@ -123,7 +147,10 @@ class ComposeReset:
             check_tracked_processes(stack.state, self.directory, prune=True)
             stack.save()
             stack.down(True)
-            for name in self.volumes.values():
+            for name in self.legacy_volumes.values():
+                self.adapter.run(['volume', 'rm', name])
+            all_volumes = list(self.volumes.values()) + list(self.legacy_volumes.values())
+            for name in all_volumes:
                 # A successful inspect proves deletion did not complete.
                 remaining = self.adapter.run(['volume', 'ls', '-q', '--filter', 'name=^' + name + '$']).split()
                 if name in remaining:
@@ -145,7 +172,7 @@ class ComposeReset:
             if counts.strip() != '0':
                 raise RuntimeError('replacement database is not empty')
             checkpoint.save('complete')
-            return {'deleted_volumes': list(self.volumes.values()), 'deleted_vector_objects': self.index_count,
+            return {'deleted_volumes': all_volumes, 'deleted_vector_objects': self.index_count,
                     'deleted_blob_objects_at_least': self.storage['objects_at_least'],
                     'terminated_workflows': workflows, 'schema': 'fresh migrations applied', 'writers': 'restarted'}
         except Exception:

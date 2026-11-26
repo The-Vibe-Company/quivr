@@ -132,7 +132,8 @@ class Compose:
         environment.setdefault('QUIVR_MODEL_ROOT', str(infra.ROOT / '.scratch/e5-model'))
         # Only infrastructure services; never scale workers or alter unrelated services.
         self.run(['compose', '--project-name', self.project, '-f', str(infra.ROOT / 'deploy/compose/compose.yaml'),
-                  '-f', str(overlay), 'up', '-d', 'postgres', 'temporal', *([] if external else ['weaviate'])], environ=environment)
+                  '-f', str(overlay), 'up', '-d', '--wait', '--wait-timeout', '120',
+                  'postgres', 'temporal', *([] if external else ['weaviate'])], environ=environment)
 
     def initialize_monitoring(self):
         self.configured('postgres')

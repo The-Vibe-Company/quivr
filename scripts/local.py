@@ -355,15 +355,15 @@ class Stack:
         self.start_dependencies()
         normalizer_plugin.prepare(self);subscription_plugin.prepare(self);fixture_plugin.prepare(self)
         self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);push_plugin.start(self);connector_plugin.start_first_party(self);fixture_plugin.start(self);self.start_processes()
-    def start_dependencies(self,attempts=2):
+    def start_dependencies(self,*services,attempts=2,wait_timeout=180):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
         more bounded attempt; every retry is recorded in readiness.json, never hidden."""
         for attempt in range(1,attempts+1):
             try:
-                self.compose('up','-d','--wait','--wait-timeout','180');return
+                self.compose('up','-d','--wait','--wait-timeout',str(wait_timeout),*services);return
             except subprocess.CalledProcessError as error:
-                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',capture_output=True,text=True).stdout.split()
+                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',*services,capture_output=True,text=True).stdout.split()
                 self.readiness.setdefault('dependency_start_retries',[]).append({'attempt':attempt,'exited':crashed})
                 self.save_readiness()
                 # Only a crashed dependency is retried; a healthcheck timeout fails at once.
@@ -408,7 +408,7 @@ class Stack:
                 try: os.kill(pid,signal.SIGKILL)
                 except ProcessLookupError: pass
             s['pids']=[];self.save()
-            self.compose('up','-d','--wait','--wait-timeout','90',dependency)
+            self.start_dependencies(dependency, wait_timeout=90)
             self.config()
             self.start_processes()
             replay=call('POST','/v0/records',command);assert replay['receipt_id']==rid

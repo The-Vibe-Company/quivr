@@ -111,9 +111,10 @@ def stack(images, settings, values, initialized=False):
             'BIND_ON_IP': '0.0.0.0', 'TEMPORAL_BROADCAST_ADDRESS': '127.0.0.1',
             'TEMPORAL_ADDRESS': '127.0.0.1:7233'}, 'deploy': settings['temporal']['deploy'],
             'depends_on': {'postgres': {'condition': 'service_healthy'}},
-            'healthcheck': health(['CMD', 'temporal', 'operator', 'namespace', 'describe',
-                                   '--address', '127.0.0.1:7233', '--namespace',
-                                   settings['temporal']['environment']['DEFAULT_NAMESPACE']], 90)},
+            'healthcheck': health([
+                'CMD-SHELL',
+                'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"',
+            ], 90)},
         'seaweed': {'image': images['seaweed'], 'environment': {
             'S3_ACCESS_KEY': '${S3_ACCESS_KEY:?}', 'S3_SECRET_KEY': '${S3_SECRET_KEY:?}'},
             'volumes': ['seaweed-data:/data'], 'healthcheck': health([

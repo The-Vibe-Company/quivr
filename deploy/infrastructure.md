@@ -43,9 +43,9 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | `QUIVR_POSTGRES_WAL_COMPRESSION` / `QUIVR_POSTGRES_STAT_STATEMENTS_TRACK` | lz4 / all; reduce full-page WAL bytes while retaining complete statement statistics for diagnosis. |
 | `QUIVR_POSTGRES_JIT` / `QUIVR_POSTGRES_SYNCHRONOUS_COMMIT` | on / on; JIT supports planned compilation and may override to off, while only `on` is accepted for durable acknowledgements. |
 | `QUIVR_POSTGRES_COMMIT_DELAY` / `QUIVR_POSTGRES_COMMIT_SIBLINGS` | 100 microseconds / 5 active transactions; allow a small durable WAL group-commit window during concurrent writes. Delay accepts 0–100000 microseconds (0 disables the window); siblings accepts 0–1000. Acknowledgements still wait for WAL flush. Tune against storage and throughput measurements. |
-| Temporal `DB` / `DB_PORT` | `postgres12` / `5432`; durable PostgreSQL persistence (`postgres12` or `postgres12_pgx` only, never SQLite). Connection host, user and password stay outside the declaration. |
+| Temporal `DB` / `DB_PORT` | `postgres12` / `5432`; durable PostgreSQL persistence (`postgres12` or `postgres12_pgx` only, never SQLite). Host/shell overrides use `QUIVR_TEMPORAL_<KEY>`; JSON overrides use container keys directly. Connection host, user and password stay outside the declaration. |
 | Temporal `DBNAME` / `VISIBILITY_DBNAME` | `temporal` / `temporal_visibility`; separate PostgreSQL databases bootstrapped and migrated idempotently by `auto-setup` (`SKIP_DB_CREATE=false`, `SKIP_SCHEMA_SETUP=false`). Must differ from each other and `quivr`. |
-| Temporal `NUM_HISTORY_SHARDS` / `DEFAULT_NAMESPACE` / `DEFAULT_NAMESPACE_RETENTION` | `4` (immutable once initialized) / `default` / `72h` (minimum `24h`); `SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES=true` skips test search attributes. |
+| Temporal `NUM_HISTORY_SHARDS` / `DEFAULT_NAMESPACE` / `DEFAULT_NAMESPACE_RETENTION` | `4` small / `64` large (immutable once initialized; existing `small` stacks moving to `large` must override `NUM_HISTORY_SHARDS=4`) / `default` / `72h` (minimum `24h`); `SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES=true` skips test search attributes. |
 | Temporal `SQL_MAX_CONNS` / `SQL_VIS_MAX_CONNS` | `20` / `10` small, `50` / `20` large (matching idle pools); bounded within PostgreSQL `max_connections` alongside API/worker pools. |
 | Weaviate `DEFAULT_QUANTIZATION` | rq-8; reduce vector memory, retaining explicit per-space configuration. |
 | `ASYNC_INDEXING` | false in small, true in large; decouple large writes from ANN indexing with visibility lag. |
@@ -88,8 +88,8 @@ generated PostgreSQL and autoscaler artifacts in sync.
 
 The Compose adapter exposes `preview`, `apply`, `check`, and `initialize-monitoring`; it
 manages PostgreSQL, Temporal and Weaviate, while API and worker processes stay native hosts.
-`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json`.
-Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
+`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json` and waits for readiness (bounded).
+Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. Switching an existing SQLite-backed project to PostgreSQL Temporal starts a fresh Temporal history (drain active work first; `deploy/reset.py` or manual `docker volume rm` retires the unused legacy `temporal-data` volume). If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
 
 ```sh
 python3 deploy/compose/infrastructure.py preview \

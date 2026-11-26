@@ -98,15 +98,8 @@
       },
       "healthcheck": {
         "test": [
-          "CMD",
-          "temporal",
-          "operator",
-          "namespace",
-          "describe",
-          "--address",
-          "127.0.0.1:7233",
-          "--namespace",
-          "default"
+          "CMD-SHELL",
+          "temporal operator namespace describe --address 127.0.0.1:7233 --namespace \"$${DEFAULT_NAMESPACE:-default}\""
         ],
         "interval": "2s",
         "timeout": "5s",

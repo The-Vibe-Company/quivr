@@ -62,6 +62,10 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual(temporal['environment']['POSTGRES_SEEDS'], 'postgres')
             self.assertEqual(temporal['environment']['POSTGRES_PWD'], '${QUIVR_DB_PASSWORD:?}')
             self.assertEqual(temporal['depends_on'], {'postgres': {'condition': 'service_healthy'}})
+            self.assertEqual(temporal['healthcheck']['test'], [
+                'CMD-SHELL',
+                'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"',
+            ])
             self.assertNotIn('volumes', temporal)
             self.assertNotIn('command', temporal)
             for rendered in ((directory / 'compose.yaml').read_text(),

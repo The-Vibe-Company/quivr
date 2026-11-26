@@ -42,6 +42,7 @@ def deployment_config(spec, new):
             config['source'] = {'image': None}
     elif 'image' in spec:
         config['dockerfilePath'] = None
+        config['source'] = {'image': spec['image']}
     if 'healthcheck' in spec:
         config.update(healthcheckPath=spec['healthcheck'],
                       healthcheckTimeout=spec.get('healthcheck_timeout', 180))
