@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 
 def vector_endpoint(value):
@@ -42,6 +42,50 @@ def vector_objects(value):
             or not isinstance(count, int) or count < len(objects or []) or bool(count) != bool(objects)):
         raise RuntimeError('unexpected Weaviate object count')
     return count
+
+
+def vector_inventory(client):
+    """Count indexed Weaviate objects across shared and multi-tenant collections."""
+    total = vector_objects(client.request_json('/v1/objects?limit=1'))
+    schema = client.request_json('/v1/schema')
+    if not isinstance(schema, dict) or 'classes' not in schema:
+        raise RuntimeError('unexpected Weaviate schema response')
+    classes = schema['classes']
+    if classes is None:
+        classes = []
+    if not isinstance(classes, list):
+        raise RuntimeError('unexpected Weaviate schema response')
+    for entry in classes:
+        if not isinstance(entry, dict):
+            raise RuntimeError('unexpected Weaviate schema response')
+        mt = entry.get('multiTenancyConfig')
+        if not (isinstance(mt, dict) and mt.get('enabled') is True):
+            continue
+        name = entry.get('class')
+        if not isinstance(name, str) or not name:
+            raise RuntimeError('unexpected Weaviate class name')
+        encoded_class = quote(name, safe='')
+        tenants = client.request_json(f'/v1/schema/{encoded_class}/tenants')
+        if tenants is None:
+            tenants = []
+        if not isinstance(tenants, list):
+            raise RuntimeError('unexpected Weaviate tenants response')
+        for tenant in tenants:
+            if not isinstance(tenant, dict) or not isinstance(tenant.get('name'), str) or not tenant['name']:
+                raise RuntimeError('unexpected Weaviate tenant entry')
+            status = tenant.get('activityStatus')
+            if status is not None and not isinstance(status, str):
+                raise RuntimeError('unexpected Weaviate tenant entry')
+            if (status or 'ACTIVE').upper() not in ('ACTIVE', 'HOT'):
+                # Inactive or offloaded tenants cannot be queried via /v1/objects
+                # without activating them; count each as non-empty so reset never
+                # mistakes an archived tenant for an empty index.
+                total += 1
+                continue
+            encoded_tenant = quote(tenant['name'], safe='')
+            total += vector_objects(client.request_json(
+                f'/v1/objects?class={encoded_class}&tenant={encoded_tenant}&limit=1'))
+    return total
 
 
 class ResetTimeout(RuntimeError):

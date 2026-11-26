@@ -6,7 +6,7 @@ import shlex
 import sys
 
 from deploy.compose.infrastructure import Compose
-from deploy.reset_support import Checkpoint, terminate_workflows, vector_objects, require_local_vector
+from deploy.reset_support import Checkpoint, terminate_workflows, vector_inventory, require_local_vector
 from deploy.weaviate_client import WeaviateClient
 from scripts import local_secrets
 
@@ -117,7 +117,7 @@ class ComposeReset:
         # An archive used as a source must live outside the storage being reset.
         from deploy.reset_storage import inventory
         self.storage = inventory(self.config['s3'])
-        self.index_count = vector_objects(WeaviateClient.from_config(self.config).request_json('/v1/objects?limit=1'))
+        self.index_count = vector_inventory(WeaviateClient.from_config(self.config))
         preview = {'volumes': self.volumes, 'object_store': self.storage,
                    'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
                    'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
@@ -165,7 +165,7 @@ class ComposeReset:
             storage = inventory(config['s3'])
             if storage['objects_at_least'] != 0 or storage['truncated']:
                 raise RuntimeError('new object store is not empty')
-            if vector_objects(WeaviateClient.from_config(config).request_json('/v1/objects?limit=1')) != 0:
+            if vector_inventory(WeaviateClient.from_config(config)) != 0:
                 raise RuntimeError('new vector store is not empty')
             postgres = stack.compose('ps', '-q', 'postgres', capture_output=True, text=True).stdout.strip()
             counts = self.adapter.run(['exec', postgres, 'sh', '-c',

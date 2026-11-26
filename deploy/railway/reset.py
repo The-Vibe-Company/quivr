@@ -85,11 +85,13 @@ class RailwayReset:
         return json.loads(self.ssh('api', 'python3 -c ' + shlex.quote(code)))
 
     def index_inventory(self):
-        from deploy.reset_support import vector_objects
-        code = ('import json\n' + inspect.getsource(vector_objects)
+        from deploy.reset_support import vector_inventory, vector_objects
+        code = ('import json\nfrom urllib.parse import quote\n'
+                + inspect.getsource(vector_objects)
+                + '\n' + inspect.getsource(vector_inventory)
                 + '\n' + inspect.getsource(weaviate_client)
                 + '\nc=json.load(open("/tmp/quivr-runtime.json")); '
-                'print(vector_objects(WeaviateClient.from_config(c).request_json("/v1/objects?limit=1")))')
+                'print(vector_inventory(WeaviateClient.from_config(c)))')
         return int(self.ssh('api', 'python3 -c ' + shlex.quote(code)).strip())
 
     def preview(self):

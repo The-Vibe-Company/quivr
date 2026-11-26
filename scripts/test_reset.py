@@ -115,7 +115,7 @@ class RailwayIsolation(unittest.TestCase):
                             del removing[identifier]
                     if args[0] == 'ssh':
                         command = args[-1]
-                        if '/v1/objects?limit=1' in command:
+                        if 'vector_inventory(' in command:
                             return '0'
                         if 'weaviate_url' in command and 'json.dumps' in command:
                             return json.dumps(None if failure == 'unknown-index' else
@@ -326,6 +326,57 @@ class WeaviateTransport(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Weaviate'):
                 vector_objects(response)
 
+    def test_vector_inventory_counts_shared_active_and_inactive_multi_tenant_objects(self):
+        from deploy.reset_support import vector_inventory
+
+        class FakeClient:
+            def __init__(self, responses):
+                self.responses = responses
+                self.paths = []
+
+            def request_json(self, path):
+                self.paths.append(path)
+                if path not in self.responses:
+                    raise AssertionError(f'unexpected Weaviate path: {path}')
+                return self.responses[path]
+
+        active_and_archived = FakeClient({
+            '/v1/objects?limit=1': {'objects': []},
+            '/v1/schema': {'classes': [
+                {'class': 'QuivrTextV4', 'multiTenancyConfig': {'enabled': False}},
+                {'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}},
+            ]},
+            '/v1/schema/QuivrTextV5/tenants': [
+                {'name': 'org/c1/g1', 'activityStatus': 'ACTIVE'},
+                {'name': 'org/c2/g1', 'activityStatus': 'INACTIVE'},
+            ],
+            '/v1/objects?class=QuivrTextV5&tenant=org%2Fc1%2Fg1&limit=1': {
+                'objects': [{'id': 'obj-1'}],
+                'totalResults': 3,
+            },
+        })
+        self.assertEqual(vector_inventory(active_and_archived), 4)
+        self.assertNotIn('/v1/objects?class=QuivrTextV5&tenant=org%2Fc2%2Fg1&limit=1', active_and_archived.paths)
+
+        empty_multi_tenant = FakeClient({
+            '/v1/objects?limit=1': {'objects': []},
+            '/v1/schema': {'classes': [{'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}}]},
+            '/v1/schema/QuivrTextV5/tenants': [],
+        })
+        self.assertEqual(vector_inventory(empty_multi_tenant), 0)
+
+        for bad_schema in ({}, {'classes': 'invalid'}):
+            with self.assertRaisesRegex(RuntimeError, 'Weaviate schema'):
+                vector_inventory(FakeClient({'/v1/objects?limit=1': {'objects': []}, '/v1/schema': bad_schema}))
+
+        bad_tenants = FakeClient({
+            '/v1/objects?limit=1': {'objects': []},
+            '/v1/schema': {'classes': [{'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}}]},
+            '/v1/schema/QuivrTextV5/tenants': {'not': 'a list'},
+        })
+        with self.assertRaisesRegex(RuntimeError, 'Weaviate tenants'):
+            vector_inventory(bad_tenants)
+
 
 class RailwayAuthScope(unittest.TestCase):
     def test_environment_token_cannot_prove_project_volume_isolation(self):
@@ -430,7 +481,9 @@ class ComposeProcessScope(unittest.TestCase):
                      patch.object(compose_reset.sys, 'version_info', (3, 12, 0)), \
                      patch('deploy.reset_storage.inventory', return_value={'objects_at_least': 0, 'truncated': False}), \
                      patch.object(compose_reset.WeaviateClient, 'from_config') as client:
-                    client.return_value.request_json.return_value = {'objects': []}
+                    client.return_value.request_json.side_effect = lambda path: (
+                        {'classes': []} if path == '/v1/schema' else {'objects': []}
+                    )
                     resetter = compose_reset.ComposeReset({'deployment': 'legacy', 'project': 'legacy-stack'})
                     resetter.adapter.run = docker
                     if foreign_attachment:
