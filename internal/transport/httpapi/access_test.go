@@ -285,6 +285,11 @@ func TestCorrelationIDIsEchoedAndLogged(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			gotReq, gotCorr := rec.Header().Get("X-Request-ID"), rec.Header().Get("X-Correlation-ID")
+			for _, rejected := range append(append([]string{}, tc.request...), tc.corr...) {
+				if tc.wantReq == "" && gotReq == rejected || tc.wantCorr == "" && gotCorr == rejected {
+					t.Fatalf("rejected value %q was trusted: X-Request-ID %q X-Correlation-ID %q", rejected, gotReq, gotCorr)
+				}
+			}
 			if gotReq == "" || gotCorr == "" || (tc.wantReq != "" && gotReq != tc.wantReq) || (tc.wantCorr != "" && gotCorr != tc.wantCorr) || (tc.wantCorr == "" && gotReq != gotCorr) {
 				t.Fatalf("X-Request-ID %q X-Correlation-ID %q; want %q and %q", gotReq, gotCorr, tc.wantReq, tc.wantCorr)
 			}

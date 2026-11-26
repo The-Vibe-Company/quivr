@@ -28,17 +28,22 @@ function useSearchPhases(onUnauthorized: () => void) {
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    const read = () =>
-      request<SearchPhases>("/demo/admin/search-phases", undefined, controller.signal)
+    // A poll that answers after a newer one started must not overwrite it.
+    let latest = 0;
+    const read = () => {
+      const mine = ++latest;
+      return request<SearchPhases>("/demo/admin/search-phases", undefined, controller.signal)
         .then((next) => {
+          if (mine !== latest) return;
           setData(next);
           setStatus("ready");
         })
         .catch((e) => {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || mine !== latest) return;
           if (e instanceof APIError && e.status === 401) return onUnauthorized();
           setStatus("error");
         });
+    };
     setStatus("loading");
     void read();
     const timer = setInterval(() => {

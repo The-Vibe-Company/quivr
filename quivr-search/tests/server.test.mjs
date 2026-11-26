@@ -137,7 +137,10 @@ test("search relays the engine's profile list and the chosen profile", async (t)
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     seen.push({ method: req.method, url: req.url, body: Buffer.concat(chunks).toString("utf8") });
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Server-Timing": "routing;dur=1.5, encode;dur=4",
+    });
     res.end(
       JSON.stringify(
         req.url === "/v0/search/profiles"
@@ -165,6 +168,17 @@ test("search relays the engine's profile list and the chosen profile", async (t)
   });
   assert.equal(search.status, 200);
   assert.deepEqual(JSON.parse(seen.at(-1).body), body);
+  // The engine's phases reach the browser, with the facade's own core time
+  // after them, and feed the Admin tab's per-phase numbers.
+  assert.match(search.headers.get("server-timing"), /^routing;dur=1\.5, encode;dur=4, core;dur=[\d.]+;desc="\d+ calls?"$/);
+  const phases = await fetch(base + "/demo/admin/search-phases");
+  assert.deepEqual(await phases.json(), {
+    searches: 1,
+    phases: [
+      { phase: "routing", p50_ms: 1.5, p95_ms: 1.5 },
+      { phase: "encode", p50_ms: 4, p95_ms: 4 },
+    ],
+  });
 });
 
 test("connector routes are fenced to the demo corpus and mutations must be same-origin", async (t) => {

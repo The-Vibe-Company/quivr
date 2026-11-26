@@ -352,9 +352,14 @@ async function send(res, status, data, headers = {}) {
     ...headers,
   };
   const spent = coreTime.getStore();
+  // The engine's phases, when it sent any, then the facade's own core time.
   if (spent?.calls)
-    head["Server-Timing"] =
-      `core;dur=${spent.ms.toFixed(1)};desc="${spent.calls} call${spent.calls > 1 ? "s" : ""}"`;
+    head["Server-Timing"] = [
+      headers["Server-Timing"],
+      `core;dur=${spent.ms.toFixed(1)};desc="${spent.calls} call${spent.calls > 1 ? "s" : ""}"`,
+    ]
+      .filter(Boolean)
+      .join(", ");
   if (status === 200 && req.method === "GET" && !headers["Cache-Control"]) {
     head.ETag = tag(body);
     head["Cache-Control"] = "private, no-cache";
@@ -797,7 +802,12 @@ async function handle(req, res) {
         }
       }
       if (!response) throw fail(404, "Page introuvable.");
-      await send(res, response.status, response.data);
+      await send(
+        res,
+        response.status,
+        response.data,
+        response.serverTiming ? { "Server-Timing": response.serverTiming } : {},
+      );
       return;
     }
     if (req.method !== "GET" && req.method !== "HEAD")

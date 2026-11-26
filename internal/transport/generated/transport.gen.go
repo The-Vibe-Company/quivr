@@ -10512,15 +10512,29 @@ func (response SearchRecordsResponseFunc) VisitSearchRecordsResponse(w http.Resp
 	return nil
 }
 
-type SearchRecords200JSONResponse SearchResponse
+type SearchRecords200ResponseHeaders struct {
+	ServerTiming   *string
+	XCorrelationID *string
+}
+
+type SearchRecords200JSONResponse struct {
+	Body    SearchResponse
+	Headers SearchRecords200ResponseHeaders
+}
 
 func (response SearchRecords200JSONResponse) VisitSearchRecordsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ServerTiming != nil {
+		w.Header().Set("Server-Timing", fmt.Sprint(*response.Headers.ServerTiming))
+	}
+	if response.Headers.XCorrelationID != nil {
+		w.Header().Set("X-Correlation-ID", fmt.Sprint(*response.Headers.XCorrelationID))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
