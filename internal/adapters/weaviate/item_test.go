@@ -527,6 +527,327 @@ func TestItemSearchFetchesTextOnlyForPassageSelection(t *testing.T) {
 	}
 }
 
+func TestItemPassageSelectionPrefersSubstantiveAndBM25(t *testing.T) {
+	richHarbour := "Maritime authorities published a detailed schedule for the harbour ferries operating across the northern bay throughout the autumn season."
+	richHarbourDense := "Harbour planners confirmed that harbour ferries will double harbour departures because ferries now carry record commuter traffic daily."
+	richCommon := "The quarterly report summarizes municipal spending across regional schools, transit corridors, libraries, and water treatment plants."
+	richRare := "Engineers deployed new photovoltaic arrays across coastal stations to stabilize afternoon electricity supply during peak summer demand."
+	richLead := "Delegates met in Geneva on Monday to negotiate binding targets for grid modernization, industrial efficiency, and cross-border energy storage."
+	richFrench := "Les élections municipales ont mobilisé une forte participation dans les communes côtières autour des transports publics et du logement."
+	richFrenchStop := "Le conseil municipal a présenté le plan annuel des investissements pour le réseau fluvial et les équipements scolaires régionaux."
+
+	for _, tc := range []struct {
+		name     string
+		analyzer string
+		query    string
+		passages []itemSearchRow
+		want     string
+	}{
+		{
+			name:     "rich paragraph beats 8-char matching boilerplate",
+			analyzer: "folded",
+			query:    "harbour",
+			passages: []itemSearchRow{
+				{Segment: "aaa-boilerplate", Version: "v1", Text: "Harbour."},
+				{Segment: "zzz-rich", Version: "v1", Text: richHarbour},
+			},
+			want: "zzz-rich",
+		},
+		{
+			name:     "rich paragraph beats short multi-term dateline boilerplate",
+			analyzer: "folded",
+			query:    "harbour 2026",
+			passages: []itemSearchRow{
+				{Segment: "aaa-dateline", Version: "v1", Text: "Harbour 2026"},
+				{Segment: "zzz-rich", Version: "v1", Text: richHarbour},
+			},
+			want: "zzz-rich",
+		},
+		{
+			name:     "title match with zero body hits prefers rich paragraph over 8-char footer",
+			analyzer: "folded",
+			query:    "unmatched-title-token",
+			passages: []itemSearchRow{
+				{Segment: "aaa-footer", Version: "v1", Text: "Page 1/4"},
+				{Segment: "bbb-notice", Version: "v1", Text: "All rights reserved by the publisher for this edition."},
+				{Segment: "zzz-lead", Version: "v1", Text: richLead},
+			},
+			want: "zzz-lead",
+		},
+		{
+			name:     "bm25 breaks equal coverage ties by term frequency",
+			analyzer: "folded",
+			query:    "harbour ferries",
+			passages: []itemSearchRow{
+				{Segment: "aaa-single", Version: "v1", Text: richHarbour},
+				{Segment: "zzz-multi", Version: "v1", Text: richHarbourDense},
+			},
+			want: "zzz-multi",
+		},
+		{
+			name:     "bm25 breaks equal coverage ties by rare query term idf",
+			analyzer: "folded",
+			query:    "photovoltaic report",
+			passages: []itemSearchRow{
+				{Segment: "aaa-common-1", Version: "v1", Text: richCommon},
+				{Segment: "bbb-common-2", Version: "v1", Text: richCommon + " Additional budget appendices follow."},
+				{Segment: "ccc-common-3", Version: "v1", Text: richCommon + " Committee minutes are archived online."},
+				{Segment: "zzz-rare", Version: "v1", Text: richRare},
+			},
+			want: "zzz-rare",
+		},
+		{
+			name:     "french analyzer prefers rich paragraph over 8-char boilerplate",
+			analyzer: "french_light",
+			query:    "election",
+			passages: []itemSearchRow{
+				{Segment: "aaa-short", Version: "v1", Text: "Élection"},
+				{Segment: "zzz-rich", Version: "v1", Text: richFrench},
+			},
+			want: "zzz-rich",
+		},
+		{
+			name:     "stopword-only query under french analyzer falls back to folded scoring",
+			analyzer: "french_light",
+			query:    "le",
+			passages: []itemSearchRow{
+				{Segment: "aaa-short", Version: "v1", Text: "Le 2026."},
+				{Segment: "zzz-rich", Version: "v1", Text: richFrenchStop},
+			},
+			want: "zzz-rich",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+				switch {
+				case strings.Contains(query, "bm25:"):
+					return itemSearchResponse([]itemSearchRow{{Version: "v1", Score: "4.2"}}), nil
+				case strings.Contains(query, "passageText"):
+					return itemSearchResponse(tc.passages), nil
+				default:
+					meta := append([]itemSearchRow(nil), tc.passages...)
+					for i := range meta {
+						meta[i].Text = ""
+					}
+					return itemSearchResponse(meta), nil
+				}
+			})
+			store := weaviate.New("http://index.invalid")
+			store.Client.Transport = transport
+			g := content.Generation{
+				ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+				Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: tc.analyzer}},
+			}
+			hits, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+				Query: tc.query, Mode: "lexical", GroupBy: "record", K: 10,
+			})
+			if err != nil || len(hits) != 1 || hits[0].SegmentID != tc.want {
+				t.Fatalf("got %+v, err=%v; want segment %s", hits, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
+	const totalItems = 60
+	rich := "Maritime authorities published a detailed schedule for the harbour ferries operating across the northern bay throughout the autumn season."
+	bm25Rows := make([]itemSearchRow, totalItems)
+	byVersion := make(map[string][]itemSearchRow, totalItems)
+	for i := 0; i < totalItems; i++ {
+		ver := fmt.Sprintf("v-%03d", i)
+		bm25Rows[i] = itemSearchRow{Version: ver, Score: fmt.Sprintf("%.2f", float64(totalItems-i))}
+		byVersion[ver] = []itemSearchRow{
+			{Segment: fmt.Sprintf("aaa-%03d", i), Version: ver, Text: "Harbour."},
+			{Segment: fmt.Sprintf("zzz-%03d", i), Version: ver, Text: rich},
+		}
+	}
+
+	parseLimit := func(query string) int {
+		idx := strings.LastIndex(query, "limit:")
+		if idx < 0 {
+			return -1
+		}
+		rest := query[idx+len("limit:"):]
+		end := strings.IndexAny(rest, "), }")
+		if end > 0 {
+			rest = rest[:end]
+		}
+		n, _ := strconv.Atoi(rest)
+		return n
+	}
+
+	filterPassages := func(query string, withText bool) []itemSearchRow {
+		var out []itemSearchRow
+		for i := 0; i < totalItems; i++ {
+			ver := fmt.Sprintf("v-%03d", i)
+			for _, row := range byVersion[ver] {
+				if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) ||
+					strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(ver)) {
+					if !withText {
+						row.Text = ""
+					}
+					out = append(out, row)
+				}
+			}
+		}
+		return out
+	}
+
+	t.Run("hybrid bounds scan limits, skips tail text, and reuses dense tail passages", func(t *testing.T) {
+		var mu sync.Mutex
+		var textVersions []string
+		var tailQueriedDense bool
+		denseTailVer := "v-040"
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLimit(query)
+			if lim >= 2400 {
+				return nil, fmt.Errorf("unexpected 2400-passage scan limit %d in %s", lim, query)
+			}
+			switch {
+			case strings.Contains(query, "nearVector:"):
+				if lim > 600 {
+					return nil, fmt.Errorf("dense scan limit %d exceeds 600", lim)
+				}
+				d := 0.1
+				return itemSearchResponse([]itemSearchRow{{Segment: "dense-40", Version: denseTailVer, Distance: &d}}), nil
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(bm25Rows), nil
+			case strings.Contains(query, "passageText"):
+				rows := filterPassages(query, true)
+				mu.Lock()
+				for _, r := range rows {
+					textVersions = append(textVersions, r.Version)
+				}
+				mu.Unlock()
+				return itemSearchResponse(rows), nil
+			default:
+				if lim > 512 {
+					return nil, fmt.Errorf("passage metadata scan limit %d exceeds 512", lim)
+				}
+				if strings.Contains(query, strconv.Quote("v-039")) && strings.Contains(query, strconv.Quote(denseTailVer)) {
+					mu.Lock()
+					tailQueriedDense = true
+					mu.Unlock()
+				}
+				return itemSearchResponse(filterPassages(query, false)), nil
+			}
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "hybrid", Vector: []float32{1}, GroupBy: "record", Limit: 5, K: retrieval.CandidateLimit,
+			Hybrid: &retrieval.HybridOptions{Alpha: 0.5, Fusion: retrieval.FusionRelativeScore},
+		})
+		if err != nil {
+			t.Fatalf("hybrid search failed: %v", err)
+		}
+		if len(hits) != totalItems {
+			t.Fatalf("got %d hits, want all %d items preserved for fusion/fallback", len(hits), totalItems)
+		}
+		if tailQueriedDense {
+			t.Fatal("tail passage query should reuse dense passage instead of re-querying Weaviate")
+		}
+		// Limit 5 gives selectionK = 10 (5 + min(5, 10)), so only v-000..v-009 get text scoring.
+		seenText := map[string]bool{}
+		for _, v := range textVersions {
+			seenText[v] = true
+			if v >= "v-010" {
+				t.Fatalf("fetched passageText for tail version %s outside top-K", v)
+			}
+		}
+		if len(seenText) != 10 {
+			t.Fatalf("fetched passageText for %d versions, want 10 top-K versions", len(seenText))
+		}
+		byVer := map[string]string{}
+		for _, h := range hits {
+			byVer[h.VersionID] = h.SegmentID
+		}
+		for i := 0; i < 10; i++ {
+			ver := fmt.Sprintf("v-%03d", i)
+			if want := fmt.Sprintf("zzz-%03d", i); byVer[ver] != want {
+				t.Fatalf("top-K version %s picked %s, want rich passage %s", ver, byVer[ver], want)
+			}
+		}
+		if byVer[denseTailVer] != "dense-40" {
+			t.Fatalf("dense tail version %s picked %s, want dense-40", denseTailVer, byVer[denseTailVer])
+		}
+	})
+
+	t.Run("owner-filtered top items promote eligible tail items into text selection", func(t *testing.T) {
+		var textVersions []string
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(bm25Rows[:15]), nil
+			case strings.Contains(query, "passageText"):
+				rows := filterPassages(query, true)
+				for _, r := range rows {
+					textVersions = append(textVersions, r.Version)
+				}
+				return itemSearchResponse(rows), nil
+			default:
+				// Only v-010..v-014 belong to the requested owner; v-000..v-009 return empty.
+				var out []itemSearchRow
+				for _, r := range filterPassages(query, false) {
+					if r.Version >= "v-010" {
+						out = append(out, r)
+					}
+				}
+				return itemSearchResponse(out), nil
+			}
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: 2, K: 15, EvaluationPlugin: "trial.owner",
+		})
+		if err != nil {
+			t.Fatalf("owner-filtered lexical search failed: %v", err)
+		}
+		if len(hits) != 5 {
+			t.Fatalf("got %d hits, want 5 owner-eligible items", len(hits))
+		}
+		// Limit 2 gives selectionK = 4; top 4 eligible promoted items (v-010..v-013) pick rich passages.
+		byVer := map[string]string{}
+		for _, h := range hits {
+			byVer[h.VersionID] = h.SegmentID
+		}
+		for i := 10; i < 14; i++ {
+			ver := fmt.Sprintf("v-%03d", i)
+			if want := fmt.Sprintf("zzz-%03d", i); byVer[ver] != want {
+				t.Fatalf("promoted version %s picked %s, want rich passage %s", ver, byVer[ver], want)
+			}
+		}
+		for _, v := range textVersions {
+			if v == "v-014" {
+				t.Fatal("should not fetch passageText beyond promoted selectionK")
+			}
+		}
+	})
+
+	t.Run("dense grouped refill caps scan depth below 2400", func(t *testing.T) {
+		var maxSeen int
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLimit(query)
+			if lim > maxSeen {
+				maxSeen = lim
+			}
+			// Always return `lim` passages belonging to a single version to force refill.
+			d := 0.2
+			rows := make([]itemSearchRow, lim)
+			for i := range rows {
+				rows[i] = itemSearchRow{Segment: fmt.Sprintf("seg-%04d", i), Version: "only-version", Distance: &d}
+			}
+			return itemSearchResponse(rows), nil
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "semantic", Vector: []float32{1}, GroupBy: "record", K: retrieval.CandidateLimit,
+		})
+		if err != nil || len(hits) != 1 {
+			t.Fatalf("dense refill: %+v, %v", hits, err)
+		}
+		if maxSeen != 600 {
+			t.Fatalf("dense max scan depth = %d, want 600", maxSeen)
+		}
+	})
+}
+
 type itemSearchRow struct {
 	Segment  string
 	Version  string
