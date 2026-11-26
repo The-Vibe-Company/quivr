@@ -38,7 +38,7 @@ docker compose ps -a
 docker compose --profile demo up -d
 ```
 
-The migrator exits with code zero; API, worker and dependencies stay running. The API listens on `http://127.0.0.1:8080`, and the demo on `http://127.0.0.1:3000`. Read `DEMO_PASSWORD` privately from `.env` to sign in. Create a collection, add text, and search it by keyword and meaning. The [ingestion guide](../guides/add-content.mdx) describes the public API; the [search guide](../guides/search.mdx) covers lexical, semantic and hybrid modes. CPU ingestion can take time: wait for documents to become searchable and receive vectors before checking meaning searches.
+The migrator exits with code zero; API, worker and dependencies stay running. The API listens on `http://127.0.0.1:8080` (functional routes only), the internal admin listener on `http://127.0.0.1:8082` (`/v0/admin/*` with `QUIVR_ADMIN_KEY`), and the demo on `http://127.0.0.1:3000`. Read `DEMO_PASSWORD` privately from `.env` to sign in. Create a collection, add text, and search it by keyword and meaning. The [ingestion guide](../guides/add-content.mdx) describes the public API; the [search guide](../guides/search.mdx) covers lexical, semantic and hybrid modes. CPU ingestion can take time: wait for documents to become searchable and receive vectors before checking meaning searches.
 
 If migration fails, inspect that container privately, correct the configuration, remove the exited migrator with `docker compose rm -f migrate`, and run `docker compose up -d` again. Do not delete volumes to retry startup.
 

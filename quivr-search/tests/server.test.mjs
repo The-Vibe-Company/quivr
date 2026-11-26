@@ -1722,3 +1722,88 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   assert.equal((await get("/demo/session")).corpus_id, "demo-3");
   assert.equal(errors.length, 1);
 });
+
+test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", async (t) => {
+  const functionalSeen = [];
+  const adminSeen = [];
+  let allowFunctionalAdmin = false;
+  const functional = http.createServer((req, res) => {
+    functionalSeen.push({ url: req.url, auth: req.headers.authorization });
+    if (!allowFunctionalAdmin && req.url.startsWith("/v0/admin")) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ code: "not_found", message: "not found", retryable: false }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ items: [] }));
+  });
+  const admin = http.createServer((req, res) => {
+    adminSeen.push({ url: req.url, auth: req.headers.authorization });
+    if (req.headers.authorization !== "Bearer fixture-admin-key") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ code: "invalid_api_key", message: "invalid api key", retryable: false }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/v0/admin/active-plugins") {
+      return res.end(JSON.stringify({ items: [] }));
+    }
+    res.end(JSON.stringify({ items: [] }));
+  });
+  for (const server of [functional, admin]) {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+  }
+  const base = await startDemo(t, functional.address().port, {
+    QUIVR_ADMIN_URL: `http://127.0.0.1:${admin.address().port}`,
+    QUIVR_ADMIN_KEY: "fixture-admin-key",
+  });
+  const response = await fetch(base + "/demo/admin/plugins");
+  assert.equal(response.status, 200);
+  assert.ok(adminSeen.some((entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-admin-key"));
+  assert.ok(!functionalSeen.some((entry) => entry.url.startsWith("/v0/admin")));
+  // Explicit empty strings (such as cleared Railway variables) fall back to combined mode cleanly.
+  allowFunctionalAdmin = true;
+  const combinedBase = await startDemo(t, functional.address().port, {
+    QUIVR_ADMIN_URL: "",
+    QUIVR_ADMIN_KEY: "",
+  });
+  const combinedResponse = await fetch(combinedBase + "/demo/admin/plugins");
+  assert.equal(combinedResponse.status, 200);
+  assert.ok(
+    functionalSeen.some(
+      (entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-server-key",
+    ),
+  );
+  // Setting only one of QUIVR_ADMIN_URL or QUIVR_ADMIN_KEY must refuse startup.
+  for (const partial of [
+    { QUIVR_ADMIN_URL: `http://127.0.0.1:${admin.address().port}`, QUIVR_ADMIN_KEY: "" },
+    { QUIVR_ADMIN_URL: "", QUIVR_ADMIN_KEY: "fixture-admin-key" },
+  ]) {
+    const child = spawn(process.execPath, ["server.mjs"], {
+      env: {
+        ...process.env,
+        HOST: "127.0.0.1",
+        PORT: "0",
+        DEMO_PASSWORD: "",
+        QUIVR_API_URL: `http://127.0.0.1:${functional.address().port}`,
+        QUIVR_API_KEY: "fixture-server-key",
+        ...partial,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stderr = [];
+    child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+    const [code] = await Promise.race([
+      once(child, "close"),
+      delay(5000, undefined, { ref: false }).then(() => {
+        child.kill();
+        throw new Error("partial admin configuration did not stop the server");
+      }),
+    ]);
+    assert.notEqual(code, 0);
+    assert.match(stderr.join(""), /QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY/);
+  }
+});

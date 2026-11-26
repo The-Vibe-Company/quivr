@@ -2,6 +2,7 @@
 """Resolve portable infrastructure intent; never contains credentials or live selectors."""
 import argparse
 import copy
+import ipaddress
 import json
 import math
 import os
@@ -43,8 +44,9 @@ AUTOSCALER_KEYS = {
     'QUIVR_AUTOSCALER_DOWNSCALE_WINDOW', 'QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL',
     'QUIVR_AUTOSCALER_REQUEST_TIMEOUT',
 }
+API_KEYS = {'QUIVR_ADMIN_LISTEN'}
 KEYS = {'postgres': POSTGRES_KEYS, 'temporal': TEMPORAL_KEYS, 'weaviate': WEAVIATE_KEYS,
-        'autoscaler': AUTOSCALER_KEYS, 'api': set(), 'worker': set(), 'worker-bulk': set()}
+        'autoscaler': AUTOSCALER_KEYS, 'api': API_KEYS, 'worker': set(), 'worker-bulk': set()}
 # Unprefixed Temporal container keys such as DB or DB_PORT collide with common shell/CI variables.
 ENV_PREFIX = {'temporal': 'QUIVR_TEMPORAL_'}
 VECTOR_HOST_AUTH = {'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED': 'false',
@@ -80,10 +82,10 @@ def validate(services, resolved=False):
         environment = service.get('environment', {})
         if not isinstance(environment, dict) or set(environment) - KEYS[name]:
             raise ValueError('unsupported infrastructure setting')
-        for value in environment.values():
-            if not isinstance(value, str) or not re.fullmatch(r'[a-zA-Z0-9./_-]+', value):
-                raise ValueError('invalid infrastructure value')
         for key, value in environment.items():
+            pattern = r'[a-zA-Z0-9.:_\[\]-]+' if key == 'QUIVR_ADMIN_LISTEN' else r'[a-zA-Z0-9./_-]+'
+            if not isinstance(value, str) or not re.fullmatch(pattern, value):
+                raise ValueError('invalid infrastructure value')
             if safe_environment(key, value) == '<invalid>':
                 raise ValueError('invalid infrastructure value')
         if name == 'postgres' and environment.get('QUIVR_POSTGRES_MIN_WAL_SIZE'):
@@ -395,9 +397,45 @@ def safe_environment(name, value):
         valid = value in ('none', 'top', 'all')
     elif name == 'QUIVR_POSTGRES_WAL_COMPRESSION':
         valid = value in ('on', 'off', 'pglz', 'lz4', 'zstd')
+    elif name == 'QUIVR_ADMIN_LISTEN':
+        valid = valid_admin_listen(value)
     else:
         valid = bool(re.fullmatch(r'[0-9]{1,12}(\.[0-9]{1,6})?(kB|MB|GB|TB|KiB|MiB|GiB|TiB|ms|s|min|m|h)?', value))
     return value if valid else '<invalid>'
+
+
+def valid_admin_listen(value):
+    if value == 'off':
+        return True
+    wildcard = False
+    if value.startswith('['):
+        host, sep, port_text = value[1:].partition(']:')
+        if not sep:
+            return False
+        try:
+            addr = ipaddress.IPv6Address(host)
+        except ValueError:
+            return False
+        wildcard = addr.is_unspecified
+    else:
+        host, sep, port_text = value.rpartition(':')
+        if not sep or not host:
+            return False
+        if host != 'localhost':
+            try:
+                addr = ipaddress.IPv4Address(host)
+            except ValueError:
+                return False
+            wildcard = addr.is_unspecified
+    if not re.fullmatch(r'[1-9][0-9]{0,4}', port_text):
+        return False
+    port = int(port_text)
+    if not 1 <= port <= 65535 or port == 8080:
+        return False
+    # Container probe listeners bind 0.0.0.0:8081; only a matching wildcard host can share port 8081.
+    if port == 8081 and not wildcard:
+        return False
+    return True
 
 
 def runtime_script(name):

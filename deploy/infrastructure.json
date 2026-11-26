@@ -196,7 +196,9 @@
     },
     "services": {
       "api": {
-        "environment": {}
+        "environment": {
+          "QUIVR_ADMIN_LISTEN": "0.0.0.0:8082"
+        }
       },
       "worker": {
         "environment": {}

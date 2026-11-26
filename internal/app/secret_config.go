@@ -61,6 +61,9 @@ func (cfg *Config) loadSecrets(databaseOnly bool) error {
 	if err := loadSecretMap("QUIVR_API_KEYS", "keys", &cfg.Keys); err != nil {
 		return err
 	}
+	if err := loadSecretMap("QUIVR_ADMIN_KEYS", "admin_keys", &cfg.AdminKeys); err != nil {
+		return err
+	}
 	if err := loadSecretMap("QUIVR_TELEMETRY_HEADERS", "telemetry.headers", &cfg.Telemetry.Headers); err != nil {
 		return err
 	}

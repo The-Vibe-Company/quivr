@@ -653,6 +653,74 @@ class Infrastructure(unittest.TestCase):
         self.assertIsNone(temporal_config['dockerfilePath'])
         self.assertEqual(temporal_config['source'], {'image': services['temporal']['image']})
 
+    def test_admin_listener_is_declared_validated_and_drift_checked(self):
+        from deploy.railway.infrastructure import Railway
+        from deploy.railway import provision as railway_provision
+        load_services = railway_provision.load_services
+        for profile in ('small', 'large'):
+            resolved = infra.resolve(profile)
+            self.assertEqual(resolved['api']['environment']['QUIVR_ADMIN_LISTEN'], '0.0.0.0:8082')
+            services = load_services(profile)
+            self.assertEqual(services['api']['variables']['QUIVR_ADMIN_LISTEN'], '0.0.0.0:8082')
+            self.assertEqual(services['web']['variables']['QUIVR_ADMIN_URL'], 'http://api.railway.internal:8082')
+        with tempfile.TemporaryDirectory() as directory:
+            override = Path(directory) / 'admin.json'
+            # Sharing the container probe port 8081 requires a matching wildcard bind.
+            override.write_text('{"services":{"api":{"environment":{"QUIVR_ADMIN_LISTEN":"0.0.0.0:8081"}}}}')
+            self.assertEqual(infra.resolve(overrides=override)['api']['environment']['QUIVR_ADMIN_LISTEN'], '0.0.0.0:8081')
+            self.assertEqual(load_services(overrides=override)['web']['variables']['QUIVR_ADMIN_URL'], 'http://api.railway.internal:8081')
+            # Loopback admin listener is allowed in generic IaC outside port 8081,
+            # but Railway rejects loopback because the separate web service uses api.railway.internal.
+            override.write_text('{"services":{"api":{"environment":{"QUIVR_ADMIN_LISTEN":"127.0.0.1:8082"}}}}')
+            self.assertEqual(infra.resolve(overrides=override)['api']['environment']['QUIVR_ADMIN_LISTEN'], '127.0.0.1:8082')
+            with self.assertRaisesRegex(ValueError, 'non-loopback'):
+                load_services(overrides=override)
+            override.write_text('{"services":{"api":{"environment":{"QUIVR_ADMIN_LISTEN":"off"}}}}')
+            self.assertEqual(infra.resolve(overrides=override)['api']['environment']['QUIVR_ADMIN_LISTEN'], 'off')
+            self.assertNotIn('QUIVR_ADMIN_URL', load_services(overrides=override)['web']['variables'])
+            # Re-provisioning Railway with QUIVR_ADMIN_LISTEN=off must explicitly clear stale web admin variables.
+            writes = []
+            def fake_cli(*args, stdin=None):
+                if args[:2] == ('status', '--json'):
+                    return json.dumps({'id': 'project', 'name': 'quivr-v2-demo',
+                                       'environments': {'edges': [{'node': {'id': 'env'}}]}})
+                if args[:2] == ('service', 'list'):
+                    return json.dumps([{'id': f'svc-{name}', 'name': name}
+                                       for name in ('postgres', 'temporal', 'seaweed', 'weaviate', 'tei', 'api', 'worker', 'worker-bulk', 'web')])
+                if args[:2] == ('volume', 'list'):
+                    return json.dumps({'volumes': [{'serviceName': name} for name in ('postgres', 'temporal', 'seaweed', 'weaviate')]})
+                if args[:2] == ('variable', 'set'):
+                    writes.append((args[args.index('--service') + 1], args[2], stdin))
+                return '{}'
+            with patch.object(railway_provision, 'ROOT', Path(directory)), \
+                    patch.object(railway_provision, 'cli', side_effect=fake_cli), \
+                    patch.object(sys, 'argv', ['provision.py', '--project-id', 'project', '--environment-id', 'env',
+                                               '--apply', '--overrides', str(override)]):
+                railway_provision.main()
+            web_writes = {key: value for sid, key, value in writes if sid == 'svc-web'}
+            self.assertEqual(web_writes.get('QUIVR_ADMIN_URL'), '')
+            self.assertEqual(web_writes.get('QUIVR_ADMIN_KEY'), '')
+            for bad in ('0.0.0.0:8080', '127.0.0.1:8080', '127.0.0.1:8081', 'localhost:8081', '[::1]:8081',
+                        'http://api:8082', '0.0.0.0:0', '0.0.0.0:70000', 'bad-host:8082'):
+                with self.subTest(bad=bad):
+                    override.write_text(json.dumps({'services': {'api': {'environment': {'QUIVR_ADMIN_LISTEN': bad}}}}))
+                    with self.assertRaisesRegex(ValueError, 'invalid infrastructure value'):
+                        infra.resolve(overrides=override)
+        # Railway apply/check must sync QUIVR_ADMIN_LISTEN and mask invalid secrets.
+        transport = RailwayTransport()
+        transport.variables = {'QUIVR_ADMIN_LISTEN': 'private-secret-token'}
+        transport.startup = 'QUIVR_ADMIN_LISTEN=0.0.0.0:8082\n'
+        adapter = Railway('project', 'environment', run=transport)
+        adapter.select({'api': 'api-service'})
+        checked = adapter.check(infra.resolve('small'))
+        self.assertEqual(checked['status'], 'drift')
+        self.assertNotIn('private-secret-token', json.dumps(checked))
+        adapter.apply(infra.resolve('small'))
+        writes = [(args, stdin) for args, stdin in transport.calls if args[:2] == ['variable', 'set']]
+        self.assertEqual(writes, [
+            (['variable', 'set', 'QUIVR_ADMIN_LISTEN', '--stdin', '--skip-deploys',
+              '--project', 'project', '--environment', 'environment', '--service', 'api-service'], '0.0.0.0:8082')])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -50,6 +50,7 @@ type API struct {
 	processWork       context.Context
 	router            *routing.Mux
 	routes            http.Handler
+	surface           routeSurface
 	loadMetrics       *telemetry.LoadMetrics
 	searchAdmission   *SearchAdmission
 	facets            chan struct{}
@@ -97,22 +98,41 @@ type API struct {
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
+	a, err := buildAPI(store, contents, search, uploadService, keys, cursorKey, surfaceAll, options...)
+	if err != nil {
+		return nil, err
+	}
+	return http.HandlerFunc(a.serveAccess), nil
+}
+
+func buildAPI(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, surface routeSurface, options ...Option) (*API, error) {
 	contract, err := loadContract()
 	if err != nil {
 		return nil, err
 	}
-	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
+	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, surface: surface}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
 	}
 	a.Changes.Corpora = store
+	if surface == surfaceAdmin {
+		// The internal admin listener never trusts forwarding headers.
+		a.pushProxyCIDRs = nil
+	}
 	for _, raw := range a.pushProxyCIDRs {
 		if _, err := netip.ParsePrefix(raw); err != nil {
 			return nil, errors.New("trusted push proxies require CIDRs")
 		}
 	}
-	mux := routing.New(a.routeFallback)
+	var allow func(string) bool
+	switch surface {
+	case surfaceFunctional:
+		allow = func(path string) bool { return !IsAdminPath(path) }
+	case surfaceAdmin:
+		allow = IsAdminPath
+	}
+	mux := routing.NewFiltered(a.routeFallback, allow)
 	a.routes = transport.HandlerWithOptions(transport.NewStrictHandler(a, nil), transport.StdHTTPServerOptions{BaseRouter: mux})
 	for alias, target := range contract.aliases {
 		if err := mux.HandleAlias(alias, target); err != nil {
@@ -121,8 +141,10 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	}
 	a.router = mux
 	a.loadMetrics.RegisterRoutes(mux.Templates()...)
-	a.loadMetrics.BindSearchAdmission(a.searchAdmission.Stats)
-	return http.HandlerFunc(a.serveAccess), nil
+	if surface != surfaceAdmin {
+		a.loadMetrics.BindSearchAdmission(a.searchAdmission.Stats)
+	}
+	return a, nil
 }
 
 const (

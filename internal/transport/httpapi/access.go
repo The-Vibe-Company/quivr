@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
@@ -22,11 +23,20 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 	if a.processWork != nil {
 		r = r.WithContext(lifecycle.WithWorkContext(r.Context(), a.processWork))
 	}
-	scope, keyID := a.auditKey(r)
+	surfaceBlocked := a.surfaceBlocked(r.URL.Path)
+	var scope corpus.Scope
+	keyID := ""
+	if !surfaceBlocked {
+		scope, keyID = a.auditKey(r)
+	}
 	r.Pattern = a.router.Pattern(r)
 	logRequest(w, r, keyID, a.pushClientIP(r).String(), a.loadMetrics, func(w *responseWriter, r *http.Request) {
 		if a.draining != nil && a.draining() {
 			writeError(w, publicerr.ContentUnavailable, nil)
+			return
+		}
+		if surfaceBlocked {
+			writeError(w, publicerr.NotFound, nil)
 			return
 		}
 		a.serveAudited(w, r, scope, keyID)

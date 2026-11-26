@@ -15,6 +15,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 COMPONENTS = ('core', 'web', 'cpu-embeddings', 'postgres', 'seaweed', 'tei')
 SECRET_KEYS = ('QUIVR_DB_PASSWORD', 'QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY',
+               'QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY',
                'QUIVR_CURSOR_KEY', 'QUIVR_CREDENTIAL_KEY', 'S3_ACCESS_KEY',
                'S3_SECRET_KEY', 'EMBED_API_KEY', 'DEMO_PASSWORD')
 
@@ -84,10 +85,19 @@ def stack(images, settings, values, initialized=False):
     def health(command, retries=60):
         return {'test': command, 'interval': '2s', 'timeout': '5s', 'retries': retries, 'start_period': '10s'}
     healthy = {name: {'condition': 'service_healthy'} for name in ('postgres', 'temporal', 'seaweed', 'weaviate', 'embeddings')}
+    admin_listen = settings['api']['environment']['QUIVR_ADMIN_LISTEN']
+    admin_port = ''
+    if admin_listen != 'off':
+        admin_host = admin_listen[1:].partition(']:')[0] if admin_listen.startswith('[') else admin_listen.rpartition(':')[0]
+        if admin_host not in ('0.0.0.0', '::'):
+            raise ValueError('QUIVR_ADMIN_LISTEN must bind 0.0.0.0 or [::] inside the container (or off)')
+        admin_port = admin_listen.rsplit(':', 1)[1]
     core_env = {
         'QUIVR_SINGLE_MACHINE': '1', 'QUIVR_ORGANIZATION': '${QUIVR_ORGANIZATION:-quivr}',
         'DATABASE_URL': 'postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable',
         'QUIVR_API_KEY': '${QUIVR_API_KEY:?}', 'QUIVR_OPERATOR_KEY': '${QUIVR_OPERATOR_KEY:?}',
+        'QUIVR_ADMIN_KEY': '${QUIVR_ADMIN_KEY:?}', 'QUIVR_DEMO_ADMIN_KEY': '${QUIVR_DEMO_ADMIN_KEY:?}',
+        'QUIVR_ADMIN_LISTEN': admin_listen,
         'QUIVR_CURSOR_KEY': '${QUIVR_CURSOR_KEY:?}', 'QUIVR_CREDENTIAL_KEY': '${QUIVR_CREDENTIAL_KEY:?}',
         'TEMPORAL_ADDRESS': 'temporal:7233', 'WEAVIATE_URL': 'http://weaviate:8080',
         'TEI_URL': 'http://embeddings:80' if model == 'e5' else 'http://embeddings:8080',
@@ -133,13 +143,16 @@ def stack(images, settings, values, initialized=False):
             'depends_on': healthy, 'restart': 'no', 'tmpfs': ['/tmp:mode=1777,size=128m']},
         'api': {'image': images['core'], 'environment': {**core_env, 'QUIVR_ROLE': 'api'},
             'depends_on': {'migrate': {'condition': 'service_completed_successfully'}},
-            'ports': ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080'], 'tmpfs': ['/tmp:mode=1777,size=128m'],
+            'ports': ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080',
+                      *([f'127.0.0.1:${{QUIVR_ADMIN_PORT:-8082}}:{admin_port}'] if admin_port else [])],
+            'tmpfs': ['/tmp:mode=1777,size=128m'],
             'healthcheck': health(['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/readyz',timeout=3)"])},
         'worker': {'image': images['core'], 'environment': {**core_env, 'QUIVR_ROLE': 'worker'},
             'depends_on': {'migrate': {'condition': 'service_completed_successfully'}},
             'tmpfs': ['/tmp:mode=1777,size=128m'], 'stop_grace_period': '60s'},
         'demo': {'image': images['web'], 'profiles': ['demo'],
             'environment': {'QUIVR_API_URL': 'http://api:8080', 'QUIVR_API_KEY': '${QUIVR_API_KEY:?}',
+                **({'QUIVR_ADMIN_URL': f'http://api:{admin_port}', 'QUIVR_ADMIN_KEY': '${QUIVR_DEMO_ADMIN_KEY:?}'} if admin_port else {}),
                 'DEMO_PASSWORD': '${DEMO_PASSWORD:?}', 'DEMO_SECURE_COOKIE': 'false', 'HOST': '0.0.0.0', 'PORT': '3000'},
             'ports': ['127.0.0.1:${QUIVR_DEMO_PORT:-3000}:3000'],
             'depends_on': {'api': {'condition': 'service_healthy'}}}}
@@ -208,8 +221,9 @@ def initialize(directory, release_path, project, embedding, profile, secret_file
                 values[key] = secrets.token_hex(32)
         if not re.fullmatch('[a-f0-9]{64}', values[key]):
             raise ValueError('installation secrets must contain 64 hexadecimal characters')
-    if values['QUIVR_API_KEY'] == values['QUIVR_OPERATOR_KEY']:
-        raise ValueError('API and operator keys must differ')
+    distinct = [values[k] for k in ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY')]
+    if len(set(distinct)) != len(distinct):
+        raise ValueError('API, operator and admin keys must differ')
     path = directory / 'compose.yaml'
     if path.is_symlink():
         raise ValueError('refuse symlink Compose output')

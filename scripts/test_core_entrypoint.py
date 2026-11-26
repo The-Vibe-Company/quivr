@@ -648,6 +648,61 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])
 
+    def test_admin_listener_separates_admin_keys_from_functional_keys(self):
+        admin_actions = {'plugins:admin', 'observability:read', 'queues:read', 'audit:read'}
+        # QUIVR_DEMO_ADMIN_KEY must register observability:read even when QUIVR_DEMO_ADMIN is unset (default Railway web).
+        sep_env = {
+            **ENV,
+            'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082',
+            'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
+            'QUIVR_ADMIN_KEY': 'placeholder-admin-key',
+            'QUIVR_QUEUE_KEY': 'placeholder-queue-key',
+            'QUIVR_DEMO_ADMIN_KEY': 'placeholder-demo-admin-key',
+        }
+        separated = core_entrypoint.build_config(sep_env)
+        sep_keys, sep_admin_keys = core_entrypoint.engine_key_sets(sep_env)
+        self.assertEqual(separated['admin_listen'], '0.0.0.0:8082')
+        self.assertNotIn('keys', separated)
+        self.assertNotIn('admin_keys', separated)
+        # Neither functional key receives any admin action when separated (even if QUIVR_DEMO_ADMIN=1).
+        self.assertFalse(admin_actions & set(sep_keys[ENV['QUIVR_API_KEY']]['actions']))
+        self.assertFalse(admin_actions & set(sep_keys['placeholder-operator-key']['actions']))
+        demo_keys, _ = core_entrypoint.engine_key_sets({
+            **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', 'QUIVR_DEMO_ADMIN': '1',
+            'QUIVR_ADMIN_KEY': 'placeholder-admin-key',
+        })
+        self.assertFalse(admin_actions & set(demo_keys[ENV['QUIVR_API_KEY']]['actions']))
+        # Operator key retains functional operator actions while dedicated keys own admin_keys.
+        self.assertEqual(set(sep_keys), {ENV['QUIVR_API_KEY'], 'placeholder-operator-key'})
+        self.assertIn('projections:rebuild', sep_keys['placeholder-operator-key']['actions'])
+        self.assertEqual(set(sep_admin_keys), {'placeholder-admin-key', 'placeholder-queue-key', 'placeholder-demo-admin-key'})
+        self.assertEqual(sep_admin_keys['placeholder-queue-key']['actions'], ['queues:read'])
+        self.assertEqual(sep_admin_keys['placeholder-demo-admin-key']['actions'], ['observability:read'])
+        self.assertEqual(set(sep_admin_keys['placeholder-admin-key']['actions']), admin_actions)
+        # Without QUIVR_ADMIN_KEY, QUIVR_OPERATOR_KEY moves cleanly into admin_keys without token reuse.
+        op_keys, op_admin_keys = core_entrypoint.engine_key_sets({
+            **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8081', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})
+        self.assertEqual(set(op_keys), {ENV['QUIVR_API_KEY']})
+        self.assertEqual(set(op_admin_keys), {'placeholder-operator-key'})
+        # QUIVR_ADMIN_LISTEN=off keeps combined mode.
+        self.assertEqual(core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': 'off'}), core_entrypoint.build_config(ENV))
+        self.assertEqual(core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': 'off'}), core_entrypoint.engine_key_sets(ENV))
+        # Missing admin keys, port 8080, invalid bind, or key reuse fail fast.
+        with self.assertRaisesRegex(ValueError, 'dedicated admin key'):
+            core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082'})
+        for bad in ('0.0.0.0:8080', '127.0.0.1:8080', 'bad-host:8082', '0.0.0.0:0'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'QUIVR_ADMIN_LISTEN'):
+                core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': bad, 'QUIVR_ADMIN_KEY': 'placeholder-admin-key'})
+        # Every credential variable must refuse token reuse against QUIVR_API_KEY and against each other.
+        for env_var in ('QUIVR_ADMIN_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY', 'QUIVR_DEMO_ADMIN_KEY'):
+            with self.subTest(reuse_api_key=env_var), self.assertRaisesRegex(ValueError, 'must differ'):
+                core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', env_var: ENV['QUIVR_API_KEY']})
+        for pair_var in ('QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY', 'QUIVR_DEMO_ADMIN_KEY'):
+            with self.subTest(reuse_admin_key=pair_var), self.assertRaisesRegex(ValueError, 'must differ'):
+                core_entrypoint.engine_key_sets({
+                    **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082',
+                    'QUIVR_ADMIN_KEY': 'shared-secret-value', pair_var: 'shared-secret-value'})
+
     def test_image_role_guard_matches_slim_targets_and_services(self):
         services = json.loads((ROOT / 'deploy' / 'railway' / 'services.json').read_text())
         self.assertEqual(services['api']['variables']['QUIVR_IMAGE_ROLE'], 'api')

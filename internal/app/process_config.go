@@ -57,6 +57,15 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 	if cfg.ProbeListen == "" {
 		cfg.ProbeListen = "127.0.0.1:8081"
 	}
+	secrets := cfg.logSecrets()
+	if value := os.Getenv("QUIVR_ADMIN_LISTEN"); value != "" {
+		if value == "off" {
+			cfg.AdminListen = ""
+			cfg.AdminKeys = nil
+		} else {
+			cfg.AdminListen = value
+		}
+	}
 	var output io.Writer = os.Stdout
 	if cfg.LogDirectory != "" {
 		if err := os.MkdirAll(cfg.LogDirectory, 0o700); err != nil {
@@ -65,7 +74,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 		output = io.MultiWriter(os.Stdout, &rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")})
 	}
 	logger, err := logging.New(output, logging.Options{Level: level, Service: "quivr." + command, Version: buildinfo.Version,
-		Instance: cfg.Instance, Environment: cfg.Environment, Secrets: cfg.logSecrets()})
+		Instance: cfg.Instance, Environment: cfg.Environment, Secrets: secrets})
 	if err != nil {
 		return 0, err
 	}
@@ -80,6 +89,9 @@ func (cfg Config) logSecrets() []string {
 	}
 	secrets = append(secrets, cfg.Telemetry.Endpoint)
 	for token := range cfg.Keys {
+		secrets = append(secrets, token)
+	}
+	for token := range cfg.AdminKeys {
 		secrets = append(secrets, token)
 	}
 	for _, destination := range cfg.Destinations {
@@ -162,8 +174,10 @@ func (cfg Config) processSummary(grace time.Duration) slog.Attr {
 	return slog.Group("effective_config",
 		slog.String("log_level", cfg.LogLevel), slog.Duration("shutdown_grace", grace),
 		slog.String("listen", cfg.Listen), slog.String("probe_listen", cfg.ProbeListen),
+		slog.String("admin_listen", cfg.AdminListen),
 		slog.Bool("tracing", cfg.Telemetry.Endpoint != ""),
 		slog.Bool("file_logging", cfg.LogDirectory != ""), slog.Int("key_count", len(cfg.Keys)),
+		slog.Int("admin_key_count", len(cfg.AdminKeys)),
 		slog.Bool("credential_deposits", cfg.CredentialKey != ""), slog.Int("destinations", len(cfg.Destinations)),
 		slog.Int("ingestion_evaluation_concurrency", concurrency),
 		slog.Bool("record_query_text", cfg.Observability.RecordQueryText),

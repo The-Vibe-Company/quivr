@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Configure the dedicated Railway demo. Does not expose domains or deploy code."""
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,16 @@ from deploy import infrastructure
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def admin_listen_is_loopback(addr):
+    host = addr[1:].partition(']:')[0] if addr.startswith('[') else addr.rpartition(':')[0]
+    if host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def load_services(profile='small', overrides=None):
     services = json.loads((Path(__file__).parent / 'services.json').read_text())
     for name, shared in infrastructure.resolve(profile, overrides).items():
@@ -25,6 +36,15 @@ def load_services(profile='small', overrides=None):
             services[name]['limits'] = limits
         if name in ('temporal', 'weaviate'):
             services[name]['image'] = shared['image']
+    admin_listen = services.get('api', {}).get('variables', {}).get('QUIVR_ADMIN_LISTEN', '')
+    if 'web' in services:
+        if admin_listen and admin_listen != 'off':
+            if admin_listen_is_loopback(admin_listen):
+                raise ValueError('Railway QUIVR_ADMIN_LISTEN must bind a non-loopback container interface (such as 0.0.0.0:8082) or off')
+            services['web'].setdefault('variables', {})['QUIVR_ADMIN_URL'] = (
+                'http://api.railway.internal:' + admin_listen.rsplit(':', 1)[1])
+        else:
+            services['web'].get('variables', {}).pop('QUIVR_ADMIN_URL', None)
     return services
 
 
@@ -92,18 +112,23 @@ def main():
     secretfile = directory / 'secrets.json'
     if secretfile.exists():
         values = json.loads(secretfile.read_text())
-        # credential_key is optional (THE-691) but enables Deposited Credentials; add it
+        # credential_key (THE-691) and dedicated admin keys (THE-1160) are added
         # once to existing deployments without rotating any other secret.
-        if 'credential_key' not in values:
-            values['credential_key'] = secrets.token_hex(32)
+        updated = False
+        for key in ('credential_key', 'admin_key', 'demo_admin_key'):
+            if key not in values:
+                values[key] = secrets.token_hex(32)
+                updated = True
+        if updated:
             secretfile.write_text(json.dumps(values))
     else:
         if any(s.get('source') for s in existing.values()):
             raise SystemExit('Existing deployment without local secrets: restore credentials instead of rotating them.')
-        values = {k: secrets.token_hex(32) for k in ['database_password', 'api_key', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'demo_password']}
+        values = {k: secrets.token_hex(32) for k in ['database_password', 'api_key', 'admin_key', 'demo_admin_key', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'demo_password']}
         secretfile.write_text(json.dumps(values))
     common = {
-        'QUIVR_API_KEY': values['api_key'], 'QUIVR_CURSOR_KEY': values['cursor_key'],
+        'QUIVR_API_KEY': values['api_key'], 'QUIVR_ADMIN_KEY': values['admin_key'],
+        'QUIVR_DEMO_ADMIN_KEY': values['demo_admin_key'], 'QUIVR_CURSOR_KEY': values['cursor_key'],
         'QUIVR_CREDENTIAL_KEY': values['credential_key'],
         'DATABASE_URL': f"postgres://quivr:{values['database_password']}@postgres.railway.internal:5432/quivr?sslmode=disable",
         'S3_ACCESS_KEY': values['s3_access'], 'S3_SECRET_KEY': values['s3_secret'],
@@ -131,6 +156,12 @@ def main():
             variables.update(common)
         elif name == 'web':
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
+            if 'QUIVR_ADMIN_URL' in variables:
+                variables['QUIVR_ADMIN_KEY'] = values['demo_admin_key']
+            else:
+                # Explicitly clear stale separation settings on existing Railway services.
+                variables['QUIVR_ADMIN_URL'] = ''
+                variables['QUIVR_ADMIN_KEY'] = ''
         for key, value in variables.items():
             cli('variable', 'set', key, '--stdin', '--skip-deploys', '--service', sid, stdin=value)
         config = deployment_config(spec, new=name not in existing)

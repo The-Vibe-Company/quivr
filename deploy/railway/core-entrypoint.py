@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import pathlib
@@ -261,12 +262,39 @@ def connector_pins(env):
              'configuration': configuration(c)} for c in runtime_connectors(env)]
 
 
+def parse_admin_listen(raw):
+    value = (raw or '').strip()
+    if not value or value == 'off':
+        return ''
+    if value.startswith('['):
+        host, sep, port_text = value[1:].partition(']:')
+        if not sep:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off') from None
+    else:
+        host, sep, port_text = value.rpartition(':')
+        if not sep or not host:
+            raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+        if host != 'localhost':
+            try:
+                ipaddress.IPv4Address(host)
+            except ValueError:
+                raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off') from None
+    if not port_text.isascii() or not port_text.isdigit() or port_text.startswith('0') or not 1 <= int(port_text) <= 65535 or int(port_text) == 8080:
+        raise ValueError('QUIVR_ADMIN_LISTEN must be a valid host:port address outside port 8080, or off')
+    return value
+
+
 # Resolve mounted secrets once so migration, core and sidecars use the same
 # values even if a mounted secret rotates during startup.
 REQUIRED_CORE_SECRETS = ('DATABASE_URL', 'QUIVR_CURSOR_KEY', 'S3_ACCESS_KEY', 'S3_SECRET_KEY')
 OPTIONAL_CORE_SECRETS = ('QUIVR_CREDENTIAL_KEY', 'WEAVIATE_API_KEY', 'QUIVR_ENGINE_PLUGIN_KEYS',
-                         'QUIVR_API_KEYS', 'QUIVR_TELEMETRY_HEADERS')
-SCOPED_KEY_SECRETS = ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY')
+                         'QUIVR_API_KEYS', 'QUIVR_ADMIN_KEYS', 'QUIVR_TELEMETRY_HEADERS')
+SCOPED_KEY_SECRETS = ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY',
+                      'QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY')
 PLUGIN_SECRETS = ('TYPESAFE_API_KEY', 'AZURE_FOUNDRY_KEY', 'EMBED_API_KEY')
 
 
@@ -309,8 +337,10 @@ def config_url(env, name):
     raise ValueError(name + ' must be an HTTP(S) URL without credentials, query or fragment')
 
 
-def engine_api_keys(env):
+def engine_key_sets(env):
+    """Build separated functional keys and dedicated admin_keys from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
+    admin_listen = parse_admin_listen(env.get('QUIVR_ADMIN_LISTEN', ''))
     organization = env.get('QUIVR_ORGANIZATION', 'quivr-demo').strip()
     if not organization:
         raise ValueError('QUIVR_ORGANIZATION must not be empty')
@@ -323,32 +353,74 @@ def engine_api_keys(env):
     # Opt-in: the Alertes tab creates Saved Queries and Subscriptions and reads their Matches.
     if plugins_enabled(env):
         actions += ['monitoring:read', 'monitoring:write']
-    # Opt-in: the read-only Admin tab follows documents through their steps.
-    if env.get('QUIVR_DEMO_ADMIN') == '1':
+    # Opt-in: in combined mode, the read-only Admin tab uses the API key; when
+    # separated onto admin_listen, observability:read belongs only to admin_keys.
+    if not admin_listen and env.get('QUIVR_DEMO_ADMIN') == '1':
         actions += ['observability:read']
     keys = {key: {'organization': organization, 'actions': actions, 'corpora': ['*']}}
-    # Optional operator key, never given to the web app: rebuilds a Corpus projection
-    # (for example after a migration adds a projected field), reads the plugin
-    # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)
-    # Corpora from inside the deployment.
+    admin_keys = {}
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
-    if operator:
-        if operator == key:
-            raise ValueError('API and operator keys must differ')
-        keys[operator] = {'organization': organization, 'corpora': ['*'],
-                                    'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
-                                                'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
     queue_key = env.get('QUIVR_QUEUE_KEY', '').strip()
-    if queue_key:
-        if queue_key in keys:
-            raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
-        keys[queue_key] = {'organization': organization, 'corpora': ['*'],
-                                     'actions': ['queues:read']}
+    admin_key = env.get('QUIVR_ADMIN_KEY', '').strip()
+    demo_admin_key = env.get('QUIVR_DEMO_ADMIN_KEY', '').strip()
+    if admin_listen:
+        seen = {key}
+        for name, value in (('QUIVR_OPERATOR_KEY', operator), ('QUIVR_ADMIN_KEY', admin_key),
+                            ('QUIVR_QUEUE_KEY', queue_key), ('QUIVR_DEMO_ADMIN_KEY', demo_admin_key)):
+            if not value:
+                continue
+            if value in seen:
+                raise ValueError(name + ' must differ from other API, operator and admin keys')
+            seen.add(value)
+        admin_actions = ['plugins:admin', 'observability:read', 'queues:read', 'audit:read']
+        if admin_key:
+            admin_keys[admin_key] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
+        if operator:
+            if admin_key:
+                keys[operator] = {'organization': organization, 'corpora': ['*'],
+                                  'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
+                                              'operations:write', 'corpora:archive', 'corpora:rename']}
+            else:
+                admin_keys[operator] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
+        if queue_key:
+            admin_keys[queue_key] = {'organization': organization, 'corpora': ['*'], 'actions': ['queues:read']}
+        if demo_admin_key:
+            admin_keys[demo_admin_key] = {'organization': organization, 'corpora': ['*'],
+                                          'actions': ['observability:read']}
+        if not admin_keys:
+            raise ValueError('QUIVR_ADMIN_LISTEN requires at least one dedicated admin key')
+    else:
+        # Optional operator key, never given to the web app: rebuilds a Corpus projection
+        # (for example after a migration adds a projected field), reads the plugin
+        # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)
+        # Corpora from inside the deployment.
+        if operator:
+            if operator == key:
+                raise ValueError('API and operator keys must differ')
+            keys[operator] = {'organization': organization, 'corpora': ['*'],
+                              'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
+                                          'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
+        if queue_key:
+            if queue_key in keys:
+                raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
+            keys[queue_key] = {'organization': organization, 'corpora': ['*'],
+                               'actions': ['queues:read']}
+    return keys, admin_keys
+
+
+def engine_api_keys(env):
+    keys, _ = engine_key_sets(env)
     return keys
+
+
+def engine_admin_keys(env):
+    _, admin_keys = engine_key_sets(env)
+    return admin_keys
 
 
 def build_config(env):
     """Build the nonsecret core configuration from Railway runtime variables."""
+    admin_listen = parse_admin_listen(env.get('QUIVR_ADMIN_LISTEN', ''))
     recording = env.get('QUIVR_RECORD_QUERY_TEXT', '0' if env.get('QUIVR_SINGLE_MACHINE') == '1' else '1')
     if recording not in ('0', '1'):
         raise ValueError('QUIVR_RECORD_QUERY_TEXT must be 0 or 1')
@@ -370,6 +442,8 @@ def build_config(env):
         # Its queries are demo traffic; a deployment with private queries leaves this off.
         'observability': {'record_query_text': recording == '1'},
     }
+    if admin_listen:
+        config['admin_listen'] = admin_listen
     # Omitted queue variables keep one worker serving both queues.
     worker = {}
     if 'QUIVR_WORKER_QUEUES' in env:
@@ -613,9 +687,15 @@ def main():
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
     validate_image_role(os.environ, mode)
     env = runtime_environment(os.environ)
-    if env.get('QUIVR_API_KEYS') and any(env.get(name) for name in SCOPED_KEY_SECRETS):
-        raise ValueError('QUIVR_API_KEYS cannot be combined with the individual Railway API key variables')
-    api_keys = env.get('QUIVR_API_KEYS') or json.dumps(engine_api_keys(env))
+    if (env.get('QUIVR_API_KEYS') or env.get('QUIVR_ADMIN_KEYS')) and any(env.get(name) for name in SCOPED_KEY_SECRETS):
+        raise ValueError('QUIVR_API_KEYS and QUIVR_ADMIN_KEYS cannot be combined with the individual Railway API key variables')
+    if env.get('QUIVR_API_KEYS'):
+        api_keys = env['QUIVR_API_KEYS']
+        admin_keys = env.get('QUIVR_ADMIN_KEYS', '')
+    else:
+        functional, admin = engine_key_sets(env)
+        api_keys = json.dumps(functional)
+        admin_keys = json.dumps(admin) if admin else ''
     signing = engine_signing_environment(env)
     config = build_config(env)
     settings = encoder_settings(env) if mode == 'api' else None
@@ -634,6 +714,10 @@ def main():
                 if name not in PLUGIN_SECRETS and name not in SCOPED_KEY_SECRETS
                 and name not in ('QUIVR_PLUGIN_SIGNING_KEYS', 'QUIVR_PLUGIN_SIGNING_KEYS_FILE')}
     core_env.update(signing, QUIVR_API_KEYS=api_keys, QUIVR_CONFIG=str(path))
+    if admin_keys:
+        core_env['QUIVR_ADMIN_KEYS'] = admin_keys
+    else:
+        core_env.pop('QUIVR_ADMIN_KEYS', None)
     # Only the API applies startup migrations; failures abort before serving.
     if mode == 'api' and env.get('QUIVR_SINGLE_MACHINE') != '1':
         subprocess.run(['quivr', 'migrate'], check=True, env=core_env)

@@ -103,7 +103,8 @@ QUIVR_DEMO_URL=https://<live demo> npm run journeys:live --prefix quivr-search/j
 | Variable | Meaning |
 | --- | --- |
 | `QUIVR_API_URL` | Private core URL, no trailing route |
-| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab; the Veille tab needs `changes:read`, the Admin tab `observability:read` |
+| `QUIVR_API_KEY` | Server-only core credential with corpus/content/search permissions (`connectors:*`, `changes:read` for Sources/Veille; `observability:read` for Admin in combined mode) |
+| `QUIVR_ADMIN_URL`, `QUIVR_ADMIN_KEY` | Optional internal admin listener URL and dedicated `observability:read` key for `/v0/admin/*` when separated from `QUIVR_API_URL` |
 | `QUIVR_DEMO_CORPORA` | Optional comma-separated names (or IDs) of other corpora the demo reads: the Fil, search and the Explorer can span them (at most 16 at a time); sources, alerts and added texts stay on the demo corpus. Every corpus the key can read with that name is read, every other corpus is refused. At startup, one error line names the entries that match no corpus. The key needs read, search and `changes:read` on them |
 | `DEMO_PASSWORD` | Shared demo password, required on public binds |
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |
