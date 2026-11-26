@@ -3,6 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -115,6 +117,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	if u := result.Usage; u != nil {
 		response.Usage = usageToTransport(*u)
+		w.Header().Set("Server-Timing", serverTiming(u.Phases))
 	}
 	send(w, 200, response)
 }
@@ -134,6 +137,20 @@ func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
 		out.Profiles = &profiles
 	}
 	return out
+}
+
+// serverTiming renders the phases as a Server-Timing header value, each metric
+// in milliseconds with microsecond precision.
+func serverTiming(p retrieval.Phases) string {
+	metrics := []struct {
+		name string
+		d    time.Duration
+	}{{"routing", p.Routing}, {"coverage", p.Coverage}, {"plugin", p.PluginRounds}, {"encode", p.QueryEncoding}, {"index", p.IndexQuery}, {"hydrate", p.Hydration}}
+	parts := make([]string, len(metrics))
+	for i, m := range metrics {
+		parts[i] = m.name + ";dur=" + strconv.FormatFloat(float64(m.d.Microseconds())/1000, 'f', -1, 64)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // searchProfiles lists the search profiles this deployment answers.

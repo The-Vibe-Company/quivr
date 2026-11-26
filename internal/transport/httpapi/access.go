@@ -85,11 +85,19 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 	start := time.Now()
 	var requestID [16]byte
 	_, _ = rand.Read(requestID[:])
-	id := r.Header.Get("X-Request-ID")
-	if len(r.Header.Values("X-Request-ID")) != 1 || !validRequestID(id) {
+	correlationID := callerID(r.Header, "X-Correlation-ID")
+	id := callerID(r.Header, "X-Request-ID")
+	if id == "" {
+		id = correlationID
+	}
+	if id == "" {
 		id = hex.EncodeToString(requestID[:])
 	}
+	if correlationID == "" {
+		correlationID = id
+	}
 	w.Header().Set("X-Request-ID", id)
+	w.Header().Set("X-Correlation-ID", correlationID)
 	ctx := telemetry.Extract(logging.WithRequestID(r.Context(), id), r.Header)
 	route := r.Pattern
 	if route == "" {
@@ -104,7 +112,7 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 		}
 		finish(metricStatus, time.Since(start))
 	}()
-	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method))))
+	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method)), attribute.String("correlation_id", correlationID)))
 	defer span.End()
 	sc := span.SpanContext()
 	if sc.IsValid() {
@@ -123,7 +131,7 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 		if status >= 500 {
 			span.SetStatus(codes.Error, "request failed")
 		}
-		slog.InfoContext(r.Context(), "http request", "request_id", id, "route", route, "method", method,
+		slog.InfoContext(r.Context(), "http request", "request_id", id, "correlation_id", correlationID, "route", route, "method", method,
 			"status", status, "duration_ms", float64(time.Since(start).Microseconds())/1000,
 			"response_size", observed.size, "client_ip", ip, "api_key_id", keyID, "error_code", observed.errorCode)
 	}()
@@ -161,6 +169,14 @@ func (w *responseWriter) FlushError() error {
 		w.WriteHeader(http.StatusOK)
 	}
 	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+// callerID returns the single, valid value a caller sent in header, or "".
+func callerID(h http.Header, header string) string {
+	if values := h.Values(header); len(values) == 1 && validRequestID(values[0]) {
+		return values[0]
+	}
+	return ""
 }
 
 // Caller request IDs are bounded opaque correlation values, never free text.

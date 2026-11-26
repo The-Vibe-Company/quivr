@@ -12,6 +12,7 @@ import { createFeed } from "./feed.mjs";
 import { boundsOf, createCatalog, statsQuery, topicsQuery } from "./catalog.mjs";
 import { alertRoutes } from "./alerts.mjs";
 import { createAdmin } from "./admin.mjs";
+import { createPhaseWindow } from "./phases.mjs";
 import { activePlugins } from "./admin-plugins.mjs";
 import { corporaPicker, createViews } from "./views.mjs";
 import { demoCorpora } from "./corpora.mjs";
@@ -124,6 +125,8 @@ async function saveState() {
   }
 }
 let admin;
+// The phases of the searches this facade relayed, for the Admin tab.
+const searchPhases = createPhaseWindow();
 // One feed and one index per corpus read, made on first use.
 const liveFeeds = new Map();
 const catalogs = new Map();
@@ -287,7 +290,11 @@ async function upstreamCall(path, method, body, timeout, signal) {
     chunks.push(chunk);
   }
   const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  return { status: response.status, data };
+  return {
+    status: response.status,
+    data,
+    serverTiming: response.headers.get("server-timing"),
+  };
 }
 function authenticated(req) {
   if (!password) return true;
@@ -714,6 +721,8 @@ async function handle(req, res) {
         response = await adminFor(id).timeline(timeline[1]);
       else if (stats && req.method === "GET")
         response = await adminFor(id).stats(stats[1], url);
+      else if (path === "/demo/admin/search-phases" && req.method === "GET")
+        response = { status: 200, data: searchPhases.summary() };
       else if (path === "/demo/admin/history" && req.method === "GET")
         response = { status: 200, data: await adminFor(id).history(url) };
       else if (path === "/demo/admin/plugins" && req.method === "GET")
@@ -748,6 +757,7 @@ async function handle(req, res) {
         // The body goes through unchanged, profile included. A deep search
         // may take up to the engine's hard bound, 9 s, before it answers.
         response = await upstream(path, "POST", body, 10000);
+        if (response.status === 200) searchPhases.record(response.serverTiming);
       } else if (path === "/v0/search/profiles" && req.method === "GET") {
         // The profiles the engine answers: the page offers deep only when listed.
         response = await upstream(path);

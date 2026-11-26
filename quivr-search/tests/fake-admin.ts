@@ -308,6 +308,15 @@ export async function fakeAdmin(page: Page): Promise<AdminFake> {
       });
     if (path === "/demo/admin/plugins") return json(route, { items: active });
     if (path === "/demo/admin/history") return json(route, history(url));
+    if (path === "/demo/admin/search-phases")
+      return json(route, {
+        searches: 42,
+        phases: [
+          { phase: "routing", p50_ms: 1, p95_ms: 2 },
+          { phase: "encode", p50_ms: 38, p95_ms: 95 },
+          { phase: "index", p50_ms: 12, p95_ms: 40 },
+        ],
+      });
     const kind = path.match(/^\/demo\/admin\/stats\/(\w[\w-]*)$/)?.[1];
     const window = (url.searchParams.get("window") || "1h") as Window;
     const now = Date.now();

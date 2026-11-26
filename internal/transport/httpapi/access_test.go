@@ -249,3 +249,52 @@ func TestAccessEventsIncludeEarlyAndFinalPushAuditRefusals(t *testing.T) {
 		}
 	}
 }
+
+// Owns the correlation contract: a valid caller X-Correlation-ID is echoed and
+// logged, stands in for a missing request ID, and is never trusted when it is
+// repeated or malformed.
+func TestCorrelationIDIsEchoedAndLogged(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	logger, err := logging.New(&logs, logging.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, nil, catalogCursorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name              string
+		request, corr     []string
+		wantReq, wantCorr string // "" means a generated value, equal for both headers
+	}{
+		{"correlation only", nil, []string{"corr-1"}, "corr-1", "corr-1"},
+		{"both differ", []string{"req-1"}, []string{"corr-1"}, "req-1", "corr-1"},
+		{"request only", []string{"req-1"}, nil, "req-1", "req-1"},
+		{"malformed correlation", nil, []string{"not valid!"}, "", ""},
+		{"repeated correlation", nil, []string{"corr-1", "corr-2"}, "", ""},
+		{"none", nil, nil, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs.Reset()
+			req := httptest.NewRequest("GET", "/v0/corpora/c", nil)
+			req.Header["X-Request-Id"], req.Header["X-Correlation-Id"] = tc.request, tc.corr
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			gotReq, gotCorr := rec.Header().Get("X-Request-ID"), rec.Header().Get("X-Correlation-ID")
+			if gotReq == "" || gotCorr == "" || (tc.wantReq != "" && gotReq != tc.wantReq) || (tc.wantCorr != "" && gotCorr != tc.wantCorr) || (tc.wantCorr == "" && gotReq != gotCorr) {
+				t.Fatalf("X-Request-ID %q X-Correlation-ID %q; want %q and %q", gotReq, gotCorr, tc.wantReq, tc.wantCorr)
+			}
+			var event map[string]any
+			if err := json.NewDecoder(&logs).Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event["request_id"] != gotReq || event["correlation_id"] != gotCorr {
+				t.Fatalf("log %v; want request_id %q correlation_id %q", event, gotReq, gotCorr)
+			}
+		})
+	}
+}
