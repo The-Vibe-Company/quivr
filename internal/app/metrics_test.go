@@ -29,11 +29,16 @@ func TestBuildMetricsSurvivesDependencyFailure(t *testing.T) {
 	load := telemetry.NewLoadMetrics()
 	load.RegisterRoutes("/example")
 	load.Begin("/example", "GET")(503, time.Second)
+	deps := telemetry.NewDependencyMetrics()
+	deps.Record(telemetry.DependencyWeaviate, telemetry.ProtocolHTTP, telemetry.OpQuery)
 	w := httptest.NewRecorder()
 	processMetrics(buildMetrics(apiMetrics(telemetry.NewCommands(), func(context.Context) (int64, time.Duration, error) {
+		// Simulate the PostgreSQL backlog query issued by /metrics itself; it must
+		// appear in this scrape's dependency count rather than leaking to the next delta.
+		deps.Record(telemetry.DependencyPostgres, telemetry.ProtocolWire, telemetry.OpQuery)
 		return 0, 0, errors.New("storage unavailable")
-	}, func(io.Writer) {})), load, postgres.NewPoolMetrics(pool)).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
-	for _, want := range []string{`quivr_build_info{version="dev",revision="unknown"} 1`, `quivr_http_requests_total{route="/example",method="GET",status_class="5xx"} 1`, "quivr_postgres_pool_max_connections 3"} {
+	}, func(io.Writer) {})), load, postgres.NewPoolMetrics(pool), deps).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	for _, want := range []string{`quivr_build_info{version="dev",revision="unknown"} 1`, `quivr_http_requests_total{route="/example",method="GET",status_class="5xx"} 1`, "quivr_postgres_pool_max_connections 3", `quivr_dependency_calls_total{dependency="weaviate",protocol="http",operation="query"} 1`, `quivr_dependency_calls_total{dependency="postgres",protocol="wire",operation="query"} 1`} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("missing %q in\n%s", want, w.Body.String())
 		}
