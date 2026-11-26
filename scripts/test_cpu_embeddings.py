@@ -26,6 +26,12 @@ METADATA = {
     "source_revision": embedding_api.REVISION,
     "dimensions": embedding_api.DIMENSIONS,
     "threads": 4,
+    "backend": "onnx",
+    "precision": "int8",
+    "onnxruntime_version": "1.32.0",
+    "tokenizers_version": "0.23.2",
+    "numpy_version": "2.5.2",
+    "ignored_secret": "do-not-expose",
 }
 
 
@@ -94,10 +100,15 @@ class CpuEmbeddingHttpTest(unittest.TestCase):
         status, body = self.request("GET", "/health")
         self.assertEqual(status, 200)
         self.assertEqual(
-            {key: body[key] for key in ("status", "model", "revision", "dimensions")},
+            {key: body[key] for key in ("status", "model", "revision", "dimensions",
+                                        "backend", "precision", "onnxruntime_version",
+                                        "tokenizers_version", "numpy_version")},
             {"status": "ok", "model": embedding_api.MODEL,
-             "revision": embedding_api.REVISION, "dimensions": 768},
+             "revision": embedding_api.REVISION, "dimensions": 768,
+             "backend": "onnx", "precision": "int8", "onnxruntime_version": "1.32.0",
+             "tokenizers_version": "0.23.2", "numpy_version": "2.5.2"},
         )
+        self.assertNotIn("ignored_secret", body)
 
     def test_embedding_response_keeps_input_order_and_sanitizes_failures(self):
         vectors = [[1.0] + [0.0] * 767, [0.0, 1.0] + [0.0] * 766]

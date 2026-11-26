@@ -25,7 +25,7 @@ This page lists what Quivr 2.0 does not do, and the limits you are most likely t
 | Text indexed for one version | 256 KiB and 64 `title` or `body` pieces, with the first-party ingestion plugin |
 | One search | up to 16 collections, 50 results, no pagination |
 | One query | 8,192 characters; for meaning search, also the model's limit (256 tokens with the default model) |
-| Searches running at once | 64 per API process; more are refused with a retryable error |
+| Searches running at once | Adaptive per API process (starts at 64, scales 4–128 with a short bounded queue); excess is shed with a retryable error and `Retry-After` |
 
 A version over the indexing limits is stored and readable, but not searchable; its receipt says which limit it hit. [Add content](/guides/add-content#limits) and [Search](/guides/search) give the details.
 
@@ -43,7 +43,7 @@ To keep storage bounded, Quivr reclaims old detail, at the earliest after 30 day
 
 - **Local development (`make dev`)** runs on Linux x86_64 and on Apple Silicon Macs. The full verification (`make verify`) runs on Linux x86_64 only.
 - **Release images** are published for `linux/amd64` only.
-- **The single-machine installation** runs Temporal without high availability and is meant for one Linux amd64 host. A consistent backup needs a short full stop.
+- **The single-machine installation** runs PostgreSQL-backed Temporal without high availability and is meant for one Linux amd64 host. A consistent backup needs a short full stop.
 - **Upgrading from a pre-release.** Upgrading in place from a `2.0.0-alpha` release is not supported: start a fresh installation and send your documents again.
 
 ## Scale

@@ -669,3 +669,55 @@ func TestExecutionReplacementHonorsOperationStops(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryVectorCacheFollowsLiveRegistration(t *testing.T) {
+	var first *plugins.Pin
+	var calls atomic.Int32
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r, first) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			_, _ = io.WriteString(w, `{"vector":[1,0]}`)
+		} else {
+			_, _ = io.WriteString(w, `{"vector":[0,1]}`)
+		}
+	}))
+	defer peer.Close()
+
+	load := func(registration string) (*plugins.Pin, *plugins.PinSet) {
+		t.Helper()
+		pin, err := plugins.LoadPinManifest([]byte(embedderManifest), "embedder", plugins.PinConfig{Endpoint: peer.URL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin.Registration = registration
+		set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pin, set
+	}
+	first, old := load("first")
+	_, next := load("second")
+	live, err := plugins.NewLive("first-plan", old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := retrieval.Service{Spaces: pluginhttp.LiveIngestor{Live: live}, QueryVectors: retrieval.NewQueryVectorCache()}
+	check := func(want []float32, wantCalls int32) {
+		t.Helper()
+		got, err := service.EncodeQuery(t.Context(), "org", "acme.embedder.small@1", "hello")
+		if err != nil || !slices.Equal(got, want) || calls.Load() != wantCalls {
+			t.Fatalf("vector = %v, calls = %d, error = %v, want %v and %d calls", got, calls.Load(), err, want, wantCalls)
+		}
+	}
+	check([]float32{1, 0}, 1)
+	check([]float32{1, 0}, 1)
+	if err := live.Store("second-plan", next); err != nil {
+		t.Fatal(err)
+	}
+	check([]float32{0, 1}, 2)
+	check([]float32{0, 1}, 2)
+}

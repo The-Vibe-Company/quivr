@@ -13,7 +13,9 @@
 #     (plugins/x-list) has scripts/plugin_<id>_fixtures.py, which serves the
 #     fake and writes the fixtures to certify with. plugins/core-ingest needs
 #     TEI and the pinned tokenizer: the verify stack certifies it
-#     (scripts/core_ingest_plugin.py), so here it is vetted, tested and inspected.
+#     (scripts/core_ingest_plugin.py), so here it is vetted, tested and inspected;
+#  5. the multi-call Go plugins bundle (deploy/plugins) passes go vet and its
+#     dispatch and role-build tests.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -30,7 +32,7 @@ else
 fi
 
 if [ "${GITHUB_ACTIONS:-}" = true ]; then
-  for module in "$root" "$root/sdks/go"; do
+  for module in "$root" "$root/sdks/go" "$root/deploy/plugins"; do
     python3 "$root/scripts/ci_dependencies.py" --cwd "$module" -- "$GO" mod download
   done
   for mod in "$root"/plugins/*/go.mod; do
@@ -44,8 +46,7 @@ fi
 python3 sdks/go/scripts/sync_schemas.py --check
 (cd sdks/go && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")
 
-"$GO" build -o "$work/quivr-go" ./cmd/quivr
-quivr="$work/quivr-go"
+quivr=$(GO="$GO" python3 "$root/scripts/go_bin_cache.py" ensure --name quivr --cwd "$root" --package ./cmd/quivr --materialize "$work/quivr-go")
 (cd "$root/sdks/go" && "$GO" build -o "$work/go-conformance-peer" ./quivrplugin/testdata/conformance)
 "$work/venv-go/bin/python" "$root/scripts/plugin_sdk_conformance.py" go "$quivr" "$work/go-conformance-peer"
 cd "$root/sdks/go/examples/static-source"
@@ -101,8 +102,18 @@ for mod in "$root"/plugins/*/go.mod; do
     for f in $(cat "$work/$id-fixtures.txt"); do fixtures+=(--fixture "$f"); done
     [ ${#fixtures[@]} -gt 0 ] || { echo "$helper wrote no fixtures" >&2; exit 1; }
   fi
-  "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
+  # scripts/plugin_crossmodal_image_fixtures.py certifies both the builtin space
+  # and the authenticated HTTP bearer space (crossmodal.image.external) using
+  # CROSSMODAL_API_KEY so the credentials check exercises the live secret path.
+  env_prefix=()
+  if [ "$id" = crossmodal-image ]; then
+    env_prefix=(CROSSMODAL_API_KEY=crossmodal-certify-secret)
+  fi
+  env ${env_prefix[@]+"${env_prefix[@]}"} "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  if [ "$id" = crossmodal-image ]; then
+    grep -q "PASS  embed_query .*crossmodal.image.external" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  fi
   # A retrieval plugin (core-retrieve) declares no secret: its searches must replay instead.
   if grep -q "^  retrieval:" quivr-plugin.yaml; then
     grep -q "PASS  replay .*retrieval" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
@@ -114,3 +125,6 @@ for mod in "$root"/plugins/*/go.mod; do
   if grep -q "^    attachments:" quivr-plugin.yaml; then grep -q "PASS  attachments" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }; fi
   echo "quivr plugin test certified the $id connector plugin: $work/$id-contract-report.json"
 done
+
+# Multi-call Go plugins bundle (deploy/plugins): vet and test role dispatch/builds.
+(cd "$root/deploy/plugins" && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")

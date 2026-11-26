@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -129,8 +130,11 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 		t.Fatal("retry duplicated readiness fact", events, err)
 	}
 	candidate := content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID}
-	if _, err = hydrateOne(ctx, store, scope, candidate); err != nil {
-		t.Fatal(err)
+	search := retrieval.Service{Routing: store, Content: service, Projection: coverageIndex{candidate: candidate}, Ranker: coverageRanker{}}
+	search.Content.Blobs = &objectMemory{objects: map[string][]byte{"fixture/text": []byte("Atomic baseline")}}
+	result, err := search.Search(ctx, scope, retrieval.Request{Query: "Atomic baseline", Mode: "lexical", CorpusIDs: []string{c.ID}})
+	if err != nil || len(result.Hits) != 1 || result.Hits[0].Segment.ID != candidate.SegmentID {
+		t.Fatalf("search must return the promoted segment %s: %+v, %v", candidate.SegmentID, result, err)
 	}
 	// One batch lookup fences each candidate on its own and keeps its position.
 	batch, err := store.Hydrate(ctx, scope, []content.Candidate{{SegmentID: "absent", GenerationID: g.ID}, candidate, {SegmentID: candidate.SegmentID, GenerationID: "unrouted"}})

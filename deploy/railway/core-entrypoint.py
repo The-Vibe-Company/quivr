@@ -61,6 +61,7 @@ HOSTED_EMBED = {'id': 'hosted-embed', 'signing_id': 'hosted.embed', 'port': 9980
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
 ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
 ENCODER_MODEL = '/opt/query-encoder/model'
+ENCODER_LOCK = '/app/third_party/query-encoder/model-lock.json'
 ENCODER_URL = 'http://127.0.0.1:9995'
 ENCODER_IDENTITY = {'model': 'google/embeddinggemma-2',
                     'model_revision': '914f7f89142e33e7',
@@ -80,7 +81,53 @@ def encoder_settings(env):
         if not raw.isascii() or not raw.isdigit() or not 1 <= int(raw) <= limit:
             raise ValueError(name + ' must be an integer from 1 to ' + str(limit))
         values[name] = int(raw)
+    backend = env.get('QUIVR_QUERY_ENCODER_BACKEND', '').strip().lower()
+    if backend:
+        if backend not in ('auto', 'onnx', 'pytorch'):
+            raise ValueError('QUIVR_QUERY_ENCODER_BACKEND must be auto, onnx or pytorch')
+        values['QUIVR_QUERY_ENCODER_BACKEND'] = backend
     return values
+
+
+def _encoder_image_backend(model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    """Return the baked query-encoder backend ('onnx' or 'pytorch') when its assets exist."""
+    root = pathlib.Path(model_dir)
+    lock_file = pathlib.Path(lock_path)
+    if lock_file.is_file():
+        try:
+            lock = json.loads(lock_file.read_text())
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(lock, dict):
+            return None
+        files = lock.get('files') if isinstance(lock.get('files'), dict) else {}
+        backend = lock.get('backend')
+        if backend not in ('onnx', 'pytorch'):
+            backend = 'onnx' if any(str(name).endswith('.onnx') for name in files) else 'pytorch'
+        if backend == 'onnx':
+            model_file = lock.get('model_file') or 'onnx/model_quantized.onnx'
+            if not isinstance(model_file, str) or not model_file.endswith('.onnx'):
+                return None
+            return 'onnx' if (root / pathlib.PurePosixPath(model_file)).is_file() else None
+        return 'pytorch' if (root / 'model.safetensors').is_file() else None
+    if (root / 'onnx' / 'model_quantized.onnx').is_file():
+        return 'onnx'
+    if (root / 'model.safetensors').is_file():
+        return 'pytorch'
+    return None
+
+
+def _validate_encoder_runtime(settings, *, python_path=ENCODER_PYTHON,
+                              model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    baked = _encoder_image_backend(model_dir, lock_path) if pathlib.Path(python_path).is_file() else None
+    if baked is None:
+        raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+    requested = settings.get('QUIVR_QUERY_ENCODER_BACKEND')
+    if requested and requested not in ('auto', baked):
+        raise ValueError(
+            f'QUIVR_QUERY_ENCODER_BACKEND={requested} does not match the baked {baked} query encoder image'
+        )
+    return baked
 
 
 def plugins_enabled(env):
@@ -378,13 +425,16 @@ def sidecar_commands(env, role='worker'):
         return commands
     settings = encoder_settings(env) if role == 'api' else None
     if settings and role == 'api':
+        encoder_env = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
+                       'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
+                       'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
+                       'TOKENIZERS_PARALLELISM': 'false'}
+        if 'QUIVR_QUERY_ENCODER_BACKEND' in settings:
+            encoder_env['QUIVR_QUERY_ENCODER_BACKEND'] = settings['QUIVR_QUERY_ENCODER_BACKEND']
         commands.append(('text-encoder', [ENCODER_PYTHON, '-m', 'deploy.cpu.text_encoder',
                          '--model-dir', ENCODER_MODEL, '--port', '9995',
                          '--threads', str(settings['QUIVR_QUERY_ENCODER_THREADS'])], '/app',
-                         {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
-                          'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
-                          'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
-                          'TOKENIZERS_PARALLELISM': 'false'}))
+                         encoder_env))
     for connector in runtime_connectors(env):
         if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
@@ -504,16 +554,28 @@ def supervise(commands, grace=10.0, poll=0.2, readiness=None):
             signal.signal(s, handler)
 
 
+def validate_image_role(env, mode):
+    image_role = env.get('QUIVR_IMAGE_ROLE', '')
+    if not image_role:
+        return
+    if image_role not in ('core', 'api', 'worker'):
+        raise ValueError('QUIVR_IMAGE_ROLE must be core, api or worker')
+    if image_role == 'api' and mode == 'worker':
+        raise ValueError('QUIVR_ROLE=worker requires the worker or core image')
+    if image_role == 'worker' and mode == 'api':
+        raise ValueError('QUIVR_ROLE=api requires the api or core image')
+
+
 def main():
     mode = os.environ.get('QUIVR_ROLE', 'api')
     if mode not in ('api', 'worker', 'migrate'):
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
+    validate_image_role(os.environ, mode)
     config = build_config(os.environ)
     settings = encoder_settings(os.environ) if mode == 'api' else None
     readiness = None
     if mode == 'api' and settings:
-        if not pathlib.Path(ENCODER_PYTHON).is_file() or not pathlib.Path(ENCODER_MODEL + '/model.safetensors').is_file():
-            raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+        _validate_encoder_runtime(settings)
         readiness = {'name': 'text-encoder', 'url': ENCODER_URL + '/health',
                      'timeout': settings['QUIVR_QUERY_ENCODER_STARTUP_SECONDS'], **ENCODER_IDENTITY}
     os.umask(0o077)
