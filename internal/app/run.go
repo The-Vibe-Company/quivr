@@ -594,7 +594,11 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	defer closeProjection()
+	closePool := closeResources
+	closeResources = func(deadline context.Context) {
+		closeProjection()
+		closePool(deadline)
+	}
 	projection.SetMetrics(dependencyMetrics)
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID

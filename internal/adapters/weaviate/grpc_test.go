@@ -29,18 +29,30 @@ type grpcSearchFixture struct {
 	pb.UnimplementedWeaviateServer
 }
 
-func (grpcSearchFixture) Search(ctx context.Context, _ *pb.SearchRequest) (*pb.SearchReply, error) {
+func (grpcSearchFixture) Search(ctx context.Context, request *pb.SearchRequest) (*pb.SearchReply, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	if bearer := md.Get("authorization"); len(bearer) != 1 || bearer[0] != "Bearer example-api-key" {
 		return nil, status.Error(codes.Unauthenticated, "bearer credential missing")
 	}
+	if request.GetCollection() != "Example" {
+		return nil, status.Error(codes.InvalidArgument, "collection missing")
+	}
+	for _, filter := range request.GetFilters().GetFilters() {
+		if filter.GetTarget().GetProperty() == "organization" && filter.GetValueText() == "organization" {
+			return searchFixtureReply(), nil
+		}
+	}
+	return nil, status.Error(codes.InvalidArgument, "organization filter missing")
+}
+
+func searchFixtureReply() *pb.SearchReply {
 	return &pb.SearchReply{Results: []*pb.SearchResult{{
 		Properties: &pb.PropertiesResult{NonRefProps: &pb.Properties{Fields: map[string]*pb.Value{
 			"segmentId":    {Kind: &pb.Value_TextValue{TextValue: "segment"}},
 			"generationId": {Kind: &pb.Value_TextValue{TextValue: "generation"}},
 		}}},
 		Metadata: &pb.MetadataResult{ScorePresent: true, Score: 2.5},
-	}}}, nil
+	}}}
 }
 
 func TestGRPCSearchUsesMutualTLSBearerAndProtocolMetrics(t *testing.T) {

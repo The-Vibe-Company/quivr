@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
@@ -51,7 +52,9 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 	cfg.LogLevel = level
 	cfg.Instance = override("QUIVR_INSTANCE", cfg.Instance)
 	cfg.Environment = override("QUIVR_ENVIRONMENT", cfg.Environment)
-	cfg.WeaviateGRPCAddress = override("WEAVIATE_GRPC_ADDRESS", cfg.WeaviateGRPCAddress)
+	if address := strings.TrimSpace(os.Getenv("WEAVIATE_GRPC_ADDRESS")); address != "" {
+		cfg.WeaviateGRPCAddress = address
+	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}

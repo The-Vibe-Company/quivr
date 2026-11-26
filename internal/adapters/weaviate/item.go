@@ -522,10 +522,21 @@ func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow)
 }
 
 func addPassageRows(best map[string]itemRow, ambiguous map[string][]itemRow, rows []itemRow) {
+	seenSegments := make(map[string]bool, len(rows))
+	for _, row := range best {
+		seenSegments[candidateKey(row.candidate(false), false)] = true
+	}
+	for _, group := range ambiguous {
+		for _, row := range group {
+			seenSegments[candidateKey(row.candidate(false), false)] = true
+		}
+	}
 	for _, row := range rows {
-		if row.SegmentID == "" {
+		segment := candidateKey(row.candidate(false), false)
+		if row.SegmentID == "" || seenSegments[segment] {
 			continue
 		}
+		seenSegments[segment] = true
 		key := candidateKey(row.candidate(false), true)
 		first, seen := best[key]
 		if !seen {
@@ -617,10 +628,13 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 		return false, err
 	}
 	byItem := map[string][]itemRow{}
+	seenSegments := make(map[string]bool, len(textRows))
 	for _, row := range textRows {
-		if row.SegmentID == "" {
+		segment := candidateKey(row.candidate(false), false)
+		if row.SegmentID == "" || seenSegments[segment] {
 			continue
 		}
+		seenSegments[segment] = true
 		key := candidateKey(row.candidate(false), true)
 		if len(ambiguous[key]) == 0 {
 			continue

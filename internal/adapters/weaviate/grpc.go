@@ -186,16 +186,13 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 	return rows, nil
 }
 
-func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, inventory bool) ([]projectionRow, error) {
-	request, err := searchRequest(collection, searchBranch{}, where, order, limit, nil)
+func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
+	request, err := searchRequest(collection, searchBranch{}, where, order, limit, properties)
 	if err != nil {
 		return nil, err
 	}
 	request.Metadata.Uuid = true
-	if inventory {
-		request.Properties.NonRefProperties = []string{"segmentId", embeddingRevision}
-		request.Metadata.CreationTimeUnix = true
-	}
+	request.Metadata.CreationTimeUnix = created
 	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, 2<<20, false)
 	if err != nil {
 		return nil, err
@@ -203,7 +200,10 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 	rows := make([]projectionRow, 0, len(results))
 	for _, result := range results {
 		fields := result.GetProperties().GetNonRefProps().GetFields()
-		row := projectionRow{SegmentID: fields["segmentId"].GetTextValue(), Revision: fields[embeddingRevision].GetIntValue()}
+		row := projectionRow{
+			SegmentID: fields["segmentId"].GetTextValue(), Revision: fields[embeddingRevision].GetIntValue(),
+			Kind: fields[itemKind].GetTextValue(),
+		}
 		m := result.GetMetadata()
 		row.Additional.ID = m.GetId()
 		if id := m.GetIdAsBytes(); len(id) == 16 {

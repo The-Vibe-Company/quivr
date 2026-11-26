@@ -1067,10 +1067,14 @@ func runItemSearch(ctx context.Context, transport http.RoundTripper, q retrieval
 func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 	f := newAttachFixture(t)
 	g := f.gen
-	g.ItemKeywordsProjected = true
+	g.ItemKeywordsProjected, g.SpacesProjected = true, true
+	f.store.LegacySpace = g.SpaceID
+	routes := []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}
+	scope := corpus.Scope{Organization: f.org}
 	vector := unitVector(1)
 	for _, name := range []string{"legacy", "unified"} {
 		seg := f.segmentation(name, "harbour ferry")
+		seg.Segments[0].Derivation.LexicalText = name + " harbour ferry"
 		v := content.Version{ID: seg.VersionID, RecordID: name, Manifest: content.Manifest{
 			Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "harbour ferry"}}},
 		}}
@@ -1098,6 +1102,28 @@ func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 				t.Fatalf("restore legacy passage: %s", res.Status)
 			}
 		}
+		transport := f.store.Client.Transport
+		var checkedSwap bool
+		if name == "unified" {
+			f.store.Client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodDelete && req.URL.Path == "/v1/batch/objects" {
+					// Just before the seed is retired, both immutable
+					// snapshots must be visible to plugin lexical search.
+					objects := f.objects(g, name)
+					if plain, enriched := shape(objects); plain != 1 || enriched != 1 {
+						t.Errorf("segment swap visibility: %+v", objects)
+					}
+					hits, err := f.store.Search(f.ctx, routes, scope, retrieval.Request{
+						Query: name, Mode: "lexical", Field: retrieval.FieldLexical, RecordIDs: []string{name}, K: 3,
+					})
+					if err != nil || len(hits) == 0 || hits[0].SegmentID != name {
+						t.Errorf("plugin lexical during segment swap: %+v, %v", hits, err)
+					}
+					checkedSwap = true
+				}
+				return transport.RoundTrip(req)
+			})
+		}
 		data := []content.EmbeddingData{f.embedding(g, name, vector)}
 		for _, write := range []func() error{
 			func() error { return f.store.PublishEmbeddings(f.ctx, g, f.org, data) },
@@ -1108,18 +1134,18 @@ func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		f.store.Client.Transport = transport
 		objects := f.objects(g, name)
 		if name == "legacy" {
 			if lexical, enriched := shape(objects); lexical != 1 || enriched != 1 || lexicalObject(objects).ID != anchor.ID {
 				t.Fatalf("legacy segment after replay: %+v", objects)
 			}
-		} else if len(objects) != 1 || objects[0].ID != anchor.ID || !objects[0].Vector {
+		} else if !checkedSwap || len(objects) != 1 || objects[0].ID == anchor.ID || !objects[0].Vector {
 			t.Fatalf("unified segment after replay: %+v", objects)
 		}
 	}
-	routes := []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}
 	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
-		hits, err := f.store.Search(f.ctx, routes, corpus.Scope{Organization: f.org}, retrieval.Request{
+		hits, err := f.store.Search(f.ctx, routes, scope, retrieval.Request{
 			Query: "harbour", Vector: vector, Mode: mode, GroupBy: "record", K: 2,
 		})
 		if err != nil || len(hits) != 2 || hits[0].SegmentID == hits[1].SegmentID {

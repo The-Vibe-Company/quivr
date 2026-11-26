@@ -446,6 +446,7 @@ const embeddingRevision = "embeddingRevision"
 
 type projectionRow struct {
 	SegmentID  string `json:"segmentId"`
+	Kind       string `json:"itemKind"`
 	Revision   int64  `json:"embeddingRevision"`
 	Additional struct {
 		ID      string `json:"id"`
@@ -454,15 +455,21 @@ type projectionRow struct {
 }
 
 // projectionRows lists identities without fetching text or vectors.
-func (s *Store) projectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, fields string) ([]projectionRow, error) {
+func (s *Store) projectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
 	if s.grpc != nil {
-		return s.grpcProjectionRows(ctx, collection, where, limit, order, fields == embeddingInventoryFields)
+		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created)
 	}
 	sortClause := strings.TrimSuffix(order.graphql(), ",")
 	if sortClause != "" {
 		sortClause = "," + sortClause
 	}
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, sortClause, fields)
+	fields := append([]string{}, properties...)
+	additional := "_additional{id}"
+	if created {
+		additional = "_additional{id creationTimeUnix}"
+	}
+	fields = append(fields, additional)
+	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, sortClause, strings.Join(fields, " "))
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`
@@ -560,7 +567,7 @@ func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) err
 // publishAnchors leaves matching anchors untouched, including anchors written
 // before routing properties were introduced. Batch upserts can change the
 // document ID of an existing anchor, so on replay inspect only IDs that exist.
-func (s *Store) publishAnchors(ctx context.Context, collection string, objects []projectionObject) error {
+func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org string, objects []projectionObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -568,7 +575,7 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	for i, object := range objects {
 		ids[i] = object.ID
 	}
-	rows, err := s.projectionRows(ctx, collection, containsAny("id", ids), len(ids), searchOrder{}, "_additional{id}")
+	rows, err := s.projectionRows(ctx, g.Collection, containsAny("id", ids), len(ids), searchOrder{}, nil, false)
 	if err != nil {
 		return err
 	}
@@ -576,10 +583,52 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	for _, row := range rows {
 		exists[row.Additional.ID] = true
 	}
+	// A unified snapshot replaces the seed after enrichment. Find it by
+	// segment when the seed ID is absent, so Publish replay does not restore it.
+	var segments []string
+	for _, object := range objects {
+		if !exists[object.ID] && object.Properties[itemKind] == segmentKind {
+			segments = append(segments, object.Properties["segmentId"].(string))
+		}
+	}
+	snapshots := map[string]projectionRow{}
+	if len(segments) > 0 {
+		scope := and(equal("organization", org), equal("generationId", g.ID), equal(itemKind, segmentKind))
+		rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
+			embeddingInventoryLimit, searchOrder{}, []string{"segmentId"}, true)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if best, ok := snapshots[row.SegmentID]; !ok || compareEmbeddings(row, best) > 0 {
+				snapshots[row.SegmentID] = row
+			}
+		}
+		if len(rows) == embeddingInventoryLimit {
+			for _, segment := range segments {
+				if _, ok := snapshots[segment]; ok {
+					continue
+				}
+				matched, err := s.projectionRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), 1, searchOrder{}, []string{"segmentId"}, false)
+				if err != nil {
+					return err
+				}
+				if len(matched) > 0 {
+					snapshots[segment] = matched[0]
+				}
+			}
+		}
+	}
 	pending := objects[:0]
 	for _, object := range objects {
-		if exists[object.ID] {
-			stored, found, err := s.object(ctx, collection, object.ID)
+		id := object.ID
+		if object.Properties[itemKind] == segmentKind {
+			if row, ok := snapshots[object.Properties["segmentId"].(string)]; ok {
+				id = row.Additional.ID
+			}
+		}
+		if exists[object.ID] || id != object.ID {
+			stored, found, err := s.object(ctx, g.Collection, id)
 			if err != nil {
 				return err
 			}
@@ -604,8 +653,12 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 					return errors.New("immutable item projection mismatch")
 				}
 				if object.Properties[itemKind] == segmentKind {
-					object.Vectors = stored.Vectors
+					return errors.New("unified segment projection mismatch")
 				}
+			} else if object.Properties[itemKind] == segmentKind {
+				// Embedding publication may have retired the selected
+				// snapshot. Reconcile its successor on the next attempt.
+				return retrieval.ErrProjectionMissing
 			}
 		}
 		pending = append(pending, object)
@@ -638,7 +691,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
 	objects := make([]projectionObject, 0, projectionBatch)
 	flush := func() error {
-		err := s.publishAnchors(ctx, g.Collection, objects)
+		err := s.publishAnchors(ctx, g, org, objects)
 		objects = objects[:0]
 		return err
 	}
@@ -878,12 +931,15 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	return result, nil
 }
 
-// PublishEmbeddings attaches named vectors to unified segments. Legacy
-// passages retain their separate enriched objects and replacement protocol.
-// Both layouts leave the item or legacy BM25 anchor untouched.
+// PublishEmbeddings attaches named vectors by publishing a replacement
+// snapshot before retiring the unified segment's seed or an older snapshot.
+// Legacy passage and item keyword anchors remain immutable.
 func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid embedding projection")
+	}
+	if err := s.ensureItemSchema(ctx, g); err != nil {
+		return err
 	}
 	if err := s.ensureVectors(ctx, g); err != nil {
 		return err
@@ -947,14 +1003,16 @@ func (s *Store) embeddingObject(g content.Generation, org, segment string, vecto
 	}, nil
 }
 
-const (
-	// The common case is an anchor and one enriched object per segment.
-	embeddingInventoryLimit  = 3 * projectionBatch
-	embeddingInventoryFields = "segmentId " + embeddingRevision + " _additional{id creationTimeUnix}"
-)
+// A legacy segment has an anchor and an enriched object. Allow room for
+// partial writes and in-flight replacements in the bounded inventory.
+const embeddingInventoryLimit = 3 * projectionBatch
 
-func (s *Store) embeddingRows(ctx context.Context, collection string, where filter, order searchOrder) ([]projectionRow, error) {
-	rows, err := s.projectionRows(ctx, collection, where, embeddingInventoryLimit, order, embeddingInventoryFields)
+func (s *Store) embeddingRows(ctx context.Context, g content.Generation, where filter, order searchOrder) ([]projectionRow, error) {
+	properties := []string{"segmentId", embeddingRevision}
+	if g.ItemKeywordsProjected {
+		properties = append(properties, itemKind)
+	}
+	rows, err := s.projectionRows(ctx, g.Collection, where, embeddingInventoryLimit, order, properties, true)
 	if err != nil {
 		return nil, err
 	}
@@ -969,7 +1027,7 @@ func (s *Store) embeddingRows(ctx context.Context, collection string, where filt
 func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
 	scope := and(equal("organization", org), equal("generationId", g.ID))
 	inventory := func(segments []string) ([]projectionRow, error) {
-		return s.embeddingRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)), searchOrder{})
+		return s.embeddingRows(ctx, g, and(scope, containsAny("segmentId", segments)), searchOrder{})
 	}
 	rows, err := inventory(segments)
 	if err != nil {
@@ -990,53 +1048,34 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 			return err
 		}
 		anchorID := objectID(org, g.ID, segment)
-		var anchor storedObject
-		if g.ItemKeywordsProjected {
-			var projected bool
-			anchor, projected, err = s.object(ctx, g.Collection, anchorID)
-			if err != nil {
-				return err
-			}
-			if !projected {
-				return retrieval.ErrProjectionMissing
-			}
-			if anchor.Properties[itemKind] == segmentKind {
-				// The item anchor alone serves item BM25. The segment keeps
-				// the same identity and properties when its vectors change.
-				object.ID = anchorID
-				if len(anchor.Vectors) == len(object.Vectors) && sameVectors(anchor.Vectors, object.Vectors) {
-					existing = append(existing, object)
-					continue
-				}
-				object.Properties = anchor.Properties
-				pending = append(pending, object)
-				continue
-			}
-		}
-
 		rows := rowsBySegment[segment]
 		if full {
 			// Read the highest revisions for each segment independently when
 			// the bounded inventory could have omitted them.
-			rows, err = s.embeddingRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), searchOrder{field: embeddingRevision, desc: true})
+			rows, err = s.embeddingRows(ctx, g, and(scope, equal("segmentId", segment)), searchOrder{field: embeddingRevision, desc: true})
 			if err != nil {
 				return err
 			}
 		}
 		var revision int64
-		var found, replacing bool
+		var found, replacing, hasSeed bool
+		var snapshot projectionRow
 		for _, row := range rows {
 			switch row.Additional.ID {
 			case anchorID:
-				continue
+				hasSeed = row.Kind == segmentKind
 			case object.ID:
 				found = true
 			default:
 				replacing = true
 				revision = max(revision, row.Revision)
 			}
+			if row.Additional.ID != anchorID && row.Kind == segmentKind &&
+				(snapshot.Additional.ID == "" || compareEmbeddings(row, snapshot) > 0) {
+				snapshot = row
+			}
 		}
-		if replacing {
+		if replacing || hasSeed {
 			replacements = append(replacements, segment)
 		}
 		if len(rows) >= embeddingInventoryLimit && !found {
@@ -1049,15 +1088,15 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 			existing = append(existing, object)
 			continue
 		}
-		if !g.ItemKeywordsProjected {
-			var projected bool
-			anchor, projected, err = s.object(ctx, g.Collection, anchorID)
-			if err != nil {
-				return err
-			}
-			if !projected {
-				return retrieval.ErrProjectionMissing
-			}
+		if snapshot.Additional.ID != "" {
+			anchorID = snapshot.Additional.ID
+		}
+		anchor, projected, err := s.object(ctx, g.Collection, anchorID)
+		if err != nil {
+			return err
+		}
+		if !projected {
+			return retrieval.ErrProjectionMissing
 		}
 		for _, key := range lexicalProperties {
 			// A legacy anchor may have no value to copy.
@@ -1065,7 +1104,7 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 				object.Properties[key] = value
 			}
 		}
-		if g.ItemKeywordsProjected {
+		if g.ItemKeywordsProjected && anchor.Properties[itemKind] != segmentKind {
 			object.Properties[itemKind] = "vector"
 		}
 		for key, value := range anchor.Properties {
@@ -1136,14 +1175,46 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 			winners[row.SegmentID] = row
 		}
 	}
+	var seeds []string
 	for _, row := range rows {
 		id := row.Additional.ID
-		if id == objectID(org, g.ID, row.SegmentID) || id == winners[row.SegmentID].Additional.ID {
+		winner, ok := winners[row.SegmentID]
+		if !ok || id == winner.Additional.ID {
+			continue
+		}
+		if id == objectID(org, g.ID, row.SegmentID) {
+			if row.Kind == segmentKind && winner.Kind == segmentKind {
+				seeds = append(seeds, id)
+			}
 			continue
 		}
 		// Delete observed identities. A filter excluding the winner's ID could
 		// match a concurrent insert before Weaviate indexes its ID.
 		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+			return err
+		}
+	}
+	return s.removeSegmentSeeds(ctx, g.Collection, seeds)
+}
+
+// Retire only the seed identities observed alongside a confirmed snapshot.
+func (s *Store) removeSegmentSeeds(ctx context.Context, collection string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	operands := make([]any, 0, len(ids))
+	for _, id := range ids {
+		operands = append(operands, equalText("id", id))
+	}
+	where := map[string]any{"operator": "Or", "operands": operands}
+	result, err := s.deleteWhere(ctx, s.Client, collection, where)
+	if err != nil || result.Complete {
+		return err
+	}
+	// The deployment may cap a batch below our write size. Delete the
+	// observed identities directly so truncation never leaves seeds behind.
+	for _, id := range ids {
+		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
 			return err
 		}
 	}
@@ -1154,7 +1225,7 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org string, scope filter, segment string) error {
 	where := and(scope, equal("segmentId", segment))
 	for {
-		rows, err := s.embeddingRows(ctx, g.Collection, where, searchOrder{})
+		rows, err := s.embeddingRows(ctx, g, where, searchOrder{})
 		if err != nil {
 			return err
 		}
