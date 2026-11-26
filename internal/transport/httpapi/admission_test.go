@@ -217,14 +217,14 @@ func TestSearchAdmissionPeakOverloadBurstBoundsTailLatency(t *testing.T) {
 		// 100 req/s burst over 1.2s (120 total requests, 10ms apart).
 		const totalRequests = 120
 		var (
-			wg        sync.WaitGroup
-			okCount   atomic.Int32
-			shedCount atomic.Int32
+			wg         sync.WaitGroup
+			okCount    atomic.Int32
+			shedCount  atomic.Int32
 			timeout504 atomic.Int32
-			otherErr  atomic.Int32
-			mu        sync.Mutex
-			maxShed   time.Duration
-			maxAdmit  time.Duration
+			otherErr   atomic.Int32
+			mu         sync.Mutex
+			maxShed    time.Duration
+			maxAdmit   time.Duration
 		)
 		for i := 0; i < totalRequests; i++ {
 			wg.Add(1)

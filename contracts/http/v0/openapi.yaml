@@ -3927,8 +3927,9 @@ paths:
         Each API process bounds active searches across callers with an adaptive concurrency limiter
         and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with
         Retry-After before storage or plugin work. When a deep search has insufficient remaining
-        deadline budget for reranking or the reranker is unavailable, it degrades gracefully to
-        default hybrid results and reports the reason in retrieval_profile.degraded.
+        deadline budget for reranking, or the reranker hits its deadline or fails, it degrades
+        gracefully to default results for the requested mode and reports the reason in
+        retrieval_profile.degraded.
         A query encoding model that cannot answer returns retryable 503 model_unavailable,
         including the legacy inference service and the ingestion plugin that owns the requested vector space.
       requestBody:
@@ -8197,7 +8198,7 @@ components:
         reason:
           type: string
           enum: [vectors_unavailable, reranker_budget_exceeded, reranker_unavailable]
-          description: Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking so default results were returned. reranker_unavailable means the reranker failed or was overloaded so default results were returned.
+          description: Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
         corpus_ids:
           type: array
           minItems: 1

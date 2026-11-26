@@ -3158,11 +3158,11 @@ type ScheduleChange struct {
 type SearchDegradation struct {
 	CorpusIds []string `json:"corpus_ids"`
 
-	// Reason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking so default results were returned. reranker_unavailable means the reranker failed or was overloaded so default results were returned.
+	// Reason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 	Reason SearchDegradationReason `json:"reason"`
 }
 
-// SearchDegradationReason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking so default results were returned. reranker_unavailable means the reranker failed or was overloaded so default results were returned.
+// SearchDegradationReason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 type SearchDegradationReason string
 
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.

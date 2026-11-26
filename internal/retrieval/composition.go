@@ -141,7 +141,9 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	if err != nil {
 		return nil, err
 	}
-	if len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) && sv.fallback == nil {
+	defaultRanker, defaultLocal, hasDefault := sv.s.resolveProfile(DefaultProfile)
+	if hasDefault && len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) &&
+		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal && sv.fallback == nil {
 		saved := result
 		saved.Hits = slices.Clone(result.Hits)
 		sv.fallback = &saved

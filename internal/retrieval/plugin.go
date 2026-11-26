@@ -156,11 +156,13 @@ func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Requ
 	defRanker, defLocal, hasDefault := s.resolveProfile(DefaultProfile)
 	canFallback := isDeepProfile(out.Profile, q.Profile) && hasDefault &&
 		(defRanker.Manifest().ID != s.Ranker.Manifest().ID || defLocal != q.Profile)
-	if canFallback {
+	if canFallback && (parentCtx == nil || parentCtx.Err() == nil) {
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
 			slog.WarnContext(ctx, "deep search degraded to default before reranking due to tight deadline",
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
-			return s.runDefaultFallback(ctx, scope, q, routes, out, started, defRanker, defLocal, DegradationRerankerBudgetExceeded)
+			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+			defer cancel()
+			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
 	}
 	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil, canFallback)
@@ -258,8 +260,8 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	scope.Corpora = q.CorpusIDs
 	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile}
 	for {
-		clientCanceled := parentCtx != nil && errors.Is(parentCtx.Err(), context.Canceled)
-		if sv.fallback != nil && !clientCanceled {
+		callerDone := parentCtx != nil && parentCtx.Err() != nil
+		if sv.fallback != nil && !callerDone {
 			if ctx.Err() != nil {
 				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
 			}
@@ -285,7 +287,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		}
 		body, err := s.Ranker.Round(ctx, request)
 		timing.PluginRounds += time.Since(phase)
-		clientCanceled = parentCtx != nil && errors.Is(parentCtx.Err(), context.Canceled)
+		callerDone = parentCtx != nil && parentCtx.Err() != nil
 		switch {
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
@@ -298,10 +300,10 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			if errors.Is(context.Cause(ctx), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrDeadline) {
 				reason = DegradationRerankerBudgetExceeded
 			}
-			if sv.fallback != nil && !clientCanceled {
+			if sv.fallback != nil && !callerDone {
 				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, reason, chain, timing, started, session.Round(), profile), nil
 			}
-			if canFallback && len(ancestors) == 0 && !clientCanceled && parentCtx != nil && parentCtx.Err() == nil {
+			if canFallback && len(ancestors) == 0 && !callerDone && parentCtx != nil {
 				if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok {
 					slog.WarnContext(ctx, "deep search degraded to default after reranker failure", "component", "search", "profile", out.Profile, "reason", reason)
 					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
@@ -321,7 +323,8 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			return out, err
 		}
 		if ctx.Err() != nil {
-			if sv.fallback != nil && !clientCanceled && errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			callerDone = parentCtx != nil && parentCtx.Err() != nil
+			if sv.fallback != nil && !callerDone && errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
 			}
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)

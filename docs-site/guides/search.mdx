@@ -61,8 +61,8 @@ When served vectors are unavailable, hybrid search returns keyword results with
 names the affected collections in `corpus_ids`, even when no documents match.
 Other collections keep their hybrid results. When a `deep` search has too little
 remaining deadline budget for reranking (`reranker_budget_exceeded`) or its
-reranker fails (`reranker_unavailable`), it falls back to `default` hybrid
-results and reports the affected `corpus_ids` in `retrieval_profile.degraded`.
+reranker fails (`reranker_unavailable`), it falls back to `default` results for the requested mode and reports the affected
+`corpus_ids` in `retrieval_profile.degraded`.
 You can show this notice until a later response omits the marker; rebuilding
 needs no client-side retry loop.
 
