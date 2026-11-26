@@ -345,6 +345,8 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		m := s.Ranker.Manifest()
 		out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
+		elapsed := time.Since(started)
+		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}, OverObjective: elapsed > m.Contributions.Retrieval.Profiles[q.Profile].Objective()}
 		return out, nil
 	}
 	return s.rank(ctx, scope, q, routes, out, started)

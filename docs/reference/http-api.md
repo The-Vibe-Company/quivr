@@ -2054,7 +2054,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
+| `200` | `application/json` [`SearchResponse`](#searchresponse)<br><br>Header `Server-Timing`: string. Time spent in each search phase, in milliseconds (routing, coverage, plugin, encode, index, hydrate).<br><br>Header `X-Correlation-ID`: string. The caller's valid X-Correlation-ID, or the request ID when none was sent; carried into logs, audit events and traces. | Successful response |
 | `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 model_unavailable (the query encoding model could not answer) or search_unavailable (another search dependency is unavailable), 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
 
 #### `GET /v0/search/profiles`

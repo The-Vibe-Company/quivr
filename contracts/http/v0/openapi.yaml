@@ -3937,6 +3937,15 @@ paths:
       responses:
         '200':
           description: Successful response
+          headers:
+            Server-Timing:
+              description: Time spent in each search phase, in milliseconds (routing, coverage, plugin, encode, index, hydrate).
+              schema:
+                type: string
+            X-Correlation-ID:
+              description: The caller's valid X-Correlation-ID, or the request ID when none was sent; carried into logs, audit events and traces.
+              schema:
+                type: string
           content:
             application/json:
               schema:

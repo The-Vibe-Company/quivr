@@ -17590,6 +17590,12 @@ func (r GetSavedQueryVersionResponse) ContentType() string {
 	return ""
 }
 
+// SearchRecordsResponse200Headers the declared response headers of an HTTP 200 response for SearchRecords
+type SearchRecordsResponse200Headers struct {
+	ServerTiming   *string
+	XCorrelationID *string
+}
+
 // SearchRecordsResponseDefaultHeaders the declared response headers of an HTTP default response for SearchRecords
 type SearchRecordsResponseDefaultHeaders struct {
 	RetryAfter *int
@@ -17602,6 +17608,8 @@ type SearchRecordsResponse struct {
 	JSON200 *SearchResponse
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *SearchRecordsResponse200Headers
 	// HeadersDefault the parsed response headers for an HTTP default response
 	HeadersDefault *SearchRecordsResponseDefaultHeaders
 }
@@ -23125,6 +23133,23 @@ func ParseSearchRecordsResponse(rsp *http.Response) (*SearchRecordsResponse, err
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers SearchRecordsResponse200Headers
+		if values := rsp.Header.Values("Server-Timing"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Server-Timing", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ServerTiming = &value
+		}
+		if values := rsp.Header.Values("X-Correlation-ID"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "X-Correlation-ID", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.XCorrelationID = &value
+		}
+		response.Headers200 = &headers
 	case true:
 		var headers SearchRecordsResponseDefaultHeaders
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
