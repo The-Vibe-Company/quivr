@@ -466,7 +466,7 @@ class OnnxEncoderBackendTest(unittest.TestCase):
             )
             fake_tokenizers = types.SimpleNamespace(Tokenizer=FakeTokenizer)
 
-            with patch.dict(os.environ, {}, clear=False), patch.dict(sys.modules, {
+            with patch.dict(os.environ, {'QUIVR_QUERY_ENCODER_BACKEND': 'auto'}, clear=False), patch.dict(sys.modules, {
                 'numpy': _FakeNumpy,
                 'onnxruntime': fake_ort,
                 'tokenizers': fake_tokenizers,
