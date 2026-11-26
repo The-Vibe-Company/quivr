@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Run pinned OCR delegation on macOS/Linux; bootstrap without Node or LLM config."""
-# Modified by Armada: read-only setup diagnostics for armada doctor.
 from __future__ import annotations
 
 import hashlib
@@ -12,12 +11,12 @@ import sys
 import tempfile
 import urllib.request
 
-VERSION = "1.12.1"
+VERSION = "1.13.12"
 CHECKSUMS = {
-    "darwin-arm64": "55b305965d946e3b53a701809a118d2013cd03082bd0941ffe9c974832819c1c",
-    "darwin-amd64": "a0c02c70db535d5995e991af2a8141d7af787242a557be236e233bea3333d654",
-    "linux-arm64": "b7b22f879048dc642f334af180d84040a1615ba912172ae242ba514851ee9cb8",
-    "linux-amd64": "5e17687c60646846cc942f7422d2ae9e7104f7315ad973505cc73bac56bd62f1",
+    "darwin-arm64": "d68eadd45e57f05698373cc7115084a204798e7da37a52ce8326444a9e257a65",
+    "darwin-amd64": "e067e92e8fa7030f59490f9cec5b86f9c69dd8a13d252b979f4cd87b7f047696",
+    "linux-arm64": "178b1a926616f69522a7dc18a69513841813132f98accc35db960276cd53408d",
+    "linux-amd64": "673ed6bfd905bf68383269e78945b9d873a5c8c0931fce6e86374ca58df0b8b1",
 }
 
 
@@ -65,32 +64,9 @@ def ensure_binary() -> Path:
     return binary
 
 
-def check_setup() -> int:
-    """Inspect the cache without writing, downloading or executing a binary."""
-    key = target(platform.system(), platform.machine())
-    root = Path(os.environ.get("REVIEW_CODE_OCR_HOME", str(Path.home() / ".local/share/review-code-dev/ocr"))).expanduser().resolve()
-    binary = root / VERSION / key / "ocr"
-    if binary.exists():
-        if digest(binary) != CHECKSUMS[key]:
-            raise RuntimeError("OCR checksum mismatch; inspect the cache before running review.")
-        if not os.access(binary, os.X_OK):
-            raise RuntimeError("Verified OCR cache is not executable; restore its execute permission.")
-        print(f"OCR {VERSION} ({key}) cached binary verified; no execution performed.")
-        return 0
-    parent = binary.parent
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
-        raise RuntimeError("OCR cache is not writable; choose a writable REVIEW_CODE_OCR_HOME.")
-    print(f"OCR {VERSION} ({key}) not cached; first review needs HTTPS access to github.com/alibaba/open-code-review/releases and its release asset host. No API key or LLM endpoint is required.")
-    return 2
-
-
 def main(args: list[str]) -> int:
-    if args == ["check"]:
-        return check_setup()
     if args == ["--help"] or not args:
-        print("Usage: python3 ocr.py check | version | delegate preview [flags] | delegate rule [flags] -- <paths>\n"
+        print("Usage: python3 ocr.py version | delegate preview [flags] | delegate rule [flags] -- <paths>\n"
               "First call downloads checksum-pinned OCR. No API key, Node, sudo, or PATH change.\n"
               "Optional REVIEW_CODE_OCR_HOME overrides the user cache directory.")
         return 0
