@@ -31,10 +31,13 @@ type SpaceSnapshots struct {
 	entries  map[string]*spaceSnapshot
 }
 
+const maxCoverageFailureBackoff = 15 * time.Minute
+
 type spaceSnapshot struct {
 	spaces         map[string]content.SpaceCoverage
 	total          int64
 	observed, next time.Time
+	failures       int
 }
 
 func NewSpaceSnapshots(parent context.Context, registry SpaceDescriptions, ttl time.Duration) *SpaceSnapshots {
@@ -92,8 +95,14 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.busy = false
+	if err != nil {
+		entry.failures++
+		entry.next = time.Now().Add(coverageFailureBackoff(c.ttl, entry.failures))
+		return
+	}
+	entry.failures = 0
 	entry.next = time.Now().Add(c.ttl)
-	if err != nil || snapshotKey(org, corpusID, g) != key || c.entries[key] != entry {
+	if snapshotKey(org, corpusID, g) != key || c.entries[key] != entry {
 		return
 	}
 	entry.spaces = make(map[string]content.SpaceCoverage, len(spaces))
@@ -101,6 +110,21 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 		entry.spaces[sp.ID] = sp
 	}
 	entry.total, entry.observed = total, observed
+}
+
+func coverageFailureBackoff(base time.Duration, failures int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	capDelay := max(base, maxCoverageFailureBackoff)
+	delay := base
+	for range max(0, failures-1) {
+		if delay >= capDelay/2 {
+			return capDelay
+		}
+		delay *= 2
+	}
+	return delay
 }
 
 func snapshotKey(org, corpusID string, g content.Generation) string {

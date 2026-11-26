@@ -373,10 +373,10 @@ export function createHistory() {
 export function createExplorer({ upstream, readable, picked, demo, history }) {
   // Corpora as the engine describes them, read again after a minute.
   const corpora = new Map();
-  async function corpus(id) {
+  async function corpus(id, signal) {
     const known = corpora.get(id);
     if (known && Date.now() - known.at < CORPUS_TTL_MS) return known.value;
-    const response = await upstream(`/v0/corpora/${encodeURIComponent(id)}`);
+    const response = await upstream(`/v0/corpora/${encodeURIComponent(id)}`, "GET", undefined, 8000, signal);
     if (response.status >= 500) throw failure(503, "Le moteur est momentanément indisponible. Réessayez.");
     // A corpus the key cannot read, or that is gone, is not offered; any
     // other answer is passing, and the corpus is described again later.
@@ -407,10 +407,14 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
 
   // Versions are immutable: each is read once and kept, the latest MAX_VERSIONS.
   const versions = new Map();
-  async function version(record, id) {
+  async function version(record, id, signal) {
     if (versions.has(id)) return versions.get(id);
     const response = await upstream(
       `/v0/records/${encodeURIComponent(record)}/versions/${encodeURIComponent(id)}`,
+      "GET",
+      undefined,
+      8000,
+      signal,
     );
     if (response.status === 404) return null;
     if (response.status !== 200) throw failure(503, "Ces documents sont momentanément indisponibles. Réessayez.");
@@ -421,7 +425,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
   }
 
   // One listing page of the corpora under the predicates, newest first.
-  async function list(ids, predicates, limit, cursor) {
+  async function list(ids, predicates, limit, cursor, signal) {
     const query = new URLSearchParams({
       corpus_ids: ids.join(","),
       order: "accepted_at_desc",
@@ -429,7 +433,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     });
     if (predicates.length) query.set("metadata", JSON.stringify(predicates));
     if (cursor) query.set("page_cursor", cursor);
-    const response = await upstream(`/v0/records?${query}`);
+    const response = await upstream(`/v0/records?${query}`, "GET", undefined, 8000, signal);
     if (response.status === 422 && response.data?.code === "metadata_filter_unavailable")
       throw failure(
         422,
@@ -444,13 +448,13 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
 
   // The best documents for a text under the predicates, as listing rows
   // would carry them: one per Record, in rank order.
-  async function search(ids, predicates, query) {
+  async function search(ids, predicates, query, signal) {
     const response = await upstream("/v0/search", "POST", {
       query,
       corpus_ids: ids,
       limit: SEARCH_LIMIT,
       ...(predicates.length ? { filter: { metadata: predicates } } : {}),
-    });
+    }, 8000, signal);
     if (response.status === 422 && response.data?.code === "metadata_filter_unavailable")
       throw failure(
         422,
@@ -471,13 +475,14 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     const queue = [...hits.entries()];
     await Promise.all(
       Array.from({ length: HYDRATE_CONCURRENCY }, async () => {
-        for (let next; (next = queue.shift()); ) {
+        for (let next; !signal?.aborted && (next = queue.shift()); ) {
           const [index, hit] = next;
-          const source = await sourceOf(hit.record_id);
+          const source = await sourceOf(hit.record_id, signal);
           if (source) records[index] = { record_id: hit.record_id, source, withdrawn: false, current_version_id: hit.version_id };
         }
       }),
     );
+    signal?.throwIfAborted();
     return {
       items: records.filter(Boolean),
       excluded_corpora: response.data.excluded_corpora,
@@ -489,9 +494,9 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
 
   // A Record's source identity, which never changes: read once, the latest kept.
   const sources = new Map();
-  async function sourceOf(record) {
+  async function sourceOf(record, signal) {
     if (sources.has(record)) return sources.get(record);
-    const response = await upstream(`/v0/records/${encodeURIComponent(record)}`);
+    const response = await upstream(`/v0/records/${encodeURIComponent(record)}`, "GET", undefined, 8000, signal);
     if (response.status === 404 || response.status === 403) return null;
     if (response.status !== 200) throw failure(503, "Ces documents sont momentanément indisponibles. Réessayez.");
     sources.set(record, response.data.source);
@@ -514,19 +519,20 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
   }
 
   // The current Version of each listed Record, in order; withdrawn ones left out.
-  async function hydrate(records) {
+  async function hydrate(records, signal) {
     const out = [];
     const queue = records
       .filter((r) => !r.withdrawn && r.current_version_id)
       .map((record, index) => ({ record, index }));
     await Promise.all(
       Array.from({ length: HYDRATE_CONCURRENCY }, async () => {
-        for (let next; (next = queue.shift()); ) {
-          const data = await version(next.record.record_id, next.record.current_version_id);
+        for (let next; !signal?.aborted && (next = queue.shift()); ) {
+          const data = await version(next.record.record_id, next.record.current_version_id, signal);
           if (data) out[next.index] = { record: next.record, version: data };
         }
       }),
     );
+    signal?.throwIfAborted();
     return out.filter(Boolean);
   }
 
@@ -573,14 +579,14 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       };
     },
     /** GET /demo/explore: a page of documents, newest first, or a search's best (?q=). */
-    async page(params) {
+    async page(params, signal) {
       const ids = await picked(params);
       const predicates = predicatesOf(params.get("metadata"));
       const query = (params.get("q") || "").trim();
       if (query.length > QUERY_CHARS) throw failure(422, "Cette recherche est trop longue.");
-      const data = query ? await search(ids, predicates, query) : await list(ids, predicates, PAGE, params.get("cursor"));
-      const infos = new Map((await Promise.all(ids.map(corpus))).map((c) => [c.corpus_id, c]));
-      const rows = await hydrate(data.items || []);
+      const data = query ? await search(ids, predicates, query, signal) : await list(ids, predicates, PAGE, params.get("cursor"), signal);
+      const infos = new Map((await Promise.all(ids.map((id) => corpus(id, signal)))).map((c) => [c.corpus_id, c]));
+      const rows = await hydrate(data.items || [], signal);
       const page = {
         items: rows.map((r) => row(r, infos.get(r.record.source?.corpus_id) || { common: COMMON_FIELDS, own: [] })),
       };

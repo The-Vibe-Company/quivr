@@ -258,3 +258,42 @@ test("one field is counted alone, once, fast when asked, and says how its counts
   for (const params of [{ field: "metadata.unknown" }, { field: "metadata.language", accuracy: "approximate" }])
     await assert.rejects(ask(params), (error) => error.status === 422, JSON.stringify(params));
 });
+
+test("Explorer page forwards abort signal and stops follow-up hydration when client leaves", async () => {
+  const controller = new AbortController();
+  const seen = [];
+  const explorer = createExplorer({
+    upstream: async (path, _method, _body, _timeout, signal) => {
+      seen.push({ path, signal });
+      if (path === "/v0/search") {
+        return {
+          status: 200,
+          data: {
+            items: Array.from({ length: 12 }, (_, i) => ({
+              record_id: `rec-${i}`,
+              version_id: `ver-${i}`,
+              rank: i + 1,
+            })),
+          },
+        };
+      }
+      if (path.startsWith("/v0/records/")) {
+        controller.abort();
+        signal?.throwIfAborted();
+        return { status: 200, data: { source: { corpus_id: "c1" } } };
+      }
+      return { status: 200, data: { name: "Example corpus" } };
+    },
+    picked: async () => ["c1"],
+    demo: () => "c1",
+    history: { note() {}, of: () => [] },
+  });
+  await assert.rejects(
+    explorer.page(new URLSearchParams({ q: "harbour" }), controller.signal),
+    (error) => error.name === "AbortError",
+  );
+  assert.equal(seen[0].path, "/v0/search");
+  assert.equal(seen[0].signal, controller.signal);
+  // Aborting on the first record fetch prevents the remaining queue from running.
+  assert.ok(seen.filter((s) => s.path.startsWith("/v0/records/")).length <= 6);
+});

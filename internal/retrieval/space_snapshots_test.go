@@ -116,3 +116,76 @@ func TestSpaceSnapshotsNeverWaitForCoverage(t *testing.T) {
 		synctest.Wait()
 	})
 }
+
+// Persistent coverage refresh failures back off exponentially up to the cap so
+// a slow corpus does not thrash canonical storage every TTL, and reset once a
+// refresh succeeds.
+func TestSpaceSnapshotsBackOffAfterRepeatedFailures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		closed := make(chan struct{})
+		close(closed)
+		registry := &snapshotRegistry{generation: "a", complete: closed, fail: true}
+		cache := NewSpaceSnapshots(ctx, registry, 10*time.Second)
+
+		probe := func() {
+			t.Helper()
+			if _, _, _, err := cache.VectorSpaces(context.Background(), "org", "corpus"); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+		}
+
+		// Failure 1 -> retry allowed after 10s.
+		probe()
+		if registry.reads != 1 {
+			t.Fatalf("reads=%d, want 1", registry.reads)
+		}
+		time.Sleep(9 * time.Second)
+		probe()
+		if registry.reads != 1 {
+			t.Fatalf("retried before first ttl: reads=%d", registry.reads)
+		}
+
+		// Failure 2 -> retry backs off to 20s.
+		time.Sleep(2 * time.Second)
+		probe()
+		if registry.reads != 2 {
+			t.Fatalf("reads=%d, want 2", registry.reads)
+		}
+		time.Sleep(15 * time.Second)
+		probe()
+		if registry.reads != 2 {
+			t.Fatalf("retried during 20s backoff: reads=%d", registry.reads)
+		}
+
+		// Failure 3 -> retry backs off to 40s.
+		time.Sleep(6 * time.Second)
+		probe()
+		if registry.reads != 3 {
+			t.Fatalf("reads=%d, want 3", registry.reads)
+		}
+		time.Sleep(35 * time.Second)
+		probe()
+		if registry.reads != 3 {
+			t.Fatalf("retried during 40s backoff: reads=%d", registry.reads)
+		}
+
+		// Recovery resets the backoff back to 10s.
+		registry.fail = false
+		time.Sleep(6 * time.Second)
+		probe()
+		if registry.reads != 4 {
+			t.Fatalf("reads=%d, want 4", registry.reads)
+		}
+		time.Sleep(11 * time.Second)
+		probe()
+		if registry.reads != 5 {
+			t.Fatalf("backoff did not reset after success: reads=%d, want 5", registry.reads)
+		}
+		if got := coverageFailureBackoff(10*time.Second, 20); got != maxCoverageFailureBackoff {
+			t.Fatalf("capped backoff = %s, want %s", got, maxCoverageFailureBackoff)
+		}
+	})
+}

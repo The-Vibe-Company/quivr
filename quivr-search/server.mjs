@@ -671,7 +671,12 @@ async function handle(req, res) {
         return;
       }
       if (path === "/demo/explore" && req.method === "GET") {
-        await send(res, 200, await explorer.page(url.searchParams));
+        // A browser that leaves stops the search and its document reads.
+        const left = new AbortController();
+        res.on("close", () => {
+          if (!res.writableEnded) left.abort();
+        });
+        await send(res, 200, await explorer.page(url.searchParams, left.signal));
         return;
       }
       if (path === "/demo/explore/facets" && req.method === "GET") {
@@ -860,7 +865,7 @@ async function handle(req, res) {
     }
     await reply(res, 200, head, data.raw, data.encoded);
   } catch (error) {
-    if (res.headersSent) return void res.destroy();
+    if (res.headersSent || res.destroyed) return void res.destroy();
     const status = error.status || 503;
     await send(res, status, {
       code:

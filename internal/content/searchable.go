@@ -317,12 +317,15 @@ type HydrationRechecker interface {
 }
 
 // Located is a candidate's segment as canonical storage records it, with the
-// immutable blob holding its Part text.
+// immutable blob holding its Part text. For legacy unpacked multi-part
+// segments, ManifestBlob carries the Version's canonical Manifest so hydration
+// reads one object per Version instead of one per Part.
 type Located struct {
 	Hydrated
-	Blob    Blob
-	Pack    PackRange
-	Sources []LocatedSource
+	Blob         Blob
+	Pack         PackRange
+	ManifestBlob Blob
+	Sources      []LocatedSource
 }
 type LocatedSource struct {
 	Range SourceRange
@@ -705,8 +708,9 @@ func (b blobSlicer) slice(start, end int) (string, bool) {
 }
 
 // blobReadParallelism bounds the concurrent canonical blob reads of one
-// hydration batch.
-const blobReadParallelism = 16
+// hydration batch, staying within the S3 transport's idle connection pool
+// while letting a 50-hit page complete in a single round-trip wave.
+const blobReadParallelism = 64
 
 // Hydrate rechecks candidates and reads their excerpts from canonical storage
 // as one batch: one lookup, one read per distinct uncached blob, then one recheck,
@@ -787,13 +791,27 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 	type request struct {
 		candidate, index int
 		source           LocatedSource
+		ranges           []SourceRange
 	}
 	byBlob := map[blobCacheKey][]request{}
 	seenBlob := map[string]Blob{}
 	regionOnly := map[int]bool{}
 	for i, l := range located {
-		if len(l.Sources) == 0 && l.Blob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0 {
+		if len(l.Sources) == 0 && l.Blob.Key == "" && l.ManifestBlob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0 {
 			regionOnly[i] = true
+			continue
+		}
+		if len(l.Sources) == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0 {
+			if prev, ok := seenBlob[l.ManifestBlob.Key]; ok && prev != l.ManifestBlob {
+				return nil, ErrArtifactCorrupt
+			}
+			seenBlob[l.ManifestBlob.Key] = l.ManifestBlob
+			key := blobCacheKey{organization: org, key: l.ManifestBlob.Key, sha256: l.ManifestBlob.SHA256, size: l.ManifestBlob.Size}
+			byBlob[key] = append(byBlob[key], request{
+				candidate: i,
+				source:    LocatedSource{Blob: l.ManifestBlob},
+				ranges:    l.Segment.Derivation.SourceRanges,
+			})
 			continue
 		}
 		sources := l.Sources
@@ -806,7 +824,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			}
 			seenBlob[source.Blob.Key] = source.Blob
 			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256, size: source.Blob.Size}
-			byBlob[key] = append(byBlob[key], request{i, k, source})
+			byBlob[key] = append(byBlob[key], request{candidate: i, index: k, source: source})
 		}
 	}
 	slices := map[int][]SourceExcerpt{}
@@ -815,15 +833,55 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			continue
 		}
 		n := len(l.Sources)
+		if n == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0 {
+			n = len(l.Segment.Derivation.SourceRanges)
+		}
 		if n == 0 {
 			n = 1
 		}
 		slices[i] = make([]SourceExcerpt, n)
 	}
-	sliceBlob := func(blob string, requests []request) ([]SourceExcerpt, error) {
+	sliceBlob := func(blob string, requests []request) ([][]SourceExcerpt, error) {
+		var manifestParts map[string]string
+		var manifestSlicers map[string]*blobSlicer
 		parts := map[[2]int64]*blobSlicer{}
-		cuts := make([]SourceExcerpt, len(requests))
+		cuts := make([][]SourceExcerpt, len(requests))
 		for idx, req := range requests {
+			if len(req.ranges) > 0 {
+				if manifestParts == nil {
+					var manifest Manifest
+					if err := json.Unmarshal([]byte(blob), &manifest); err != nil {
+						return nil, ErrArtifactCorrupt
+					}
+					manifestParts = make(map[string]string, len(manifest.Parts))
+					manifestSlicers = make(map[string]*blobSlicer, len(manifest.Parts))
+					for _, part := range manifest.Parts {
+						if part.Content.Kind == "text" {
+							manifestParts[part.Key] = part.Content.Text
+						}
+					}
+				}
+				excerpts := make([]SourceExcerpt, len(req.ranges))
+				for k, r := range req.ranges {
+					slicer, ok := manifestSlicers[r.PartKey]
+					if !ok {
+						partText, exists := manifestParts[r.PartKey]
+						if !exists || !ValidText(partText) {
+							return nil, ErrArtifactCorrupt
+						}
+						s := newBlobSlicer(partText)
+						slicer = &s
+						manifestSlicers[r.PartKey] = slicer
+					}
+					cut, valid := slicer.slice(r.Start, r.End)
+					if !valid {
+						return nil, ErrArtifactCorrupt
+					}
+					excerpts[k] = SourceExcerpt{SourceRange: r, Text: cut}
+				}
+				cuts[idx] = excerpts
+				continue
+			}
 			bounds, err := req.source.Pack.bounds(int64(len(blob)))
 			if err != nil {
 				return nil, err
@@ -843,9 +901,18 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			if !valid {
 				return nil, ErrArtifactCorrupt
 			}
-			cuts[idx] = SourceExcerpt{SourceRange: r, Text: cut}
+			cuts[idx] = []SourceExcerpt{{SourceRange: r, Text: cut}}
 		}
 		return cuts, nil
+	}
+	applyCuts := func(requests []request, cuts [][]SourceExcerpt) {
+		for idx, req := range requests {
+			if len(req.ranges) > 0 {
+				copy(slices[req.candidate], cuts[idx])
+			} else {
+				slices[req.candidate][req.index] = cuts[idx][0]
+			}
+		}
 	}
 	type miss struct {
 		key      blobCacheKey
@@ -866,9 +933,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			if err != nil {
 				return nil, err
 			}
-			for idx, req := range requests {
-				slices[req.candidate][req.index] = cuts[idx]
-			}
+			applyCuts(requests, cuts)
 			continue
 		}
 		misses = append(misses, miss{key: key, requests: requests})
@@ -878,9 +943,28 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		var failure error
 		var wg sync.WaitGroup
 		slots := make(chan struct{}, blobReadParallelism)
+	launch:
 		for _, item := range misses {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				mu.Lock()
+				if failure == nil {
+					failure = ctx.Err()
+				}
+				mu.Unlock()
+				break launch
+			}
+			if ctx.Err() != nil {
+				<-slots
+				mu.Lock()
+				if failure == nil {
+					failure = ctx.Err()
+				}
+				mu.Unlock()
+				break launch
+			}
 			wg.Add(1)
-			slots <- struct{}{}
 			go func(item miss) {
 				defer func() { <-slots; wg.Done() }()
 				// Verify the whole shared object once through Read before slicing Parts.
@@ -907,9 +991,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 					s.BlobCache.put(item.key, text)
 				}
 				mu.Lock()
-				for idx, req := range item.requests {
-					slices[req.candidate][req.index] = cuts[idx]
-				}
+				applyCuts(item.requests, cuts)
 				mu.Unlock()
 			}(item)
 		}
@@ -936,7 +1018,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		out[i] = text
 		l := located[i]
-		if len(l.Sources) > 0 {
+		if len(l.Sources) > 0 || (l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0) {
 			l.Segment.SourceExcerpts = pieces
 			located[i] = l
 		}
