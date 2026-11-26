@@ -176,17 +176,17 @@ validation; this change's measurements use fake inference only.
 ## Optional CPU query encoding
 
 Build the core image with Docker build argument `QUIVR_BUILD_LOCAL_QUERY_ENCODER=1`
-to include the pinned fp32 Sentence Transformers text runtime. The default `0`
-includes neither CPU wheels nor model weights. The build verifies every file
-against `third_party/query-encoder/model-lock.json`; runtime loading stays offline.
-The model revision, 768 dimensions, input prefixes and stored vector space stay
-unchanged. No Corpus rebuild is needed for this execution change.
+to include the pinned INT8 ONNX Runtime text encoder. To use the legacy fp32 fallback,
+also pass Docker build argument `QUIVR_QUERY_ENCODER_BACKEND=pytorch`; the runtime
+setting must match the baked assets. The default `0` includes neither CPU wheels nor
+model weights. The build verifies every file against
+`third_party/query-encoder/model-lock.json`; runtime loading stays offline. The model
+revision, 768 dimensions, input prefixes and vector space stay unchanged; no rebuild.
 
-Start with an API allocation of **4 CPU cores and 4 GB RAM**, then measure actual
-memory and latency. Text-only fp32 weights occupy about 1.1 GB of RAM, with
-additional runtime, tokenizer and activation memory. The baked snapshot is about
-1.5 GB because its weight file includes disabled modality encoders. Workers do
-not load the model.
+Start with **4 CPU cores and 1–2 GB RAM** for ONNX (**4 GB RAM for the PyTorch fallback**),
+then measure actual memory and latency. INT8 ONNX text weights and runtime occupy about
+420 MB of RAM (~346 MB snapshot, ~190 MB venv) without vision, audio or PyTorch
+dependencies. Workers do not load the model.
 
 Set `QUIVR_LOCAL_QUERY_ENCODER=1` on the API only, while retaining
 `QUIVR_DEMO_EMBEDDING=gemma`, `EMBED_URL` and `EMBED_API_KEY` on API and workers.
@@ -234,10 +234,10 @@ a ranking mismatch, incomplete evidence, errors or local/plugin p95 of `100 ms`
 or more. A passing direct-encoder report leaves demo acceptance unmeasured:
 require the plugin-boundary comparison and record the deployed demo's
 `query_encoding` p50/p95 and cold-start/error observations on the ticket too.
-If fp32 misses the latency target, stop activation and report the numbers; do not
-substitute a quantized model or fp16. Unset `QUIVR_LOCAL_QUERY_ENCODER` and redeploy
-the API to restore remote queries. Keep the remote document service available
-throughout rollout and rollback.
+If the local encoder misses the latency or parity target, stop activation and report
+the numbers. Unset `QUIVR_LOCAL_QUERY_ENCODER` and redeploy the API to restore
+remote queries. Keep the remote document service available throughout rollout and
+rollback.
 
 ## Hosted Azure embeddings for every source (optional)
 
