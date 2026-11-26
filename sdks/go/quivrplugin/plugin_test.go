@@ -482,15 +482,15 @@ func TestWithHealthCheck(t *testing.T) {
 			wantMessage: "index loading",
 		},
 		{
-			name:         "unclassified error is redacted and logged",
-			fn:           func(context.Context) error { return errors.New("dial tcp 10.0.0.1:5432: " + secret) },
+			name:         "unclassified error hides detail from response and logs it",
+			fn:           func(context.Context) error { return errors.New("dial tcp 10.0.0.1:5432: connection refused") },
 			wantCode:     "unhealthy",
-			forbidInBody: "super-secret",
+			forbidInBody: "10.0.0.1:5432",
 			expectLog:    "health check failed",
 		},
 		{
-			name:         "panic is recovered and logged",
-			fn:           func(context.Context) error { panic("boom " + secret) },
+			name:         "panic is recovered, hidden from response, and logged",
+			fn:           func(context.Context) error { panic("boom internal pool state") },
 			wantCode:     "unhealthy",
 			forbidInBody: "boom",
 			expectLog:    "health check panicked",
@@ -540,6 +540,65 @@ func TestWithHealthCheck(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("declared secret is redacted from health responses and logs", func(t *testing.T) {
+		rawManifest, err := os.ReadFile("testdata/quivr-plugin.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rawManifest = append(rawManifest, []byte("\nsecrets:\n  - name: TEST_HEALTH_SECRET\n    description: backend token\n")...)
+		manifestPath := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
+		if err := os.WriteFile(manifestPath, rawManifest, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("TEST_HEALTH_SECRET", secret)
+
+		for _, tc := range []struct {
+			name      string
+			fn        func(context.Context) error
+			expectLog bool
+		}{
+			{
+				name:      "unclassified error",
+				fn:        func(context.Context) error { return errors.New("dial tcp 10.0.0.1:5432: " + secret) },
+				expectLog: true,
+			},
+			{
+				name:      "panic",
+				fn:        func(context.Context) error { panic("boom " + secret) },
+				expectLog: true,
+			},
+			{
+				name:      "classified error",
+				fn:        func(context.Context) error { return RetryableError("warming_up", "using " + secret) },
+				expectLog: false,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				logs := &bytes.Buffer{}
+				p, err := New(manifestPath, WithLogger(slog.New(slog.NewTextHandler(logs, nil))), WithHealthCheck(tc.fn))
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+				h, err := p.Handler()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/health", nil))
+				if rec.Code != http.StatusServiceUnavailable {
+					t.Fatalf("HTTP %d %s", rec.Code, rec.Body.String())
+				}
+				if strings.Contains(rec.Body.String(), "super-secret") || strings.Contains(logs.String(), "super-secret") {
+					t.Fatalf("secret leaked in health response or logs:\nbody=%s\nlogs=%s", rec.Body.String(), logs.String())
+				}
+				if tc.expectLog && !strings.Contains(logs.String(), Redacted) {
+					t.Fatalf("expected redacted marker in logs, got %q", logs.String())
+				}
+			})
+		}
+	})
 }
 
 func TestManifestDigestHeaderOnAllV0Responses(t *testing.T) {
@@ -675,13 +734,19 @@ func TestServerTimeoutsAndGracefulShutdown(t *testing.T) {
 		<-entered
 		cancel()
 		// Wait until server.Shutdown closes the listener before releasing the in-flight request.
+		closed := false
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
 			conn, err := net.DialTimeout("tcp", ln.Addr().String(), 50*time.Millisecond)
 			if err != nil {
+				closed = true
 				break
 			}
 			_ = conn.Close()
+		}
+		if !closed {
+			close(release)
+			t.Fatal("listener remained open after shutdown began")
 		}
 		close(release)
 

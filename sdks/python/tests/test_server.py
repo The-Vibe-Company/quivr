@@ -531,6 +531,63 @@ class HTTPTransport(Base):
                 self.assertEqual(client_result.get("body"), {"status": "ok"})
                 self.assertEqual(client_result.get("digest"), plugin.manifest.digest)
 
+    def test_draining_rejects_new_keepalive_requests_before_dispatch(self):
+        import http.client
+
+        dispatched = []
+
+        @self.plugin.normalizer
+        def guard_normalizer(invocation):
+            dispatched.append(invocation.request.invocation_id)
+            raise AssertionError("normalizer must not run after draining starts")
+
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/v0/health")
+        first = conn.getresponse()
+        self.assertEqual(first.status, 200)
+        self.assertEqual(json.loads(first.read()), {"status": "ok"})
+
+        # Simulate SIGTERM/SIGINT draining while the keep-alive socket stays open.
+        server._draining.set()
+        body = json.dumps(make_request(self.doc).to_dict()).encode()
+        conn.request("POST", "/v0/contributions/normalizer", body=body)
+        second = conn.getresponse()
+        payload = json.loads(second.read())
+        self.assertEqual(second.status, 503)
+        self.assertEqual(second.getheader("Connection"), "close")
+        self.assertEqual(second.getheader(MANIFEST_DIGEST_HEADER), self.plugin.manifest.digest)
+        self.assertEqual(payload["code"], "shutting_down")
+        self.assertIs(payload["retryable"], True)
+        self.assertEqual(protocol_errors("error.schema.json", payload), [])
+        self.assertEqual(dispatched, [], "draining must reject new requests before plugin dispatch")
+
+        # Signed API 0.14.0 rejects with 503 shutting_down before authentication (not 401).
+        manifest_014 = Path(self.tmp.name) / "quivr-plugin-drain.yaml"
+        manifest_014.write_text(MANIFEST.read_text().replace(">=0.1.0 <0.2.0", ">=0.14.0 <0.15.0"))
+        signed_plugin = Plugin(manifest_014)
+        signed_plugin.normalizer(lambda inv: {"manifest": {"kind": "manifest", "parts": []}})
+        signed_server = signed_plugin.make_server("127.0.0.1", 0)
+        signed_server._draining.set()
+        threading.Thread(target=signed_server.serve_forever, daemon=True).start()
+        self.addCleanup(signed_server.server_close)
+        self.addCleanup(signed_server.shutdown)
+        signed_conn = http.client.HTTPConnection("127.0.0.1", signed_server.server_port, timeout=5)
+        self.addCleanup(signed_conn.close)
+        signed_conn.request("GET", "/v0/discovery")
+        resp = signed_conn.getresponse()
+        signed_payload = json.loads(resp.read())
+        self.assertEqual(resp.status, 503)
+        self.assertEqual(signed_payload["code"], "shutting_down")
+        self.assertIs(signed_payload["retryable"], True)
+        self.assertEqual(resp.getheader("Connection"), "close")
+        self.assertEqual(resp.getheader(MANIFEST_DIGEST_HEADER), signed_plugin.manifest.digest)
+
 
 class Fixtures(Base):
     def test_build_request_from_the_normative_fixture(self):

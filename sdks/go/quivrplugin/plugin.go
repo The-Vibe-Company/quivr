@@ -332,14 +332,43 @@ func (p *Plugin) withManifestDigest(next http.Handler) http.Handler {
 	})
 }
 
+// healthRedactor collects values of declared manifest secrets and the plugin's
+// signing key ring from the environment so health-check errors and panics never
+// leak them into HTTP responses or logs.
+func (p *Plugin) healthRedactor() Credential {
+	var values []any
+	if ring := os.Getenv(EnvSigningKeys); ring != "" {
+		values = append(values, ring)
+		var parsed any
+		if json.Unmarshal([]byte(ring), &parsed) == nil {
+			values = append(values, parsed)
+		}
+	}
+	for _, s := range p.m.Secrets {
+		if v := os.Getenv(s.Name); v != "" {
+			values = append(values, v)
+		}
+	}
+	if len(values) == 0 {
+		return Credential{}
+	}
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return Credential{}
+	}
+	return newCredential(raw)
+}
+
 func (p *Plugin) serveHealth(w http.ResponseWriter, r *http.Request) {
 	if p.healthCheck == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
+	redact := p.healthRedactor()
+	log := slog.New(redactingHandler{next: p.logger.Handler(), credential: redact})
 	defer func() {
 		if v := recover(); v != nil {
-			p.logger.Error("health check panicked", "panic", fmt.Sprint(v))
+			log.Error("health check panicked", "panic", fmt.Sprint(v))
 			writeJSON(w, http.StatusServiceUnavailable, envelope{
 				Code:      "unhealthy",
 				Message:   "the health check panicked; see the plugin log",
@@ -348,20 +377,20 @@ func (p *Plugin) serveHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	if err := p.healthCheck(r.Context()); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, p.healthErrorEnvelope(err))
+		writeJSON(w, http.StatusServiceUnavailable, p.healthErrorEnvelope(log, err, redact))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (p *Plugin) healthErrorEnvelope(err error) envelope {
+func (p *Plugin) healthErrorEnvelope(log *slog.Logger, err error, redact Credential) envelope {
 	var connErr *Error
 	if errors.As(err, &connErr) {
 		_, env := connErr.envelope()
 		if !healthErrorCodePattern.MatchString(env.Code) {
 			env.Code = "unhealthy"
 		}
-		env.Message = truncate(env.Message)
+		env.Message = truncate(redact.Redact(env.Message))
 		env.Retryable = true
 		if env.Class != ClassTransient {
 			if env.RetryAfterSeconds > 0 {
@@ -382,7 +411,7 @@ func (p *Plugin) healthErrorEnvelope(err error) envelope {
 		if msg == "" {
 			msg = code
 		}
-		return envelope{Code: code, Message: truncate(msg), Retryable: true}
+		return envelope{Code: code, Message: truncate(redact.Redact(msg)), Retryable: true}
 	}
 	var searchErr *SearchError
 	if errors.As(err, &searchErr) {
@@ -394,9 +423,9 @@ func (p *Plugin) healthErrorEnvelope(err error) envelope {
 		if msg == "" {
 			msg = code
 		}
-		return envelope{Code: code, Message: truncate(msg), Retryable: true}
+		return envelope{Code: code, Message: truncate(redact.Redact(msg)), Retryable: true}
 	}
-	p.logger.Error("health check failed", "error", err.Error())
+	log.Error("health check failed", "error", err.Error())
 	return envelope{
 		Code:      "unhealthy",
 		Message:   "the health check failed; see the plugin log",
