@@ -101,3 +101,19 @@ class SingleMachineTest(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('digest', result.stderr)
+            # Loopback container bind is refused because host port publishing and demo require 0.0.0.0/[::].
+            manifest['images']['core']['reference'] = 'ghcr.io/example/quivr-core@sha256:' + 'a' * 64
+            release.write_text(json.dumps(manifest))
+            for bad_bind in ('127.0.0.1:8082', 'localhost:8082'):
+                (directory / '.env').write_text(env + f'QUIVR_ADMIN_LISTEN={bad_bind}\n')
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('0.0.0.0', result.stderr)
+            # QUIVR_ADMIN_LISTEN=off omits the admin port and demo admin routing.
+            (directory / '.env').write_text(env + 'QUIVR_ADMIN_LISTEN=off\n')
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            combined = json.loads((directory / 'compose.yaml').read_text())
+            self.assertEqual(combined['services']['api']['ports'], ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080'])
+            self.assertNotIn('QUIVR_ADMIN_URL', combined['services']['demo']['environment'])
+            self.assertNotIn('QUIVR_ADMIN_KEY', combined['services']['demo']['environment'])

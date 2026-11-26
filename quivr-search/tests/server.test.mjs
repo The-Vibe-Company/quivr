@@ -1749,4 +1749,33 @@ test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", asyn
   assert.equal(response.status, 200);
   assert.ok(adminSeen.some((entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-admin-key"));
   assert.ok(!functionalSeen.some((entry) => entry.url.startsWith("/v0/admin")));
+  // Explicit empty strings (such as cleared Railway variables) fall back to combined mode cleanly.
+  const combinedBase = await startDemo(t, functional.address().port, {
+    QUIVR_ADMIN_URL: "",
+    QUIVR_ADMIN_KEY: "",
+  });
+  assert.equal((await fetch(combinedBase + "/healthz")).status, 204);
+  // Setting only one of QUIVR_ADMIN_URL or QUIVR_ADMIN_KEY must refuse startup.
+  for (const partial of [
+    { QUIVR_ADMIN_URL: `http://127.0.0.1:${admin.address().port}`, QUIVR_ADMIN_KEY: "" },
+    { QUIVR_ADMIN_URL: "", QUIVR_ADMIN_KEY: "fixture-admin-key" },
+  ]) {
+    const child = spawn(process.execPath, ["server.mjs"], {
+      env: {
+        ...process.env,
+        HOST: "127.0.0.1",
+        PORT: "0",
+        DEMO_PASSWORD: "",
+        QUIVR_API_URL: `http://127.0.0.1:${functional.address().port}`,
+        QUIVR_API_KEY: "fixture-server-key",
+        ...partial,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stderr = [];
+    child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+    const [code] = await once(child, "exit");
+    assert.notEqual(code, 0);
+    assert.match(stderr.join(""), /QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY/);
+  }
 });

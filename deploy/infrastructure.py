@@ -347,24 +347,35 @@ def safe_environment(name, value):
 def valid_admin_listen(value):
     if value == 'off':
         return True
+    wildcard = False
     if value.startswith('['):
         host, sep, port_text = value[1:].partition(']:')
         if not sep:
             return False
         try:
-            ipaddress.IPv6Address(host)
+            addr = ipaddress.IPv6Address(host)
         except ValueError:
             return False
+        wildcard = addr.is_unspecified
     else:
         host, sep, port_text = value.rpartition(':')
         if not sep or not host:
             return False
         if host != 'localhost':
             try:
-                ipaddress.IPv4Address(host)
+                addr = ipaddress.IPv4Address(host)
             except ValueError:
                 return False
-    return bool(re.fullmatch(r'[1-9][0-9]{0,4}', port_text)) and 1 <= int(port_text) <= 65535 and int(port_text) != 8080
+            wildcard = addr.is_unspecified
+    if not re.fullmatch(r'[1-9][0-9]{0,4}', port_text):
+        return False
+    port = int(port_text)
+    if not 1 <= port <= 65535 or port == 8080:
+        return False
+    # Container probe listeners bind 0.0.0.0:8081; only a matching wildcard host can share port 8081.
+    if port == 8081 and not wildcard:
+        return False
+    return True
 
 
 def runtime_script(name):

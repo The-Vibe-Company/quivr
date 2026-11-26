@@ -56,9 +56,11 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 	if cfg.ProbeListen == "" {
 		cfg.ProbeListen = "127.0.0.1:8081"
 	}
+	secrets := cfg.logSecrets()
 	if value := os.Getenv("QUIVR_ADMIN_LISTEN"); value != "" {
 		if value == "off" {
 			cfg.AdminListen = ""
+			cfg.AdminKeys = nil
 		} else {
 			cfg.AdminListen = value
 		}
@@ -71,7 +73,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 		output = io.MultiWriter(os.Stdout, &rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")})
 	}
 	logger, err := logging.New(output, logging.Options{Level: level, Service: "quivr." + command, Version: buildinfo.Version,
-		Instance: cfg.Instance, Environment: cfg.Environment, Secrets: cfg.logSecrets()})
+		Instance: cfg.Instance, Environment: cfg.Environment, Secrets: secrets})
 	if err != nil {
 		return 0, err
 	}

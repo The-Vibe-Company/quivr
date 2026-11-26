@@ -318,7 +318,7 @@ def build_config(env):
                 admin_keys[operator] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
         if queue_key:
             admin_keys[queue_key] = {'organization': organization, 'corpora': ['*'], 'actions': ['queues:read']}
-        if demo_admin_key and env.get('QUIVR_DEMO_ADMIN') == '1':
+        if demo_admin_key:
             admin_keys[demo_admin_key] = {'organization': organization, 'corpora': ['*'],
                                           'actions': ['observability:read']}
         if not admin_keys:

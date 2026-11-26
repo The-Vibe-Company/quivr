@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -14,6 +15,8 @@ import (
 // Owns external JSON key compatibility, environment precedence, conflict checks
 // and secret redaction for admin_listen and admin_keys.
 func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
+	previousLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 	const (
 		funcToken  = "functional-token-0123456789abcdef01234567"
 		adminToken = "dedicated-admin-token-0123456789abcdef012"
@@ -47,7 +50,8 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 		t.Fatalf("shared probe/admin listener: separated=%t shareProbe=%t err=%v", separated, shareProbe, err)
 	}
 
-	// Environment override QUIVR_ADMIN_LISTEN overrides file config, and "off" clears it.
+	// Environment override QUIVR_ADMIN_LISTEN overrides file config, and "off" clears
+	// both admin_listen and admin_keys so combined mode starts cleanly.
 	t.Setenv("QUIVR_ADMIN_LISTEN", "127.0.0.1:8085")
 	overridden := dedicated
 	if _, err := overridden.configureProcess("api"); err != nil {
@@ -58,12 +62,14 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 	}
 	t.Setenv("QUIVR_ADMIN_LISTEN", "off")
 	disabled := dedicated
-	disabled.AdminKeys = nil
 	if _, err := disabled.configureProcess("api"); err != nil {
 		t.Fatal(err)
 	}
-	if disabled.AdminListen != "" {
-		t.Fatalf("QUIVR_ADMIN_LISTEN=off: got %q", disabled.AdminListen)
+	if disabled.AdminListen != "" || len(disabled.AdminKeys) != 0 {
+		t.Fatalf("QUIVR_ADMIN_LISTEN=off: listen=%q adminKeys=%d", disabled.AdminListen, len(disabled.AdminKeys))
+	}
+	if sep, sharedProbe, err := disabled.validateAdminListener(); err != nil || sep || sharedProbe {
+		t.Fatalf("QUIVR_ADMIN_LISTEN=off validation: sep=%t shareProbe=%t err=%v", sep, sharedProbe, err)
 	}
 	t.Setenv("QUIVR_ADMIN_LISTEN", "")
 
@@ -81,7 +87,11 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 		{"admin_listen without admin_keys", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8082", Keys: baseKeys}, configMissing, "admin_keys"},
 		{"invalid admin_listen syntax", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "not-a-host-port", Keys: baseKeys, AdminKeys: baseAdminKeys}, configInvalid, "admin_listen"},
 		{"admin_listen whitespace host", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "bad host:8082", Keys: baseKeys, AdminKeys: baseAdminKeys}, configInvalid, "admin_listen"},
+		{"admin_listen arbitrary hostname", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "api.internal:8082", Keys: baseKeys, AdminKeys: baseAdminKeys}, configInvalid, "admin_listen"},
 		{"admin_listen equals listen", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8080", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
+		{"admin_listen localhost collides ipv4 loopback listen", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "localhost:8080", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
+		{"admin_listen localhost collides ipv6 loopback listen", Config{Listen: "[::1]:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "localhost:8080", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
+		{"admin_listen localhost collides ipv4 loopback probe", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "localhost:8081", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
 		{"admin_listen collides wildcard listen", Config{Listen: "0.0.0.0:8080", ProbeListen: "0.0.0.0:8081", AdminListen: "127.0.0.1:8080", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
 		{"admin_listen collides mismatched probe host", Config{Listen: "0.0.0.0:8080", ProbeListen: "0.0.0.0:8081", AdminListen: "127.0.0.1:8081", Keys: baseKeys, AdminKeys: baseAdminKeys}, configConflict, "admin_listen"},
 		{"short admin key", Config{Listen: "127.0.0.1:8080", ProbeListen: "127.0.0.1:8081", AdminListen: "127.0.0.1:8082", Keys: baseKeys, AdminKeys: map[string]corpus.Scope{"short-key": validScope}}, configInvalid, "admin_keys"},

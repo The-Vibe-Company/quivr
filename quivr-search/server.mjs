@@ -20,8 +20,14 @@ import { createExplorer, createHistory } from "./explore.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
 const key = process.env.QUIVR_API_KEY;
-const adminCore = process.env.QUIVR_ADMIN_URL?.replace(/\/$/, "") || core;
-const adminKey = process.env.QUIVR_ADMIN_KEY || key;
+const rawAdminURL = (process.env.QUIVR_ADMIN_URL || "").trim();
+const rawAdminKey = (process.env.QUIVR_ADMIN_KEY || "").trim();
+if (Boolean(rawAdminURL) !== Boolean(rawAdminKey))
+  throw new Error(
+    "Configure QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY together, or omit both",
+  );
+const adminCore = rawAdminURL ? rawAdminURL.replace(/\/$/, "") : core;
+const adminKey = rawAdminKey || key;
 const password = process.env.DEMO_PASSWORD;
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 5183);

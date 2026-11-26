@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/audit"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
@@ -28,6 +30,9 @@ type spyAuditStore struct {
 
 func (s *spyAuditStore) Record(ctx context.Context, event *audit.Event, work func(context.Context) error) error {
 	if err := work(ctx); err != nil {
+		if errors.Is(err, audit.ErrReadOnly) {
+			return nil
+		}
 		return err
 	}
 	event.ID = int64(len(s.events) + 1)
@@ -77,11 +82,13 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 	draining := false
 	queueCalls := 0
 	audits := &spyAuditStore{}
+	bfStore := backfillStore{estimates: map[string][]byte{}}
 	metrics := telemetry.NewLoadMetrics()
 	publicHandler, adminHandler, err := httpapi.NewSplit(
 		knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{},
 		functionalKeys, adminKeys, catalogCursorKey,
 		httpapi.WithActivity(content.Activities{Store: memoryActivity{}}),
+		httpapi.WithBackfills(backfill.Service{Store: bfStore, Registry: bfStore, Plans: backfillPlans{}}, backfill.Promotions{}),
 		httpapi.WithQueues(queueRows{&queueCalls, false}),
 		httpapi.WithAudit(audits),
 		httpapi.WithPlugins(registry.Service{}),
@@ -192,14 +199,28 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 		})
 	}
 
-	// 4. Sensitive admin commands on the admin listener remain audited.
-	req := httptest.NewRequest("POST", "/v0/admin/backfills", strings.NewReader(`{}`))
+	// 4. Sensitive admin commands on the admin listener execute and record accepted audit events.
+	dryReq := httptest.NewRequest("POST", "/v0/admin/backfills", strings.NewReader(`{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`))
+	dryReq.Header.Set("Authorization", "Bearer "+adminKey)
+	dryReq.Header.Set("Content-Type", "application/json")
+	dryRec := httptest.NewRecorder()
+	adminHandler.ServeHTTP(dryRec, dryReq)
+	if dryRec.Code != 200 {
+		t.Fatalf("admin backfill dry run: want 200 got %d %s", dryRec.Code, dryRec.Body.String())
+	}
+	if len(audits.events) != 0 {
+		t.Fatalf("dry run unexpectedly created audit event: %+v", audits.events)
+	}
+	req := httptest.NewRequest("POST", "/v0/admin/backfills", strings.NewReader(`{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":false,"confirm_cost":true}`))
 	req.Header.Set("Authorization", "Bearer "+adminKey)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	adminHandler.ServeHTTP(rec, req)
-	if len(audits.events) != 1 || audits.events[0].Action != "operation.backfill" {
-		t.Fatalf("expected audited admin command, got %+v", audits.events)
+	if rec.Code != 202 {
+		t.Fatalf("admin backfill accept: want 202 got %d %s", rec.Code, rec.Body.String())
+	}
+	if len(audits.events) != 1 || audits.events[0].Action != "operation.backfill" || audits.events[0].Outcome != "accepted" || audits.events[0].Detail.Status != 202 || audits.events[0].TargetID != "operation_fill" {
+		t.Fatalf("expected accepted audited admin command, got %+v", audits.events)
 	}
 
 	// 5. Draining stops new admin requests just like functional requests.

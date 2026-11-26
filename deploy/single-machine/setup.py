@@ -87,7 +87,12 @@ def stack(images, settings, values, initialized=False):
         return {'test': command, 'interval': '2s', 'timeout': '5s', 'retries': retries, 'start_period': '10s'}
     healthy = {name: {'condition': 'service_healthy'} for name in ('postgres', 'temporal', 'seaweed', 'weaviate', 'embeddings')}
     admin_listen = settings['api']['environment']['QUIVR_ADMIN_LISTEN']
-    admin_port = '' if admin_listen == 'off' else admin_listen.rsplit(':', 1)[1]
+    admin_port = ''
+    if admin_listen != 'off':
+        admin_host = admin_listen[1:].partition(']:')[0] if admin_listen.startswith('[') else admin_listen.rpartition(':')[0]
+        if admin_host not in ('0.0.0.0', '::'):
+            raise ValueError('QUIVR_ADMIN_LISTEN must bind 0.0.0.0 or [::] inside the container (or off)')
+        admin_port = admin_listen.rsplit(':', 1)[1]
     core_env = {
         'QUIVR_SINGLE_MACHINE': '1', 'QUIVR_ORGANIZATION': '${QUIVR_ORGANIZATION:-quivr}',
         'DATABASE_URL': 'postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable',

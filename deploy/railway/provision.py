@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Configure the dedicated Railway demo. Does not expose domains or deploy code."""
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from deploy import infrastructure
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def admin_listen_is_loopback(addr):
+    host = addr[1:].partition(']:')[0] if addr.startswith('[') else addr.rpartition(':')[0]
+    if host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def load_services(profile='small', overrides=None):
@@ -28,6 +39,8 @@ def load_services(profile='small', overrides=None):
     admin_listen = services.get('api', {}).get('variables', {}).get('QUIVR_ADMIN_LISTEN', '')
     if 'web' in services:
         if admin_listen and admin_listen != 'off':
+            if admin_listen_is_loopback(admin_listen):
+                raise ValueError('Railway QUIVR_ADMIN_LISTEN must bind a non-loopback container interface (such as 0.0.0.0:8082) or off')
             services['web'].setdefault('variables', {})['QUIVR_ADMIN_URL'] = (
                 'http://api.railway.internal:' + admin_listen.rsplit(':', 1)[1])
         else:
@@ -140,6 +153,10 @@ def main():
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
             if 'QUIVR_ADMIN_URL' in variables:
                 variables['QUIVR_ADMIN_KEY'] = values['demo_admin_key']
+            else:
+                # Explicitly clear stale separation settings on existing Railway services.
+                variables['QUIVR_ADMIN_URL'] = ''
+                variables['QUIVR_ADMIN_KEY'] = ''
         for key, value in variables.items():
             cli('variable', 'set', key, '--stdin', '--skip-deploys', '--service', sid, stdin=value)
         config = deployment_config(spec, new=name not in existing)

@@ -50,26 +50,42 @@ func parseListenAddress(addr string) (string, int, bool) {
 	if strings.ContainsAny(host, " \t\r\n") {
 		return "", 0, false
 	}
+	normalized, ok := normalizeListenHost(host)
+	if !ok {
+		return "", 0, false
+	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 0 || port > 65535 {
 		return "", 0, false
 	}
-	return normalizeListenHost(host), port, true
+	return normalized, port, true
 }
 
-func normalizeListenHost(host string) string {
+func normalizeListenHost(host string) (string, bool) {
 	host = strings.TrimSpace(host)
 	if host == "" {
-		return ""
+		return "", true
 	}
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
 		if ip.IsUnspecified() {
-			return ""
+			return "", true
 		}
-		return ip.String()
+		return ip.String(), true
 	}
-	return strings.ToLower(host)
+	lower := strings.ToLower(host)
+	if lower == "localhost" {
+		return "localhost", true
+	}
+	return "", false
+}
+
+func isLoopbackListenHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 func sameListenAddress(hostA string, portA int, hostB string, portB int) bool {
@@ -80,5 +96,9 @@ func listenAddressesCollide(hostA string, portA int, hostB string, portB int) bo
 	if portA == 0 || portA != portB {
 		return false
 	}
-	return hostA == hostB || hostA == "" || hostB == ""
+	if hostA == hostB || hostA == "" || hostB == "" {
+		return true
+	}
+	return (hostA == "localhost" && isLoopbackListenHost(hostB)) ||
+		(hostB == "localhost" && isLoopbackListenHost(hostA))
 }
