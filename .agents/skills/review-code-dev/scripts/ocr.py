@@ -12,12 +12,12 @@ import sys
 import tempfile
 import urllib.request
 
-VERSION = "1.12.1"
+VERSION = "1.14.4"
 CHECKSUMS = {
-    "darwin-arm64": "55b305965d946e3b53a701809a118d2013cd03082bd0941ffe9c974832819c1c",
-    "darwin-amd64": "a0c02c70db535d5995e991af2a8141d7af787242a557be236e233bea3333d654",
-    "linux-arm64": "b7b22f879048dc642f334af180d84040a1615ba912172ae242ba514851ee9cb8",
-    "linux-amd64": "5e17687c60646846cc942f7422d2ae9e7104f7315ad973505cc73bac56bd62f1",
+    "darwin-arm64": "ede097e99b36ddadf1360de1ed745e401f805ca0a63d0b76a4c80a9f22d5a10c",
+    "darwin-amd64": "16ddec6b58fce2334d703a1488bdb6e17094d110f0ae2fc79d84d73eada96edf",
+    "linux-arm64": "afc99d23004f8d1893e67d4916927b8bcb0a68b0891d06a2abc268a65a2e0078",
+    "linux-amd64": "1dc6b1ea37611a2c10d61cb755ab03f07dc3c1a88872963669443937211e7f3a",
 }
 
 

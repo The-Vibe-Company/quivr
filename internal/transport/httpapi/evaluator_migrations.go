@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
@@ -37,6 +38,7 @@ func (a *API) migrateEvaluators(w http.ResponseWriter, r *http.Request, scope co
 		return
 	}
 	if !m.DryRun {
+		audit.RecordTarget(r.Context(), "evaluator_migration", m.PluginID+"@"+m.FromVersion+"->"+m.ToVersion)
 		slog.InfoContext(r.Context(), "subscriptions moved to another alert-rule version", "organization", scope.Organization, "plugin", m.PluginID, "from", m.FromVersion, "to", m.ToVersion, "moved", len(m.Moved), "refused", len(m.Refused))
 	}
 	out := transport.SubscriptionEvaluatorMigration{PluginId: m.PluginID, FromVersion: m.FromVersion, ToVersion: m.ToVersion, DryRun: m.DryRun, NextAfter: optionalString(m.Next),

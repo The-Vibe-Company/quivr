@@ -2,6 +2,7 @@
 """Render, install or observe an authenticated index host (Ubuntu 24.04)."""
 import argparse
 import copy
+import http.client
 import ipaddress
 import json
 import os
@@ -11,6 +12,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -18,12 +20,19 @@ from deploy import infrastructure as infra
 
 CONFIG = Path('/etc/quivr-vector-host')
 DATA = Path('/var/lib/quivr-vector-host')
+SYSTEMD = Path('/etc/systemd/system')
 CADDY = 'caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb'
 AUTH = infra.VECTOR_HOST_AUTH
+KEY_ENV = 'AUTHENTICATION_APIKEY_ALLOWED_KEYS'
+KEY_PATTERN = r'[A-Za-z0-9_.-]{16,256}'
+PROJECT = 'quivr-vector-host'
+COMPOSE = ['docker', 'compose', '-f', str(CONFIG / 'compose.json')]
+HOST_UNIT = 'quivr-vector-host.service'
+FIREWALL_UNIT = 'quivr-vector-firewall.service'
 
 
-def run(args, stdin=None):
-    result = subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=600)
+def run(args, timeout=600):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
         # Never echo Docker environment, command input or external diagnostics.
         raise RuntimeError('Host command failed; inspect the host privately')
@@ -62,7 +71,7 @@ def assets(settings, uuid='UNMOUNTED'):
     proxy = {'image': CADDY, 'restart': 'no', 'ports': ['443:443/tcp'], 'logging': logging,
              'volumes': [bind(CONFIG / 'Caddyfile', '/etc/caddy/Caddyfile', True),
                          bind(DATA / 'certificates', '/data')], 'networks': ['index']}
-    model = {'name': 'quivr-vector-host', 'services': {'weaviate': index, 'proxy': proxy},
+    model = {'name': PROJECT, 'services': {'weaviate': index, 'proxy': proxy},
              'networks': {'index': {'driver': 'bridge'}}}
     proxy_config = ('{\n  admin off\n  auto_https disable_redirects\n}\n'
                     + settings['hostname'] + ' {\n  tls {\n    issuer acme {\n'
@@ -179,7 +188,7 @@ def key(args):
         value = source.read_text().strip()
     else:
         value = os.environ.get('WEAVIATE_API_KEY', '')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]{16,256}', value):
+    if not re.fullmatch(KEY_PATTERN, value):
         raise ValueError('API key must be 16-256 URL-safe characters')
     return value
 
@@ -203,41 +212,94 @@ def apply(settings, args):
         raise ValueError('data filesystem is below the declared storage budget')
     changed = False
     for name, content in assets(settings, uuid).items():
-        path = Path('/etc/systemd/system') / name if name.endswith('.service') else CONFIG / name
+        path = SYSTEMD / name if name.endswith('.service') else CONFIG / name
         changed = write(path, content, 0o644 if name.endswith('.service') else 0o600) or changed
     if secret is not None:
-        changed = write(CONFIG / 'weaviate.env', 'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + secret + '\n') or changed
+        changed = write(CONFIG / 'weaviate.env', f'{KEY_ENV}={secret}\n') or changed
     # Validate before loading firewall rules or restarting containers.
     run(['nft', '--check', '-f', str(CONFIG / 'firewall.nft')])
-    run(['docker', 'compose', '-f', str(CONFIG / 'compose.json'), 'config', '--quiet']) if secret else None
+    if secret is not None:
+        run([*COMPOSE, 'config', '--quiet'])
     if changed:
         run(['systemctl', 'daemon-reload'])
-        run(['systemctl', 'enable', 'quivr-vector-firewall.service', 'quivr-vector-host.service'])
-    if args.command == 'apply':
-        if changed:
-            run(['systemctl', 'restart', 'quivr-vector-firewall.service'])
-            run(['systemctl', 'restart', 'quivr-vector-host.service'])
-        else:
-            run(['systemctl', 'start', 'quivr-vector-firewall.service', 'quivr-vector-host.service'])
-    return {'status': 'changed' if changed else 'unchanged', 'mounted_uuid': uuid}
+        run(['systemctl', 'enable', FIREWALL_UNIT, HOST_UNIT])
+    result = {'status': 'changed' if changed else 'unchanged', 'mounted_uuid': uuid}
+    if args.command == 'prepare':
+        return result
+
+    run(['systemctl', 'start', FIREWALL_UNIT])
+    # Starting an active oneshot does not load new rules, including after an
+    # interrupted apply. Replace the owned table atomically without stopping it.
+    run(['/bin/sh', str(CONFIG / 'firewall.sh')])
+    # A previous apply can have written the desired files before restarting,
+    # or someone can have recreated the live container with different settings.
+    if changed or observe(settings, probe=False)['status'] == 'drift':
+        run(['systemctl', 'restart', HOST_UNIT])
+        result['status'] = 'changed'
+    else:
+        run(['systemctl', 'start', HOST_UNIT])
+    result['check'] = wait_for_host(settings, args.startup_timeout)
+    return result
 
 
-def observe(settings):
+def wait_for_host(settings, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        result = observe(settings)
+        remaining = deadline - time.monotonic()
+        if result['status'] != 'unknown' or remaining <= 0:
+            return result
+        time.sleep(min(2, remaining))
+
+
+def probe_index(networks, check_version):
+    ready = version = None
+    connection = None
+    try:
+        # Target the running container directly. No DNS, proxy, TLS setup
+        # or redirects are involved in this probe on the local Docker bridge.
+        address = ipaddress.IPv4Address(networks[f'{PROJECT}_index']['IPAddress'])
+        connection = http.client.HTTPConnection(str(address), 8080, timeout=5)
+        connection.request('GET', '/v1/.well-known/ready')
+        with connection.getresponse() as response:
+            if response.status != 200:
+                return ready, version
+            response.read()
+        ready = 'true'
+        if check_version:
+            text = (CONFIG / 'weaviate.env').read_text().strip()
+            key_match = re.fullmatch(KEY_ENV + '=(' + KEY_PATTERN + ')', text)
+            if key_match:
+                # Weaviate serves readiness before auth middleware, but /meta
+                # requires the installed key when anonymous access is disabled.
+                connection.request('GET', '/v1/meta', headers={'Authorization': 'Bearer ' + key_match[1]})
+                with connection.getresponse() as response:
+                    if response.status == 200:
+                        version = infra.weaviate_version_value(json.loads(response.read())['version'])
+    except (http.client.HTTPException, ValueError, OSError, KeyError, TypeError):
+        pass
+    finally:
+        if connection is not None:
+            connection.close()
+    return ready, version
+
+
+def observe(settings, probe=True):
     rows = []
     spec = settings['weaviate']
     actual = {}
-    mounted = None
+    networks = {}
     try:
-        ids = run(['docker', 'compose', '-f', str(CONFIG / 'compose.json'), 'ps', '-q', 'weaviate']).split()
+        ids = run([*COMPOSE, 'ps', '-q', 'weaviate'], timeout=5).split()
         if len(ids) == 1:
-            container = json.loads(run(['docker', 'inspect', ids[0]]))[0]
+            container = json.loads(run(['docker', 'inspect', ids[0]], timeout=5))[0]
             if container['State']['Running']:
                 env = dict(item.split('=', 1) for item in container['Config']['Env'] if '=' in item)
                 actual = {'image': container['Config']['Image'], 'environment': env,
                           'memory': str(container['HostConfig']['Memory']),
                           'cpus': str(container['HostConfig']['NanoCpus'] / 1e9)}
-        mounted = run(['findmnt', '-n', '-o', 'UUID', '--mountpoint', str(DATA)]).strip()
-    except (RuntimeError, ValueError, OSError, KeyError, IndexError, subprocess.TimeoutExpired):
+                networks = container.get('NetworkSettings', {}).get('Networks', {})
+    except (RuntimeError, ValueError, OSError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
         pass
     image = actual.get('image')
     if image and not re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}', image):
@@ -245,23 +307,39 @@ def observe(settings):
     infra.observation(rows, 'weaviate', 'vector_host', 'image', spec['image'], image)
     for name, value in spec['environment'].items():
         observed = actual.get('environment', {}).get(name)
-        if name in AUTH:
-            observed = observed if observed in (AUTH[name], 'true', 'false') else None
+        if observed is None and actual:
+            observed = '<missing>'
+        elif name in AUTH and observed is not None:
+            observed = observed if observed in (AUTH[name], 'true', 'false') else '<invalid>'
         else:
             observed = infra.safe_environment(name, observed)
         infra.observation(rows, 'weaviate', 'vector_host', name, value, observed)
     for name, value in spec['deploy']['resources']['limits'].items():
         infra.observation(rows, 'weaviate', 'vector_host', name, value, actual.get(name))
     # Mount health cannot be inferred from the root filesystem's capacity.
-    expected_uuid = None
+    expected_uuid = mounted = capacity = None
     try:
         guard = (CONFIG / 'run.sh').read_text()
         expected_uuid = re.search(r'= ([0-9a-fA-F-]{36})\n', guard).group(1)
     except (OSError, AttributeError):
         pass
+    try:
+        mounted = run(['findmnt', '-n', '-o', 'UUID', '--mountpoint', str(DATA)], timeout=5).strip()
+        if re.fullmatch(r'[0-9a-fA-F-]{36}', mounted):
+            filesystem = os.statvfs(DATA)
+            capacity = str(filesystem.f_blocks * filesystem.f_frsize)
+        else:
+            mounted = None
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        pass
     infra.observation(rows, 'weaviate', 'vector_host', 'mounted_uuid', expected_uuid, mounted)
-    capacity = str(os.statvfs(DATA).f_blocks * os.statvfs(DATA).f_frsize) if mounted else None
     infra.storage_observation(rows, 'weaviate', spec, {'limits': {'storage': capacity}})
+    if probe:
+        expected_version = infra.weaviate_version(spec['image'])
+        ready, version = probe_index(networks, expected_version is not None)
+        infra.observation(rows, 'weaviate', 'vector_host', 'ready', 'true', ready)
+        if expected_version:
+            infra.observation(rows, 'weaviate', 'vector_host', 'version', expected_version, version)
     return infra.report(rows)
 
 
@@ -277,8 +355,12 @@ def main():
     parser.add_argument('--initialize-empty-disk', action='store_true')
     parser.add_argument('--api-key-file', type=Path)
     parser.add_argument('--key-stdin', action='store_true')
+    parser.add_argument('--startup-timeout', type=int, default=600, metavar='SECONDS',
+                        help='maximum wait for startup after apply (default: 600)')
     args = parser.parse_args()
     try:
+        if args.startup_timeout < 0:
+            raise ValueError('startup timeout must be nonnegative')
         settings = json.loads((CONFIG / 'settings.json').read_text()) if not args.hostname else options(args)
         if args.command == 'render':
             if not args.output:
@@ -291,7 +373,8 @@ def main():
         else:
             result = observe(settings)
         print(json.dumps(result, indent=2))
-        return {'match': 0, 'drift': 1, 'unknown': 2}.get(result['status'], 0)
+        status = result.get('check', result)['status']
+        return {'match': 0, 'drift': 1, 'unknown': 2}.get(status, 0)
     except (ValueError, RuntimeError, OSError, KeyError, TypeError, subprocess.TimeoutExpired):
         print('Vector host request failed; verify arguments, private credentials, disk and host capacity.', file=sys.stderr)
         return 2

@@ -27,12 +27,14 @@ class PluginBoundaryTest(unittest.TestCase):
             "plugins/feeds/main.go": f'package main\n\nimport (\n\t"fmt"\n\tcontent "{INTERNAL}/content"\n)\n',
             "sdks/go/x/x.go": f'//go:build linux\n\npackage x\n\nimport _ "{INTERNAL}/plugins"\n',
             "plugins/feeds/go.mod": "module example.com/feeds\n\nreplace github.com/The-Vibe-Company/quivr => ../..\n",
+            "deploy/plugins/go.mod": "module example.com/multicall\n\nrequire github.com/The-Vibe-Company/quivr v0.0.0\n",
         })
         result = self.run_check(root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(f"plugins/feeds/main.go: imports {INTERNAL}/content", result.stderr)
         self.assertIn(f"sdks/go/x/x.go: imports {INTERNAL}/plugins", result.stderr)
         self.assertIn("plugins/feeds/go.mod: requires or replaces the engine module", result.stderr)
+        self.assertIn("deploy/plugins/go.mod: requires or replaces the engine module", result.stderr)
 
     def test_public_imports_comments_and_the_sdk_module_pass(self):
         root = self.tree({

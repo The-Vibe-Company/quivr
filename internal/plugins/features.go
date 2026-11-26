@@ -29,6 +29,7 @@ const (
 	FeatureMultiPartSegments              Feature = "multi_part_segments"
 	FeatureIngestionPages                 Feature = "ingestion_pages"
 	FeatureConnectorOrderedRecords        Feature = "connector_ordered_records"
+	FeatureMultimodalIngestion            Feature = "multimodal_ingestion"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -64,6 +65,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureMultiPartSegments, "0.17.0", "Ingestion segments spanning ordered ranges from multiple Parts", "", ""},
 	{FeatureIngestionPages, "0.18.0", "Bounded ingestion pages with complete source coverage and durable negotiated cuts", "", "/contributions/ingestion/paging"},
 	{FeatureConnectorOrderedRecords, "0.19.0", "Optional connector pages with ordered revisions of each record", "", ""},
+	{FeatureMultimodalIngestion, "0.20.0", "Multimodal image ingestion with Blob Part references and segment region provenance", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.
