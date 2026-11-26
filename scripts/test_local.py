@@ -126,15 +126,15 @@ class Isolation(unittest.TestCase):
 
     def test_plugin_go_builds_filter_engine_secrets(self):
         import hosted_embed_plugin
+        import plugin_environment
 
         stack = local.Stack(self.names[0])
-        engine_secrets = {
-            'DATABASE_URL': 'postgres://secret',
-            'QUIVR_ADMIN_KEYS': 'admin-ring',
-            'QUIVR_ADMIN_KEY': 'admin-token',
-            'QUIVR_DEMO_ADMIN_KEY': 'demo-admin',
-            'QUIVR_ENGINE_PLUGIN_KEYS': 'engine-rings',
-        }
+        engine_secrets = {}
+        for name in plugin_environment.ENGINE_SECRETS:
+            engine_secrets[name] = f'secret-{name.lower()}'
+            engine_secrets[f'{name}_FILE'] = f'/fixture/{name.lower()}'
+        engine_secrets['QUIVR_LOCAL_WEBHOOK_0'] = 'whsec_fixture'
+        engine_secrets['QUIVR_LOCAL_WEBHOOK_0_FILE'] = '/fixture/webhook'
         sentinel = RuntimeError('stop-after-build')
         with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True):
             with mock.patch.object(local.fixture_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure:

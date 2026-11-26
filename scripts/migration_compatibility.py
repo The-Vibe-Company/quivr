@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -75,6 +76,32 @@ def main():
         print('Compatibility evidence:', output, flush=True)
 
 
+def _force_cleanup_stack(stack):
+    """Force-terminate any tracked host processes and tear down Compose volumes on failed shutdown."""
+    state = getattr(stack, 'state', None)
+    pids = list(state.get('pids', [])) if isinstance(state, dict) else []
+    signal_owned = getattr(stack, 'signal_owned', None)
+    for pid in pids:
+        try:
+            if callable(signal_owned):
+                signal_owned(pid, signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError, PermissionError):
+            pass
+    launched = getattr(stack, 'launched', None)
+    if isinstance(launched, dict):
+        for proc in launched.values():
+            try:
+                proc.wait(timeout=1)
+            except Exception:
+                pass
+    try:
+        stack.compose('down', '--volumes')
+    except Exception:
+        pass
+
+
 def exercise(args):
     sys.path.insert(0, str(args.previous_source / 'scripts'))
     import local
@@ -122,10 +149,7 @@ def exercise(args):
             try:
                 stack.down(reset=True)
             except Exception:
-                try:
-                    stack.compose('down', '--volumes')
-                except Exception:
-                    pass
+                _force_cleanup_stack(stack)
                 raise
 
 

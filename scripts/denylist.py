@@ -37,7 +37,8 @@ _CHECKSUM = re.compile(r'(?:\bh1:|\bsha(?:1|256|384|512)-)[A-Za-z0-9+/]+=*')
 _BLOB = re.compile(r'''(?<![^\s"'`])[A-Za-z0-9+/]{40,}=*(?![^\s"'`,])''')
 
 
-_HEX_BLOB = re.compile(r'^(?:[0-9a-f]{40,}|[0-9A-F]{40,})$')
+_HEX_BLOB = re.compile(r'^[0-9A-Fa-f]{40,}$')
+_PROSE_SEGMENT = re.compile(r'[A-Z]?[a-z]{3,}')
 
 
 def _fold(text):
@@ -46,12 +47,17 @@ def _fold(text):
 
 
 def _is_opaque_blob(value):
-    # Random hex/base64 checksums have many digits and either pure-hex alphabet
-    # or base64 punctuation/padding (+, /, =). Long CamelCase identifiers with
-    # years or version numbers stay out of _BLOB so they are still checked.
+    # Random hex/base64 checksums have many digits. Pure hex and base64 with
+    # +/= punctuation are always opaque; unpadded alphanumeric base64 mixes
+    # uppercase, lowercase, and digits without prose/CamelCase word runs.
     if len(re.findall(r'[0-9]', value)) < 4:
         return False
-    return bool(_HEX_BLOB.match(value)) or any(ch in value for ch in '+/=')
+    if _HEX_BLOB.match(value) or any(ch in value for ch in '+/='):
+        return True
+    if any(ch.isupper() for ch in value) and any(ch.islower() for ch in value):
+        prose_chars = sum(len(seg) for seg in _PROSE_SEGMENT.findall(value))
+        return prose_chars * 2 < len(value)
+    return False
 
 
 def _opaque(text):
@@ -59,8 +65,19 @@ def _opaque(text):
     return _BLOB.sub(lambda m: ' ' if _is_opaque_blob(m.group()) else m.group(), text)
 
 
+def _raw_words(text):
+    return [word.lower() for word in _WORD.findall(text)]
+
+
+def _raw_tokens(text):
+    text = _opaque(text)
+    for pattern, repl in _CASE:
+        text = pattern.sub(repl, text)
+    return _raw_words(text)
+
+
 def words(text):
-    return [word.lower() for word in _WORD.findall(_fold(text))]
+    return _raw_words(_fold(text))
 
 
 def tokens(text):
@@ -80,17 +97,15 @@ def load(path):
 
 
 def find_in_text(text, hashes):
-    prev_words_last = None
-    prev_tokens_last = None
+    prev_last = [None, None, None, None]
     for number, line in enumerate(text.splitlines(), 1):
         seen = set()
-        line_words = words(line)
-        line_tokens = tokens(line)
-        # Check both "WordJoined" as one word and its case-split parts,
+        # Check folded and legacy raw splits (whole-word and case-split),
         # plus adjacent-line bigrams across a single newline.
-        for split, prev_last in ((line_words, prev_words_last), (line_tokens, prev_tokens_last)):
-            if prev_last is not None and split:
-                bigram = prev_last + ' ' + split[0]
+        splits = (words(line), tokens(line), _raw_words(line), _raw_tokens(line))
+        for idx, split in enumerate(splits):
+            if prev_last[idx] is not None and split:
+                bigram = prev_last[idx] + ' ' + split[0]
                 if bigram not in seen and digest(bigram) in hashes:
                     seen.add(bigram)
                     yield number, bigram
@@ -100,8 +115,7 @@ def find_in_text(text, hashes):
                     if term not in seen and digest(term) in hashes:
                         seen.add(term)
                         yield number, term
-        prev_words_last = line_words[-1] if line_words else None
-        prev_tokens_last = line_tokens[-1] if line_tokens else None
+            prev_last[idx] = split[-1] if split else None
 
 
 def files(root):

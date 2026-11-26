@@ -41,6 +41,7 @@ class PluginBoundaryTest(unittest.TestCase):
             "plugins/feeds/main.go": (
                 "package main\n\n// Never import \"" + INTERNAL + "/content\" here.\n"
                 'import (\n\t"fmt"\n\t"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"\n)\n'
+                f'const snippet = `package sample; import "{INTERNAL}/foo"\nimport "{INTERNAL}/bar"`\n'
             ),
             "plugins/feeds/go.mod": "module example.com/feeds\n\nrequire github.com/The-Vibe-Company/quivr/sdks/go v0.0.0\n\nreplace github.com/The-Vibe-Company/quivr/sdks/go => ../../sdks/go\n",
         })
@@ -56,8 +57,15 @@ class PluginBoundaryTest(unittest.TestCase):
             "plugins/quoted/go.mod": 'module example.com/quoted\n\nrequire "github.com/The-Vibe-Company/quivr" v0.0.0\n',
             "plugins/rhs/go.mod": 'module example.com/rhs\n\nreplace example.com/alias => "github.com/The-Vibe-Company/quivr" v0.0.0\n',
             "plugins/rhsdir/go.mod": "module example.com/rhsdir\n\nreplace example.com/alias => ../..\n",
+            "plugins/space dir/go.mod": 'module example.com/spacedir\n\nreplace example.com/alias => "../../"\n',
             "plugins/work/go.work": "go 1.24\n\nuse (\n\t../..\n)\n",
         })
+        # Also test a quoted replace path that itself contains spaces pointing to the engine root.
+        spaced_engine = root / "engine dir"
+        spaced_engine.mkdir()
+        (spaced_engine / "go.mod").write_text("module github.com/The-Vibe-Company/quivr\n")
+        (root / "plugins/spacepath").mkdir(parents=True)
+        (root / "plugins/spacepath/go.mod").write_text('module example.com/sp\n\nreplace example.com/alias => "../../engine dir"\n')
         result = self.run_check(root)
         self.assertEqual(result.returncode, 1, result.stdout)
         for expected in (
@@ -67,6 +75,7 @@ class PluginBoundaryTest(unittest.TestCase):
             "plugins/quoted/go.mod: requires or replaces the engine module",
             "plugins/rhs/go.mod: requires or replaces the engine module",
             "plugins/rhsdir/go.mod: requires or replaces the engine module",
+            "plugins/spacepath/go.mod: requires or replaces the engine module",
             "plugins/work/go.work: uses or replaces the engine module",
         ):
             self.assertIn(expected, result.stderr)

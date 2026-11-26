@@ -238,29 +238,40 @@ class GoBinCache(unittest.TestCase):
                     )
                     self.assertEqual(go_bin_cache._local_replaces(mod), [dep_space.resolve()])
 
-            # Real build with GOWORK pointing to a go.work file invalidates when a `use`d module changes.
+            # Real build with GOWORK auto-discovery (newly created go.work in same process) and paths containing ')'.
             work_root = root / 'workspace'
             cache = root / 'work-bin'
             app = work_root / 'app'
-            lib = work_root / 'lib dir'
+            lib = work_root / 'lib) dir'
             app.mkdir(parents=True)
             lib.mkdir(parents=True)
             (lib / 'go.mod').write_text('module example.com/lib\n\ngo 1.21\n')
             (lib / 'lib.go').write_text('package lib\n\nfunc Value() string { return "work-v1" }\n')
-            (app / 'go.mod').write_text('module example.com/app\n\ngo 1.21\n\nrequire example.com/lib v0.0.0\n')
+            (app / 'go.mod').write_text(
+                'module example.com/app\n\ngo 1.21\n\nrequire example.com/lib v0.0.0\n'
+                'replace (\n\texample.com/lib => "../lib) dir"\n)\n'
+            )
             (app / 'main.go').write_text(
                 'package main\n\nimport (\n\t"fmt"\n\t"example.com/lib"\n)\n\nfunc main() { fmt.Print(lib.Value()) }\n'
             )
-            gowork = work_root / 'go.work'
-            gowork.write_text('go 1.21\n\nuse (\n\t./app\n\t"./lib dir"\n)\n')
-            work_env = {**self.env, 'GOWORK': str(gowork)}
-
-            binary = go_bin_cache.ensure('work-sample', app, '.', go=GO, cache_dir=cache, env=work_env)
+            auto_env = {k: v for k, v in self.env.items() if k != 'GOWORK'}
+            binary = go_bin_cache.ensure('work-sample', app, '.', go=GO, cache_dir=cache, env=auto_env)
             self.assertEqual(subprocess.check_output([str(binary)], text=True), 'work-v1')
 
-            (lib / 'lib.go').write_text('package lib\n\nfunc Value() string { return "work-v2" }\n')
-            rebuilt = go_bin_cache.ensure('work-sample', app, '.', go=GO, cache_dir=cache, env=work_env)
-            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'work-v2')
+            # Creating go.work in the same Python process must bust _GO_ENV_CACHE and pick up its `use` dir.
+            override_lib = work_root / 'override) lib'
+            override_lib.mkdir(parents=True)
+            (override_lib / 'go.mod').write_text('module example.com/lib\n\ngo 1.21\n')
+            (override_lib / 'lib.go').write_text('package lib\n\nfunc Value() string { return "gowork-v2" }\n')
+            (work_root / 'go.work').write_text('go 1.21\n\nuse (\n\t./app\n\t"./override) lib"\n)\n')
+            # Remove go.mod replace so go.work is the sole provider of example.com/lib.
+            (app / 'go.mod').write_text('module example.com/app\n\ngo 1.21\n\nrequire example.com/lib v0.0.0\n')
+            rebuilt = go_bin_cache.ensure('work-sample', app, '.', go=GO, cache_dir=cache, env=auto_env)
+            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'gowork-v2')
+
+            (override_lib / 'lib.go').write_text('package lib\n\nfunc Value() string { return "gowork-v3" }\n')
+            rebuilt2 = go_bin_cache.ensure('work-sample', app, '.', go=GO, cache_dir=cache, env=auto_env)
+            self.assertEqual(subprocess.check_output([str(rebuilt2)], text=True), 'gowork-v3')
 
 
 if __name__ == '__main__':

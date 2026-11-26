@@ -417,8 +417,15 @@ class Infrastructure(unittest.TestCase):
             adapter.apply({'temporal': spec})
         self.assertFalse(any(args[:2] == ['variable', 'set'] or (args[0] == 'api' and 'mutation' in args[1])
                              for args, _ in transport.calls))
+        # Empty/whitespace secret string is still refused, whereas a Railway sealed variable (None) is accepted.
         transport.variables.update({'POSTGRES_SEEDS': 'postgres.railway.internal',
-                                    'POSTGRES_USER': 'postgres', 'POSTGRES_PWD': 'fixture-secret'})
+                                    'POSTGRES_USER': 'postgres', 'POSTGRES_PWD': '   '})
+        transport.calls.clear()
+        with self.assertRaisesRegex(RuntimeError, r'POSTGRES_PWD.*provision\.py --apply'):
+            adapter.apply({'temporal': spec})
+        self.assertFalse(any(args[:2] == ['variable', 'set'] or (args[0] == 'api' and 'mutation' in args[1])
+                             for args, _ in transport.calls))
+        transport.variables['POSTGRES_PWD'] = None
         transport.calls.clear()
         adapter.apply({'temporal': spec})
         mutations = [json.loads(args[3]) for args, _ in transport.calls

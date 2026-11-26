@@ -173,7 +173,7 @@ def _validate_positive_timeout(name: str, value: float | None) -> float | None:
     return float(value)
 
 
-_HEALTH_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_HEALTH_CODE = re.compile(r"\A[a-z][a-z0-9_]{0,63}\Z")
 _MIN_SECRET_LENGTH = 4
 _REDACTED = "[redacted]"
 
@@ -252,7 +252,7 @@ def _redact(text: str, secrets: list[str]) -> str:
 
 
 def _sanitize_health_code(code: Any, secrets: list[str]) -> str:
-    if not isinstance(code, str) or not _HEALTH_CODE.match(code) or _redact(code, secrets) != code:
+    if not isinstance(code, str) or not _HEALTH_CODE.fullmatch(code) or _redact(code, secrets) != code:
         return "unhealthy"
     return code
 
@@ -686,7 +686,14 @@ class Plugin:
                 else:
                     if content_lengths:
                         raw_length = content_lengths[0].strip()
-                        length = int(raw_length) if raw_length.isascii() and raw_length.isdigit() else -1
+                        if raw_length.isascii() and raw_length.isdigit():
+                            trimmed = raw_length.lstrip("0") or "0"
+                            if len(trimmed) > 18:
+                                length = max_request_bytes(self.path) + 1
+                            else:
+                                length = int(trimmed)
+                        else:
+                            length = -1
                     else:
                         raw_length = "0"
                         length = 0

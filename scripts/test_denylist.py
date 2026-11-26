@@ -36,8 +36,18 @@ class Findings(unittest.TestCase):
 
     def test_checksums_are_opaque(self):
         blob = 'Q2kLmNpRsT9Zorblax3xuVwQ2kLmNpRsTuVwQ2kLmNpRs='
-        text = 'h1:9Zorblax3xQ2kLmNpRsTuVw= sha512-aZORBLAX1bQ2kLmNpRsTu "' + blob + '"'
+        unpadded = 'Q2kLmNpRsT9Zorblax3xuVwQ2kLmNpRsTuVwQ2kLmNpR'
+        mixed_hex = 'deadBEEF0123456789abcdefABCDEF0123456789deadBEEF'
+        text = f'h1:9Zorblax3xQ2kLmNpRsTuVw= sha512-aZORBLAX1bQ2kLmNpRsTu "{blob}" "{unpadded}" "{mixed_hex}"'
         self.assertEqual(self.matches(text), [])
+        self.assertTrue(d._is_opaque_blob(mixed_hex))
+        self.assertTrue(d._is_opaque_blob(unpadded))
+
+    def test_legacy_pre_nfkd_hash_still_matches(self):
+        import hashlib
+        # Legacy pre-NFKD hash of "Zörblax" dropped "ö" and stored "z rblax".
+        legacy_hash = hashlib.sha256((d.SALT + 'z rblax').encode()).hexdigest()
+        self.assertEqual([(line, term) for line, term in d.find_in_text('Zörblax', {legacy_hash})], [(1, 'z rblax')])
 
     def test_versioned_identifiers_and_paths_still_match(self):
         for text in ('internal/ZorblaxPlugin/v2', 'ZorblaxPluginV2Handler', 'github.com/org/ZorblaxDocs/tree/v2',

@@ -120,7 +120,9 @@ class Railway:
         if not isinstance(variables, dict):
             raise RuntimeError('Railway returned an unsupported variable response')
         return {'environment': {key: infra.safe_environment(key, variables.get(key)) for key in infra.KEYS[name]},
-                'present_variables': {key for key, value in variables.items() if isinstance(value, str) and value.strip()},
+                'present_variables': {key for key, value in variables.items()
+                                      if (isinstance(value, str) and value.strip())
+                                      or (key in REQUIRED_TEMPORAL_POSTGRES_VARS and value is None)},
                 'image': (instance.get('source') or {}).get('image'),
                 'dockerfile': instance.get('dockerfilePath'),
                 'limits': limits(response.get('serviceInstanceLimitOverride'))}

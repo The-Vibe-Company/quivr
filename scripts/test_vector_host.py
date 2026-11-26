@@ -513,10 +513,16 @@ class VectorHost(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((ROOT / name).read_bytes())
             baseline = azure.source_digest(root)
-            # Editing deploy/report-resources.sh must change the source intent digest.
-            report_script = root / 'deploy/report-resources.sh'
-            report_script.write_bytes(report_script.read_bytes() + b'\n# changed\n')
-            self.assertNotEqual(azure.source_digest(root), baseline)
+            # Editing every declared source in SOURCES (including report-resources.sh and host.py) must change the digest.
+            for name in azure.SOURCES:
+                with self.subTest(source=name):
+                    target = root / name
+                    original = target.read_bytes()
+                    target.write_bytes(original + b'\n# changed\n')
+                    try:
+                        self.assertNotEqual(azure.source_digest(root), baseline)
+                    finally:
+                        target.write_bytes(original)
             # Shifting a byte across adjacent SOURCES entries must never collide.
             (root / azure.SOURCES[0]).write_bytes(b'ab')
             (root / azure.SOURCES[1]).write_bytes(b'c')

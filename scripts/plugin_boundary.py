@@ -23,15 +23,12 @@ ENGINE = "github.com/The-Vibe-Company/quivr"
 TREES = ("plugins", "sdks/go", "deploy/plugins")
 SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", "testdata"}
 
-_TOKEN_OR_COMMENT = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`|//[^\n]*|/\*.*?\*/', re.S)
-_BLOCK = re.compile(r"(?:^|;)\s*import\s*\((.*?)\)", re.S | re.M)
-_SINGLE = re.compile(r'(?:^|;)\s*import\s+(?:[\w.]+\s+)?(?:"([^"]+)"|`([^`]+)`)', re.M)
-_SPEC = re.compile(r'(?:^|;)\s*(?:[\w.]+\s+)?(?:"([^"]+)"|`([^`]+)`)', re.M)
+_GO_TOKEN = re.compile(
+    r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|`[^`]*`|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|[();.]',
+    re.S,
+)
+_MOD_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`|\S+')
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
-
-
-def _strip_comments(source: str) -> str:
-    return _TOKEN_OR_COMMENT.sub(lambda m: m.group(0) if m.group(0)[0] in '"`' else " ", source)
 
 
 def _unquote(token: str) -> str:
@@ -41,12 +38,59 @@ def _unquote(token: str) -> str:
     return token
 
 
+def _find_unquoted(line: str, target: str) -> int:
+    in_quote = ""
+    escaped = False
+    tlen = len(target)
+    for i, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if in_quote:
+            if in_quote == '"' and ch == "\\":
+                escaped = True
+            elif ch == in_quote:
+                in_quote = ""
+            continue
+        if ch in ('"', "`"):
+            in_quote = ch
+        elif line[i : i + tlen] == target:
+            return i
+    return -1
+
+
 def imports(source: str) -> list[str]:
-    """The import paths of a Go file (comments removed first)."""
-    code = _strip_comments(source)
-    found = [a or b for a, b in _SINGLE.findall(code)]
-    for block in _BLOCK.findall(code):
-        found += [a or b for a, b in _SPEC.findall(block)]
+    """The import paths of a Go file (lexed so comments and string literals never match)."""
+    tokens = [
+        match.group(0)
+        for match in _GO_TOKEN.finditer(source)
+        if not match.group(0).startswith(("//", "/*"))
+    ]
+    found: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        if tokens[i] != "import":
+            i += 1
+            continue
+        i += 1
+        if i >= n:
+            break
+        if tokens[i] == "(":
+            i += 1
+            while i < n and tokens[i] != ")":
+                tok = tokens[i]
+                if tok[0] in ('"', "`"):
+                    found.append(_unquote(tok))
+                i += 1
+            if i < n and tokens[i] == ")":
+                i += 1
+        elif tokens[i][0] in ('"', "`"):
+            found.append(_unquote(tokens[i]))
+            i += 1
+        elif i + 1 < n and tokens[i + 1][0] in ('"', "`"):
+            found.append(_unquote(tokens[i + 1]))
+            i += 2
     return found
 
 
@@ -79,8 +123,9 @@ def engine_dependency(gomod: str, *, base_dir: Path | None = None, is_work: bool
         directive: str | None = None
         spec = ""
         if in_block:
-            if ")" in line:
-                spec = line.split(")", 1)[0].strip()
+            close_idx = _find_unquoted(line, ")")
+            if close_idx != -1:
+                spec = line[:close_idx].strip()
                 directive = in_block
                 in_block = None
             else:
@@ -91,8 +136,9 @@ def engine_dependency(gomod: str, *, base_dir: Path | None = None, is_work: bool
             if match:
                 directive = match.group(1)
                 rest = match.group(2).strip()
-                if ")" in rest:
-                    spec = rest.split(")", 1)[0].strip()
+                close_idx = _find_unquoted(rest, ")")
+                if close_idx != -1:
+                    spec = rest[:close_idx].strip()
                 else:
                     in_block = directive
                     spec = rest
@@ -104,21 +150,23 @@ def engine_dependency(gomod: str, *, base_dir: Path | None = None, is_work: bool
         if not directive or not spec:
             continue
         if directive == "replace":
-            lhs, sep, rhs = spec.partition("=>")
-            lhs_words = [_unquote(w) for w in lhs.split()]
+            arrow_idx = _find_unquoted(spec, "=>")
+            lhs = spec[:arrow_idx] if arrow_idx != -1 else spec
+            rhs = spec[arrow_idx + 2 :] if arrow_idx != -1 else ""
+            lhs_words = [_unquote(w) for w in _MOD_TOKEN.findall(lhs)]
             if lhs_words and lhs_words[0] == ENGINE:
                 return True
-            if sep:
-                rhs_words = [_unquote(w) for w in rhs.split()]
+            if arrow_idx != -1:
+                rhs_words = [_unquote(w) for w in _MOD_TOKEN.findall(rhs)]
                 if rhs_words and (rhs_words[0] == ENGINE or (len(rhs_words) == 1 and _references_engine_dir(rhs_words[0], base_dir))):
                     return True
         elif directive == "require":
-            words = [_unquote(w) for w in spec.split()]
+            words = [_unquote(w) for w in _MOD_TOKEN.findall(spec)]
             if words and words[0] == ENGINE:
                 return True
         elif directive == "use" and is_work:
-            target = _unquote(spec)
-            if target == ENGINE or _references_engine_dir(target, base_dir):
+            words = [_unquote(w) for w in _MOD_TOKEN.findall(spec)]
+            if len(words) == 1 and (words[0] == ENGINE or _references_engine_dir(words[0], base_dir)):
                 return True
     return False
 

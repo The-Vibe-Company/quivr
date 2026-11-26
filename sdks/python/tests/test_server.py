@@ -99,21 +99,16 @@ class Routes(Base):
             self.assertNotIn(manifest_secret, reply.body["message"])
             self.assertIn("[redacted]", reply.body["message"])
 
-            # Mutated invalid or secret-bearing error code falls back to "unhealthy".
-            @plugin.health_check
-            def bad_code():
-                err = RetryableError("valid_code", "message")
-                err.code = "INVALID CODE!"
-                raise err
+            # Mutated invalid or newline-suffixed or secret-bearing error code falls back to "unhealthy".
+            for invalid_code in ("INVALID CODE!", "valid_code\n", "tok_err"):
+                with self.subTest(invalid_code=invalid_code):
+                    @plugin.health_check
+                    def bad_code(code=invalid_code):
+                        err = RetryableError("valid_code", "message")
+                        err.code = code
+                        raise err
 
-            self.assertEnvelope(plugin.handle("GET", "/v0/health"), 503, "unhealthy", True)
-
-            @plugin.health_check
-            def secret_in_code():
-                err = RetryableError("tok_err", "message")
-                raise err
-
-            self.assertEnvelope(plugin.handle("GET", "/v0/health"), 503, "unhealthy", True)
+                    self.assertEnvelope(plugin.handle("GET", "/v0/health"), 503, "unhealthy", True)
 
             # Unexpected exception logs must also redact both signing and manifest secrets.
             @plugin.health_check
@@ -387,6 +382,14 @@ class HTTPTransport(Base):
                 b"{}",
                 400,
                 "invalid_request",
+            ),
+            (
+                "oversized_digit_content_length",
+                b"POST /v0/contributions/normalizer HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: " + (b"9" * 5000) + b"\r\n\r\n",
+                413,
+                "request_too_large",
             ),
         ]
         for label, raw_request, expected_status, expected_code in cases:

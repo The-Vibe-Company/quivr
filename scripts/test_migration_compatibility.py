@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import signal
 import sys
 import tempfile
 import types
@@ -44,11 +45,20 @@ class MigrationCompatibilityTests(unittest.TestCase):
                 (stack_dir / 'api-startup.log').write_text('api booted\n')
                 (stack_dir / 'worker-startup.log').write_text('worker booted\n')
 
+            class FakeProc:
+                def wait(self, timeout=None):
+                    events.append(('reap', timeout))
+
             class FakeStack:
                 def __init__(self, name):
                     self.name = name
                     self.directory = stack_dir
                     self.verifying = False
+                    self.state = {'pids': [4242, 4343]}
+                    self.launched = {18080: FakeProc()}
+
+                def signal_owned(self, pid, sig):
+                    events.append(('signal_owned', pid, sig))
 
                 def up(self):
                     events.append(('up',))
@@ -127,6 +137,9 @@ class MigrationCompatibilityTests(unittest.TestCase):
             'previous-worker-startup.log': 'worker booted\n',
         })
         self.assertIn(('down', True), events)
+        self.assertIn(('signal_owned', 4242, signal.SIGKILL), events)
+        self.assertIn(('signal_owned', 4343, signal.SIGKILL), events)
+        self.assertIn(('reap', 1), events)
         self.assertIn(('compose', 'down', '--volumes'), events)
 
     def test_pip_constraint_rewritten_when_present_and_popped_when_absent(self):

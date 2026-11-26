@@ -106,6 +106,28 @@ def _split_go_tokens(text: str) -> list[str]:
         return []
 
 
+def _find_unquoted(line: str, target: str) -> int:
+    """Return index of first ``target`` outside Go double-quoted or backtick strings, or -1."""
+    in_quote = ''
+    escaped = False
+    tlen = len(target)
+    for i, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if in_quote:
+            if in_quote == '"' and ch == '\\':
+                escaped = True
+            elif ch == in_quote:
+                in_quote = ''
+            continue
+        if ch in ('"', '`'):
+            in_quote = ch
+        elif line[i:i + tlen] == target:
+            return i
+    return -1
+
+
 def _directive_specs(text: str, keyword: str) -> list[str]:
     """Extract single-line, block, and inline-block specs for a go.mod/go.work directive."""
     specs: list[str] = []
@@ -117,8 +139,9 @@ def _directive_specs(text: str, keyword: str) -> list[str]:
         if not line:
             continue
         if in_block:
-            if ')' in line:
-                before = line.split(')', 1)[0].strip()
+            close_idx = _find_unquoted(line, ')')
+            if close_idx != -1:
+                before = line[:close_idx].strip()
                 if before:
                     specs.append(before)
                 in_block = False
@@ -128,8 +151,9 @@ def _directive_specs(text: str, keyword: str) -> list[str]:
         match = open_block.match(line)
         if match:
             rest = match.group(1).strip()
-            if ')' in rest:
-                before = rest.split(')', 1)[0].strip()
+            close_idx = _find_unquoted(rest, ')')
+            if close_idx != -1:
+                before = rest[:close_idx].strip()
                 if before:
                     specs.append(before)
             else:
@@ -149,9 +173,10 @@ def _local_replaces_in_file(mod_file: pathlib.Path, base_dir: pathlib.Path) -> l
         return []
     targets: list[pathlib.Path] = []
     for spec in _directive_specs(mod_file.read_text(errors='replace'), 'replace'):
-        if '=>' not in spec:
+        arrow_idx = _find_unquoted(spec, '=>')
+        if arrow_idx == -1:
             continue
-        rhs = spec.split('=>', 1)[1].strip()
+        rhs = spec[arrow_idx + 2:].strip()
         tokens = _split_go_tokens(rhs)
         # Module version replacements carry two tokens (path + version); local
         # filesystem replacements carry a single directory path token.
@@ -299,9 +324,25 @@ def _relevant_env_items(env: dict[str, str]) -> tuple[tuple[str, str], ...]:
     ))
 
 
+def _discover_gowork_hint(cwd: pathlib.Path, env: dict[str, str]) -> str:
+    """Resolve the active go.work file location so new/removed go.work files bust _GO_ENV_CACHE."""
+    raw = env.get('GOWORK', '').strip()
+    if raw == 'off':
+        return 'off'
+    if raw and raw != 'auto':
+        candidate = pathlib.Path(raw)
+        resolved = candidate.resolve() if candidate.is_absolute() else (cwd / candidate).resolve()
+        return str(resolved) if resolved.is_file() else raw
+    for parent in (cwd, *cwd.parents):
+        candidate = parent / 'go.work'
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return ''
+
+
 def _effective_go_env(go: str, cwd: pathlib.Path, env: dict[str, str]) -> str:
     """Return a canonical serialization of the effective ``go env`` build settings."""
-    key = (go, str(cwd), _relevant_env_items(env))
+    key = (go, str(cwd), _relevant_env_items(env), _discover_gowork_hint(cwd, env))
     cached = _GO_ENV_CACHE.get(key)
     if cached is not None:
         return cached
