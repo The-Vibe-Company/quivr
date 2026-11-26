@@ -13,6 +13,9 @@ type PrerequisiteError struct {
 
 func (e *PrerequisiteError) Error() string { return e.problem }
 
+// ErrPrerequisiteConnection reports that the PostgreSQL preflight could not run.
+var ErrPrerequisiteConnection = &PrerequisiteError{"could not check PostgreSQL prerequisites. Verify database_url, TLS, and CONNECT access to a PostgreSQL 17 or newer primary"}
+
 const ledgerInsertDenied = "PostgreSQL role cannot insert into public.schema_migrations. Ask the DBA to check ledger ownership, INSERT privileges, and row-level security policies"
 
 // CheckPrerequisites checks the actual session's schema and privileges without
@@ -37,7 +40,7 @@ func CheckPrerequisites(ctx context.Context, pool *pgxpool.Pool, forMigration bo
 		Scan(&writable, &schemaExists, &schemaUsage, &schemaFirst, &schemaCreate, &plpgsql, &ledgerReadable, &ledgerWritable)
 	switch {
 	case err != nil:
-		return &PrerequisiteError{"could not check PostgreSQL prerequisites. Verify database_url, TLS, and CONNECT access to a PostgreSQL 17 or newer primary"}
+		return ErrPrerequisiteConnection
 	case !writable:
 		return &PrerequisiteError{"PostgreSQL session is read-only. Connect Quivr to a writable primary and check the role's default_transaction_read_only setting"}
 	case !schemaExists:
