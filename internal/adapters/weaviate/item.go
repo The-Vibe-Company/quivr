@@ -110,44 +110,6 @@ func (s *Store) ensureProperties(ctx context.Context, collection string, props [
 	return nil
 }
 
-func (s *Store) publishItem(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, metadata map[string]any) error {
-	props := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "recordId": v.RecordID, sourceNamespaceProperty: namespace, itemKind: "item"}
-	for k, value := range metadata {
-		props[k] = value
-	}
-	values := content.ItemText(v, g.Fields)
-	for _, f := range content.ItemFields(g.Fields) {
-		if text := values[f.Name]; text != "" {
-			props[itemProperty(f)] = text
-			if a, ok := keywords.Lookup(f.Analyzer); ok {
-				props[analyzedProperty(f, a)] = a.Analyze(text)
-			}
-		}
-	}
-	id := uuidOf(content.StableID("item-keywords", org, g.ID, v.ID))
-	existing, found, err := s.object(ctx, g.Collection, id)
-	if err != nil {
-		return err
-	}
-	if found {
-		if sameProperties(existing.Properties, props) {
-			return nil
-		}
-		return errors.New("immutable item projection mismatch")
-	}
-	if err := s.insert(ctx, map[string]any{"class": g.Collection, "id": id, "properties": props}); err != nil {
-		return err
-	}
-	existing, found, err = s.object(ctx, g.Collection, id)
-	if err != nil {
-		return err
-	}
-	if !found || !sameProperties(existing.Properties, props) {
-		return errors.New("item projection verification mismatch")
-	}
-	return nil
-}
-
 type itemRow struct {
 	SegmentID    string `json:"segmentId"`
 	GenerationID string `json:"generationId"`
