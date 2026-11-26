@@ -85,12 +85,14 @@ class RailwayReset:
         return json.loads(self.ssh('api', 'python3 -c ' + shlex.quote(code)))
 
     def index_inventory(self):
-        from deploy.reset_support import vector_objects
-        code = ('import json\n' + inspect.getsource(vector_objects)
+        from deploy.reset_support import vector_inventory, vector_objects
+        code = ('import json\nfrom urllib.parse import quote\n'
+                + inspect.getsource(vector_objects)
+                + '\n' + inspect.getsource(vector_inventory)
                 + '\n' + inspect.getsource(weaviate_client)
                 + '\nc=json.load(open("/tmp/quivr-runtime.json")); '
-                'print(vector_objects(WeaviateClient.from_config(c).request_json("/v1/objects?limit=1")))')
-        return int(self.ssh('api', 'python3 -c ' + shlex.quote(code)).strip())
+                'print(json.dumps(vector_inventory(WeaviateClient.from_config(c))))')
+        return json.loads(self.ssh('api', 'python3 -c ' + shlex.quote(code)).strip())
 
     def preview(self):
         # CLI project tokens only see one environment. Their connection pagination
@@ -163,7 +165,9 @@ class RailwayReset:
                 'replacement_capacity': 'unknown until created; Railway replacements use provider defaults; '
                                         'grow them in the Railway dashboard before importing',
                 'writers': [k for k in WRITERS if k in selectors], 'object_store': self.storage,
-                'vector_objects': self.index_count, 'preserves': 'service settings, replica counts, credentials and exact deployed artifacts',
+                'vector_objects': self.index_count['objects'],
+                'inactive_vector_tenants': self.index_count['inactive_tenants'],
+                'preserves': 'service settings, replica counts, credentials and exact deployed artifacts',
                 'deletion': 'replaced volumes are detached; provider deletion retention may apply'}
 
     def stop(self, role):
@@ -304,7 +308,8 @@ class RailwayReset:
             self.restore('api', checkpoint)
             role = 'replacement-stores'
             storage = self.storage_inventory()
-            if storage['objects_at_least'] or storage['truncated'] or self.index_inventory():
+            post_index = self.index_inventory()
+            if storage['objects_at_least'] or storage['truncated'] or post_index['objects'] or post_index['inactive_tenants']:
                 raise RuntimeError('replacement stores are not empty')
             query = 'SELECT count(*) FROM corpora'
             role = 'postgres'
@@ -321,7 +326,9 @@ class RailwayReset:
                     'warnings': [f'{role}: replacement volume capacity shrank; grow it in the Railway dashboard before importing'
                                  for role, sizes in volume_sizes.items() if sizes['shrunk']],
                     'old_volumes': 'detached; deletion acknowledged, provider retention may apply',
-                    'deleted_vector_objects': self.index_count, 'deleted_blob_objects_at_least': self.storage['objects_at_least'],
+                    'deleted_vector_objects': self.index_count['objects'],
+                    'deleted_inactive_vector_tenants': self.index_count['inactive_tenants'],
+                    'deleted_blob_objects_at_least': self.storage['objects_at_least'],
                     'terminated_workflows': workflows, 'schema': 'fresh startup migrations applied', 'writers': 'restarted'}
         except Exception:
             # A failed restore can leave an API or worker running. Stop any newly
