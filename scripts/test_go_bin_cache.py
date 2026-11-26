@@ -76,6 +76,12 @@ class GoBinCache(unittest.TestCase):
             stamp = json.loads((cache / 'sample.stamp').read_text())
             self.assertEqual(stamp['inode'], binary.stat().st_ino)
             self.assertEqual(stamp['size'], binary.stat().st_size)
+            # Mutating the cached binary in place (same inode, mismatched size) must force a rebuild.
+            with binary.open('ab') as stream:
+                stream.write(b'\0')
+            with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
+                binary = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
+            build.assert_called_once()
             self.assertEqual(subprocess.check_output([str(binary)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
 
             # Unchanged inputs hit the cache without spawning `go build`, even in a fresh

@@ -102,6 +102,16 @@ def start_fast(stack):
     await_healthy(plugin, port, log)
 
 
+def _pid_exists(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def stop_fast(stack):
     pid = stack.state.pop('fast_ingestion_pid', None)
     binary_path = stack.state.pop('fast_ingestion_binary', None) or str(go_bin_cache.BIN_DIR / 'hash-embedder')
@@ -109,6 +119,12 @@ def stop_fast(stack):
     if pid is None:
         return
     if not _owns_fast_process(stack, pid, binary_path):
+        if _pid_exists(pid):
+            print(
+                f'Warning: refusing to signal fast ingestion pid {pid}; process does not match {binary_path} for stack {stack.name}',
+                file=sys.stderr,
+                flush=True,
+            )
         return
     try:
         os.killpg(pid, signal.SIGTERM)

@@ -531,9 +531,12 @@ class DevProfile(unittest.TestCase):
         stack.state['fast_ingestion_pid'] = os.getpid()
         stack.state['fast_ingestion_binary'] = str(local.ROOT / '.scratch' / 'bin' / 'hash-embedder')
         stack.save()
-        with mock.patch.object(local.ingestion_plugin.os, 'killpg') as killpg:
+        stderr = __import__('io').StringIO()
+        with mock.patch.object(local.ingestion_plugin.os, 'killpg') as killpg, \
+                mock.patch('sys.stderr', stderr):
             local.ingestion_plugin.stop_fast(stack)
         killpg.assert_not_called()
+        self.assertIn(str(os.getpid()), stderr.getvalue())
         self.assertNotIn('fast_ingestion_pid', json.loads(stack.statefile.read_text()))
 
     def test_start_first_party_persists_each_pid_before_starting_the_next_plugin(self):
