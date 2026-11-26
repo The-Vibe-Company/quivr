@@ -300,11 +300,12 @@ def failures(stack):
     quarantined Version before and after activating its fixed release, then restore the stack's pin."""
     directory = stack.directory / 'faulty-plugin'
     directory.mkdir(exist_ok=True)
-    binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=os.environ.get('GO', 'go'), mode='test')
+    inherited = plugin_environment.inherited()
+    binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=os.environ.get('GO', 'go'), mode='test', env=inherited)
     manifest_path = directory / 'quivr-plugin.yaml'
     manifest_path.write_text(FAULTY_MANIFEST)
     port = stack_port()
-    env = {**plugin_environment.inherited(), 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_FAKE_PLUGIN_MODE': 'by-record-key',
+    env = {**inherited, 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_FAKE_PLUGIN_MODE': 'by-record-key',
            'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_path)}
     with (stack.directory / 'faulty-plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary), '-test.run=^$'], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)

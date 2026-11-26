@@ -609,6 +609,79 @@ class LocalSafetyAndReadinessContract(unittest.TestCase):
             self.assertTrue(rep2["cold_search"]["available"])
             self.assertEqual(rep2["cold_search"]["reset_strategy"], "caller_acknowledged")
 
+    def test_bench_client_guards_non_json_error_and_success_bodies(self):
+        class NonJSONHandler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                status = 502 if self.path == "/bad-gateway" else 200
+                body = b"<html>502 Bad Gateway</html>" if status == 502 else b"not-json"
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), NonJSONHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        client = perf_bench.BenchClient(f"http://127.0.0.1:{server.server_address[1]}", "bench-token")
+        with self.assertRaisesRegex(RuntimeError, r"HTTP 502.*non-JSON.*502 Bad Gateway"):
+            client.call("GET", "/bad-gateway")
+        with self.assertRaisesRegex(RuntimeError, r"HTTP 200.*invalid JSON.*not-json"):
+            client.call("GET", "/broken-ok")
+
+    def test_start_local_stack_disables_unused_plugins_and_uses_build_quivr(self):
+        import connector_plugin
+        import local
+        import prepare_embeddings
+        import prepare_tokenizer
+
+        events: list[str] = []
+
+        class FakeStack:
+            def __init__(self, name):
+                self.name = name
+                self.state: dict[str, object] = {}
+                self.directory = pathlib.Path("/tmp") / name
+
+            def save(self):
+                events.append("save")
+
+            def build_quivr(self):
+                events.append("build_quivr")
+
+            def compose(self, *args):
+                events.append("compose:" + " ".join(args))
+
+            def migrate(self):
+                events.append("migrate")
+
+            def start_processes(self):
+                events.append("start_processes")
+
+        with mock.patch.object(perf_bench.platform, "system", return_value="Linux"), \
+                mock.patch.object(perf_bench.platform, "machine", return_value="x86_64"), \
+                mock.patch.object(local, "Stack", FakeStack), \
+                mock.patch.object(local, "run", side_effect=AssertionError("must use stack.build_quivr")), \
+                mock.patch.object(prepare_tokenizer, "prepare", side_effect=lambda: events.append("tokenizer")), \
+                mock.patch.object(prepare_embeddings, "prepare", side_effect=lambda: events.append("embeddings")), \
+                mock.patch.object(connector_plugin, "start_first_party", side_effect=lambda s: events.append("start_first_party")):
+            stack, created = perf_bench._start_local_stack(None)
+
+        self.assertTrue(created)
+        self.assertIs(stack.state["push_plugin"], False)
+        self.assertIs(stack.state["fixture_plugin"], False)
+        self.assertIs(stack.state["alerts_plugin"], False)
+        self.assertIs(stack.state["subscription_template"], False)
+        self.assertEqual(stack.state["first_party"], connector_plugin.CORE)
+        self.assertIn("build_quivr", events)
+
 
 if __name__ == "__main__":
     unittest.main()

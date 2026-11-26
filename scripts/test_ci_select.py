@@ -76,6 +76,45 @@ class Selection(unittest.TestCase):
                 self.assertFalse(images & (excluded | {'', 'web', 'postgres'}))
                 self.assertIn(group, selected['groups'])
                 self.assertEqual(selected['site'], path.endswith('README.md'))
+                self.assertEqual(selected['vulnerabilities'], path.startswith('sdks/go/'))
+
+    def test_go_vulnerabilities_migration_and_part_routing_cover_all_affected_lanes(self):
+        # Go SDK, Go plugins, and Go contract files/modules all enable vulnerabilities.
+        for path in [
+            'sdks/go/quivrplugin/plugin.go',
+            'plugins/rss/connector.go',
+            'plugins/core-retrieve/main.go',
+            'contracts/http/v0/embed.go',
+            'contracts/http/v0/checks/go.mod',
+            'contracts/http/v0/checks/go.sum',
+        ]:
+            with self.subTest(vuln_path=path):
+                self.assertTrue(ci_select.select([path])['vulnerabilities'])
+        # Pure Python plugins and non-Go contract schemas do not trigger Go govulncheck.
+        for path in ['plugins/alerts/src/alerts/__init__.py', 'contracts/http/v0/openapi.yaml']:
+            with self.subTest(no_vuln_path=path):
+                self.assertFalse(ci_select.select([path])['vulnerabilities'])
+
+        # Parts routing for core-retrieve, plugins/alerts, internal/monitoring, internal/connectors.
+        self.assertEqual(ci_select.select(['plugins/core-retrieve/main.go'])['parts'],
+                         ['core', 'monitoring', 'plugins', 'connectors', 'demo'])
+        self.assertEqual(ci_select.select(['plugins/alerts/src/alerts/__init__.py'])['parts'],
+                         ['monitoring', 'plugins', 'demo'])
+        self.assertEqual(ci_select.select(['internal/monitoring/rule.go'])['parts'],
+                         ['monitoring', 'plugins', 'demo'])
+        self.assertEqual(ci_select.select(['internal/connectors/sync.go'])['parts'],
+                         ['connectors', 'demo'])
+
+        # Migration compatibility covers postgres adapter, app wiring, secretinput, and cmd/quivr.
+        for path in [
+            'internal/adapters/postgres/store.go',
+            'internal/app/run.go',
+            'internal/secretinput/secret.go',
+            'cmd/quivr/main.go',
+        ]:
+            with self.subTest(migration_path=path):
+                self.assertTrue(ci_select.select([path])['migration-compatibility'])
+        self.assertFalse(ci_select.select(['internal/retrieval/retrieval.go'])['migration-compatibility'])
 
     def test_shared_inputs_and_missing_diff_fail_closed(self):
         for paths in [None, ['scripts/local.py'], ['scripts/prepare_tokenizer.py'],
@@ -384,6 +423,50 @@ class Workflow(unittest.TestCase):
                 for step in job['steps']:
                     if step.get('uses', '').startswith('actions/checkout@'):
                         self.assertEqual(step['with']['ref'], '${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}')
+
+    def test_artifact_overwrite_digest_mismatch_and_image_scan_revision(self):
+        expected_ref = '${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}'
+        verify = yaml.safe_load((ci_select.ROOT / '.github/workflows/verify.yml').read_text())
+        release = yaml.safe_load((ci_select.ROOT / '.github/workflows/release-images.yml').read_text())
+        single = yaml.safe_load((ci_select.ROOT / '.github/workflows/verify-single-machine.yml').read_text())
+
+        # Every failure-* upload in verify.yml allows rerun overwrites.
+        verify_uploads = [
+            step for job in verify['jobs'].values() for step in job.get('steps', [])
+            if step.get('uses', '').startswith('actions/upload-artifact@')
+            and str(step.get('with', {}).get('name', '')).startswith('failure-')
+        ]
+        self.assertGreaterEqual(len(verify_uploads), 6)
+        for step in verify_uploads:
+            self.assertIs(step['with'].get('overwrite'), True, step['with']['name'])
+
+        # Every sbom-*/image-* upload in release-images.yml allows rerun overwrites.
+        release_uploads = [
+            step for job in release['jobs'].values() for step in job.get('steps', [])
+            if step.get('uses', '').startswith('actions/upload-artifact@')
+            and str(step.get('with', {}).get('name', '')).startswith(('sbom-', 'image-'))
+        ]
+        self.assertEqual(len(release_uploads), 2)
+        for step in release_uploads:
+            self.assertIs(step['with'].get('overwrite'), True, step['with']['name'])
+
+        # Artifact downloads in release-images.yml and verify-single-machine.yml fail on digest mismatch.
+        for name, wf, expected_count in [('release-images.yml', release, 2), ('verify-single-machine.yml', single, 1)]:
+            downloads = [
+                step for job in wf['jobs'].values() for step in job.get('steps', [])
+                if step.get('uses', '').startswith('actions/download-artifact@')
+            ]
+            self.assertEqual(len(downloads), expected_count, name)
+            for step in downloads:
+                self.assertEqual(step['with'].get('digest-mismatch'), 'error', name)
+
+        # image-vulnerabilities uses the resolved checkout ref for REVISION build-arg, OCI label, and smoke check.
+        scan_steps = verify['jobs']['image-vulnerabilities']['steps']
+        build = next(s for s in scan_steps if s.get('uses', '').startswith('docker/build-push-action@'))
+        self.assertIn(f'REVISION={expected_ref}', build['with']['build-args'])
+        self.assertIn(f'org.opencontainers.image.revision={expected_ref}', build['with']['labels'])
+        smoke = next(s for s in scan_steps if s.get('name') == 'Check hosted image token packing offline')
+        self.assertEqual(smoke['env']['REVISION'], expected_ref)
 
 
 if __name__ == '__main__':

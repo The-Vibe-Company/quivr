@@ -71,6 +71,58 @@ class Routes(Base):
         with self.assertLogs("quivr_plugin.server", logging.ERROR):
             self.assertEnvelope(self.plugin.handle("GET", "/v0/health"), 503, "unhealthy", True)
 
+    def test_health_redacts_secrets_validates_code_and_forces_retryable(self):
+        manifest_path = Path(self.tmp.name) / "secret-plugin.yaml"
+        manifest_path.write_text(
+            MANIFEST.read_text()
+            + "\nsecrets:\n  - name: TEST_PROVIDER_TOKEN\n    required: true\n"
+        )
+        plugin = Plugin(manifest_path)
+        plugin.normalizer(lambda inv: {"manifest": {"kind": "manifest", "parts": []}})
+
+        signing_secret = "signing-secret-material-1234567890"
+        manifest_secret = "tok"
+        malformed_ring = f'{{"active":"k1","keys":[{{"id":"k1","secret":"{signing_secret}"'
+
+        with mock.patch.dict(os.environ, {
+            "QUIVR_PLUGIN_SIGNING_KEYS": malformed_ring,
+            "TEST_PROVIDER_TOKEN": manifest_secret,
+        }):
+            # TerminalError on /v0/health must still produce retryable: True and redact secrets.
+            @plugin.health_check
+            def terminal_leak():
+                raise TerminalError("dep_down", f"failed with {signing_secret} and {manifest_secret}")
+
+            reply = plugin.handle("GET", "/v0/health")
+            self.assertEnvelope(reply, 503, "dep_down", True)
+            self.assertNotIn(signing_secret, reply.body["message"])
+            self.assertNotIn(manifest_secret, reply.body["message"])
+            self.assertIn("[redacted]", reply.body["message"])
+
+            # Mutated invalid or newline-suffixed or secret-bearing error code falls back to "unhealthy".
+            for invalid_code in ("INVALID CODE!", "valid_code\n", "tok_err"):
+                with self.subTest(invalid_code=invalid_code):
+                    @plugin.health_check
+                    def bad_code(code=invalid_code):
+                        err = RetryableError("valid_code", "message")
+                        err.code = code
+                        raise err
+
+                    self.assertEnvelope(plugin.handle("GET", "/v0/health"), 503, "unhealthy", True)
+
+            # Unexpected exception logs must also redact both signing and manifest secrets.
+            @plugin.health_check
+            def crash_leak():
+                raise RuntimeError(f"boom {signing_secret} {manifest_secret}")
+
+            with self.assertLogs("quivr_plugin.server", logging.ERROR) as captured:
+                reply = plugin.handle("GET", "/v0/health")
+            self.assertEnvelope(reply, 503, "unhealthy", True)
+            joined_logs = "\n".join(captured.output)
+            self.assertNotIn(signing_secret, joined_logs)
+            self.assertNotIn(manifest_secret, joined_logs)
+            self.assertIn("[redacted]", joined_logs)
+
     def test_unknown_route_and_wrong_method(self):
         self.assertEnvelope(self.plugin.handle("GET", "/v0/nope"), 404, "not_found", False)
         self.assertEnvelope(self.plugin.handle("GET", "/v0/contributions/normalizer"), 405, "method_not_allowed", False)
@@ -304,6 +356,63 @@ class HTTPTransport(Base):
                 self.assertEqual(response.getheader(MANIFEST_DIGEST_HEADER), self.plugin.manifest.digest)
                 body = json.loads(response.read())
                 self.assertEqual(protocol_errors("error.schema.json", body), [])
+
+    def test_framing_smuggling_headers_are_rejected_and_close_connection(self):
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        cases = [
+            (
+                "transfer_encoding",
+                b"POST /v0/contributions/normalizer HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n"
+                b"0\r\n\r\n",
+                501,
+                "not_implemented",
+            ),
+            (
+                "duplicate_content_length",
+                b"POST /v0/contributions/normalizer HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 2\r\n"
+                b"Content-Length: 4\r\n\r\n"
+                b"{}",
+                400,
+                "invalid_request",
+            ),
+            (
+                "oversized_digit_content_length",
+                b"POST /v0/contributions/normalizer HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: " + (b"9" * 5000) + b"\r\n\r\n",
+                413,
+                "request_too_large",
+            ),
+        ]
+        for label, raw_request, expected_status, expected_code in cases:
+            with self.subTest(label=label):
+                sock = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+                self.addCleanup(sock.close)
+                sock.sendall(raw_request)
+                chunks = []
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                raw_response = b"".join(chunks)
+                head, _, body_bytes = raw_response.partition(b"\r\n\r\n")
+                header_lines = head.decode("latin1").split("\r\n")
+                self.assertIn(f" {expected_status} ", header_lines[0])
+                headers = {k.lower(): v.strip() for line in header_lines[1:] for k, _, v in [line.partition(":")]}
+                self.assertEqual(headers.get("connection"), "close")
+                self.assertEqual(headers.get(MANIFEST_DIGEST_HEADER.lower()), self.plugin.manifest.digest)
+                payload = json.loads(body_bytes)
+                self.assertEqual(payload["code"], expected_code)
+                self.assertEqual(protocol_errors("error.schema.json", payload), [])
 
     def test_server_backlog_reuse_and_idle_timeout(self):
         with self.assertRaises(ValueError):

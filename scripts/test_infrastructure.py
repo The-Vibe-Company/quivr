@@ -411,6 +411,21 @@ class Infrastructure(unittest.TestCase):
         rows = {(row['scope'], row['setting']): row['status'] for row in before['observations']}
         self.assertEqual(rows['configured', 'dockerfile_cleared'], 'drift')
         self.assertEqual(rows['configured', 'image'], 'unknown')
+        # Refuses to switch off Dockerfile until PostgreSQL connection variables exist on Temporal.
+        transport.calls.clear()
+        with self.assertRaisesRegex(RuntimeError, r'POSTGRES_SEEDS.*POSTGRES_USER.*POSTGRES_PWD.*provision\.py --apply'):
+            adapter.apply({'temporal': spec})
+        self.assertFalse(any(args[:2] == ['variable', 'set'] or (args[0] == 'api' and 'mutation' in args[1])
+                             for args, _ in transport.calls))
+        # Empty/whitespace secret string is still refused, whereas a Railway sealed variable (None) is accepted.
+        transport.variables.update({'POSTGRES_SEEDS': 'postgres.railway.internal',
+                                    'POSTGRES_USER': 'postgres', 'POSTGRES_PWD': '   '})
+        transport.calls.clear()
+        with self.assertRaisesRegex(RuntimeError, r'POSTGRES_PWD.*provision\.py --apply'):
+            adapter.apply({'temporal': spec})
+        self.assertFalse(any(args[:2] == ['variable', 'set'] or (args[0] == 'api' and 'mutation' in args[1])
+                             for args, _ in transport.calls))
+        transport.variables['POSTGRES_PWD'] = None
         transport.calls.clear()
         adapter.apply({'temporal': spec})
         mutations = [json.loads(args[3]) for args, _ in transport.calls
@@ -451,7 +466,7 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(len(source_writes), 1)
             self.assertEqual(json.loads(source_writes[0][3]), {
                 'serviceId': 'index-service', 'environmentId': 'environment',
-                'input': {'source': {'image': infra.resolve()['weaviate']['image']}}})
+                'input': {'source': {'image': infra.resolve()['weaviate']['image']}, 'dockerfilePath': None}})
             self.assertIn(('redeploy', '--service', 'index-service', '--project', 'project',
                            '--environment', 'environment', '--from-source', '--yes', '--json'),
                           [call.args for call in deployment.cli.call_args_list])

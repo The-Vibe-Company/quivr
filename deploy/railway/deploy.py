@@ -31,7 +31,7 @@ def main():
                      '{serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input)}')
             cli('api', query, '--variables', json.dumps({
                 'serviceId': ids[name], 'environmentId': args.environment_id,
-                'input': {'source': {'image': services[name]['image']}}}))
+                'input': {'source': {'image': services[name]['image']}, 'dockerfilePath': None}}))
             output = cli('redeploy', '--service', ids[name], '--project', args.project_id,
                          '--environment', args.environment_id, '--from-source', '--yes', '--json')
         else:

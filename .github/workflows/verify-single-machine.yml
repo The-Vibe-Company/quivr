@@ -38,6 +38,7 @@ jobs:
           pattern: image-*
           merge-multiple: true
           path: .scratch/compose-images
+          digest-mismatch: error
       - name: Reserve disk for the six image builds
         if: inputs.mode == 'candidate'
         run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*

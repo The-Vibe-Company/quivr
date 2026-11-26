@@ -116,7 +116,12 @@ def run_unittest(directory, module=None, preload=(), shard=None):
     failures += [{'test': test.id(), 'excerpt': 'Unexpected success for an expected failure'}
                  for test in result.unexpectedSuccesses]
     suffix = f'-shard{shard[0]}of{shard[1]}' if shard else ''
-    save('unittest-' + (module or str(Path(directory).resolve())).replace('/', '-') + suffix,
+    resolved = Path(directory).resolve()
+    try:
+        label = resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        label = str(resolved)
+    save('unittest-' + (module or label).replace('/', '-') + suffix,
          {'tests': result.timings, 'failures': failures, 'count': result.testsRun,
           'selected_tests': selected, 'skipped': len(result.skipped), 'successful': result.wasSuccessful()})
     return 0 if result.wasSuccessful() else 1

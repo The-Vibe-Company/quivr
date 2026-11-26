@@ -59,6 +59,9 @@ class ProviderCapError(RuntimeError):
     """Safe local preflight diagnostics, never raw provider error text."""
 
 
+REQUIRED_TEMPORAL_POSTGRES_VARS = ('POSTGRES_SEEDS', 'POSTGRES_USER', 'POSTGRES_PWD')
+
+
 class Railway:
     def __init__(self, project, environment, run=execute):
         self.project, self.environment, self.run = project, environment, run
@@ -117,6 +120,9 @@ class Railway:
         if not isinstance(variables, dict):
             raise RuntimeError('Railway returned an unsupported variable response')
         return {'environment': {key: infra.safe_environment(key, variables.get(key)) for key in infra.KEYS[name]},
+                'present_variables': {key for key, value in variables.items()
+                                      if (isinstance(value, str) and value.strip())
+                                      or (key in REQUIRED_TEMPORAL_POSTGRES_VARS and value is None)},
                 'image': (instance.get('source') or {}).get('image'),
                 'dockerfile': instance.get('dockerfilePath'),
                 'limits': limits(response.get('serviceInstanceLimitOverride'))}
@@ -216,6 +222,14 @@ class Railway:
         if errors:
             raise ProviderCapError('\n'.join(errors))
         states = {name: self.configured(name) for name in self.targets}
+        if 'temporal' in self.targets and states['temporal'].get('dockerfile'):
+            present = states['temporal'].get('present_variables', set())
+            missing = [var for var in REQUIRED_TEMPORAL_POSTGRES_VARS if var not in present]
+            if missing:
+                raise ProviderCapError(
+                    'temporal: refusing to switch off Dockerfile to temporalio/auto-setup without '
+                    f"{', '.join(missing)}; run deploy/railway/provision.py --apply first. No settings applied."
+                )
         for name in self.targets:
             spec, state = services[name], states[name]
             for key, value in spec.get('environment', {}).items():

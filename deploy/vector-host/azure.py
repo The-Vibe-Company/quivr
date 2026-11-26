@@ -57,6 +57,19 @@ def host_flags(args, hostname, source=SOURCE):
     return flags
 
 
+def source_digest(root=ROOT):
+    """Hash every declared host source file with unambiguous name and length framing."""
+    hasher = hashlib.sha256()
+    for name in SOURCES:
+        data = (root / name).read_bytes()
+        hasher.update(name.encode('utf-8'))
+        hasher.update(b'\0')
+        hasher.update(str(len(data)).encode('ascii'))
+        hasher.update(b'\0')
+        hasher.update(data)
+    return hasher.hexdigest()
+
+
 def cloud_init(args, hostname, override, fingerprint):
     files = [{'path': str(SOURCE / name), 'permissions': '0644', 'encoding': 'gzip+b64',
               'content': base64.b64encode(gzip.compress((ROOT / name).read_bytes(), mtime=0)).decode()}
@@ -205,9 +218,7 @@ def _provision(args, context):
     intent['public_key'] = public_key
     intent['override'] = override
     intent['profile'] = args.profile
-    intent['source'] = hashlib.sha256((ROOT / 'deploy/vector-host/host.py').read_bytes()
-                                    + (ROOT / 'deploy/infrastructure.json').read_bytes()
-                                    + (ROOT / 'deploy/infrastructure.py').read_bytes()).hexdigest()
+    intent['source'] = source_digest(ROOT)
     fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True).encode()).hexdigest()
     group_flags = ['--resource-group', args.resource_group]
     context.at('inspect resource group', args.resource_group)

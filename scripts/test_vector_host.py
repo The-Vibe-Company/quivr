@@ -502,6 +502,35 @@ class VectorHost(unittest.TestCase):
             self.assertIn('/dev/disk/azure/scsi1/lun0', init['runcmd'][0])
             self.assertEqual({rule['destinationPortRange'] for rule in rules if rule['access'] == 'Allow'}, {'443', '22'})
 
+    def test_azure_intent_source_hash_covers_all_sources_with_framing(self):
+        module_spec = importlib.util.spec_from_file_location('vector_azure', HOST.with_name('azure.py'))
+        azure = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(azure)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in azure.SOURCES:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / name).read_bytes())
+            baseline = azure.source_digest(root)
+            # Editing every declared source in SOURCES (including report-resources.sh and host.py) must change the digest.
+            for name in azure.SOURCES:
+                with self.subTest(source=name):
+                    target = root / name
+                    original = target.read_bytes()
+                    target.write_bytes(original + b'\n# changed\n')
+                    try:
+                        self.assertNotEqual(azure.source_digest(root), baseline)
+                    finally:
+                        target.write_bytes(original)
+            # Shifting a byte across adjacent SOURCES entries must never collide.
+            (root / azure.SOURCES[0]).write_bytes(b'ab')
+            (root / azure.SOURCES[1]).write_bytes(b'c')
+            first = azure.source_digest(root)
+            (root / azure.SOURCES[0]).write_bytes(b'a')
+            (root / azure.SOURCES[1]).write_bytes(b'bc')
+            self.assertNotEqual(azure.source_digest(root), first)
+
 
 if __name__ == '__main__':
     unittest.main()

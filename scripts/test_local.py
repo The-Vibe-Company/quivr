@@ -124,6 +124,47 @@ class Isolation(unittest.TestCase):
         self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', build_env)
         self.assertEqual(json.loads(launch_env['QUIVR_PLUGIN_SIGNING_KEYS']), plugins.signing_ring(stack, archive))
 
+    def test_plugin_go_builds_filter_engine_secrets(self):
+        import hosted_embed_plugin
+        import plugin_environment
+
+        stack = local.Stack(self.names[0])
+        engine_secrets = {}
+        for name in plugin_environment.ENGINE_SECRETS:
+            engine_secrets[name] = f'secret-{name.lower()}'
+            engine_secrets[f'{name}_FILE'] = f'/fixture/{name.lower()}'
+        engine_secrets['QUIVR_LOCAL_WEBHOOK_0'] = 'whsec_fixture'
+        engine_secrets['QUIVR_LOCAL_WEBHOOK_0_FILE'] = '/fixture/webhook'
+        sentinel = RuntimeError('stop-after-build')
+        with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True):
+            with mock.patch.object(local.fixture_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure:
+                local.fixture_plugin.binary(stack)
+                self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
+            with mock.patch.object(local.ingestion_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure:
+                local.ingestion_plugin.hash_embedder_binary(stack.source)
+                self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
+            with mock.patch.object(local.connector_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure:
+                local.connector_plugin.binary(stack)
+                self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
+            with mock.patch.object(hosted_embed_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
+                    mock.patch.object(hosted_embed_plugin.go_bin_cache, 'materialize', return_value=stack.directory / 'hosted-embed'):
+                hosted_embed_plugin.build(stack.directory)
+                self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
+            with mock.patch.object(local.retrieval_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
+                    mock.patch.object(local.retrieval_plugin.ports, 'allocate', side_effect=sentinel):
+                with self.assertRaises(RuntimeError) as caught:
+                    local.retrieval_plugin.verify(stack)
+                self.assertIs(caught.exception, sentinel)
+                self.assertEqual(ensure.call_count, 2)
+                for call in ensure.call_args_list:
+                    self.assertEqual(call.kwargs['env'], {'PATH': '/fixture/bin'})
+            with mock.patch.object(local.normalizer_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
+                    mock.patch.object(local.normalizer_plugin, 'stack_port', side_effect=sentinel):
+                with self.assertRaises(RuntimeError) as caught:
+                    local.normalizer_plugin.failures(stack)
+                self.assertIs(caught.exception, sentinel)
+                self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
+
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])
         again = local.Stack(self.names[0])

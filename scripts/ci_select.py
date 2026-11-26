@@ -64,6 +64,8 @@ def select(paths, full=False):
             parts.update(all_parts)
             images.update(i['plugin'] for i in all_images if i['plugin']
                           and (i['target'] == 'python-plugin') == (language == 'python'))
+            if language == 'go':
+                vulnerabilities = True
             # The Python SDK packages its README as metadata.
             site |= path == 'sdks/python/README.md'
         elif path in documentation or path.startswith(('docs/', 'docs-site/')) or path in {
@@ -87,19 +89,25 @@ def select(paths, full=False):
                 images.add('')
             if plugin in {'jev-rerank', 'core-ingest', 'core-retrieve', 'hosted-embed'}:
                 groups.update(eval_groups)
-            groups.add('sdk-go' if (ROOT / 'plugins' / plugin / 'go.mod').exists() else 'sdk-python')
-            parts.add('connectors' if plugin in connector_plugins else 'plugins')
+            is_go_plugin = (ROOT / 'plugins' / plugin / 'go.mod').exists()
+            groups.add('sdk-go' if is_go_plugin else 'sdk-python')
+            if is_go_plugin:
+                vulnerabilities = True
+            if plugin == 'alerts':
+                parts.update({'plugins', 'monitoring', 'demo'})
+            else:
+                parts.add('connectors' if plugin in connector_plugins else 'plugins')
             # These plugins are also pinned by the default stack and its core proofs.
-            if plugin in {'core-ingest', 'hosted-embed', 'pdf-text', 'newsml-g2'}:
+            if plugin in {'core-ingest', 'core-retrieve', 'hosted-embed', 'pdf-text', 'newsml-g2'}:
                 parts.update(all_parts)
         elif path.startswith('internal/monitoring/'):
             groups.update(eval_groups)
-            parts.add('monitoring')
+            parts.update({'monitoring', 'plugins', 'demo'})
             images.add('')
             vulnerabilities = True
         elif path.startswith('internal/connectors/'):
             groups.update(eval_groups)
-            parts.add('connectors')
+            parts.update({'connectors', 'demo'})
             images.add('')
             vulnerabilities = True
         elif path in {'go.mod', 'go.sum'} or path.startswith(('internal/', 'cmd/', 'client/')):
@@ -114,6 +122,8 @@ def select(paths, full=False):
                 migration = True
             elif path.startswith(('cmd/quivr-plugin-api/', 'cmd/quivr-reference/', 'internal/transport/generated/', 'client/')):
                 groups.update({'contracts', 'sdk-go', 'sdk-python'})
+            if path.startswith(('internal/adapters/postgres/', 'internal/app/', 'internal/secretinput/', 'cmd/quivr/')):
+                migration = True
         elif path.startswith('migrations/'):
             groups.update(eval_groups)
             parts.update(all_parts)
@@ -124,6 +134,8 @@ def select(paths, full=False):
             parts.update(all_parts)
             images.update(i['plugin'] for i in all_images)
             site = True
+            if path.endswith(('.go', '/go.mod', '/go.sum')):
+                vulnerabilities = True
         elif path.startswith(('scripts/measure_', 'tests/load/', 'conformance/')):
             # Local-only measurement inputs; the cheap lane validates Python/conformance.
             pass

@@ -128,6 +128,7 @@ jobs:
         if-no-files-found: warn
         retention-days: 3
         compression-level: 0
+        overwrite: true
     - name: Sign, attest and verify the immutable image
       timeout-minutes: 5
       env:
@@ -142,6 +143,7 @@ jobs:
         name: sbom-${{ matrix.component || matrix.plugin || 'engine' }}
         path: sboms/
         if-no-files-found: error
+        overwrite: true
     - name: Record the signed image
       env:
         IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -153,6 +155,7 @@ jobs:
       with:
         name: image-${{ matrix.component || matrix.plugin || 'engine' }}
         path: signed-images/
+        overwrite: true
   deployment-smoke:
     needs: [prepare, build]
     uses: ./.github/workflows/verify-single-machine.yml
@@ -181,11 +184,13 @@ jobs:
         pattern: image-*
         merge-multiple: true
         path: signed-images
+        digest-mismatch: error
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         pattern: sbom-*
         merge-multiple: true
         path: sboms
+        digest-mismatch: error
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
     - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
       with:

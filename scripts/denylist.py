@@ -18,6 +18,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DENYLIST = ROOT / 'scripts' / 'denylist.sha256'
@@ -36,18 +37,51 @@ _CHECKSUM = re.compile(r'(?:\bh1:|\bsha(?:1|256|384|512)-)[A-Za-z0-9+/]+=*')
 _BLOB = re.compile(r'''(?<![^\s"'`])[A-Za-z0-9+/]{40,}=*(?![^\s"'`,])''')
 
 
+_HEX_BLOB = re.compile(r'^[0-9A-Fa-f]{40,}$')
+_PROSE_SEGMENT = re.compile(r'[A-Z]?[a-z]{3,}')
+
+
+def _fold(text):
+    """NFKD-fold diacritics to ASCII so accented variants match plain denylist entries."""
+    return ''.join(ch for ch in unicodedata.normalize('NFKD', text) if unicodedata.category(ch) != 'Mn')
+
+
+def _is_opaque_blob(value):
+    # Random hex/base64 checksums have many digits. Pure hex and base64 with
+    # +/= punctuation are always opaque; unpadded alphanumeric base64 mixes
+    # uppercase, lowercase, and digits without prose/CamelCase word runs.
+    if len(re.findall(r'[0-9]', value)) < 4:
+        return False
+    if _HEX_BLOB.match(value) or any(ch in value for ch in '+/='):
+        return True
+    if any(ch.isupper() for ch in value) and any(ch.islower() for ch in value):
+        prose_chars = sum(len(seg) for seg in _PROSE_SEGMENT.findall(value))
+        return prose_chars * 2 < len(value)
+    return False
+
+
 def _opaque(text):
     text = _CHECKSUM.sub(' ', text)
-    # Random base64 has many digits; long identifiers and paths rarely have four.
-    return _BLOB.sub(lambda m: ' ' if len(re.findall(r'[0-9]', m.group())) >= 4 else m.group(), text)
+    return _BLOB.sub(lambda m: ' ' if _is_opaque_blob(m.group()) else m.group(), text)
 
 
-def words(text):
+def _raw_words(text):
     return [word.lower() for word in _WORD.findall(text)]
 
 
-def tokens(text):
+def _raw_tokens(text):
     text = _opaque(text)
+    for pattern, repl in _CASE:
+        text = pattern.sub(repl, text)
+    return _raw_words(text)
+
+
+def words(text):
+    return _raw_words(_fold(text))
+
+
+def tokens(text):
+    text = _opaque(_fold(text))
     for pattern, repl in _CASE:
         text = pattern.sub(repl, text)
     return words(text)
@@ -63,16 +97,25 @@ def load(path):
 
 
 def find_in_text(text, hashes):
+    prev_last = [None, None, None, None]
     for number, line in enumerate(text.splitlines(), 1):
         seen = set()
-        # Check both "WordJoined" as one word and its case-split parts.
-        for split in (words(line), tokens(line)):
+        # Check folded and legacy raw splits (whole-word and case-split),
+        # plus adjacent-line bigrams across a single newline.
+        splits = (words(line), tokens(line), _raw_words(line), _raw_tokens(line))
+        for idx, split in enumerate(splits):
+            if prev_last[idx] is not None and split:
+                bigram = prev_last[idx] + ' ' + split[0]
+                if bigram not in seen and digest(bigram) in hashes:
+                    seen.add(bigram)
+                    yield number, bigram
             for size in range(1, MAX_WORDS + 1):
                 for start in range(len(split) - size + 1):
                     term = ' '.join(split[start:start + size])
                     if term not in seen and digest(term) in hashes:
                         seen.add(term)
                         yield number, term
+            prev_last[idx] = split[-1] if split else None
 
 
 def files(root):

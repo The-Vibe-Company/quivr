@@ -46,7 +46,7 @@ FAST_SPACES = {'example.hash_embedder.small': 'served'}
 
 
 def hash_embedder_binary(source=ROOT):
-    return go_bin_cache.ensure('hash-embedder', pathlib.Path(source) / 'sdks' / 'go', './examples/hash-embedder', go=GO)
+    return go_bin_cache.ensure('hash-embedder', pathlib.Path(source) / 'sdks' / 'go', './examples/hash-embedder', go=GO, env=plugin_environment.inherited())
 
 
 def fast_manifest(stack):

@@ -757,6 +757,17 @@ export function createAdmin({
         watching();
       });
     },
+    // Verify the deployment key holds observability:read (reuses the cached rollup read).
+    async authorize() {
+      const response = await rollup("steps", "1h");
+      if (response.status === 200) return;
+      if (response.status === 404) {
+        const docs = await upstream("/v0/admin/documents?limit=1");
+        if (docs.status === 200) return;
+        throw unavailable(docs.status);
+      }
+      throw unavailable(response.status);
+    },
     // The engine's rollups for a section of the tab, read-only.
     async stats(kind, url) {
       if (!STATS_KINDS.has(kind)) throw failure(404, "Page introuvable.");

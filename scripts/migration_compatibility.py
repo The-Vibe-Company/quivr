@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -58,7 +59,11 @@ def main():
     # The previous checkout installs its own locks, so it must not inherit the candidate's pip constraints.
     env = dict(os.environ)
     if 'PIP_CONSTRAINT' in env:
-        env['PIP_CONSTRAINT'] = str(source / 'scripts' / 'ci-constraints.txt')
+        constraints = source / 'scripts' / 'ci-constraints.txt'
+        if constraints.is_file():
+            env['PIP_CONSTRAINT'] = str(constraints)
+        else:
+            env.pop('PIP_CONSTRAINT', None)
     try:
         run([sys.executable, str(pathlib.Path(__file__).resolve()), '--previous-source', str(source), '--candidate', str(candidate), '--output', str(output)], cwd=source, env=env)
         report['result'] = 'passed'
@@ -69,6 +74,53 @@ def main():
         # logs and the commit/report metadata are uploaded by CI.
         shutil.rmtree(source)
         print('Compatibility evidence:', output, flush=True)
+
+
+def _owns_stack_process(stack, pid):
+    """Verify that pid still belongs to this stack's quivr binary before signaling."""
+    owns = getattr(stack, 'owns_process', None)
+    if callable(owns):
+        return bool(owns(pid))
+    directory = getattr(stack, 'directory', None)
+    if directory is None:
+        return False
+    expected = str(pathlib.Path(directory) / 'quivr').encode()
+    try:
+        if sys.platform == 'darwin':
+            cmd = subprocess.check_output(['ps', '-o', 'comm=', '-p', str(pid)], text=True, stderr=subprocess.DEVNULL).strip().encode()
+        else:
+            cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
+        return cmd == expected
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _force_cleanup_stack(stack):
+    """Force-terminate verified host processes and tear down Compose volumes on failed shutdown."""
+    state = getattr(stack, 'state', None)
+    pids = list(state.get('pids', [])) if isinstance(state, dict) else []
+    signal_owned = getattr(stack, 'signal_owned', None)
+    for pid in pids:
+        try:
+            if callable(signal_owned):
+                signal_owned(pid, signal.SIGKILL)
+            elif _owns_stack_process(stack, pid):
+                os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError, PermissionError):
+            pass
+    launched = getattr(stack, 'launched', None)
+    if isinstance(launched, dict):
+        for proc in launched.values():
+            try:
+                if callable(getattr(proc, 'poll', None)) and proc.poll() is None and callable(getattr(proc, 'kill', None)):
+                    proc.kill()
+                proc.wait(timeout=1)
+            except Exception:
+                pass
+    try:
+        stack.compose('down', '--volumes')
+    except Exception:
+        pass
 
 
 def exercise(args):
@@ -111,10 +163,15 @@ def exercise(args):
         stack.tests(PATTERN)
         shutil.copyfile(stack.directory / 'acceptance.log', args.output / 'restarted-previous.log')
     finally:
-        stack.stop_processes()
-        stack.down(reset=True)
-        for log in stack.directory.glob('*-startup.log'):
-            shutil.copyfile(log, args.output / ('previous-'+log.name))
+        try:
+            for log in stack.directory.glob('*-startup.log'):
+                shutil.copyfile(log, args.output / ('previous-' + log.name))
+        finally:
+            try:
+                stack.down(reset=True)
+            except Exception:
+                _force_cleanup_stack(stack)
+                raise
 
 
 if __name__ == '__main__':

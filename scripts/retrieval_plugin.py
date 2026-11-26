@@ -36,10 +36,11 @@ def verify(stack):
     """Pin three retrieval providers, exercise routing, then restore the stack's pins."""
     directory = stack.directory / 'retrieval-plugin'
     directory.mkdir(exist_ok=True)
-    binary = go_bin_cache.ensure('fusion-retriever', stack.source / 'sdks' / 'go', './examples/fusion-retriever', go=GO)
-    fake_binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=GO, mode='test')
+    inherited = plugin_environment.inherited()
+    binary = go_bin_cache.ensure('fusion-retriever', stack.source / 'sdks' / 'go', './examples/fusion-retriever', go=GO, env=inherited)
+    fake_binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=GO, mode='test', env=inherited)
     port = ports.allocate()
-    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
+    env = {**inherited, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
     with (directory / 'plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
     running = [(plugin, port, directory / 'plugin.log')]

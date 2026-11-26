@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,7 @@ IGNORED_NAMES = frozenset({'.DS_Store'})
 IGNORED_SUFFIXES = ('.pyc', '.pyo', '.swp', '.swo')
 
 _SAFE_NAME = re.compile(r'^[A-Za-z0-9._-]+$')
-_GO_ENV_CACHE: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
+_GO_ENV_CACHE: dict[tuple[str, str, tuple[tuple[str, str], ...], str], str] = {}
 
 
 def _find_module_root(directory: pathlib.Path) -> pathlib.Path:
@@ -73,52 +74,167 @@ def _find_module_root(directory: pathlib.Path) -> pathlib.Path:
     return current
 
 
-def _local_replaces(module_root: pathlib.Path) -> list[pathlib.Path]:
-    """Return resolved local filesystem directories referenced by ``replace`` in go.mod."""
-    gomod = module_root / 'go.mod'
-    if not gomod.is_file():
+def _strip_go_line_comment(raw_line: str) -> str:
+    """Strip a trailing ``//`` comment while respecting quoted strings."""
+    in_quote = ''
+    escaped = False
+    for i, ch in enumerate(raw_line):
+        if escaped:
+            escaped = False
+            continue
+        if in_quote:
+            if in_quote == '"' and ch == '\\':
+                escaped = True
+            elif ch == in_quote:
+                in_quote = ''
+            continue
+        if ch in ('"', '`'):
+            in_quote = ch
+        elif ch == '/' and i + 1 < len(raw_line) and raw_line[i + 1] == '/':
+            return raw_line[:i]
+    return raw_line
+
+
+def _split_go_tokens(text: str) -> list[str]:
+    """Tokenize a go.mod/go.work clause supporting quoted paths with spaces."""
+    stripped = text.strip()
+    if stripped.startswith('`') and stripped.endswith('`') and stripped.count('`') == 2:
+        return [stripped[1:-1]]
+    try:
+        return shlex.split(stripped)
+    except ValueError:
         return []
-    targets: list[pathlib.Path] = []
+
+
+def _find_unquoted(line: str, target: str) -> int:
+    """Return index of first ``target`` outside Go double-quoted or backtick strings, or -1."""
+    in_quote = ''
+    escaped = False
+    tlen = len(target)
+    for i, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if in_quote:
+            if in_quote == '"' and ch == '\\':
+                escaped = True
+            elif ch == in_quote:
+                in_quote = ''
+            continue
+        if ch in ('"', '`'):
+            in_quote = ch
+        elif line[i:i + tlen] == target:
+            return i
+    return -1
+
+
+def _directive_specs(text: str, keyword: str) -> list[str]:
+    """Extract single-line, block, and inline-block specs for a go.mod/go.work directive."""
+    specs: list[str] = []
     in_block = False
-    for raw_line in gomod.read_text(errors='replace').splitlines():
-        line = raw_line.split('//', 1)[0].strip()
+    open_block = re.compile(rf'^{keyword}\s*\((.*)$')
+    single = re.compile(rf'^{keyword}\s+(.+)$')
+    for raw_line in text.splitlines():
+        line = _strip_go_line_comment(raw_line).strip()
         if not line:
             continue
         if in_block:
-            if line.startswith(')'):
+            close_idx = _find_unquoted(line, ')')
+            if close_idx != -1:
+                before = line[:close_idx].strip()
+                if before:
+                    specs.append(before)
                 in_block = False
-                continue
-            spec = line
-        elif line.startswith('replace ('):
-            in_block = True
+            else:
+                specs.append(line)
             continue
-        elif line == 'replace':
+        match = open_block.match(line)
+        if match:
+            rest = match.group(1).strip()
+            close_idx = _find_unquoted(rest, ')')
+            if close_idx != -1:
+                before = rest[:close_idx].strip()
+                if before:
+                    specs.append(before)
+            else:
+                in_block = True
+                if rest:
+                    specs.append(rest)
             continue
-        elif line.startswith('replace '):
-            spec = line[len('replace '):].strip()
-        else:
+        match = single.match(line)
+        if match:
+            specs.append(match.group(1).strip())
+    return specs
+
+
+def _local_replaces_in_file(mod_file: pathlib.Path, base_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Return resolved local filesystem directories referenced by ``replace`` in mod_file."""
+    if not mod_file.is_file():
+        return []
+    targets: list[pathlib.Path] = []
+    for spec in _directive_specs(mod_file.read_text(errors='replace'), 'replace'):
+        arrow_idx = _find_unquoted(spec, '=>')
+        if arrow_idx == -1:
             continue
-        if '=>' not in spec:
-            continue
-        rhs = spec.split('=>', 1)[1].strip()
-        tokens = rhs.split()
+        rhs = spec[arrow_idx + 2:].strip()
+        tokens = _split_go_tokens(rhs)
         # Module version replacements carry two tokens (path + version); local
         # filesystem replacements carry a single directory path token.
         if len(tokens) != 1:
             continue
-        raw_target = tokens[0].strip('"\'')
-        candidate = pathlib.Path(raw_target)
-        resolved = candidate.resolve() if candidate.is_absolute() else (module_root / candidate).resolve()
+        candidate = pathlib.Path(tokens[0])
+        resolved = candidate.resolve() if candidate.is_absolute() else (base_dir / candidate).resolve()
         if resolved.is_dir():
             targets.append(resolved)
     return targets
 
 
-def _collect_module_roots(start_module: pathlib.Path) -> list[pathlib.Path]:
-    """Return ``start_module`` and every transitive local ``replace`` module directory."""
+def _local_replaces(module_root: pathlib.Path) -> list[pathlib.Path]:
+    """Return resolved local filesystem directories referenced by ``replace`` in go.mod."""
+    return _local_replaces_in_file(module_root / 'go.mod', module_root)
+
+
+def _gowork_dirs(gowork_file: pathlib.Path) -> list[pathlib.Path]:
+    """Return resolved ``use`` and local ``replace`` directories from a go.work file."""
+    if not gowork_file.is_file():
+        return []
+    base_dir = gowork_file.parent.resolve()
+    text = gowork_file.read_text(errors='replace')
+    targets: list[pathlib.Path] = []
+    for spec in _directive_specs(text, 'use'):
+        tokens = _split_go_tokens(spec)
+        if len(tokens) != 1:
+            continue
+        candidate = pathlib.Path(tokens[0])
+        resolved = candidate.resolve() if candidate.is_absolute() else (base_dir / candidate).resolve()
+        if resolved.is_dir():
+            targets.append(resolved)
+    targets.extend(_local_replaces_in_file(gowork_file, base_dir))
+    return targets
+
+
+def _resolve_gowork(serialized_go_env: str, cwd: pathlib.Path) -> pathlib.Path | None:
+    try:
+        gowork = json.loads(serialized_go_env).get('GOWORK', '')
+    except ValueError:
+        return None
+    if not isinstance(gowork, str):
+        return None
+    gowork = gowork.strip()
+    if not gowork or gowork == 'off':
+        return None
+    candidate = pathlib.Path(gowork)
+    resolved = candidate.resolve() if candidate.is_absolute() else (cwd / candidate).resolve()
+    return resolved if resolved.is_file() else None
+
+
+def _collect_module_roots(start_module: pathlib.Path, gowork: pathlib.Path | None = None) -> list[pathlib.Path]:
+    """Return ``start_module``, any go.work ``use`` dirs, and every transitive local ``replace`` directory."""
     seen: set[pathlib.Path] = set()
     ordered: list[pathlib.Path] = []
     stack = [start_module.resolve()]
+    if gowork is not None:
+        stack.extend(reversed(_gowork_dirs(gowork)))
     while stack:
         current = stack.pop()
         if current in seen:
@@ -208,9 +324,25 @@ def _relevant_env_items(env: dict[str, str]) -> tuple[tuple[str, str], ...]:
     ))
 
 
+def _discover_gowork_hint(cwd: pathlib.Path, env: dict[str, str]) -> str:
+    """Resolve the active go.work file location so new/removed go.work files bust _GO_ENV_CACHE."""
+    raw = env.get('GOWORK', '').strip()
+    if raw == 'off':
+        return 'off'
+    if raw and raw != 'auto':
+        candidate = pathlib.Path(raw)
+        resolved = candidate.resolve() if candidate.is_absolute() else (cwd / candidate).resolve()
+        return str(resolved) if resolved.is_file() else raw
+    for parent in (cwd, *cwd.parents):
+        candidate = parent / 'go.work'
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return ''
+
+
 def _effective_go_env(go: str, cwd: pathlib.Path, env: dict[str, str]) -> str:
     """Return a canonical serialization of the effective ``go env`` build settings."""
-    key = (go, str(cwd), _relevant_env_items(env))
+    key = (go, str(cwd), _relevant_env_items(env), _discover_gowork_hint(cwd, env))
     cached = _GO_ENV_CACHE.get(key)
     if cached is not None:
         return cached
@@ -257,10 +389,22 @@ def fingerprint(
     for arg in extra_args:
         hasher.update(arg.encode())
         hasher.update(b'\0')
-    hasher.update(_effective_go_env(go_cmd, cwd_path, effective_env).encode())
+    serialized_go_env = _effective_go_env(go_cmd, cwd_path, effective_env)
+    hasher.update(serialized_go_env.encode())
     hasher.update(b'\0')
 
-    for root in _collect_module_roots(module_root):
+    gowork = _resolve_gowork(serialized_go_env, cwd_path)
+    if gowork is not None:
+        for work_file in (gowork, gowork.with_name(gowork.name + '.sum')):
+            if work_file.is_file():
+                try:
+                    hasher.update(f'GOWORK:{work_file}\0'.encode())
+                    hasher.update(work_file.read_bytes())
+                    hasher.update(b'\0')
+                except OSError:
+                    continue
+
+    for root in _collect_module_roots(module_root, gowork=gowork):
         hasher.update(f'MODULE:{root}\0'.encode())
         for path in _walk_module_files(root, include_tests=include_tests):
             try:

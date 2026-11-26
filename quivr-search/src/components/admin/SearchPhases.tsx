@@ -30,6 +30,9 @@ function useSearchPhases(onUnauthorized: () => void) {
     const controller = new AbortController();
     // A poll that answers after a newer one started must not overwrite it.
     let latest = 0;
+    // A key without observability:read will not gain it by retrying.
+    let refused = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
     const read = () => {
       const mine = ++latest;
       return request<SearchPhases>("/demo/admin/search-phases", undefined, controller.signal)
@@ -41,13 +44,19 @@ function useSearchPhases(onUnauthorized: () => void) {
         .catch((e) => {
           if (controller.signal.aborted || mine !== latest) return;
           if (e instanceof APIError && e.status === 401) return onUnauthorized();
+          if (e instanceof APIError && e.status === 403) {
+            refused = true;
+            clearInterval(timer);
+            setStatus("unavailable");
+            return;
+          }
           setStatus("error");
         });
     };
     setStatus("loading");
     void read();
-    const timer = setInterval(() => {
-      if (!document.hidden) void read();
+    timer = setInterval(() => {
+      if (!refused && !document.hidden) void read();
     }, POLL_MS);
     return () => {
       controller.abort();
