@@ -124,11 +124,22 @@ class SingleMachineTest(unittest.TestCase):
             release.write_text(json.dumps(manifest))
             setup.initialize(directory, release, 'custom-stack', 'gemma', 'small', {})
             calls = []
+            listed = ['custom-stack-temporal-data-backup\n',
+                      'custom-stack-temporal-data-backup\ncustom-stack-temporal-data\n']
             def fake_docker(args):
                 calls.append(args)
                 if args[:2] == ['volume', 'ls']:
-                    return 'custom-stack-temporal-data\n'
+                    self.assertIn('name=^custom-stack-temporal-data$', args)
+                    return listed.pop(0)
                 return ''
+            # A near-miss volume name alone must not trigger a retirement notice.
+            output = io.StringIO()
+            with patch.object(setup, 'docker', side_effect=fake_docker), \
+                 patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
+                 patch('sys.stdout', output):
+                self.assertEqual(setup.main(), 0)
+            self.assertNotIn('docker volume rm', output.getvalue())
+            # When both a near-miss and the exact volume appear, only the exact volume is reported.
             output = io.StringIO()
             with patch.object(setup, 'docker', side_effect=fake_docker), \
                  patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
@@ -136,5 +147,6 @@ class SingleMachineTest(unittest.TestCase):
                 code = setup.main()
             self.assertEqual(code, 0)
             self.assertIn('docker volume rm custom-stack-temporal-data', output.getvalue())
+            self.assertNotIn('custom-stack-temporal-data-backup', output.getvalue())
             self.assertNotIn('quivr-temporal-data', output.getvalue())
             self.assertFalse(any(args[:2] == ['volume', 'rm'] for args in calls))
