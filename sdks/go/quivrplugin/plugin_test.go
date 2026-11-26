@@ -404,6 +404,40 @@ func TestEveryDeclaredKindNeedsAnImplementation(t *testing.T) {
 	}
 }
 
+func TestServeReadyNotifiesOnlyAfterBind(t *testing.T) {
+	p, err := New("testdata/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.MustConnector("feed", fake{}).MustConnector("open", fake{}).MustConnector("optional", fake{})
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	called := false
+	if err := p.serveAddr(t.Context(), occupied.Addr().String(), func(string) { called = true }); err == nil {
+		t.Fatal("expected bind failure on occupied port")
+	}
+	if called {
+		t.Fatal("onReady must not run when bind fails")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var bound string
+	if err := p.serveAddr(ctx, "127.0.0.1:0", func(addr string) {
+		bound = addr
+		cancel()
+	}); err != nil {
+		t.Fatalf("serveAddr failed: %v", err)
+	}
+	if !strings.HasPrefix(bound, "127.0.0.1:") || bound == "127.0.0.1:0" {
+		t.Fatalf("bound address = %q, want resolved loopback port", bound)
+	}
+}
+
 func TestWithHealthCheck(t *testing.T) {
 	newPlugin := func(t *testing.T, fn func(context.Context) error) (http.Handler, *bytes.Buffer, string) {
 		t.Helper()

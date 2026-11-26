@@ -31,7 +31,8 @@ plugin protocol, pinned at startup by `scripts/fixture_plugin.py`.
 
 | Target | Required behavior |
 | --- | --- |
-| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed. Runs on Linux x86_64 and macOS arm64 (see below); fails at once elsewhere |
+| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed. Runs on Linux x86_64 and macOS arm64 (see below); fails at once elsewhere. Compiled Go engine and plugin binaries are cached in `.scratch/bin` (`scripts/go_bin_cache.py`) and rebuilt only when sources change |
+| `make dev-fast` | Fast local dev profile (`QUIVR_DEV_PROFILE=fast make dev`): skips TEI, E5 model/tokenizer downloads and non-essential sidecars, running core dependencies with cached `hash-embedder` and `core-retrieve` for core/search/API work. Individual sidecars remain opt-in (`QUIVR_RSS=on`, `QUIVR_NORMALIZER=pdf-text`, `QUIVR_ALERTS=on`); `make verify` ignores `QUIVR_DEV_PROFILE` |
 | `make check` | Run everything that needs no Docker stack: docs, denylist, migrations, contracts, image context, `go vet`, `go test`, the scripts tests and the plugin SDK. Works on macOS; the command to run before pushing |
 | `make verify` | Run `make check`, then the acceptance scenarios in an isolated Compose project; collect a report and return nonzero on failure |
 | `make down` | Stop the development project's processes and containers and preserve its data volumes |

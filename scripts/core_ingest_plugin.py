@@ -41,7 +41,7 @@ def parity(stack, vectors=True):
     if not vectors:
         configuration['tei_url'] = ''
     config.write_text(json.dumps(configuration))
-    stack.go_test(['-count=1', '-run', '^TestReproducesTheEngineGoldens$', '-v', '.'], {**os.environ, 'QUIVR_CORE_INGEST_CONFIG': str(config)}, 'core-ingest-parity', cwd=PLUGIN)
+    stack.go_test(['-count=1', '-run', '^TestReproducesTheEngineGoldens$', '-v', './...'], {**os.environ, 'QUIVR_CORE_INGEST_CONFIG': str(config)}, 'core-ingest-parity', cwd=PLUGIN)
 
 
 def verify(stack):

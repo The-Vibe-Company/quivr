@@ -130,16 +130,36 @@ def materialize(root, copies, context, dockerfile):
     return None
 
 
+def stage_names(text):
+    """Return every named stage label (``FROM image AS name``) in order."""
+    names = []
+    for words in instructions(text):
+        if words[0].upper() == 'FROM' and len(words) >= 4 and words[-2].upper() == 'AS':
+            names.append(words[-1])
+    return names
+
+
 def check_python_plugins(root, dockerfile):
-    """Install the Python sidecars from exactly the plugins stage's context and pip inputs."""
+    """Install the Python sidecars from each plugins* stage's context and pip inputs."""
     text = dockerfile.read_text()
-    copies = stage_copies(text, 'plugins')
+    stages = [name for name in stage_names(text) if name == 'plugins' or name.startswith('plugins-')]
+    for stage in stages:
+        failure = check_python_plugin_stage(root, dockerfile, stage)
+        if failure:
+            return failure
+    return None
+
+
+def check_python_plugin_stage(root, dockerfile, stage_name):
+    """Install the Python sidecars from one plugins stage's context and pip inputs."""
+    text = dockerfile.read_text()
+    copies = stage_copies(text, stage_name)
     if copies is None:
         return None
     selected, install = False, None
     for words in instructions(text):
         if words[0].upper() == 'FROM':
-            selected = len(words) >= 4 and words[-2].upper() == 'AS' and words[-1] == 'plugins'
+            selected = len(words) >= 4 and words[-2].upper() == 'AS' and words[-1] == stage_name
         elif selected and words[0].upper() == 'RUN':
             for i, word in enumerate(words[:-1]):
                 if pathlib.PurePosixPath(word).name == 'pip' and words[i + 1] == 'install':
@@ -147,7 +167,7 @@ def check_python_plugins(root, dockerfile):
                     if '&&' in install:
                         install = install[:install.index('&&')]
     if install is None:
-        return f'{dockerfile.name}: the plugins stage has no pip install command'
+        return f'{dockerfile.name}: the {stage_name} stage has no pip install command'
     with tempfile.TemporaryDirectory() as tmp:
         context = pathlib.Path(tmp)
         failure = materialize(root, copies, context, dockerfile)
@@ -175,8 +195,8 @@ def check_python_plugins(root, dockerfile):
             command = [sys.executable, str(ROOT / 'scripts/ci_fetch.py'), '--', *command]
         result = subprocess.run(command, cwd=context, capture_output=True, text=True)
         if result.returncode:
-            return (f'{dockerfile.name}: the plugins stage cannot install its Python packages.\n'
-                    f'{(result.stderr or result.stdout).strip()}\nFix: COPY each package and constraint file used by pip into the plugins stage.')
+            return (f'{dockerfile.name}: the {stage_name} stage cannot install its Python packages.\n'
+                    f'{(result.stderr or result.stdout).strip()}\nFix: COPY each package and constraint file used by pip into the {stage_name} stage.')
         result = subprocess.run([python, '-m', 'pip', 'check'], cwd=context, capture_output=True, text=True)
         if result.returncode:
             return f'{dockerfile.name}: incompatible Python plugin dependencies:\n{result.stdout.strip()}'
@@ -188,8 +208,12 @@ def go_plugins(root):
     return sorted(p.parent.relative_to(root).as_posix() for p in root.glob('plugins/*/go.mod'))
 
 
+MULTICALL_MODULE = 'deploy/plugins'
+MULTICALL_COMMANDS = ('./cmd/quivr-plugins', './cmd/quivr-plugins-api', './cmd/quivr-plugins-worker')
+
+
 def check_connectors(root, dockerfile, go):
-    """Build every Go connector plugin from only the connectors stage's copies; return the failure text or None."""
+    """Build every Go connector plugin and the multi-call targets from only the connectors stage's copies."""
     plugins = go_plugins(root)
     if not plugins:
         return None
@@ -219,6 +243,24 @@ def check_connectors(root, dockerfile, go):
                 return (f'{dockerfile.name}: the {CONNECTOR_STAGE} stage cannot build {plugin}.\n'
                         f'{result.stderr.strip()}\n'
                         f'Fix: COPY every directory the plugin module needs (its own tree and sdks/go) into the {CONNECTOR_STAGE} stage.')
+        if (root / MULTICALL_MODULE / 'go.mod').exists():
+            if not (context / MULTICALL_MODULE / 'go.mod').exists():
+                return (f'{dockerfile.name}: the {CONNECTOR_STAGE} stage does not copy {MULTICALL_MODULE}.\n'
+                        f'Fix: COPY {MULTICALL_MODULE} into the {CONNECTOR_STAGE} stage.')
+            environment = {**os.environ, 'CGO_ENABLED': '0'}
+            if os.environ.get('GITHUB_ACTIONS') == 'true':
+                fetched = subprocess.run([sys.executable, str(ROOT/'scripts/ci_fetch.py'), '--', go, 'mod', 'download'],
+                                         cwd=root / MULTICALL_MODULE, capture_output=True, text=True)
+                if fetched.returncode:
+                    return f'{dockerfile.name}: cannot fetch pinned {MULTICALL_MODULE} dependencies:\n{fetched.stdout}{fetched.stderr}'
+                environment['GOPROXY'] = 'off'
+            for cmd in MULTICALL_COMMANDS:
+                result = subprocess.run([go, 'build', '-o', os.devnull, cmd], cwd=context / MULTICALL_MODULE,
+                                        capture_output=True, text=True, env=environment)
+                if result.returncode != 0:
+                    return (f'{dockerfile.name}: the {CONNECTOR_STAGE} stage cannot build {MULTICALL_MODULE}/{cmd}.\n'
+                            f'{result.stderr.strip()}\n'
+                            f'Fix: COPY sdks/go, plugins and {MULTICALL_MODULE} into the {CONNECTOR_STAGE} stage.')
     return None
 
 

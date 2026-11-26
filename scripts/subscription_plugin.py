@@ -38,9 +38,9 @@ ALERTS_CONFIGURATION = {}
 FAKE_KEY = 'test-key'
 
 
-def from_environment():
-    """Whether `make dev` pins the keyword alerts plugin: QUIVR_ALERTS, default on."""
-    value = (os.environ.get('QUIVR_ALERTS') or 'on').lower()
+def from_environment(default='on'):
+    """Whether `make dev` pins the keyword alerts plugin: QUIVR_ALERTS, default on (off in fast dev)."""
+    value = (os.environ.get('QUIVR_ALERTS') or default).lower()
     if value not in ('on', 'off'):
         raise ValueError(f'QUIVR_ALERTS is on or off, not {value!r}')
     return value == 'on'
@@ -54,9 +54,10 @@ def described_mode(verification):
     return 'typesafe' if os.environ.get('TYPESAFE_API_KEY', '').strip() else 'off'
 
 
-def select(stack, enabled, described='off'):
+def select(stack, enabled, described='off', template=True):
     stack.state['alerts_plugin'] = bool(enabled)
     stack.state['described'] = described
+    stack.state['subscription_template'] = bool(template)
     stack.save()
 
 
@@ -78,7 +79,7 @@ def manifest(stack):
 def running(stack):
     """The plugins this stack runs: (name, directory, module, port state key)."""
     items = []
-    if manifest(stack).exists():
+    if stack.state.get('subscription_template', True) and manifest(stack).exists():
         items.append((NAME, directory(stack), MODULE, 'subscription_plugin_port'))
     if stack.state.get('alerts_plugin', True):
         items.append(('alerts', ALERTS, 'alerts', 'alerts_plugin_port'))
@@ -117,7 +118,7 @@ def prepare(stack):
     stack.state.setdefault('subscription_plugin_port', normalizer_plugin.stack_port())
     stack.state.setdefault('alerts_plugin_port', normalizer_plugin.stack_port())
     stack.save()
-    if not manifest(stack).exists():
+    if stack.state.get('subscription_template', True) and not manifest(stack).exists():
         with (stack.directory / 'subscription-plugin-init.log').open('w') as log:
             subprocess.run([str(stack.directory / 'quivr'), 'plugin', 'init', NAME, '--kind', 'subscription', '--dir', str(directory(stack))],
                            cwd=normalizer_plugin.ROOT, check=True, stdout=log, stderr=log)

@@ -1,8 +1,11 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf demo-journeys measure measure-backfill measure-upgrade measure-archive perf-bench eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
+.PHONY: dev dev-fast env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf demo-journeys measure measure-backfill measure-upgrade measure-archive perf-bench eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
+# Fast local loop: skips TEI/model download and optional sidecars, using cached hash-embedder + core-retrieve.
+dev-fast:
+	GO=$(GO) QUIVR_DEV_PROFILE=fast python3 scripts/local.py dev
 # Prints the export lines of the make dev stack's API address, key and webhook destination: eval "$$(make -s env)".
 env:
 	@python3 scripts/local.py env
