@@ -11,6 +11,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -18,12 +19,16 @@ from deploy import infrastructure as infra
 
 CONFIG = Path('/etc/quivr-vector-host')
 DATA = Path('/var/lib/quivr-vector-host')
+SYSTEMD = Path('/etc/systemd/system')
 CADDY = 'caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb'
 AUTH = infra.VECTOR_HOST_AUTH
+COMPOSE = ['docker', 'compose', '-f', str(CONFIG / 'compose.json')]
+HOST_UNIT = 'quivr-vector-host.service'
+FIREWALL_UNIT = 'quivr-vector-firewall.service'
 
 
-def run(args, stdin=None):
-    result = subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=600)
+def run(args, timeout=600):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
         # Never echo Docker environment, command input or external diagnostics.
         raise RuntimeError('Host command failed; inspect the host privately')
@@ -203,41 +208,62 @@ def apply(settings, args):
         raise ValueError('data filesystem is below the declared storage budget')
     changed = False
     for name, content in assets(settings, uuid).items():
-        path = Path('/etc/systemd/system') / name if name.endswith('.service') else CONFIG / name
+        path = SYSTEMD / name if name.endswith('.service') else CONFIG / name
         changed = write(path, content, 0o644 if name.endswith('.service') else 0o600) or changed
     if secret is not None:
         changed = write(CONFIG / 'weaviate.env', 'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + secret + '\n') or changed
     # Validate before loading firewall rules or restarting containers.
     run(['nft', '--check', '-f', str(CONFIG / 'firewall.nft')])
-    run(['docker', 'compose', '-f', str(CONFIG / 'compose.json'), 'config', '--quiet']) if secret else None
+    if secret is not None:
+        run([*COMPOSE, 'config', '--quiet'])
     if changed:
         run(['systemctl', 'daemon-reload'])
-        run(['systemctl', 'enable', 'quivr-vector-firewall.service', 'quivr-vector-host.service'])
-    if args.command == 'apply':
-        if changed:
-            run(['systemctl', 'restart', 'quivr-vector-firewall.service'])
-            run(['systemctl', 'restart', 'quivr-vector-host.service'])
-        else:
-            run(['systemctl', 'start', 'quivr-vector-firewall.service', 'quivr-vector-host.service'])
-    return {'status': 'changed' if changed else 'unchanged', 'mounted_uuid': uuid}
+        run(['systemctl', 'enable', FIREWALL_UNIT, HOST_UNIT])
+    result = {'status': 'changed' if changed else 'unchanged', 'mounted_uuid': uuid}
+    if args.command == 'prepare':
+        return result
+
+    if changed:
+        run(['systemctl', 'restart', FIREWALL_UNIT])
+    else:
+        run(['systemctl', 'start', FIREWALL_UNIT])
+    # A previous apply can have written the desired files before restarting,
+    # or someone can have recreated the live container with different settings.
+    if changed or observe(settings, probe=False)['status'] == 'drift':
+        run(['systemctl', 'restart', HOST_UNIT])
+        result['status'] = 'changed'
+    else:
+        run(['systemctl', 'start', HOST_UNIT])
+    result['check'] = wait_for_host(settings, args.startup_timeout)
+    return result
 
 
-def observe(settings):
+def wait_for_host(settings, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        result = observe(settings)
+        remaining = deadline - time.monotonic()
+        if result['status'] != 'unknown' or remaining <= 0:
+            return result
+        time.sleep(min(2, remaining))
+
+
+def observe(settings, probe=True):
     rows = []
     spec = settings['weaviate']
     actual = {}
-    mounted = None
+    container_id = None
     try:
-        ids = run(['docker', 'compose', '-f', str(CONFIG / 'compose.json'), 'ps', '-q', 'weaviate']).split()
+        ids = run([*COMPOSE, 'ps', '-q', 'weaviate'], timeout=5).split()
         if len(ids) == 1:
-            container = json.loads(run(['docker', 'inspect', ids[0]]))[0]
+            container = json.loads(run(['docker', 'inspect', ids[0]], timeout=5))[0]
             if container['State']['Running']:
                 env = dict(item.split('=', 1) for item in container['Config']['Env'] if '=' in item)
                 actual = {'image': container['Config']['Image'], 'environment': env,
                           'memory': str(container['HostConfig']['Memory']),
                           'cpus': str(container['HostConfig']['NanoCpus'] / 1e9)}
-        mounted = run(['findmnt', '-n', '-o', 'UUID', '--mountpoint', str(DATA)]).strip()
-    except (RuntimeError, ValueError, OSError, KeyError, IndexError, subprocess.TimeoutExpired):
+                container_id = ids[0]
+    except (RuntimeError, ValueError, OSError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired):
         pass
     image = actual.get('image')
     if image and not re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}', image):
@@ -245,23 +271,49 @@ def observe(settings):
     infra.observation(rows, 'weaviate', 'vector_host', 'image', spec['image'], image)
     for name, value in spec['environment'].items():
         observed = actual.get('environment', {}).get(name)
-        if name in AUTH:
-            observed = observed if observed in (AUTH[name], 'true', 'false') else None
+        if observed is None and container_id:
+            observed = '<missing>'
+        elif name in AUTH and observed is not None:
+            observed = observed if observed in (AUTH[name], 'true', 'false') else '<invalid>'
         else:
             observed = infra.safe_environment(name, observed)
         infra.observation(rows, 'weaviate', 'vector_host', name, value, observed)
     for name, value in spec['deploy']['resources']['limits'].items():
         infra.observation(rows, 'weaviate', 'vector_host', name, value, actual.get(name))
     # Mount health cannot be inferred from the root filesystem's capacity.
-    expected_uuid = None
+    expected_uuid = mounted = capacity = None
     try:
         guard = (CONFIG / 'run.sh').read_text()
         expected_uuid = re.search(r'= ([0-9a-fA-F-]{36})\n', guard).group(1)
     except (OSError, AttributeError):
         pass
+    try:
+        mounted = run(['findmnt', '-n', '-o', 'UUID', '--mountpoint', str(DATA)], timeout=5).strip()
+        if re.fullmatch(r'[0-9a-fA-F-]{36}', mounted):
+            filesystem = os.statvfs(DATA)
+            capacity = str(filesystem.f_blocks * filesystem.f_frsize)
+        else:
+            mounted = None
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        pass
     infra.observation(rows, 'weaviate', 'vector_host', 'mounted_uuid', expected_uuid, mounted)
-    capacity = str(os.statvfs(DATA).f_blocks * os.statvfs(DATA).f_frsize) if mounted else None
     infra.storage_observation(rows, 'weaviate', spec, {'limits': {'storage': capacity}})
+    if probe:
+        ready = version = None
+        expected_version = infra.weaviate_version(spec['image'])
+        if container_id:
+            wget = ['docker', 'exec', container_id, 'wget', '-q', '-O', '-']
+            try:
+                run([*wget, 'http://127.0.0.1:8080/v1/.well-known/ready'], timeout=5)
+                ready = 'true'
+                if expected_version:
+                    meta = json.loads(run([*wget, 'http://127.0.0.1:8080/v1/meta'], timeout=5))
+                    version = infra.weaviate_version_value(meta['version'])
+            except (RuntimeError, ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired):
+                pass
+        infra.observation(rows, 'weaviate', 'vector_host', 'ready', 'true', ready)
+        if expected_version:
+            infra.observation(rows, 'weaviate', 'vector_host', 'version', expected_version, version)
     return infra.report(rows)
 
 
@@ -277,8 +329,12 @@ def main():
     parser.add_argument('--initialize-empty-disk', action='store_true')
     parser.add_argument('--api-key-file', type=Path)
     parser.add_argument('--key-stdin', action='store_true')
+    parser.add_argument('--startup-timeout', type=int, default=600, metavar='SECONDS',
+                        help='maximum wait for startup after apply (default: 600)')
     args = parser.parse_args()
     try:
+        if args.startup_timeout < 0:
+            raise ValueError('startup timeout must be nonnegative')
         settings = json.loads((CONFIG / 'settings.json').read_text()) if not args.hostname else options(args)
         if args.command == 'render':
             if not args.output:
@@ -291,7 +347,8 @@ def main():
         else:
             result = observe(settings)
         print(json.dumps(result, indent=2))
-        return {'match': 0, 'drift': 1, 'unknown': 2}.get(result['status'], 0)
+        status = result.get('check', result)['status']
+        return {'match': 0, 'drift': 1, 'unknown': 2}.get(status, 0)
     except (ValueError, RuntimeError, OSError, KeyError, TypeError, subprocess.TimeoutExpired):
         print('Vector host request failed; verify arguments, private credentials, disk and host capacity.', file=sys.stderr)
         return 2

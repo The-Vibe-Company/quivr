@@ -219,11 +219,27 @@ def report(rows):
     return {'status': status, 'observations': rows}
 
 
+def weaviate_version_value(value):
+    if isinstance(value, str) and re.fullmatch(r'v?[0-9]{1,6}(?:\.[0-9]{1,6}){2}', value):
+        return value.removeprefix('v')
+    return None
+
+
+def weaviate_version(image):
+    # An override can pin an image by digest without declaring a version tag.
+    reference = image.split('@', 1)[0].rsplit('/', 1)[-1]
+    return weaviate_version_value(reference.partition(':')[2])
+
+
 def external_vector_report(spec, target=''):
     """External indexes have their own observer; a local replica proves nothing."""
     expected = dict(spec['environment'])
     expected.update(VECTOR_HOST_AUTH)
     expected['image'] = spec['image']
+    expected['ready'] = 'true'
+    version = weaviate_version(spec['image'])
+    if version:
+        expected['version'] = version
     expected.update(spec['deploy']['resources']['limits'])
     budget = spec.get('x-quivr-storage-budget-bytes')
     if budget:
@@ -250,11 +266,19 @@ def external_vector_report(spec, target=''):
     for name, value in expected.items():
         actual = observed.get(name)
         if name == 'image':
-            actual = actual if isinstance(actual, str) and re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}', actual) else None
+            if actual != '<unverified>' and not (
+                    isinstance(actual, str) and re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}', actual)):
+                actual = None
+        elif name == 'ready':
+            actual = actual if actual == 'true' else None
+        elif name == 'version':
+            actual = weaviate_version_value(actual)
         elif name in ('memory', 'cpus', 'minimum_bytes'):
             actual = str(actual) if isinstance(actual, (str, int, float)) and re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', str(actual)) else None
+        elif actual == '<missing>':
+            pass
         elif name in VECTOR_HOST_AUTH:
-            actual = actual if actual in ('true', 'false', 'quivr-engine') else None
+            actual = actual if actual in ('true', 'false', 'quivr-engine', '<invalid>') else None
         else:
             actual = safe_environment(name, actual)
         observation(rows, 'weaviate', 'vector_host', name, value, actual)

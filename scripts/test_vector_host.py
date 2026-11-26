@@ -7,7 +7,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -83,6 +85,97 @@ class VectorHost(unittest.TestCase):
                 self.assertEqual(called.exists(), observed == uuid)
                 self.assertEqual(result.returncode == 0, observed == uuid)
 
+    def test_apply_repairs_live_drift_and_requires_verified_startup(self):
+        module_spec = importlib.util.spec_from_file_location('vector_host', HOST)
+        host = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(host)
+        uuid = '12345678-1234-1234-1234-123456789abc'
+        flags = ['--hostname', 'index.example.invalid', '--operator-cidr', '192.0.2.0/24',
+                 '--data-device', '/dev/disk/by-id/example.vector-host', '--profile', 'small',
+                 '--startup-timeout', '0']
+        key = 'fixture-key-never-reported'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, data = root / 'config', root / 'data'
+            data.mkdir()
+            overrides = root / 'override.json'
+            overrides.write_text(json.dumps({'services': {'weaviate': {
+                'image': 'registry.example/weaviate:1.39.14@sha256:' + 'b' * 64}}}))
+            flags.extend(['--overrides', str(overrides)])
+            # Docker still runs the previous image despite the desired files
+            # having been installed by an interrupted apply.
+            live = {'image': 'registry.example/weaviate:1.39.10@sha256:' + 'a' * 64,
+                    'version': '1.39.10', 'ready': True, 'environment': {'ASYNC_INDEXING': 'true'}}
+            restarts = []
+
+            def run(command, **kwargs):
+                if command[-3:] == ['ps', '-q', 'weaviate']:
+                    return 'index\n'
+                if command == ['docker', 'inspect', 'index']:
+                    return json.dumps([{'State': {'Running': True},
+                        'Config': {'Image': live['image'], 'Env': [
+                            *(f'{name}={value}' for name, value in live['environment'].items()),
+                            'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + key]},
+                        'HostConfig': {'Memory': 2147483648, 'NanoCpus': 2000000000}}])
+                if command[:2] == ['docker', 'exec']:
+                    if command[-1].endswith('/ready'):
+                        if not live['ready']:
+                            raise RuntimeError(key)
+                        return ''
+                    if command[-1].endswith('/meta'):
+                        return json.dumps({'version': live['version']})
+                if command[0] == 'findmnt':
+                    return uuid
+                if command == ['systemctl', 'restart', host.HOST_UNIT]:
+                    restarts.append(command)
+                    index = json.loads((config / 'compose.json').read_text())['services']['weaviate']
+                    live.update(image=index['image'], environment=dict(index['environment']), version='1.39.14')
+                elif command[0] not in ('systemctl', 'nft', 'docker'):
+                    self.fail(f'unexpected host command {command}')
+                return ''
+
+            def cli(command):
+                with patch.object(sys, 'argv', [str(HOST), command, *flags]), redirect_stdout(io.StringIO()) as output:
+                    code = host.main()
+                self.assertNotIn(key, output.getvalue())
+                return code, json.loads(output.getvalue())
+
+            read_text = Path.read_text
+            def read(path, *args, **kwargs):
+                if path == Path('/proc/meminfo'):
+                    return 'MemTotal: 8388608 kB\n'
+                return read_text(path, *args, **kwargs)
+
+            with patch.object(host, 'CONFIG', config), patch.object(host, 'DATA', data), \
+                    patch.object(host, 'SYSTEMD', root / 'units'), \
+                    patch.object(host, 'COMPOSE', ['docker', 'compose', '-f', str(config / 'compose.json')]), \
+                    patch.object(host, 'mount_disk', return_value=uuid), patch.object(host, 'key', return_value=key), \
+                    patch.object(host.os, 'geteuid', return_value=0), \
+                    patch.object(host, 'run', side_effect=run), patch.object(Path, 'read_text', read):
+                self.assertEqual(cli('prepare')[0], 0)
+                host.write(config / 'weaviate.env', 'AUTHENTICATION_APIKEY_ALLOWED_KEYS=' + key + '\n')
+                declared = json.loads((config / 'compose.json').read_text())['services']['weaviate']['environment']
+                live['environment'] = {**declared, **live['environment']}
+                code, check = cli('check')
+                self.assertEqual(code, 1)
+                drifts = {row['setting'] for row in check['observations'] if row['status'] == 'drift'}
+                self.assertEqual(drifts, {'image', 'version', 'ASYNC_INDEXING'})
+                code, result = cli('apply')
+                self.assertEqual((code, result['status'], result['check']['status']), (0, 'changed', 'match'))
+                self.assertEqual(cli('apply')[1]['status'], 'unchanged')
+                self.assertEqual(len(restarts), 1)
+                del live['environment']['GOMEMLIMIT']
+                self.assertEqual(cli('apply')[0], 0)
+                self.assertEqual(len(restarts), 2)
+
+                # Matching the image reference alone cannot attest the server
+                # version or availability.
+                live['version'] = '1.39.10'
+                self.assertEqual(cli('apply')[0], 1)
+                live['ready'] = False
+                code, result = cli('apply')
+                self.assertEqual((code, result['check']['status']), (2, 'unknown'))
+
     def test_azure_cli_provisions_zonal_disk_and_has_no_repeat_writes(self):
         # Cloud boundary owner: provider replies describe fixed resources. The
         # real provisioner decides creation and no-op; no real az/SSH runs.
@@ -93,11 +186,16 @@ class VectorHost(unittest.TestCase):
         init = None
         drift = None
         failure = None
+        uploads = []
         sentinel = 'private-provider-payload-never-print'
         def transport(command, **kwargs):
             nonlocal init
             calls.append(command)
             if command[0] == 'ssh':
+                if isinstance(kwargs.get('input'), bytes):
+                    with tarfile.open(fileobj=io.BytesIO(kwargs['input'])) as archive:
+                        uploads.append({entry.name: archive.extractfile(entry).read() for entry in archive})
+                    return subprocess.CompletedProcess(command, 0, b'.update.Abc12345\n', b'')
                 phase = 'bootstrap' if kwargs.get('input') is None else 'apply'
                 if failure == phase + '-timeout':
                     raise subprocess.TimeoutExpired([*command, sentinel], 1800, output=sentinel, stderr=sentinel)
@@ -263,6 +361,33 @@ class VectorHost(unittest.TestCase):
                     self.assertIn('step=validate local inputs', error.getvalue())
                     self.assertIn('resource=local inputs', error.getvalue())
                     self.assertIn('exception=ValueError', error.getvalue())
+                # All resources and the VM bootstrap marker belong to an earlier
+                # revision. Only explicit reconciliation may reuse that intent.
+                for resource in resources.values():
+                    resource['tags']['quivr-vector-intent'] = 'a' * 64
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(azure.main(), 2)
+                calls.clear()
+                with patch.object(sys, 'argv', [*argv, '--reconcile']):
+                    self.assertEqual(azure.main(), 0)
+                    self.assertFalse(any('create' in command or 'update' in command or 'attach' in command for command in calls))
+                    verify, upload, apply = [command[-1] for command in calls if command[0] == 'ssh']
+                    self.assertIn('a' * 64, verify)
+                    self.assertIn('tar -xzm -f -', upload)
+                    self.assertIn('.update.Abc12345/deploy/vector-host/host.py apply', apply)
+                    self.assertNotIn('--initialize-empty-disk', apply)
+                    self.assertEqual(len(uploads), 1)
+                    self.assertNotIn('bootstrap-intent', uploads[0])
+                    self.assertNotIn(b'fixture-api-key-never-in-cloud-init', b''.join(uploads[0].values()))
+                    self.assertEqual(uploads[0]['deploy/infrastructure.json'],
+                                     (ROOT / 'deploy/infrastructure.json').read_bytes())
+                    limits = json.loads(uploads[0]['override.json'])['services']['weaviate']['deploy']['resources']['limits']
+                    self.assertEqual(limits['cpus'], '8.0')
+                    resources['example-index-disk']['tags']['quivr-vector-intent'] = 'b' * 64
+                    calls.clear()
+                    with redirect_stderr(io.StringIO()):
+                        self.assertEqual(azure.main(), 2)
+                    self.assertFalse(any(command[0] == 'ssh' or 'create' in command for command in calls))
             self.assertFalse(any('create' in command or 'update' in command or 'attach' in command for command in repeat_calls))
             disk_command = next(command for command in first_calls if command[1:3] == ['disk', 'create'])
             self.assertIn('PremiumV2_LRS', disk_command)
