@@ -116,14 +116,60 @@ class CoreEntrypointTest(unittest.TestCase):
             core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
                                               'QUIVR_QUERY_ENCODER_BACKEND': 'invalid'}, 'api')
         with tempfile.TemporaryDirectory() as tmp:
-            model_dir = pathlib.Path(tmp)
-            self.assertFalse(core_entrypoint._encoder_model_present(model_dir))
+            root = pathlib.Path(tmp)
+            python_bin = root / 'python'
+            python_bin.write_text('#!/bin/sh\n')
+            model_dir = root / 'model'
+            model_dir.mkdir()
+            lock_path = root / 'model-lock.json'
+            self.assertIsNone(core_entrypoint._encoder_image_backend(model_dir, lock_path))
+
+            # ONNX baked image: lock + ONNX file accepts auto/onnx and rejects pytorch.
             (model_dir / 'onnx').mkdir()
             (model_dir / 'onnx' / 'model_quantized.onnx').write_bytes(b'onnx')
-            self.assertTrue(core_entrypoint._encoder_model_present(model_dir))
+            lock_path.write_text(json.dumps({
+                'backend': 'onnx',
+                'model_file': 'onnx/model_quantized.onnx',
+                'files': {'onnx/model_quantized.onnx': {}},
+            }))
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {}, python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'onnx',
+            )
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'onnx'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'onnx',
+            )
+            with self.assertRaisesRegex(ValueError, 'does not match the baked onnx'):
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'pytorch'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
+
+            # Lock/asset mismatch refuses startup before launching the sidecar.
             (model_dir / 'onnx' / 'model_quantized.onnx').unlink()
             (model_dir / 'model.safetensors').write_bytes(b'pt')
-            self.assertTrue(core_entrypoint._encoder_model_present(model_dir))
+            with self.assertRaisesRegex(ValueError, 'QUIVR_BUILD_LOCAL_QUERY_ENCODER=1'):
+                core_entrypoint._validate_encoder_runtime(
+                    {}, python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
+
+            # PyTorch baked fallback image accepts auto/pytorch and rejects onnx.
+            lock_path.write_text(json.dumps({
+                'backend': 'pytorch',
+                'files': {'model.safetensors': {}},
+            }))
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'pytorch'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'pytorch',
+            )
+            with self.assertRaisesRegex(ValueError, 'does not match the baked pytorch'):
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'onnx'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
 
     def test_core_processes_keep_runtime_config_without_provider_secret(self):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.

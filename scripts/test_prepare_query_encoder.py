@@ -222,12 +222,15 @@ class QueryEncoderAssetsTest(unittest.TestCase):
             for bad_patch in (
                 {'backend': 'tensorrt'},
                 {'model_file': 'onnx/missing.onnx'},
+                {'model_file': 'config.json'},
                 {'asset_repository': '../escape'},
                 {'asset_revision': 'bad/rev'},
             ):
                 with self.subTest(bad_patch=bad_patch):
                     bad_lock = root / 'bad-lock.json'
-                    bad_lock.write_text(json.dumps({**lock_data, **bad_patch}))
+                    bad_files = {**lock_data['files'], 'config.json': {
+                        'sha256': hashlib.sha256(b'{}').hexdigest(), 'size': 2}}
+                    bad_lock.write_text(json.dumps({**lock_data, 'files': bad_files, **bad_patch}))
                     with self.assertRaises(RuntimeError):
                         prepare_query_encoder.verify_model(root / 'model', lock_path=bad_lock)
 
@@ -259,6 +262,9 @@ class QueryEncoderAssetsTest(unittest.TestCase):
             (prepare_query_encoder.LOCK_PATH.parent / 'model-lock-pytorch.json').read_text()
         )
         self.assertEqual(pytorch_lock['backend'], 'pytorch')
+        self.assertEqual(pytorch_lock['precision'], 'float32')
+        for key in ('model', 'model_revision', 'source_revision', 'dimensions'):
+            self.assertEqual(pytorch_lock[key], lock[key])
         self.assertEqual(pytorch_lock['files']['model.safetensors'], {
             'sha256': '197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79',
             'size': 1488915288,

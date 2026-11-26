@@ -75,7 +75,9 @@ def _read_lock(lock_path):
             raise RuntimeError('invalid query encoder asset lock')
         normalized[name] = {'sha256': digest, 'size': size}
     model_file = lock.get('model_file')
-    if model_file is not None and (not isinstance(model_file, str) or model_file not in normalized):
+    if model_file is not None and (
+            not isinstance(model_file, str) or not model_file.endswith('.onnx')
+            or model_file not in normalized):
         raise RuntimeError('invalid query encoder model_file in asset lock')
     lock['files'] = normalized
     return lock

@@ -61,6 +61,7 @@ HOSTED_EMBED = {'id': 'hosted-embed', 'signing_id': 'hosted.embed', 'port': 9980
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
 ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
 ENCODER_MODEL = '/opt/query-encoder/model'
+ENCODER_LOCK = '/app/third_party/query-encoder/model-lock.json'
 ENCODER_URL = 'http://127.0.0.1:9995'
 ENCODER_IDENTITY = {'model': 'google/embeddinggemma-2',
                     'model_revision': '914f7f89142e33e7',
@@ -88,9 +89,45 @@ def encoder_settings(env):
     return values
 
 
-def _encoder_model_present(model_dir=ENCODER_MODEL):
+def _encoder_image_backend(model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    """Return the baked query-encoder backend ('onnx' or 'pytorch') when its assets exist."""
     root = pathlib.Path(model_dir)
-    return (root / 'onnx' / 'model_quantized.onnx').is_file() or (root / 'model.safetensors').is_file()
+    lock_file = pathlib.Path(lock_path)
+    if lock_file.is_file():
+        try:
+            lock = json.loads(lock_file.read_text())
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(lock, dict):
+            return None
+        files = lock.get('files') if isinstance(lock.get('files'), dict) else {}
+        backend = lock.get('backend')
+        if backend not in ('onnx', 'pytorch'):
+            backend = 'onnx' if any(str(name).endswith('.onnx') for name in files) else 'pytorch'
+        if backend == 'onnx':
+            model_file = lock.get('model_file') or 'onnx/model_quantized.onnx'
+            if not isinstance(model_file, str) or not model_file.endswith('.onnx'):
+                return None
+            return 'onnx' if (root / pathlib.PurePosixPath(model_file)).is_file() else None
+        return 'pytorch' if (root / 'model.safetensors').is_file() else None
+    if (root / 'onnx' / 'model_quantized.onnx').is_file():
+        return 'onnx'
+    if (root / 'model.safetensors').is_file():
+        return 'pytorch'
+    return None
+
+
+def _validate_encoder_runtime(settings, *, python_path=ENCODER_PYTHON,
+                              model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    baked = _encoder_image_backend(model_dir, lock_path) if pathlib.Path(python_path).is_file() else None
+    if baked is None:
+        raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+    requested = settings.get('QUIVR_QUERY_ENCODER_BACKEND')
+    if requested and requested not in ('auto', baked):
+        raise ValueError(
+            f'QUIVR_QUERY_ENCODER_BACKEND={requested} does not match the baked {baked} query encoder image'
+        )
+    return baked
 
 
 def plugins_enabled(env):
@@ -525,8 +562,7 @@ def main():
     settings = encoder_settings(os.environ) if mode == 'api' else None
     readiness = None
     if mode == 'api' and settings:
-        if not pathlib.Path(ENCODER_PYTHON).is_file() or not _encoder_model_present(ENCODER_MODEL):
-            raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+        _validate_encoder_runtime(settings)
         readiness = {'name': 'text-encoder', 'url': ENCODER_URL + '/health',
                      'timeout': settings['QUIVR_QUERY_ENCODER_STARTUP_SECONDS'], **ENCODER_IDENTITY}
     os.umask(0o077)

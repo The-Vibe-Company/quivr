@@ -176,17 +176,17 @@ validation; this change's measurements use fake inference only.
 ## Optional CPU query encoding
 
 Build the core image with Docker build argument `QUIVR_BUILD_LOCAL_QUERY_ENCODER=1`
-to include the pinned INT8 ONNX Runtime text encoder (`QUIVR_QUERY_ENCODER_BACKEND=onnx`
-by default; set `pytorch` for the legacy fp32 fallback). The default `0` includes
-neither CPU wheels nor model weights. The build verifies every file against
-`third_party/query-encoder/model-lock.json`; runtime loading stays offline.
-The model revision, 768 dimensions, input prefixes and stored vector space stay
-unchanged. No Corpus rebuild is needed for this execution change.
+to include the pinned INT8 ONNX Runtime text encoder. To use the legacy fp32 fallback,
+also pass Docker build argument `QUIVR_QUERY_ENCODER_BACKEND=pytorch`; the runtime
+setting must match the baked assets. The default `0` includes neither CPU wheels nor
+model weights. The build verifies every file against
+`third_party/query-encoder/model-lock.json`; runtime loading stays offline. The model
+revision, 768 dimensions, input prefixes and vector space stay unchanged; no rebuild.
 
-Start with an API allocation of **4 CPU cores and 1–2 GB RAM**, then measure actual
-memory and latency. INT8 ONNX text weights and runtime occupy about 420 MB of RAM
-(~346 MB baked snapshot, ~190 MB venv) without vision, audio or PyTorch dependencies.
-Workers do not load the model.
+Start with **4 CPU cores and 1–2 GB RAM** for ONNX (**4 GB RAM for the PyTorch fallback**),
+then measure actual memory and latency. INT8 ONNX text weights and runtime occupy about
+420 MB of RAM (~346 MB snapshot, ~190 MB venv) without vision, audio or PyTorch
+dependencies. Workers do not load the model.
 
 Set `QUIVR_LOCAL_QUERY_ENCODER=1` on the API only, while retaining
 `QUIVR_DEMO_EMBEDDING=gemma`, `EMBED_URL` and `EMBED_API_KEY` on API and workers.

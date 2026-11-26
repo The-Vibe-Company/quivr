@@ -466,13 +466,19 @@ class OnnxEncoderBackendTest(unittest.TestCase):
             )
             fake_tokenizers = types.SimpleNamespace(Tokenizer=FakeTokenizer)
 
-            with patch.dict(sys.modules, {
+            with patch.dict(os.environ, {}, clear=False), patch.dict(sys.modules, {
                 'numpy': _FakeNumpy,
                 'onnxruntime': fake_ort,
                 'tokenizers': fake_tokenizers,
                 'torch': None,  # Ensures PyTorch is never imported by the ONNX path.
             }):
                 model, metadata = text_encoder.load_model(model_dir, threads=4, lock_path=lock_path)
+
+                # Explicit backend mismatch fails fast before loading any runtime.
+                with self.assertRaisesRegex(RuntimeError, 'pytorch backend requires'):
+                    text_encoder.load_model(model_dir, threads=4, lock_path=lock_path, backend='pytorch')
+                with self.assertRaisesRegex(ValueError, 'auto, onnx or pytorch'):
+                    text_encoder.load_model(model_dir, threads=4, lock_path=lock_path, backend='invalid')
 
             self.assertEqual(metadata['backend'], 'onnx')
             self.assertEqual(metadata['precision'], 'int8')
@@ -499,12 +505,6 @@ class OnnxEncoderBackendTest(unittest.TestCase):
             self.assertEqual(last_feeds['image_features'].shape, (0, text_encoder.MULTIMODAL_FEATURE_DIM))
             self.assertEqual(last_feeds['video_features'].shape, (0, text_encoder.MULTIMODAL_FEATURE_DIM))
             self.assertEqual(last_feeds['audio_features'].shape, (0, text_encoder.MULTIMODAL_FEATURE_DIM))
-
-            # Explicit backend mismatch fails fast before loading any runtime.
-            with self.assertRaisesRegex(RuntimeError, 'pytorch backend requires'):
-                text_encoder.load_model(model_dir, threads=4, lock_path=lock_path, backend='pytorch')
-            with self.assertRaisesRegex(ValueError, 'auto, onnx or pytorch'):
-                text_encoder.load_model(model_dir, threads=4, lock_path=lock_path, backend='invalid')
 
 
 if __name__ == '__main__':
