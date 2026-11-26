@@ -115,10 +115,10 @@ class BenchClient:
                 "error": f"{type(error).__name__}: {str(error)[:160]}",
             }
 
-    def scrape_metrics(self, urls: list[str]) -> tuple[dict[tuple[str, str, str], int] | None, list[str]]:
+    def scrape_metrics(self, urls: list[str]) -> tuple[dict[str, dict[tuple[str, str, str], int]] | None, list[str]]:
         if not urls:
             return None, []
-        snapshots: list[dict[tuple[str, str, str], int]] = []
+        snapshots: dict[str, dict[tuple[str, str, str], int]] = {}
         errors: list[str] = []
         headers = {"Authorization": f"Bearer {self.metrics_token}"} if self.metrics_token else {}
         for url in urls:
@@ -126,12 +126,12 @@ class BenchClient:
             try:
                 with urllib.request.urlopen(req, timeout=min(self.timeout, 10.0)) as response:
                     text = response.read().decode("utf-8", errors="replace")
-                    snapshots.append(metrics.parse_dependency_counters(text))
+                    snapshots[url] = metrics.parse_dependency_counters(text)
             except Exception as error:
                 errors.append(f"{url}: {type(error).__name__}: {str(error)[:120]}")
         if not snapshots or errors:
             return None, errors
-        return metrics.merge_counter_maps(snapshots), []
+        return snapshots, []
 
 
 def _git_output(*args: str) -> str:
@@ -166,12 +166,15 @@ def _dedupe_urls(urls: list[str]) -> list[str]:
     return out
 
 
-def _snapshot_deps(client: BenchClient, urls: list[str]) -> tuple[dict[tuple[str, str, str], int] | None, list[str]]:
+def _snapshot_deps(
+    client: BenchClient,
+    urls: list[str],
+) -> tuple[dict[str, dict[tuple[str, str, str], int]] | None, list[str]]:
     return client.scrape_metrics(_dedupe_urls(urls))
 
 
 def _finalize_deps(
-    before: dict[tuple[str, str, str], int] | None,
+    before: dict[str, dict[tuple[str, str, str], int]] | None,
     before_errors: list[str],
     client: BenchClient,
     urls: list[str],
@@ -190,7 +193,7 @@ def _finalize_deps(
             available=False,
             errors=errors,
         )
-    delta, reset = metrics.counter_delta(before, after)
+    delta, reset = metrics.endpoint_counter_delta(before, after)
     return metrics.summarize_dependency_calls(
         delta,
         unit_count=unit_count,
@@ -400,13 +403,10 @@ def _restart_local_api(stack) -> None:
     """Restart only the local API process so in-process caches start cold."""
     pid = stack.state.get("api_pid")
     if pid:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        stack.signal_owned(pid, signal.SIGTERM)
         deadline = time.monotonic() + 15.0
         from local import alive
-        while alive(pid) and time.monotonic() < deadline:
+        while stack.owns_process(pid) and alive(pid) and time.monotonic() < deadline:
             time.sleep(0.1)
         if pid in stack.state.get("pids", []):
             stack.state["pids"].remove(pid)
@@ -447,15 +447,75 @@ def _start_local_stack(stack_name: str | None) -> tuple[object, bool]:
     return stack, True
 
 
-def _await_model_ready(client: BenchClient, corpus_id: str, deadline_seconds: float = 180.0) -> None:
+def _await_model_ready(
+    client: BenchClient,
+    marker: str,
+    deadline_seconds: float = 180.0,
+    poll_interval: float = 0.25,
+) -> None:
+    """Verify the embedding model end-to-end on a disposable non-empty probe Corpus.
+
+    Empty-corpus semantic searches short-circuit in the engine without invoking
+    the query encoder, so readiness requires ingesting one probe Record, waiting
+    for vector enrichment, and receiving at least one semantic hit.
+    """
+    probe_key = f"perf-bench-ready-{marker}"
+    probe_corpus = client.call(
+        "POST",
+        "/v0/corpora",
+        {"name": f"Perf readiness probe {marker}", "idempotency_key": probe_key},
+        expected=(200, 201),
+    )["corpus_id"]
+    changes_base = "/v0/changes?" + urllib.parse.urlencode({"corpus_id": probe_corpus, "limit": 50})
+    cursor = client.call("GET", changes_base)["next_cursor"]
+    client.call(
+        "POST",
+        "/v0/records",
+        {
+            "idempotency_key": probe_key,
+            "source": {"corpus_id": probe_corpus, "namespace": "perf-bench-probe", "record_key": probe_key},
+            "content": {
+                "kind": "text",
+                "text": "Hydrology watershed readiness probe verifying vector enrichment and query encoding.",
+            },
+        },
+        expected=(200, 202),
+    )
+
     deadline = time.monotonic() + deadline_seconds
+    enriched = False
+    while not enriched:
+        while True:
+            page = client.call("GET", changes_base + "&" + urllib.parse.urlencode({"cursor": cursor}))
+            for event in page.get("items", []):
+                if event.get("type") == "record.enrichment_available":
+                    enriched = True
+            cursor = page.get("next_cursor", cursor)
+            if not page.get("has_more"):
+                break
+        if enriched:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError("semantic readiness probe record never finished vector enrichment")
+        if poll_interval > 0:
+            time.sleep(poll_interval)
+
     while True:
-        sample = client.timed_search({"query": "hydrology watershed readiness probe", "corpus_ids": [corpus_id], "mode": "semantic", "limit": 1})
-        if sample["ok"]:
+        sample = client.timed_search(
+            {
+                "query": "hydrology watershed readiness probe",
+                "corpus_ids": [probe_corpus],
+                "mode": "semantic",
+                "limit": 1,
+            }
+        )
+        if sample["ok"] and (sample.get("hits") or 0) >= 1:
             return
         if time.monotonic() >= deadline:
-            raise RuntimeError(f"semantic search never became ready: {sample.get('error')}")
-        time.sleep(0.25)
+            detail = sample.get("error") or f"semantic probe returned {sample.get('hits', 0)} hits"
+            raise RuntimeError(f"semantic search never became ready: {detail}")
+        if poll_interval > 0:
+            time.sleep(poll_interval)
 
 
 def run_benchmark(
@@ -480,13 +540,16 @@ def run_benchmark(
     api_metrics_urls: list[str] | None = None,
     worker_metrics_urls: list[str] | None = None,
     before_cold_hook=None,
+    cold_available: bool = True,
+    cold_unavailable_reason: str | None = None,
+    cold_reset_strategy: str = "none",
     poll_interval: float = 0.2,
     await_semantic_ready: bool = False,
 ) -> dict:
     """Execute the configured benchmark profiles against a local or remote Quivr API."""
     started = time.perf_counter()
     docs = corpus_gen.generate_documents(ingest_docs if "ingestion" in profiles else 0, words_per_doc, seed, content_marker)
-    cold_total = cold_query_count * len(modes) if "cold_search" in profiles else 0
+    cold_total = cold_query_count * len(modes) if ("cold_search" in profiles and cold_available) else 0
     cold_queries = corpus_gen.generate_cold_queries(cold_total, seed)
     warm_queries = corpus_gen.generate_warm_queries(warm_query_count if "warm_search" in profiles else 0, seed)
 
@@ -517,6 +580,7 @@ def run_benchmark(
             "warm_queries": warm_query_count,
             "warm_passes": warm_passes,
             "search_concurrency": search_concurrency,
+            "cold_reset_strategy": cold_reset_strategy,
             "api_metrics_urls": api_urls,
             "worker_metrics_urls": worker_urls,
         },
@@ -534,7 +598,7 @@ def run_benchmark(
     report["metadata"]["corpus_id"] = target_corpus
 
     if await_semantic_ready and any(m in ("semantic", "hybrid") for m in modes):
-        _await_model_ready(client, target_corpus)
+        _await_model_ready(client, content_marker, poll_interval=poll_interval)
 
     if "ingestion" in profiles:
         report["ingestion"] = run_ingestion_profile(
@@ -548,24 +612,34 @@ def run_benchmark(
         )
 
     if "cold_search" in profiles:
-        if before_cold_hook is not None:
-            before_cold_hook()
-        report["cold_search"] = run_search_profile(
-            client,
-            target_corpus,
-            cold_queries,
-            modes=modes,
-            search_profile=search_profile,
-            limit=limit,
-            concurrency=search_concurrency,
-            passes=1,
-            warmup_passes=0,
-            metrics_urls=api_urls,
-            distinct_per_mode=True,
-        )
+        if not cold_available:
+            report["cold_search"] = {
+                "available": False,
+                "reason": cold_unavailable_reason
+                or "cold state could not be guaranteed before cold_search; skipped to avoid mislabeling warm results",
+            }
+        else:
+            if before_cold_hook is not None:
+                before_cold_hook()
+            cold_result = run_search_profile(
+                client,
+                target_corpus,
+                cold_queries,
+                modes=modes,
+                search_profile=search_profile,
+                limit=limit,
+                concurrency=search_concurrency,
+                passes=1,
+                warmup_passes=0,
+                metrics_urls=api_urls,
+                distinct_per_mode=True,
+            )
+            cold_result["available"] = True
+            cold_result["reset_strategy"] = cold_reset_strategy
+            report["cold_search"] = cold_result
 
     if "warm_search" in profiles:
-        report["warm_search"] = run_search_profile(
+        warm_result = run_search_profile(
             client,
             target_corpus,
             warm_queries,
@@ -577,16 +651,25 @@ def run_benchmark(
             warmup_passes=1,
             metrics_urls=api_urls,
         )
+        warm_result["available"] = True
+        report["warm_search"] = warm_result
 
-    if report.get("cold_search") and report.get("warm_search"):
+    if (
+        report.get("cold_search")
+        and report["cold_search"].get("available", True)
+        and report.get("warm_search")
+        and report["warm_search"].get("available", True)
+    ):
         report["cold_vs_warm_delta"] = metrics.compute_search_comparison(
             report["cold_search"],
             report["warm_search"],
         )
 
     ing_ok = not report.get("ingestion") or report["ingestion"]["status"] == "complete"
-    cold_ok = not report.get("cold_search") or report["cold_search"]["overall"]["failures"] == 0
-    warm_ok = not report.get("warm_search") or report["warm_search"]["overall"]["failures"] == 0
+    cold_section = report.get("cold_search")
+    cold_ok = not cold_section or not cold_section.get("available", True) or cold_section["overall"]["failures"] == 0
+    warm_section = report.get("warm_search")
+    warm_ok = not warm_section or warm_section["overall"]["failures"] == 0
     report["status"] = "completed" if (ing_ok and cold_ok and warm_ok) else "degraded"
     report["duration_seconds"] = round(time.perf_counter() - started, 3)
     report["finished_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
@@ -631,6 +714,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search-concurrency", type=int, default=1, help="concurrent search workers")
     parser.add_argument("--request-timeout", type=float, default=30.0, help="per-request HTTP timeout in seconds")
     parser.add_argument("--no-restart-cold", action="store_true", help="do not restart local API process before cold_search")
+    parser.add_argument("--cold-reset-cmd", default=None, help="shell command run before cold_search to reset/flush remote target caches")
+    parser.add_argument("--assume-cold", action="store_true", help="acknowledge remote target caches were reset externally before cold_search")
     parser.add_argument("--seed", type=int, default=610, help="deterministic PRNG seed")
     parser.add_argument("--content-marker", default=None, help="override per-run synthetic content marker")
     parser.add_argument("--baseline", type=pathlib.Path, default=None, help="previous bench.json to emit baseline-vs-candidate delta tables")
@@ -689,19 +774,44 @@ def main(argv: list[str] | None = None) -> int:
 
         signal.signal(signal.SIGTERM, _interrupted)
 
+        cold_available = True
+        cold_unavailable_reason = None
+        cold_reset_strategy = "none"
+
         if target_mode == "local":
             stack, owns_stack = _start_local_stack(args.stack)
             base_url = f"http://127.0.0.1:{stack.state['api_port']}"
             token = stack.state["admin"]
             api_metrics_urls = args.api_metrics_url or [f"http://127.0.0.1:{stack.state['probe_port']}/metrics"]
             worker_metrics_urls = args.worker_metrics_url or [f"http://127.0.0.1:{stack.state['worker_probe_port']}/metrics"]
-            before_cold_hook = None if args.no_restart_cold else (lambda: _restart_local_api(stack))
+            if args.cold_reset_cmd:
+                before_cold_hook = lambda: subprocess.run(args.cold_reset_cmd, shell=True, check=True)
+                cold_reset_strategy = "command"
+            elif args.no_restart_cold:
+                before_cold_hook = None
+                cold_reset_strategy = "disabled_by_flag"
+            else:
+                before_cold_hook = lambda: _restart_local_api(stack)
+                cold_reset_strategy = "local_api_restart"
         else:
             base_url = args.base_url
             token = args.token
             api_metrics_urls = list(args.api_metrics_url)
             worker_metrics_urls = list(args.worker_metrics_url)
-            before_cold_hook = None
+            if args.cold_reset_cmd:
+                before_cold_hook = lambda: subprocess.run(args.cold_reset_cmd, shell=True, check=True)
+                cold_reset_strategy = "command"
+            elif args.assume_cold:
+                before_cold_hook = None
+                cold_reset_strategy = "caller_acknowledged"
+            else:
+                before_cold_hook = None
+                cold_available = False
+                cold_reset_strategy = "unavailable"
+                cold_unavailable_reason = (
+                    "remote mode does not reset target caches automatically; pass "
+                    "--cold-reset-cmd <cmd> or --assume-cold to measure cold_search"
+                )
 
         client = BenchClient(base_url, token, timeout=args.request_timeout, metrics_token=args.metrics_token)
         report = run_benchmark(
@@ -725,6 +835,9 @@ def main(argv: list[str] | None = None) -> int:
             api_metrics_urls=api_metrics_urls,
             worker_metrics_urls=worker_metrics_urls,
             before_cold_hook=before_cold_hook,
+            cold_available=cold_available,
+            cold_unavailable_reason=cold_unavailable_reason,
+            cold_reset_strategy=cold_reset_strategy,
             await_semantic_ready=(target_mode == "local" and owns_stack),
         )
     except BaseException as error:

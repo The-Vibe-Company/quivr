@@ -178,6 +178,20 @@ def counter_delta(
     return delta, reset_detected
 
 
+def endpoint_counter_delta(
+    before_by_url: dict[str, dict[tuple[str, str, str], int]],
+    after_by_url: dict[str, dict[tuple[str, str, str], int]],
+) -> tuple[dict[tuple[str, str, str], int], bool]:
+    """Compute reset-aware counter deltas per endpoint URL before summing across processes."""
+    per_endpoint: list[dict[tuple[str, str, str], int]] = []
+    any_reset = False
+    for url in sorted(set(before_by_url) | set(after_by_url)):
+        delta, reset = counter_delta(before_by_url.get(url, {}), after_by_url.get(url, {}))
+        per_endpoint.append(delta)
+        any_reset = any_reset or reset
+    return merge_counter_maps(per_endpoint), any_reset
+
+
 def summarize_dependency_calls(
     delta: dict[tuple[str, str, str], int] | None,
     unit_count: int = 0,
@@ -258,7 +272,14 @@ def metric_delta(baseline: float | None, candidate: float | None) -> dict:
 
 def compute_search_comparison(baseline_profile: dict | None, candidate_profile: dict | None) -> dict:
     """Compare two search profile summaries (e.g. cold vs warm, or baseline vs candidate)."""
-    if not baseline_profile or not candidate_profile:
+    if (
+        not baseline_profile
+        or not candidate_profile
+        or baseline_profile.get("available") is False
+        or candidate_profile.get("available") is False
+        or not baseline_profile.get("overall")
+        or not candidate_profile.get("overall")
+    ):
         return {}
     base_overall = baseline_profile.get("overall") or {}
     cand_overall = candidate_profile.get("overall") or {}
@@ -540,7 +561,16 @@ def render_markdown(report: dict, baseline: dict | None = None) -> str:
         lines += [f"Error: `{report['error']}`", ""]
 
     # Search summary table (cold + warm across all modes)
-    search_profiles = [(k, label) for k, label in (("cold_search", "Cold"), ("warm_search", "Warm")) if report.get(k)]
+    search_profiles = [
+        (k, label)
+        for k, label in (("cold_search", "Cold"), ("warm_search", "Warm"))
+        if report.get(k) and report[k].get("available", True) and report[k].get("overall")
+    ]
+    unavailable_search = [
+        (k, label)
+        for k, label in (("cold_search", "Cold"), ("warm_search", "Warm"))
+        if report.get(k) and report[k].get("available") is False
+    ]
     if search_profiles:
         lines += [
             "## Search Latency (client wall time, ms)",
@@ -560,6 +590,10 @@ def render_markdown(report: dict, baseline: dict | None = None) -> str:
 
         for key, label in search_profiles:
             lines.extend(_render_phase_table(f"{label} Search (overall)", report[key]["overall"]))
+
+    for key, label in unavailable_search:
+        reason = report[key].get("reason") or "unavailable"
+        lines += [f"### {label} Search", "", f"_Unavailable: {reason}_", ""]
 
     # Built-in cold vs warm delta table
     cold_vs_warm = report.get("cold_vs_warm_delta") or {}

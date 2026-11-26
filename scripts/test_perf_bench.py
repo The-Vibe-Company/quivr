@@ -9,11 +9,13 @@ import http.server
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 import perf_bench
@@ -157,6 +159,23 @@ quivr_dependency_calls_total{dependency="postgres",protocol="wire",operation="ba
         )
         self.assertTrue(reset_flag)
         self.assertEqual(reset_delta[("s3", "http", "get_object")], 7)
+
+    def test_per_endpoint_counter_delta_preserves_single_process_reset(self):
+        # API counter grows by +10 while worker counter restarts from 50 -> 3.
+        # Merging before differencing would see 60 -> 23 and report bogus delta 23.
+        # Per-endpoint deltas compute API (20 - 10 = 10) + worker reset (3) = 13.
+        key = ("postgres", "wire", "query")
+        before = {
+            "http://api/metrics": {key: 10},
+            "http://worker/metrics": {key: 50},
+        }
+        after = {
+            "http://api/metrics": {key: 20},
+            "http://worker/metrics": {key: 3},
+        }
+        delta, reset = metrics.endpoint_counter_delta(before, after)
+        self.assertTrue(reset)
+        self.assertEqual(delta[key], 13)
 
 
 class _FakeQuivrCluster:
@@ -324,6 +343,7 @@ class EndToEndHarnessContract(unittest.TestCase):
                     "--token", "bench-token",
                     "--api-metrics-url", baseline_cluster.base_url + "/api-metrics",
                     "--worker-metrics-url", baseline_cluster.base_url + "/worker-metrics",
+                    "--assume-cold",
                     "--ingest-docs", "6",
                     "--words-per-doc", "32",
                     "--ingest-concurrency", "2",
@@ -341,6 +361,7 @@ class EndToEndHarnessContract(unittest.TestCase):
             base_report = json.loads((base_dir / "bench.json").read_text())
             base_md = (base_dir / "bench.md").read_text()
             self.assertEqual(base_report["status"], "completed")
+            self.assertTrue(base_report["cold_search"]["available"])
             self.assertEqual(base_report["ingestion"]["accepted_count"], 6)
             self.assertEqual(base_report["ingestion"]["searchable_count"], 6)
             self.assertEqual(base_report["ingestion"]["enriched_count"], 6)
@@ -368,6 +389,7 @@ class EndToEndHarnessContract(unittest.TestCase):
                     "--token", "bench-token",
                     "--api-metrics-url", candidate_cluster.base_url + "/api-metrics",
                     "--worker-metrics-url", candidate_cluster.base_url + "/worker-metrics",
+                    "--assume-cold",
                     "--ingest-docs", "6",
                     "--words-per-doc", "32",
                     "--cold-queries", "4",
@@ -383,20 +405,23 @@ class EndToEndHarnessContract(unittest.TestCase):
             self.assertEqual(rc2, 0)
             delta_json = json.loads((cand_dir / "delta.json").read_text())
             delta_md = (cand_dir / "delta.md").read_text()
+            cand_md = (cand_dir / "bench.md").read_text()
             self.assertLess(delta_json["cold_search"]["overall"]["phases"]["hydration"]["p95_ms"]["delta"], 0)
             self.assertIn("Benchmark Delta (Baseline vs Candidate)", delta_md)
             self.assertIn("(better)", delta_md)
+            self.assertIn("## Benchmark Delta (Baseline vs Candidate)", cand_md)
+            self.assertIn("(better)", cand_md)
 
             # Offline --compare command reproduces delta artifacts without touching the network.
             rc3 = perf_bench.main(["--compare", str(base_dir / "bench.json"), str(cand_dir / "bench.json"), "--out", str(cmp_dir)])
             self.assertEqual(rc3, 0)
             self.assertEqual((cmp_dir / "delta.md").read_text(), delta_md)
 
-    def test_remote_mode_succeeds_without_metrics_probe_urls(self):
+    def test_remote_mode_marks_cold_unavailable_without_reset_or_ack(self):
         cluster = _FakeQuivrCluster(phase_scale=1.0)
         self.addCleanup(cluster.close)
         with tempfile.TemporaryDirectory() as tmp:
-            out_dir = pathlib.Path(tmp) / "no-metrics"
+            out_dir = pathlib.Path(tmp) / "remote-default"
             rc = perf_bench.main(
                 [
                     "--mode", "remote",
@@ -413,9 +438,117 @@ class EndToEndHarnessContract(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
             report = json.loads((out_dir / "bench.json").read_text())
+            md = (out_dir / "bench.md").read_text()
+            self.assertEqual(report["status"], "completed")
+            self.assertFalse(report["cold_search"]["available"])
+            self.assertIn("--cold-reset-cmd", report["cold_search"]["reason"])
+            self.assertIn("_Unavailable:", md)
+            self.assertTrue(report["warm_search"]["available"])
             self.assertFalse(report["ingestion"]["dependency_calls"]["available"])
-            self.assertFalse(report["cold_search"]["dependency_calls"]["available"])
-            self.assertIsNotNone(report["cold_search"]["overall"]["phases"]["index_query"]["p95_ms"])
+            self.assertIsNotNone(report["warm_search"]["overall"]["phases"]["index_query"]["p95_ms"])
+
+    def test_remote_cold_reset_cmd_runs_before_cold_search(self):
+        cluster = _FakeQuivrCluster(phase_scale=1.0)
+        self.addCleanup(cluster.close)
+        with tempfile.TemporaryDirectory() as tmp:
+            marker_file = pathlib.Path(tmp) / "reset.marker"
+            out_dir = pathlib.Path(tmp) / "remote-reset"
+            rc = perf_bench.main(
+                [
+                    "--mode", "remote",
+                    "--base-url", cluster.base_url,
+                    "--token", "bench-token",
+                    "--cold-reset-cmd", f"{sys.executable} -c \"import pathlib; pathlib.Path({str(marker_file)!r}).write_text('ok')\"",
+                    "--ingest-docs", "2",
+                    "--words-per-doc", "24",
+                    "--cold-queries", "2",
+                    "--warm-queries", "2",
+                    "--warm-passes", "1",
+                    "--modes", "hybrid",
+                    "--out", str(out_dir),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(marker_file.read_text(), "ok")
+            report = json.loads((out_dir / "bench.json").read_text())
+            self.assertTrue(report["cold_search"]["available"])
+            self.assertEqual(report["cold_search"]["reset_strategy"], "command")
+
+
+class LocalSafetyAndReadinessContract(unittest.TestCase):
+    def test_restart_local_api_uses_signal_owned_and_never_raw_kill(self):
+        events: list[tuple] = []
+
+        class FakeStack:
+            def __init__(self):
+                self.state = {"api_pid": 4242, "pids": [4242, 9999]}
+                self.owned_checks = 0
+
+            def signal_owned(self, pid, sig):
+                events.append(("signal_owned", pid, sig))
+
+            def owns_process(self, pid):
+                self.owned_checks += 1
+                return False
+
+            def save(self):
+                events.append(("save", list(self.state["pids"])))
+
+            def spawn(self, command, config):
+                events.append(("spawn", command, config))
+
+            def await_ready(self, key, timeout=30):
+                events.append(("await_ready", key, timeout))
+
+        stack = FakeStack()
+        with mock.patch("os.kill", side_effect=AssertionError("must use stack.signal_owned")):
+            perf_bench._restart_local_api(stack)
+
+        self.assertEqual(
+            events,
+            [
+                ("signal_owned", 4242, signal.SIGTERM),
+                ("save", [9999]),
+                ("spawn", "api", "config.json"),
+                ("await_ready", "probe_port", 30),
+            ],
+        )
+
+    def test_await_model_ready_requires_enriched_record_and_non_empty_semantic_hit(self):
+        calls: list[tuple[str, str]] = []
+        search_attempts = [0]
+
+        class FakeClient:
+            def call(self, method, path, body=None, expected=200):
+                calls.append((method, path))
+                if path == "/v0/corpora":
+                    return {"corpus_id": "probe-corpus-1"}
+                if path == "/v0/records":
+                    return {"receipt_id": "probe-receipt-1"}
+                if path.startswith("/v0/changes") and "cursor=" not in path:
+                    return {"items": [], "next_cursor": "0", "has_more": False}
+                if path.startswith("/v0/changes") and "cursor=0" in path:
+                    return {
+                        "items": [{"type": "record.enrichment_available", "resource": {"id": "probe-rec-1"}}],
+                        "next_cursor": "1",
+                        "has_more": False,
+                    }
+                raise AssertionError(f"unexpected call: {method} {path}")
+
+            def timed_search(self, body):
+                self.last_search = body
+                search_attempts[0] += 1
+                # First attempt returns 0 hits (empty/unindexed); readiness must keep waiting.
+                if search_attempts[0] == 1:
+                    return {"ok": True, "hits": 0}
+                return {"ok": True, "hits": 1}
+
+        client = FakeClient()
+        perf_bench._await_model_ready(client, "m1", deadline_seconds=5.0, poll_interval=0.0)
+        self.assertEqual(search_attempts[0], 2)
+        self.assertEqual(client.last_search["corpus_ids"], ["probe-corpus-1"])
+        self.assertEqual(client.last_search["mode"], "semantic")
+        self.assertIn(("POST", "/v0/records"), calls)
 
 
 if __name__ == "__main__":

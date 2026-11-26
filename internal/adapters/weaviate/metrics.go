@@ -2,6 +2,7 @@ package weaviate
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -15,13 +16,14 @@ func (s *Store) SetMetrics(m *telemetry.DependencyMetrics) {
 }
 
 type metricsTransport struct {
-	base  http.RoundTripper
-	store *Store
+	base     http.RoundTripper
+	store    *Store
+	basePath string
 }
 
 func (t metricsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if m := t.store.metrics.Load(); m != nil {
-		m.Record(telemetry.DependencyWeaviate, telemetry.ProtocolHTTP, classifyOperation(req.Method, req.URL.Path))
+		m.Record(telemetry.DependencyWeaviate, telemetry.ProtocolHTTP, classifyOperation(req.Method, relativeAPIPath(t.basePath, req.URL.Path)))
 	}
 	return t.base.RoundTrip(req)
 }
@@ -33,7 +35,28 @@ func (t metricsTransport) CloseIdleConnections() {
 }
 
 func (s *Store) countRequests(base http.RoundTripper) http.RoundTripper {
-	return metricsTransport{base: base, store: s}
+	return metricsTransport{base: base, store: s, basePath: endpointBasePath(s.Endpoint)}
+}
+
+func endpointBasePath(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(u.Path, "/")
+}
+
+func relativeAPIPath(basePath, reqPath string) string {
+	if basePath == "" {
+		return reqPath
+	}
+	if reqPath == basePath {
+		return "/"
+	}
+	if strings.HasPrefix(reqPath, basePath+"/") {
+		return reqPath[len(basePath):]
+	}
+	return reqPath
 }
 
 func classifyOperation(method, path string) string {
