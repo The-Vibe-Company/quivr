@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -425,8 +426,33 @@ var hydrationBlobCacheGauges = []telemetry.GaugeDefinition{
 	{Name: "quivr_hydration_blob_cache_entries", Help: "Current number of immutable text blobs held in the hydration LRU cache.", Unit: "{entry}"},
 }
 
+var (
+	hydrationBlobCacheMetricsMu  sync.Mutex
+	hydrationBlobCacheRegistered bool
+	activeHydrationBlobCache     atomic.Pointer[HydrationBlobCache]
+)
+
+func registerHydrationBlobCacheGauges(c *HydrationBlobCache) {
+	activeHydrationBlobCache.Store(c)
+	if !telemetry.Enabled() {
+		return
+	}
+	hydrationBlobCacheMetricsMu.Lock()
+	defer hydrationBlobCacheMetricsMu.Unlock()
+	if hydrationBlobCacheRegistered {
+		return
+	}
+	telemetry.RegisterGauges(hydrationBlobCacheGauges, func(context.Context) ([]float64, error) {
+		if active := activeHydrationBlobCache.Load(); active != nil {
+			return active.gaugeValues(), nil
+		}
+		return []float64{0, 0, 0}, nil
+	})
+	hydrationBlobCacheRegistered = true
+}
+
 // NewHydrationBlobCache constructs a bounded content-addressed LRU cache for
-// canonical text blobs and registers its Prometheus/OTel metrics. A non-positive
+// canonical text blobs and binds its Prometheus/OTel metrics. A non-positive
 // maxBytes disables caching and returns nil.
 func NewHydrationBlobCache(maxBytes int64) *HydrationBlobCache {
 	if maxBytes <= 0 {
@@ -438,9 +464,7 @@ func NewHydrationBlobCache(maxBytes int64) *HydrationBlobCache {
 		lookups:   telemetry.NewCounter("quivr_hydration_blob_cache_lookups_total", "Hydration immutable text blob cache lookups by result.", []string{"result"}, []string{"hit"}, []string{"miss"}),
 		evictions: telemetry.NewCounter("quivr_hydration_blob_cache_evictions_total", "Hydration immutable text blob cache entries evicted to enforce the memory budget.", nil, nil),
 	}
-	telemetry.RegisterGauges(hydrationBlobCacheGauges, func(context.Context) ([]float64, error) {
-		return c.gaugeValues(), nil
-	})
+	registerHydrationBlobCacheGauges(c)
 	return c
 }
 
@@ -578,45 +602,35 @@ func (c *HydrationBlobCache) unlink(e *blobCacheEntry) {
 	e.next = nil
 }
 
-// sliceRunes extracts Unicode code-point slice [start, end) from text as an
-// independent string so excerpts never pin an evicted cache entry's backing memory.
-func sliceRunes(text string, start, end int) (string, bool) {
-	if start < 0 || end < start {
-		return "", false
-	}
-	if start == end {
-		if start == 0 {
-			return "", true
+// blobSlicer decodes a blob once per hydration batch (avoiding []rune entirely
+// for ASCII blobs) and returns independent excerpt strings so callers never pin
+// an evicted cache entry's backing memory.
+type blobSlicer struct {
+	text  string
+	ascii bool
+	runes []rune
+}
+
+func newBlobSlicer(text string) blobSlicer {
+	for i := 0; i < len(text); i++ {
+		if text[i] >= utf8.RuneSelf {
+			return blobSlicer{text: text, runes: []rune(text)}
 		}
-		if start > len(text) {
+	}
+	return blobSlicer{text: text, ascii: true}
+}
+
+func (b blobSlicer) slice(start, end int) (string, bool) {
+	if b.ascii {
+		if start < 0 || end < start || end > len(b.text) {
 			return "", false
 		}
-		return "", start <= utf8.RuneCountInString(text)
+		return strings.Clone(b.text[start:end]), true
 	}
-	byteStart := -1
-	runeIdx := 0
-	for i, r := range text {
-		if r == utf8.RuneError {
-			if _, size := utf8.DecodeRuneInString(text[i:]); size == 1 {
-				runes := []rune(text)
-				if end > len(runes) {
-					return "", false
-				}
-				return string(runes[start:end]), true
-			}
-		}
-		if runeIdx == start {
-			byteStart = i
-		}
-		if runeIdx == end {
-			return strings.Clone(text[byteStart:i]), true
-		}
-		runeIdx++
+	if start < 0 || end < start || end > len(b.runes) {
+		return "", false
 	}
-	if runeIdx == end && byteStart >= 0 {
-		return strings.Clone(text[byteStart:]), true
-	}
-	return "", false
+	return string(b.runes[start:end]), true
 }
 
 // blobReadParallelism bounds the concurrent canonical blob reads of one
@@ -724,9 +738,10 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 	}
 	for key, requests := range byBlob {
 		if text, ok := cached[key]; ok {
+			slicer := newBlobSlicer(text)
 			for _, req := range requests {
 				r := req.source.Range
-				cut, valid := sliceRunes(text, r.Start, r.End)
+				cut, valid := slicer.slice(r.Start, r.End)
 				if !valid {
 					return nil, errors.New("invalid canonical excerpt")
 				}
@@ -759,9 +774,11 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 				if s.BlobCache != nil && item.key.cacheable() && Hash(data) == item.key.sha256 {
 					s.BlobCache.put(item.key, text)
 				}
-				for _, req := range item.requests {
+				slicer := newBlobSlicer(text)
+				cuts := make([]SourceExcerpt, len(item.requests))
+				for idx, req := range item.requests {
 					r := req.source.Range
-					cut, valid := sliceRunes(text, r.Start, r.End)
+					cut, valid := slicer.slice(r.Start, r.End)
 					if !valid {
 						mu.Lock()
 						if failure == nil {
@@ -770,11 +787,13 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 						mu.Unlock()
 						return
 					}
-					excerpt := SourceExcerpt{SourceRange: r, Text: cut}
-					mu.Lock()
-					slices[req.candidate][req.index] = excerpt
-					mu.Unlock()
+					cuts[idx] = SourceExcerpt{SourceRange: r, Text: cut}
 				}
+				mu.Lock()
+				for idx, req := range item.requests {
+					slices[req.candidate][req.index] = cuts[idx]
+				}
+				mu.Unlock()
 			}(item)
 		}
 		wg.Wait()

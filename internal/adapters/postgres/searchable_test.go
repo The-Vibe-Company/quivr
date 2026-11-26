@@ -481,7 +481,10 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	}
 	// Copy the new packed rows into pg_temp so auto_explain observes the merged SQL.
 	for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "accepted_revisions"} {
-		if _, err := explained.Exec(ctx, "TRUNCATE pg_temp."+table+"; INSERT INTO pg_temp."+table+" SELECT * FROM public."+table+" WHERE organization=$1", org); err != nil {
+		if _, err := explained.Exec(ctx, "TRUNCATE pg_temp."+table); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := explained.Exec(ctx, "INSERT INTO pg_temp."+table+" SELECT * FROM public."+table+" WHERE organization=$1", org); err != nil {
 			t.Fatal(err)
 		}
 	}
