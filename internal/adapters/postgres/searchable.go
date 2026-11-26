@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -542,12 +543,12 @@ var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,s
 LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id,p.pack_offset,p.pack_length FROM version_parts p
  WHERE c.derivation->'region' IS NULL AND (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
  ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
-LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
- WHERE c.derivation->'region' IS NULL AND p.blob_id IS NOT NULL AND (b.organization,b.blob_id)>=(c.organization,p.blob_id)
- ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
 LEFT JOIN LATERAL (SELECT mb.organization,mb.blob_id,mb.object_key,mb.sha256,mb.byte_length FROM content_blobs mb
  WHERE c.derivation->'region' IS NULL AND p.pack_offset IS NULL AND jsonb_typeof(c.derivation->'source_ranges')='array' AND jsonb_array_length(CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN c.derivation->'source_ranges' ELSE '[]'::jsonb END)>1 AND c.manifest_blob_id IS NOT NULL AND (mb.organization,mb.blob_id)>=(c.organization,c.manifest_blob_id)
  ORDER BY mb.organization,mb.blob_id LIMIT 1) mb ON (mb.organization,mb.blob_id)=(c.organization,c.manifest_blob_id)
+LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
+ WHERE c.derivation->'region' IS NULL AND mb.blob_id IS NULL AND p.blob_id IS NOT NULL AND (b.organization,b.blob_id)>=(c.organization,p.blob_id)
+ ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
 LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec WHERE ec.generation_id=g.id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g", "v") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
   AND ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
 ` + hydrationFenceSQL
@@ -628,10 +629,91 @@ func (s ProjectionStore) RecheckHydration(ctx context.Context, scope corpus.Scop
 	return out, rows.Err()
 }
 
-// Hydrate looks a batch of candidates up with response and packed-source fields
-// in a single SQL round-trip. A candidate outside the caller's Corpora is
-// absent, as if it did not exist.
+// hydrateShardMin is the smallest batch split across concurrent pool
+// connections so cold random page reads overlap across storage I/O queues.
+const hydrateShardMin = 12
+
+// hydrateMaxShards caps per-search connection fan-out; pool sizing further
+// bounds it to at most a quarter of MaxConns so concurrent searches do not
+// starve the pool.
+const hydrateMaxShards = 4
+
+func hydrateShards(candidates int, maxConns int32) int {
+	if candidates <= hydrateShardMin || maxConns < 4 {
+		return 1
+	}
+	byPool := min(hydrateMaxShards, int(maxConns/4))
+	bySize := (candidates + hydrateShardMin - 1) / hydrateShardMin
+	return max(1, min(byPool, bySize))
+}
+
+// Hydrate looks a batch of candidates up with response and packed-source fields.
+// Large non-transactional batches fan out across a bounded slice of pool
+// connections so cold random seeks execute concurrently. A candidate outside
+// the caller's Corpora is absent, as if it did not exist.
 func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
+	if len(cs) == 0 {
+		return map[int]content.Located{}, nil
+	}
+	shards := 1
+	if s.Pool != nil && database(ctx, s.Pool) == s.Pool {
+		shards = hydrateShards(len(cs), s.Pool.Config().MaxConns)
+	}
+	if shards == 1 {
+		return s.hydrateBatch(ctx, scope, cs)
+	}
+	shardCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type shardResult struct {
+		offset int
+		rows   map[int]content.Located
+	}
+	results := make([]shardResult, shards)
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	base, rem := len(cs)/shards, len(cs)%shards
+	offset := 0
+	for i := range shards {
+		size := base
+		if i < rem {
+			size++
+		}
+		start, sub := offset, cs[offset:offset+size]
+		offset += size
+		wg.Add(1)
+		go func(idx, start int, sub []content.Candidate) {
+			defer wg.Done()
+			rows, err := s.hydrateBatch(shardCtx, scope, sub)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			results[idx] = shardResult{offset: start, rows: rows}
+		}(i, start, sub)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	out := make(map[int]content.Located, len(cs))
+	for _, res := range results {
+		for k, v := range res.rows {
+			out[res.offset+k] = v
+		}
+	}
+	return out, nil
+}
+
+func (s ProjectionStore) hydrateBatch(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
 	out := map[int]content.Located{}
 	if len(cs) == 0 {
 		return out, nil

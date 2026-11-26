@@ -58,4 +58,34 @@ func TestHydrateSQLMergesPackedSourcesAndScopeFence(t *testing.T) {
 	if _, err = decodeHydratedSources(1, nil); !errors.Is(err, content.ErrConflict) {
 		t.Fatalf("null sources on packed segment err = %v; want ErrConflict", err)
 	}
+
+	// Manifest coalescing runs before primary content_blobs lookup so coalesced
+	// legacy multi-part candidates skip the primary blob seek.
+	mbPos := strings.Index(hydrateSQL, "FROM content_blobs mb")
+	bPos := strings.Index(hydrateSQL, "FROM content_blobs b")
+	if mbPos < 0 || bPos < 0 || mbPos >= bPos || !strings.Contains(hydrateSQL, "AND mb.blob_id IS NULL AND p.blob_id IS NOT NULL") {
+		t.Fatalf("hydrateSQL must resolve manifest_blob before gating primary content_blobs on mb.blob_id IS NULL")
+	}
+
+	// Shard sizing keeps small batches and tiny pools single-statement while
+	// capping large batches to at most 4 shards and a quarter of MaxConns.
+	for _, tc := range []struct {
+		candidates int
+		maxConns   int32
+		want       int
+	}{
+		{candidates: 1, maxConns: 16, want: 1},
+		{candidates: 12, maxConns: 16, want: 1},
+		{candidates: 50, maxConns: 1, want: 1},
+		{candidates: 50, maxConns: 3, want: 1},
+		{candidates: 50, maxConns: 4, want: 1},
+		{candidates: 50, maxConns: 8, want: 2},
+		{candidates: 25, maxConns: 16, want: 3},
+		{candidates: 50, maxConns: 16, want: 4},
+		{candidates: 50, maxConns: 100, want: 4},
+	} {
+		if got := hydrateShards(tc.candidates, tc.maxConns); got != tc.want {
+			t.Fatalf("hydrateShards(%d, %d) = %d, want %d", tc.candidates, tc.maxConns, got, tc.want)
+		}
+	}
 }
