@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.1.0](https://github.com/The-Vibe-Company/quivr/compare/v2.0.3...v2.1.0) (2026-11-26)
+
+
+### Features
+
+* **api:** separate /v0/admin/* onto a dedicated internal admin listener ([#4011](https://github.com/The-Vibe-Company/quivr/issues/4011)) ([805021c](https://github.com/The-Vibe-Company/quivr/commit/805021cebeead309f5507d2d4c1d9c270f15cb63))
+* **audit:** record access refusals and filter by actor ([#4006](https://github.com/The-Vibe-Company/quivr/issues/4006)) ([290ba33](https://github.com/The-Vibe-Company/quivr/commit/290ba3314df1740cb084f186bdf3db9ec7873c19))
+* **bench:** add reproducible cold/warm search and ingestion perf harness ([#4012](https://github.com/The-Vibe-Company/quivr/issues/4012)) ([4af59a4](https://github.com/The-Vibe-Company/quivr/commit/4af59a46b6fa9e25a00f0523f26ddf9aa5d6a914))
+* **config:** inject secrets outside runtime JSON ([#4007](https://github.com/The-Vibe-Company/quivr/issues/4007)) ([14518f3](https://github.com/The-Vibe-Company/quivr/commit/14518f3b41ba41ed99953c3d3adccd7c88ac28d0))
+* **deploy:** run Temporal on PostgreSQL across production IaC profiles ([#4009](https://github.com/The-Vibe-Company/quivr/issues/4009)) ([31b67b9](https://github.com/The-Vibe-Company/quivr/commit/31b67b9ead4a4c899b0e80eb6885ea8e58d7ba39))
+* **plugins:** add object-storage-prefix connector and cross-modal image ([307d8de](https://github.com/The-Vibe-Company/quivr/commit/307d8de192a776eb5ebce9a195591b94184eb79d))
+* **plugins:** add object-storage-prefix connector and cross-modal image enrichment ([#4015](https://github.com/The-Vibe-Company/quivr/issues/4015)) ([307d8de](https://github.com/The-Vibe-Company/quivr/commit/307d8de192a776eb5ebce9a195591b94184eb79d))
+* **plugins:** harden Go and Python SDK servers and emit manifest digest header ([#4008](https://github.com/The-Vibe-Company/quivr/issues/4008)) ([b2d543f](https://github.com/The-Vibe-Company/quivr/commit/b2d543ff3f7810a04b6cde8879c13d02e1ca6d54))
+* **postgres:** support DBA-managed PostgreSQL 17 ([#4004](https://github.com/The-Vibe-Company/quivr/issues/4004)) ([5cf39ee](https://github.com/The-Vibe-Company/quivr/commit/5cf39ee89011ec510ec1d945998104bffff56d71))
+* **retrieval:** add AIMD search admission limiter and graceful deep-to-default degradation ([#4021](https://github.com/The-Vibe-Company/quivr/issues/4021)) ([44f359d](https://github.com/The-Vibe-Company/quivr/commit/44f359d593aa70cbc447757182e6ffeaed1bd2d0))
+* **search:** expose Server-Timing, X-Correlation-ID and per-phase p50/p95 in Admin ([#4002](https://github.com/The-Vibe-Company/quivr/issues/4002)) ([3811f6f](https://github.com/The-Vibe-Company/quivr/commit/3811f6fc0e60af09470f0760003b8dc6a027183a))
+* **visibility:** enforce source grants and record ACL across read routes ([#4030](https://github.com/The-Vibe-Company/quivr/issues/4030)) ([f2b0583](https://github.com/The-Vibe-Company/quivr/commit/f2b0583e3c6188a78eedd2e172c211ec2d79bc6e))
+* **weaviate:** add gRPC transport and unified segment objects ([#4026](https://github.com/The-Vibe-Company/quivr/issues/4026)) ([e20bc37](https://github.com/The-Vibe-Company/quivr/commit/e20bc37cb88efba42abf4108e60f4dec7e13609e))
+* **weaviate:** add native projection tenants and cross-corpus RRF ([#4029](https://github.com/The-Vibe-Company/quivr/issues/4029)) ([cae9c78](https://github.com/The-Vibe-Company/quivr/commit/cae9c783b55b71abb39b0ad71ec7b29ead39e845))
+
+
+### Bug Fixes
+
+* **ci:** harden SDK, scripts, workflows and admin search-phases from audit ([#4028](https://github.com/The-Vibe-Company/quivr/issues/4028)) ([4b95ea1](https://github.com/The-Vibe-Company/quivr/commit/4b95ea1e2dd8a437bbfb2c84de22ec804265684a))
+* **deploy:** count multi-tenant Weaviate objects in lifecycle and reset ([#4031](https://github.com/The-Vibe-Company/quivr/issues/4031)) ([64e964f](https://github.com/The-Vibe-Company/quivr/commit/64e964f4040243a35e60ce1ff1aa77a8923fffe9))
+* **deploy:** reconcile Weaviate drift on Azure vector hosts ([#4005](https://github.com/The-Vibe-Company/quivr/issues/4005)) ([2119e71](https://github.com/The-Vibe-Company/quivr/commit/2119e7185b8404ecb7aa86ce04d358aad52cddad))
+* **engine:** harden AIMD admission, multimodal FK, Weaviate replay, security and plugin edge cases ([#4027](https://github.com/The-Vibe-Company/quivr/issues/4027)) ([13c6fcc](https://github.com/The-Vibe-Company/quivr/commit/13c6fcc207940b19e39de1ceab9655dd60a66ae7))
+* **retrieval:** score top-K item passages with information density and BM25 ([#4025](https://github.com/The-Vibe-Company/quivr/issues/4025)) ([cc8e28a](https://github.com/The-Vibe-Company/quivr/commit/cc8e28a9982ed428c101685482c97f30e3311c20))
+
+
+### Performance Improvements
+
+* **devx:** cache local Go plugin binaries and add fast dev profile ([#4010](https://github.com/The-Vibe-Company/quivr/issues/4010)) ([4a12148](https://github.com/The-Vibe-Company/quivr/commit/4a12148ad365bf71f927f975233c826a0785236a))
+* **hydration:** add bounded content-addressed text blob LRU cache and merge packed-source SQL ([#4019](https://github.com/The-Vibe-Company/quivr/issues/4019)) ([7aea34c](https://github.com/The-Vibe-Company/quivr/commit/7aea34c336352afdb4b1b425a14a045f18e2ca68))
+* **plugins:** cache discovery and raise HTTP idle connection pool ([#4003](https://github.com/The-Vibe-Company/quivr/issues/4003)) ([18efd22](https://github.com/The-Vibe-Company/quivr/commit/18efd22137aff57372f30f658e3c53804abd1b99))
+* **query-encoder:** replace PyTorch FP32 CPU encoder with quantized ONNX Runtime ([#4020](https://github.com/The-Vibe-Company/quivr/issues/4020)) ([e9eaf43](https://github.com/The-Vibe-Company/quivr/commit/e9eaf43c89f547d4afac241efade2328beef8888))
+* **retrieval:** coalesce and cache query encodings ([#4018](https://github.com/The-Vibe-Company/quivr/issues/4018)) ([2661a93](https://github.com/The-Vibe-Company/quivr/commit/2661a93eb630f7a5aff783e280e89661f3ec0be1))
+* **retrieval:** parallelize Weaviate item search ([#4017](https://github.com/The-Vibe-Company/quivr/issues/4017)) ([ec23304](https://github.com/The-Vibe-Company/quivr/commit/ec2330406dd801a2ddee131a84edf44ae41efb0f))
+* **storage:** pack normalized text per version ([#4022](https://github.com/The-Vibe-Company/quivr/issues/4022)) ([edb55db](https://github.com/The-Vibe-Company/quivr/commit/edb55dbd46e9e071657198c9660485bbb8228710))
+* **weaviate:** batch projection writes and reconciliation ([#4016](https://github.com/The-Vibe-Company/quivr/issues/4016)) ([db300fe](https://github.com/The-Vibe-Company/quivr/commit/db300fe1f747df54d7591d1e163a4e2d2f5b2a1b))
+
 ## [2.0.3](https://github.com/The-Vibe-Company/quivr/compare/v2.0.2...v2.0.3) (2026-11-16)
 
 
