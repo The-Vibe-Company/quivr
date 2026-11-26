@@ -198,7 +198,7 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	}
 	// The lexical scan budget counts canonical passages even after vectors
 	// are attached: enriched physical copies must not occupy those slots.
-	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"passage"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
+	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"segment"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
 	req, err := http.NewRequestWithContext(f.ctx, http.MethodPost, f.url+"/v1/graphql", strings.NewReader(string(queryJSON)))
 	if err != nil {
 		t.Fatal(err)
@@ -1062,4 +1062,68 @@ func runItemSearch(ctx context.Context, transport http.RoundTripper, q retrieval
 		Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}},
 	}
 	return store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, q)
+}
+
+func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
+	f := newAttachFixture(t)
+	g := f.gen
+	g.ItemKeywordsProjected = true
+	vector := unitVector(1)
+	for _, name := range []string{"legacy", "unified"} {
+		seg := f.segmentation(name, "harbour ferry")
+		v := content.Version{ID: seg.VersionID, RecordID: name, Manifest: content.Manifest{
+			Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "harbour ferry"}}},
+		}}
+		publish := func() error { return f.store.Publish(f.ctx, g, f.org, f.corpusID, "feed", v, seg) }
+		if err := publish(); err != nil {
+			t.Fatal(err)
+		}
+		anchor := lexicalObject(f.objects(g, name))
+		if name == "legacy" {
+			// Restore the 2.x seed layout before attachment. It must keep
+			// the same UUID and its separate enriched object on replay.
+			path := f.url + "/v1/objects/" + g.Collection + "/" + anchor.ID
+			req, err := http.NewRequestWithContext(f.ctx, http.MethodPatch, path,
+				strings.NewReader(`{"properties":{"itemKind":"passage"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := f.store.Client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("restore legacy passage: %s", res.Status)
+			}
+		}
+		data := []content.EmbeddingData{f.embedding(g, name, vector)}
+		for _, write := range []func() error{
+			func() error { return f.store.PublishEmbeddings(f.ctx, g, f.org, data) },
+			publish,
+			func() error { return f.store.PublishEmbeddings(f.ctx, g, f.org, data) },
+		} {
+			if err := write(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		objects := f.objects(g, name)
+		if name == "legacy" {
+			if lexical, enriched := shape(objects); lexical != 1 || enriched != 1 || lexicalObject(objects).ID != anchor.ID {
+				t.Fatalf("legacy segment after replay: %+v", objects)
+			}
+		} else if len(objects) != 1 || objects[0].ID != anchor.ID || !objects[0].Vector {
+			t.Fatalf("unified segment after replay: %+v", objects)
+		}
+	}
+	routes := []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}
+	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
+		hits, err := f.store.Search(f.ctx, routes, corpus.Scope{Organization: f.org}, retrieval.Request{
+			Query: "harbour", Vector: vector, Mode: mode, GroupBy: "record", K: 2,
+		})
+		if err != nil || len(hits) != 2 || hits[0].SegmentID == hits[1].SegmentID {
+			t.Fatalf("mixed %s search: %+v, %v", mode, hits, err)
+		}
+	}
 }

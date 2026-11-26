@@ -57,6 +57,7 @@
       "environment": {
         "AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED": "true",
         "AUTOSCHEMA_ENABLED": "false",
+        "GRPC_PORT": "50051",
         "DEFAULT_VECTORIZER_MODULE": "none",
         "PERSISTENCE_DATA_PATH": "/var/lib/weaviate",
         "DEFAULT_QUANTIZATION": "rq-8",

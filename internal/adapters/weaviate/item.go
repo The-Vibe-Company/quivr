@@ -20,6 +20,7 @@ import (
 )
 
 const itemKind = "itemKind"
+const segmentKind = "segment"
 const passageText = "passageText"
 const maxItemPassages = 2400
 
@@ -163,32 +164,39 @@ func (r itemRow) candidate(dense bool) content.Candidate {
 	}
 	return content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, VersionID: r.VersionID, Score: score}
 }
-func (s *Store) itemQuery(ctx context.Context, collection, branch, where string, limit int, text bool) ([]itemRow, error) {
-	fields := "segmentId generationId versionId"
-	if text {
-		fields += " passageText"
+func (s *Store) searchRows(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, item, text bool) ([]itemRow, error) {
+	fields := []string{"segmentId", "generationId"}
+	if item {
+		fields = append(fields, "versionId")
 	}
-	query := fmt.Sprintf("{Get{%s(%swhere:%s,limit:%d){%s _additional{score distance}}}}", collection, branch, where, limit, fields)
+	if text {
+		fields = append(fields, passageText)
+	}
+	responseLimit := 2 << 20
+	if text {
+		// The bounded window can carry more text than a 128-row page.
+		responseLimit = 16 << 20
+	}
+	if s.grpc != nil {
+		return s.grpcSearchRows(ctx, collection, branch, where, order, limit, fields, responseLimit, item)
+	}
+	query := fmt.Sprintf("{Get{%s(%s%swhere:%s,limit:%d){%s _additional{score distance}}}}",
+		collection, branch.graphql(), order.graphql(), where, limit, strings.Join(fields, " "))
 	var out struct {
 		Data struct {
 			Get map[string][]itemRow `json:"Get"`
 		} `json:"data"`
 		Errors []any `json:"errors"`
 	}
-	responseLimit := int64(2 << 20)
-	if text {
-		// The bounded window can carry more text than a 128-row page.
-		responseLimit = 16 << 20
-	}
 	reader := s
-	if _, bounded := ctx.Deadline(); bounded && s.Client.Timeout != 0 {
-		// Search is already bounded by its caller. Keep the shared transport
-		// and leave the client used for projection writes alone.
+	if _, bounded := ctx.Deadline(); item && bounded && s.Client.Timeout != 0 {
+		// Item search is already bounded by its caller. Keep the shared
+		// transport and leave the client used for projection writes alone.
 		client := *s.Client
 		client.Timeout = 0
 		reader = &Store{Endpoint: s.Endpoint, Client: &client, apiKey: s.apiKey}
 	}
-	if _, err := reader.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, responseLimit); err != nil {
+	if _, err := reader.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, int64(responseLimit)); err != nil {
 		return nil, err
 	}
 	if len(out.Errors) > 0 {
@@ -201,14 +209,14 @@ func (s *Store) itemQuery(ctx context.Context, collection, branch, where string,
 	return rows, nil
 }
 
-func identityConditions(q retrieval.Request) []string {
-	var out []string
+func identityConditions(q retrieval.Request) []filter {
+	var out []filter
 	for _, field := range []struct {
 		name   string
 		values []string
 	}{{"recordId", q.RecordIDs}, {"versionId", q.VersionIDs}} {
 		if len(field.values) > 0 {
-			var choices []string
+			var choices []filter
 			for _, v := range field.values {
 				choices = append(choices, equal(field.name, v))
 			}
@@ -218,26 +226,26 @@ func identityConditions(q retrieval.Request) []string {
 	return out
 }
 
-func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, kind string) (string, error) {
-	var clauses []string
+func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, kind string) (filter, error) {
+	var clauses []filter
 	for _, r := range routes {
 		if !className.MatchString(r.Generation.Collection) || r.Generation.ID == "" {
-			return "", errors.New("invalid projection route")
+			return filter{}, errors.New("invalid projection route")
 		}
 		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
 		if err != nil {
-			return "", err
+			return filter{}, err
 		}
 		if len(missing) > 0 {
 			continue
 		}
 		if len(typed) > 0 && !r.Generation.MetadataProjected {
-			return "", retrieval.ErrMetadataFilterUnavailable
+			return filter{}, retrieval.ErrMetadataFilterUnavailable
 		}
 		if err = s.ensureMetadata(ctx, r.Generation); err != nil {
-			return "", err
+			return filter{}, err
 		}
-		values := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
+		values := []filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
 		if kind != "item" {
 			values = append(values, projectionOwnerFilter(r.Generation, q.EvaluationPlugin))
 		}
@@ -247,17 +255,19 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		clauses = append(clauses, and(values...))
 	}
 	if len(clauses) == 0 {
-		return "", nil
+		return filter{}, nil
 	}
 	kinds := equal(itemKind, kind)
 	if kind == "vector" {
 		// Include earlier enriched objects with the passage kind; nearVector
 		// only scores objects carrying this target vector.
-		kinds = or(kinds, equal(itemKind, "passage"))
+		kinds = or(kinds, equal(itemKind, "passage"), equal(itemKind, segmentKind))
+	} else if kind == "passage" {
+		kinds = or(kinds, equal(itemKind, segmentKind))
 	}
-	all := []string{equal("organization", scope.Organization), kinds, or(clauses...)}
+	all := []filter{equal("organization", scope.Organization), kinds, or(clauses...)}
 	if len(q.SourceNamespaces) > 0 {
-		var namespaces []string
+		var namespaces []filter
 		for _, v := range q.SourceNamespaces {
 			namespaces = append(namespaces, equal(sourceNamespaceProperty, v))
 		}
@@ -465,7 +475,7 @@ func pickBestPassage(group []itemRow, query []passageTerms) itemRow {
 	return group[bestIdx]
 }
 
-const passageOrder = `sort:[{path:["segmentId"],order:asc}],`
+var passageOrder = searchOrder{field: "segmentId"}
 
 func passageSelectionLimit(q retrieval.Request, limit int) int {
 	if q.Limit > 0 {
@@ -491,9 +501,9 @@ func tailPassageScanLimit(itemCount int) int {
 	return min(maxTailPassageScan, max(itemCount, itemCount*passagesPerTailItem))
 }
 
-func versionFilter(items []content.Candidate) string {
+func versionFilter(items []content.Candidate) filter {
 	seen := make(map[string]bool, len(items))
-	ids := make([]string, 0, len(items))
+	ids := make([]filter, 0, len(items))
 	for _, c := range items {
 		if seen[c.VersionID] {
 			continue
@@ -541,7 +551,7 @@ func missingCandidates(items []content.Candidate, present map[string]itemRow) []
 
 // recoverMissingPassages guarantees that a high-passage item filling a shared
 // segmentId-ordered scan window cannot starve other ranked versions.
-func (s *Store) recoverMissingPassages(ctx context.Context, collection, passageWhere string, missing []content.Candidate, perVersionLimit int) ([]itemRow, error) {
+func (s *Store) recoverMissingPassages(ctx context.Context, collection string, passageWhere filter, missing []content.Candidate, perVersionLimit int) ([]itemRow, error) {
 	seen := make(map[string]bool, len(missing))
 	versions := make([]string, 0, len(missing))
 	for _, c := range missing {
@@ -559,7 +569,7 @@ func (s *Store) recoverMissingPassages(ctx context.Context, collection, passageW
 	group.SetLimit(missingPassageConcurrency)
 	for i, ver := range versions {
 		group.Go(func() error {
-			rows, err := s.itemQuery(gctx, collection, passageOrder, and(passageWhere, equal("versionId", ver)), perVersionLimit, false)
+			rows, err := s.searchRows(gctx, collection, searchBranch{}, and(passageWhere, equal("versionId", ver)), passageOrder, perVersionLimit, true, false)
 			results[i] = rows
 			return err
 		})
@@ -577,20 +587,27 @@ func (s *Store) recoverMissingPassages(ctx context.Context, collection, passageW
 // Choose a representative only where text affects the answer. Ungrouped
 // candidates all keep their segment IDs. With relative-score fusion a dense
 // match supplies the representative and the sparse score is independent of it.
-func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection, where string, best map[string]itemRow, ambiguous map[string][]itemRow, query []passageTerms) (bool, error) {
+func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string, where filter, best map[string]itemRow, ambiguous map[string][]itemRow, query []passageTerms) (bool, error) {
 	if len(ambiguous) == 0 {
 		return false, nil
 	}
 	// Pin the text read to the canonical rows in the metadata window.
 	// The same segment ID can appear in more than one generation.
-	var ids []string
+	var rows []itemRow
 	for _, group := range ambiguous {
-		for _, row := range group {
-			ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
-		}
+		rows = append(rows, group...)
 	}
-	sort.Strings(ids)
-	textRows, err := s.itemQuery(ctx, collection, passageOrder, and(where, or(ids...)), len(ids), true)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].GenerationID == rows[j].GenerationID {
+			return rows[i].SegmentID < rows[j].SegmentID
+		}
+		return rows[i].GenerationID < rows[j].GenerationID
+	})
+	ids := make([]filter, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
+	}
+	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, or(ids...)), passageOrder, len(ids), true, true)
 	if errors.Is(err, errResponseLimit) {
 		// Retain the canonical first passage already captured per item in the
 		// metadata window for byte-limit recovery.
@@ -702,7 +719,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 
 func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartition, scope corpus.Scope, q retrieval.Request, limit int, grouped bool, sparse map[string]content.Candidate, densePassages func() map[string]content.Candidate) error {
 	where, err := s.itemWhere(ctx, p.routes, scope, q, "item")
-	if err != nil || where == "" {
+	if err != nil || where.operator == 0 {
 		return err
 	}
 	requests := itemBM25(p, q.Query)
@@ -715,7 +732,7 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		copies, copyCtx := errgroup.WithContext(ctx)
 		for i, branch := range requests {
 			copies.Go(func() error {
-				rows, err := s.itemQuery(copyCtx, collection, branch, where, depth, false)
+				rows, err := s.searchRows(copyCtx, collection, branch, where, searchOrder{}, depth, true, false)
 				results[i] = rows
 				return err
 			})
@@ -745,7 +762,7 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		var exhausted bool
 		if !grouped {
 			scanLimit := min(maxItemPassages, max(limit, topPassageScanLimit(len(ranked))))
-			rows, err = s.itemQuery(ctx, collection, passageOrder, and(passageWhere, versionFilter(ranked)), scanLimit, false)
+			rows, err = s.searchRows(ctx, collection, searchBranch{}, and(passageWhere, versionFilter(ranked)), passageOrder, scanLimit, true, false)
 			if err != nil {
 				return err
 			}
@@ -778,13 +795,13 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 	return nil
 }
 
-func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, passageWhere string, ranked []content.Candidate, query []passageTerms, selectK int, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
+func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection string, passageWhere filter, ranked []content.Candidate, query []passageTerms, selectK int, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
 	topCount := min(len(ranked), selectK)
 	top := ranked[:topCount]
 	tail := ranked[topCount:]
 
 	topLimit := topPassageScanLimit(len(top))
-	topRows, err := s.itemQuery(ctx, collection, passageOrder, and(passageWhere, versionFilter(top)), topLimit, false)
+	topRows, err := s.searchRows(ctx, collection, searchBranch{}, and(passageWhere, versionFilter(top)), passageOrder, topLimit, true, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -845,7 +862,7 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 		tailLimit := tailPassageScanLimit(len(tailNeed))
 		tailWhere := and(passageWhere, versionFilter(tailNeed))
 		fetchTail := func(tailCtx context.Context, perMissing int) (map[string]itemRow, map[string][]itemRow, error) {
-			tailRows, err := s.itemQuery(tailCtx, collection, passageOrder, tailWhere, tailLimit, false)
+			tailRows, err := s.searchRows(tailCtx, collection, searchBranch{}, tailWhere, passageOrder, tailLimit, true, false)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -930,8 +947,8 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 	return selected, exhausted, nil
 }
 
-func itemBM25(p *itemPartition, query string) []string {
-	var branches []string
+func itemBM25(p *itemPartition, query string) []searchBranch {
+	var branches []searchBranch
 	for _, a := range append([]keywords.Analyzer{{}}, p.analyzers...) {
 		text := query
 		if a.Name != "" {
@@ -951,15 +968,14 @@ func itemBM25(p *itemPartition, query string) []string {
 			}
 			props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
 		}
-		encoded, _ := json.Marshal(props)
-		branches = append(branches, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(text), encoded))
+		branches = append(branches, searchBranch{mode: "lexical", query: text, properties: props})
 	}
 	return branches
 }
 
 func (s *Store) itemDense(ctx context.Context, collection string, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, limit int, grouped bool) (map[string]content.Candidate, error) {
 	where, err := s.itemWhere(ctx, routes, scope, q, "vector")
-	if err != nil || where == "" {
+	if err != nil || where.operator == 0 {
 		return nil, err
 	}
 	target := ""
@@ -977,15 +993,14 @@ func (s *Store) itemDense(ctx context.Context, collection string, routes []retri
 			return nil, err
 		}
 	}
-	vector, _ := json.Marshal(q.Vector)
-	branch := fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]},", vector, quote(target))
+	branch := searchBranch{mode: "semantic", vector: q.Vector, target: target}
 	dense := map[string]content.Candidate{}
 	maxDepth := limit
 	if grouped {
 		maxDepth = min(maxItemPassages, max(limit, min(maxDensePassageScan, max(minDensePassageScan, limit*4))))
 	}
 	for depth := limit; ; depth = min(maxDepth, depth*2) {
-		rows, err := s.itemQuery(ctx, collection, branch, where, depth, false)
+		rows, err := s.searchRows(ctx, collection, branch, where, searchOrder{}, depth, true, false)
 		if err != nil {
 			return nil, err
 		}

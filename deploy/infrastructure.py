@@ -35,7 +35,7 @@ TEMPORAL_KEYS = {
 }
 WEAVIATE_KEYS = {
     'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED', 'AUTOSCHEMA_ENABLED',
-    'DEFAULT_VECTORIZER_MODULE', 'PERSISTENCE_DATA_PATH', 'DEFAULT_QUANTIZATION',
+    'GRPC_PORT', 'DEFAULT_VECTORIZER_MODULE', 'PERSISTENCE_DATA_PATH', 'DEFAULT_QUANTIZATION',
     'ASYNC_INDEXING', 'PERSISTENCE_MEMTABLES_MAX_SIZE_MB', 'RAFT_BOOTSTRAP_TIMEOUT', 'GOMEMLIMIT',
 }
 AUTOSCALER_KEYS = {
@@ -379,6 +379,8 @@ def safe_environment(name, value):
         valid = value in ('rq-8', 'none', 'rq-1', 'pq', 'bq', 'sq')
     elif name == 'DEFAULT_VECTORIZER_MODULE':
         valid = value == 'none'
+    elif name == 'GRPC_PORT':
+        valid = value == '50051'
     elif name == 'PERSISTENCE_DATA_PATH':
         valid = value == '/var/lib/weaviate'
     elif name.endswith(('MEMTABLES_MAX_SIZE_MB', 'BOOTSTRAP_TIMEOUT', 'MAX_CONNECTIONS',

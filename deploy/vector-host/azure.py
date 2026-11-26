@@ -432,6 +432,7 @@ def _provision(args, context):
         az(['tag', 'update', '--operation', 'Merge', '--resource-id', vm['id'],
             '--tags', f'{APPLIED_TAG}={fingerprint}'])
     return {'status': status, 'weaviate_url': 'https://' + hostname,
+            'weaviate_grpc_address': hostname + ':443',
             'resolved_weaviate_limits': {**desired, 'cpus': cpus},
             'host_check': 'Run host.py check on the VM; validate protected requests and engine searches.'}
 

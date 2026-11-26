@@ -76,6 +76,7 @@ def assets(settings, uuid='UNMOUNTED'):
     proxy_config = ('{\n  admin off\n  auto_https disable_redirects\n}\n'
                     + settings['hostname'] + ' {\n  tls {\n    issuer acme {\n'
                     '      disable_http_challenge\n    }\n  }\n'
+                    f"  reverse_proxy /weaviate.v1.Weaviate/* h2c://weaviate:{spec['environment']['GRPC_PORT']}\n"
                     '  reverse_proxy weaviate:8080\n}\n')
     # Own table only; do not flush the machine's or Docker's rules. The forward
     # hook runs after Docker, so ACCEPT in Docker cannot bypass our policy.

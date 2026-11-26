@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 // batchProjectionHTTP supplies only the remote object API. Publication,
@@ -236,9 +237,17 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					// Repair the corrupted provider fixture before exercising the normal restart.
 					h.objects[h.submitted[0]]["vectors"] = map[string]any{"semantic_text_v1": []float32{1}}
 				}
+				if mode.item && fault == "removed while batching" {
+					// A unified segment disappeared with its vectors. A
+					// subsequent embedding replay requires publication first.
+					if err := publish(); !errors.Is(err, retrieval.ErrProjectionMissing) {
+						t.Fatalf("retry without segment = %v", err)
+					}
+					return
+				}
 				prior := map[string]bool{}
-				for id := range h.objects {
-					prior[id] = true
+				for id, object := range h.objects {
+					prior[id] = !embedding || !mode.item || object["vectors"] != nil
 				}
 				beforeRetry := len(h.submitted)
 				s = weaviate.New("http://projection.invalid")
@@ -257,7 +266,7 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					}
 				}
 				wantObjects := segmentCount
-				if embedding {
+				if embedding && !mode.item {
 					wantObjects *= 2
 				}
 				if mode.item {

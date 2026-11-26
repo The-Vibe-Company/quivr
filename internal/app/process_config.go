@@ -51,6 +51,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 	cfg.LogLevel = level
 	cfg.Instance = override("QUIVR_INSTANCE", cfg.Instance)
 	cfg.Environment = override("QUIVR_ENVIRONMENT", cfg.Environment)
+	cfg.WeaviateGRPCAddress = override("WEAVIATE_GRPC_ADDRESS", cfg.WeaviateGRPCAddress)
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
