@@ -1398,9 +1398,10 @@
       "valid": false,
       "schema_valid": false,
       "errors": [
+        "incompatible_plugin_api",
         "schema_violation"
       ],
-      "description": "Zero dimensions, an unknown metric and an unknown modality."
+      "description": "Zero dimensions, an unknown metric and an image modality outside the declared Plugin API range."
     },
     {
       "file": "requests/ingestion/segment-and-embed.json",
@@ -2764,6 +2765,54 @@
       "request": "requests/connector/fetch.json",
       "manifest": "manifests/valid/connector-ordered-019.yaml",
       "description": "Repeated revisions require the optional API 0.19 ordered-record flag; every revision remains subject to item validation."
+    },
+    {
+      "file": "manifests/valid/ingestion-multimodal.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.20 ingestion manifest declaring an image Cross-modal Vector Space."
+    },
+    {
+      "file": "manifests/invalid/ingestion-image-plugin-api-0.19.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Image vector spaces require a plugin_api range admitting Plugin API 0.20."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-blob.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Multimodal segment_and_embed request carrying a signed Blob Part reference."
+    },
+    {
+      "file": "responses/ingestion/segment-and-embed-region.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion-multimodal.yaml",
+      "request": "requests/ingestion/segment-and-embed-blob.json",
+      "description": "Valid image region segment with normalized bounding-box provenance."
+    },
+    {
+      "file": "responses/ingestion/segment-and-embed-region-oob.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_region"
+      ],
+      "manifest": "manifests/valid/ingestion-multimodal.yaml",
+      "request": "requests/ingestion/segment-and-embed-blob.json",
+      "description": "Image region extending past x + width = 1 is rejected semantically."
     }
   ]
 }

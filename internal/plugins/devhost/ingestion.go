@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -44,14 +46,22 @@ type IngestionExpect struct {
 	LexicalText *bool             `json:"lexical_text,omitempty"`
 }
 
+type ingestionFixtureBlobPart struct {
+	Key       string `json:"key"`
+	Role      string `json:"role"`
+	Path      string `json:"path"`
+	MediaType string `json:"media_type"`
+}
+
 type ingestionFixture struct {
 	Ingestion struct {
-		Parts         []plugins.IngestionPart `json:"parts"`
-		Language      string                  `json:"language,omitempty"`
-		Configuration json.RawMessage         `json:"configuration,omitempty"`
-		Spaces        []string                `json:"spaces,omitempty"`
-		Queries       []string                `json:"queries,omitempty"`
-		Expect        *IngestionExpect        `json:"expect,omitempty"`
+		Parts         []plugins.IngestionPart    `json:"parts,omitempty"`
+		BlobParts     []ingestionFixtureBlobPart `json:"blob_parts,omitempty"`
+		Language      string                     `json:"language,omitempty"`
+		Configuration json.RawMessage            `json:"configuration,omitempty"`
+		Spaces        []string                   `json:"spaces,omitempty"`
+		Queries       []string                   `json:"queries,omitempty"`
+		Expect        *IngestionExpect           `json:"expect,omitempty"`
 	} `json:"ingestion"`
 }
 
@@ -72,6 +82,12 @@ type IngestionRun struct {
 }
 
 // BuildIngestionRun turns ingestion fixture bytes into a development request.
+func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugins.Issue) {
+	return BuildIngestionRunAt(raw, "", m)
+}
+
+// BuildIngestionRunAt turns ingestion fixture bytes into a development request,
+// resolving any relative blob_parts paths against baseDir.
 // The ids derive from the first 16 hex digits of the SHA-256 of the fixture
 // bytes (dev-invocation-…, dev-record-…, dev-version-…), with Corpus
 // dev-corpus, Organization dev-organization and idempotency key
@@ -79,7 +95,7 @@ type IngestionRun struct {
 // the first 200 code points of the first non-empty Part. Issues report an
 // invalid fixture, a configuration the manifest rejects, an undeclared space
 // or duplicate Part keys.
-func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugins.Issue) {
+func BuildIngestionRunAt(raw []byte, baseDir string, m *plugins.Manifest) (*IngestionRun, []plugins.Issue) {
 	if issues := plugins.ValidateDocument("ingestion-fixture.schema.json", raw); len(issues) > 0 {
 		return nil, issues
 	}
@@ -105,6 +121,40 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 		}
 		seen[p.Key] = true
 	}
+	var blobParts []plugins.IngestionBlobPart
+	for i, bp := range in.BlobParts {
+		if seen[bp.Key] {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/key", i),
+				Message: fmt.Sprintf("duplicate Part key %q; the Parts of a Record Version have unique keys", bp.Key)})
+		}
+		seen[bp.Key] = true
+		inputPath := filepath.FromSlash(bp.Path)
+		if !filepath.IsAbs(inputPath) && baseDir != "" {
+			inputPath = filepath.Join(baseDir, inputPath)
+		}
+		if resolved, err := filepath.EvalSymlinks(inputPath); err == nil {
+			inputPath = resolved
+		}
+		data, err := os.ReadFile(inputPath)
+		if err != nil {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/path", i),
+				Message: fmt.Sprintf("cannot read blob part %q: %v", bp.Path, err)})
+			continue
+		}
+		fileURL, err := FileURL(inputPath)
+		if err != nil {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/path", i),
+				Message: err.Error()})
+			continue
+		}
+		blobSum := sha256.Sum256(data)
+		blobDigest := hex.EncodeToString(blobSum[:])
+		blobParts = append(blobParts, plugins.IngestionBlobPart{
+			Key: bp.Key, Role: bp.Role, BlobID: "dev-blob-" + blobDigest[:16], MediaType: bp.MediaType,
+			SizeBytes: int64(len(data)), SHA256: blobDigest,
+			Reference: plugins.NormalizerReference{Kind: "file", URL: fileURL},
+		})
+	}
 	spaces := in.Spaces
 	if len(spaces) == 0 {
 		for id := range m.Contributions.Ingestion.Spaces {
@@ -121,13 +171,20 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 	if len(issues) > 0 {
 		return nil, issues
 	}
+	parts := in.Parts
+	if parts == nil {
+		parts = []plugins.IngestionPart{}
+	}
 	queries := in.Queries
 	if len(queries) == 0 {
-		for _, p := range in.Parts {
+		for _, p := range parts {
 			if runes := []rune(p.Text); len(runes) > 0 {
 				queries = []string{string(runes[:min(len(runes), defaultQueryRunes)])}
 				break
 			}
+		}
+		if len(queries) == 0 && len(blobParts) > 0 {
+			queries = []string{blobParts[0].Role}
 		}
 	}
 	sum := sha256.Sum256(raw)
@@ -136,8 +193,11 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 	body, err := plugins.BuildSegmentAndEmbedRequest(segmentAndEmbedRequest{
 		InvocationID: "dev-invocation-" + short, IdempotencyKey: "dev:" + digest, Contribution: "ingestion",
 		OrganizationID: "dev-organization", Configuration: config,
-		Version:  ingestionVersion{CorpusID: "dev-corpus", RecordID: "dev-record-" + short, RecordVersionID: "dev-version-" + short},
-		Language: in.Language, Parts: in.Parts, Spaces: spaces,
+		Version:   ingestionVersion{CorpusID: "dev-corpus", RecordID: "dev-record-" + short, RecordVersionID: "dev-version-" + short},
+		Language:  in.Language,
+		Parts:     parts,
+		BlobParts: blobParts,
+		Spaces:    spaces,
 	})
 	if err != nil {
 		return nil, []plugins.Issue{{Code: plugins.CodeSchema, Message: err.Error()}}
@@ -145,7 +205,7 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 	if issues := plugins.ValidateDocument("ingestion-segment-and-embed-request.schema.json", body); len(issues) > 0 {
 		return nil, issues
 	}
-	return &IngestionRun{Request: body, View: plugins.IngestionRequestView{Parts: in.Parts, Spaces: spaces}, Queries: queries, Expect: in.Expect, short: short, digest: digest, config: config}, nil
+	return &IngestionRun{Request: body, View: plugins.IngestionRequestView{Parts: parts, BlobParts: blobParts, Spaces: spaces}, Queries: queries, Expect: in.Expect, short: short, digest: digest, config: config}, nil
 }
 
 // WithInvocation returns the segment_and_embed request under another

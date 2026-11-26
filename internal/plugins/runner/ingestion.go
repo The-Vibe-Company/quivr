@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,6 +63,13 @@ func (r *run) ingestionFixtures(own []ownFixture) []ingestionRun {
 	var out []ingestionRun
 	var notes []string
 	normative, _ := fs.Glob(contracts.PluginFixtures(), "ingestion/*.json")
+	indexesText := false
+	for _, space := range r.m.Contributions.Ingestion.Spaces {
+		if slices.Contains(space.Indexes, "text") {
+			indexesText = true
+			break
+		}
+	}
 	for _, name := range normative {
 		raw, err := fs.ReadFile(contracts.PluginFixtures(), name)
 		if err != nil {
@@ -70,6 +79,10 @@ func (r *run) ingestionFixtures(own []ownFixture) []ingestionRun {
 		built, issues := devhost.BuildIngestionRun(r.configured(raw, "ingestion"), r.m)
 		if len(issues) > 0 {
 			notes = append(notes, fmt.Sprintf("%s skipped: %s", label, issues[0].Message))
+			continue
+		}
+		if len(built.View.BlobParts) == 0 && !indexesText {
+			notes = append(notes, fmt.Sprintf("%s skipped: declared spaces index no text Parts", label))
 			continue
 		}
 		out = append(out, ingestionRun{label: label, run: built})
@@ -86,7 +99,7 @@ func (r *run) ingestionFixtures(own []ownFixture) []ingestionRun {
 			check.Issues = append(check.Issues, plugins.Issue{Code: CodeInvalidFixture, Message: f.label + ": " + err.Error()})
 			continue
 		}
-		built, issues := devhost.BuildIngestionRun(raw, r.m)
+		built, issues := devhost.BuildIngestionRunAt(raw, filepath.Dir(f.path), r.m)
 		for _, issue := range issues {
 			issue.Message = f.label + ": " + issue.Message
 			check.Issues = append(check.Issues, issue)
@@ -151,8 +164,9 @@ func (r *run) ingestionResult(ctx, callCtx context.Context, result *devhost.Resu
 // invokeIngestion runs the invoke and replay checks on one fixture.
 func (r *run) invokeIngestion(ctx context.Context, ir ingestionRun) {
 	started := time.Now()
+	partCount := len(ir.run.View.Parts) + len(ir.run.View.BlobParts)
 	check := Check{ID: CheckInvoke, Contribution: ContributionIngestion, Fixture: ir.label,
-		Title: fmt.Sprintf("segments of %d Parts, each with a vector in %d spaces, answered within %d ms and accepted by the engine", len(ir.run.View.Parts), len(ir.run.View.Spaces), r.m.Contributions.Ingestion.TimeoutMS)}
+		Title: fmt.Sprintf("segments of %d Parts, each with a vector in %d spaces, answered within %d ms and accepted by the engine", partCount, len(ir.run.View.Spaces), r.m.Contributions.Ingestion.TimeoutMS)}
 	first, problem := r.callSegmentAndEmbed(ctx, ir.run.Request)
 	check.Issues = judgeSuccess(first, problem)
 	if len(check.Issues) == 0 {

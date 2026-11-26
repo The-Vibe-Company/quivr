@@ -49,7 +49,7 @@ def select(paths, full=False):
         full, reason = True, 'diff unavailable'
     documentation = tomllib.loads((ROOT / 'docs/inventory.toml').read_text())['pages']
     eval_groups = {g for g in all_groups if g.startswith('eval-')}
-    connector_plugins = {'rss', 'x-list', 'm365-mail', 'object-storage-archive'}
+    connector_plugins = {'rss', 'x-list', 'm365-mail', 'object-storage-archive', 'object-storage-prefix'}
     for path in paths or []:
         # Documentation can change lint/site inputs, but cannot change a runtime image.
         if path in documentation or path.startswith(('docs/', 'docs-site/')) or path.endswith('/README.md') or path in {'README.md', 'AGENTS.md', 'CLAUDE.md', 'CONTEXT.md', 'LICENSE'}:

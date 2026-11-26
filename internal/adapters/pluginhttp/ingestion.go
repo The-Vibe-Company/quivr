@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/normalization"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/call"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
@@ -26,6 +28,23 @@ type Ingestor struct {
 	// Live supplies the current serving build for execution-equivalent updates.
 	// The descriptor and work binding remain those of Pin.
 	Live *plugins.Live
+	// BlobSource and Signer resolve and presign verified Blob Parts for
+	// multimodal ingestion plugins (Plugin API 0.20).
+	BlobSource content.BlobSource
+	Signer     normalization.Signer
+}
+
+func (i Ingestor) indexesImage() bool {
+	in := i.contribution()
+	if in == nil {
+		return false
+	}
+	for _, space := range in.Spaces {
+		if slices.Contains(space.Indexes, "image") {
+			return true
+		}
+	}
+	return false
 }
 
 func (i Ingestor) serving() Ingestor {
@@ -126,25 +145,66 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	}
 	sort.Strings(ids)
 	parts := []plugins.IngestionPart{}
+	var blobParts []plugins.IngestionBlobPart
+	multimodal := i.Pin.Speaks(plugins.FeatureMultimodalIngestion) && i.indexesImage()
+	signTTL := time.Duration(i.contribution().TimeoutMS)*time.Millisecond + time.Minute
+	if signTTL < 2*time.Minute {
+		signTTL = 2 * time.Minute
+	}
 	for _, p := range v.Manifest.Parts {
-		if p.Content.Kind == "text" {
+		switch p.Content.Kind {
+		case "text":
 			parts = append(parts, plugins.IngestionPart{Key: p.Key, Role: p.Role, Text: p.Content.Text})
+		case "blob":
+			if !multimodal {
+				continue
+			}
+			if i.BlobSource == nil || i.Signer == nil {
+				return nil, fmt.Errorf("%w: blob storage signer is not configured for multimodal ingestion", ErrUnavailable)
+			}
+			blob, err := i.BlobSource.VerifiedBlob(ctx, org, p.Content.BlobID)
+			if err != nil {
+				return nil, i.refused("Blob Part %q (%s) is not a verified Blob: %v", p.Key, p.Content.BlobID, err)
+			}
+			signedURL, expiresAt, err := i.Signer.PresignGet(ctx, blob.Blob.Key, signTTL)
+			if err != nil {
+				return nil, fmt.Errorf("%w: presign blob part %q: %v", ErrUnavailable, p.Key, err)
+			}
+			mediaType := p.Content.MediaType
+			if mediaType == "" {
+				mediaType = blob.MediaType
+			}
+			blobParts = append(blobParts, plugins.IngestionBlobPart{
+				Key:       p.Key,
+				Role:      p.Role,
+				BlobID:    p.Content.BlobID,
+				MediaType: mediaType,
+				SizeBytes: blob.Blob.Size,
+				SHA256:    blob.Blob.SHA256,
+				Reference: plugins.NormalizerReference{
+					Kind:      "signed_url",
+					URL:       signedURL,
+					ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+				},
+			})
 		}
 	}
 	switch {
-	case len(parts) == 0:
+	case len(parts) == 0 && len(blobParts) == 0:
 		return nil, i.refused("the Version has no text Part to index")
 	case len(parts) > 256:
 		return nil, i.refused("the Version has %d text Parts; segment_and_embed takes at most 256", len(parts))
+	case len(blobParts) > 256:
+		return nil, i.refused("the Version has %d Blob Parts; segment_and_embed takes at most 256", len(blobParts))
 	}
 
 	request := plugins.SegmentAndEmbedRequest{InvocationID: plugins.InvocationID(), IdempotencyKey: plugins.IngestionKey(i.Pin.Generation(), org, v.ID, ids), Contribution: "ingestion",
-		OrganizationID: org, Configuration: i.Pin.Configuration, Version: plugins.IngestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, Spaces: ids}
+		OrganizationID: org, Configuration: i.Pin.Configuration, Version: plugins.IngestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, BlobParts: blobParts, Spaces: ids}
 	body, err := plugins.BuildSegmentAndEmbedRequest(request)
 	if err != nil {
 		return nil, err
 	}
-	view := plugins.IngestionRequestView{Parts: parts, Spaces: ids}
+	view := plugins.IngestionRequestView{Parts: parts, BlobParts: blobParts, Spaces: ids}
 	m := &i.Pin.Manifest
 	started := time.Now()
 	result, err := call.Invoke(ctx, i.Pin, call.SegmentAndEmbed, call.Bytes(body), func(ctx context.Context, b []byte) []plugins.Issue {
@@ -171,7 +231,20 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 		for k, r := range s.SourceRanges {
 			ranges[k] = content.SourceRange{PartKey: r.PartKey, Start: r.Start, End: r.End}
 		}
-		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance, SourceRanges: ranges, SourceSeparator: s.SourceSeparator}, Vectors: vectors}
+		var region *content.ImageRegion
+		if s.Region != nil {
+			region = &content.ImageRegion{
+				CoordinateSystem: s.Region.CoordinateSystem,
+				X:                s.Region.X,
+				Y:                s.Region.Y,
+				Width:            s.Region.Width,
+				Height:           s.Region.Height,
+				ImageWidth:       s.Region.ImageWidth,
+				ImageHeight:      s.Region.ImageHeight,
+				Label:            s.Region.Label,
+			}
+		}
+		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance, SourceRanges: ranges, SourceSeparator: s.SourceSeparator, Region: region}, Vectors: vectors}
 	}
 	return out, nil
 }

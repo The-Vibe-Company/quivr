@@ -1,0 +1,17 @@
+{
+  "description": "Synthetic PNG image embedded into the crossmodal.image.vision Cross-modal Vector Space with natural-language queries.",
+  "ingestion": {
+    "blob_parts": [
+      {
+        "key": "image",
+        "role": "image",
+        "path": "sample-red.png",
+        "media_type": "image/png"
+      }
+    ],
+    "queries": [
+      "bright red square",
+      "dark blue landscape"
+    ]
+  }
+}

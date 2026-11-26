@@ -19,6 +19,7 @@ type SegmentInput struct {
 	Provenance      json.RawMessage
 	SourceRanges    []SourceRange
 	SourceSeparator string
+	Region          *ImageRegion
 }
 
 // StoredSegmentation is a segmentation as PostgreSQL keeps it: its identity,
@@ -51,8 +52,13 @@ type SegmentationStore interface {
 func PluginSegmentation(org string, v Version, recipe string, provenance json.RawMessage, in []SegmentInput) (Segmentation, error) {
 	out := Segmentation{ID: StableID("segmentation", org, v.ID, recipe), VersionID: v.ID, Recipe: recipe, Provenance: canonical(provenance)}
 	parts := map[string]string{}
+	blobParts := map[string]string{}
 	title, titleKey, titles := "", "", 0
 	for _, p := range v.Manifest.Parts {
+		if p.Content.Kind == "blob" {
+			blobParts[p.Key] = p.Content.BlobSHA256
+			continue
+		}
 		if p.Content.Kind != "text" {
 			continue
 		}
@@ -68,6 +74,21 @@ func PluginSegmentation(org string, v Version, recipe string, provenance json.Ra
 	sources := newSourceParts(v)
 	empty := Hash(nil)
 	for i, s := range in {
+		if blobSHA, isBlob := blobParts[s.PartKey]; isBlob {
+			if s.Start != 0 || s.End != 0 || len(s.SourceRanges) > 0 || !s.Region.Valid() {
+				return out, ErrInvalid
+			}
+			region := *s.Region
+			d := SegmentDerivation{Ordinal: i, NormalizedSHA256: blobSHA, ModelInputSHA256: empty,
+				LexicalText: s.LexicalText, Provenance: canonical(s.Provenance), Region: &region}
+			segment := Segment{PartKey: s.PartKey, Text: "", Start: 0, End: 0, Title: title, TitleKey: titleKey, Derivation: d}
+			segment.ID = SegmentID(org, out.ID, segment)
+			out.Segments = append(out.Segments, segment)
+			continue
+		}
+		if s.Region != nil {
+			return out, ErrInvalid
+		}
 		text, ok := parts[s.PartKey]
 		runes := []rune(text)
 		if !ok || s.Start < 0 || s.End < s.Start || s.End > len(runes) {
@@ -117,7 +138,7 @@ func (s Service) PluginSegmentationOf(ctx context.Context, org string, v Version
 	}
 	in := make([]SegmentInput, len(stored.Segments))
 	for i, p := range stored.Segments {
-		in[i] = SegmentInput{PartKey: p.PartKey, Start: p.Start, End: p.End, LexicalText: p.Derivation.LexicalText, Provenance: p.Derivation.Provenance, SourceRanges: p.Derivation.SourceRanges, SourceSeparator: p.Derivation.SourceSeparator}
+		in[i] = SegmentInput{PartKey: p.PartKey, Start: p.Start, End: p.End, LexicalText: p.Derivation.LexicalText, Provenance: p.Derivation.Provenance, SourceRanges: p.Derivation.SourceRanges, SourceSeparator: p.Derivation.SourceSeparator, Region: p.Derivation.Region}
 	}
 	seg, err := PluginSegmentation(org, v, recipe, stored.Provenance, in)
 	if err != nil {

@@ -3,12 +3,18 @@ package quivrplugin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
+	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -49,6 +55,103 @@ type IngestPart struct {
 	Text string `json:"text"`
 }
 
+// BlobReference locates a verified Blob Part (file or signed_url).
+type BlobReference struct {
+	Kind      string `json:"kind"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+// IngestBlobPart is one verified Blob Part passed by reference (Plugin API 0.20).
+type IngestBlobPart struct {
+	Key       string        `json:"key"`
+	Role      string        `json:"role"`
+	BlobID    string        `json:"blob_id"`
+	MediaType string        `json:"media_type"`
+	SizeBytes int64         `json:"size_bytes"`
+	SHA256    string        `json:"sha256"`
+	Reference BlobReference `json:"reference"`
+}
+
+// ReadBlob reads a verified Blob Part up to maxBytes (or its declared size),
+// refusing HTTP redirects and verifying both byte length and SHA-256.
+// Input URLs never appear in error messages.
+func (p IngestBlobPart) ReadBlob(ctx context.Context, maxBytes int64) ([]byte, error) {
+	if p.SizeBytes < 0 || p.SizeBytes == math.MaxInt64 {
+		return nil, TerminalIngestError("invalid_input", "invalid blob size")
+	}
+	if maxBytes > 0 && p.SizeBytes > maxBytes {
+		return nil, TerminalIngestError("blob_too_large", fmt.Sprintf("blob part %q exceeds max size of %d bytes", p.Key, maxBytes))
+	}
+	var reader io.ReadCloser
+	if p.Reference.Kind == "file" {
+		u, err := url.Parse(p.Reference.URL)
+		if err != nil || (u.Host != "" && u.Host != "localhost") {
+			return nil, TerminalIngestError("invalid_input", "invalid local blob reference")
+		}
+		f, err := os.Open(u.Path)
+		if err != nil {
+			return nil, RetryableIngestError("input_unavailable", "cannot read blob part")
+		}
+		reader = f
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Reference.URL, nil)
+		if err != nil {
+			return nil, TerminalIngestError("invalid_input", "invalid blob reference")
+		}
+		InjectTrace(ctx, req.Header)
+		client := &http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, RetryableIngestError("input_unavailable", "cannot read blob part")
+		}
+		reader = resp.Body
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			reader.Close()
+			if resp.StatusCode >= 500 || slices.Contains([]int{401, 403, 408, 425, 429}, resp.StatusCode) {
+				return nil, RetryableIngestError("input_unavailable", "blob storage service unavailable")
+			}
+			return nil, TerminalIngestError("input_unavailable", "blob storage service refused the read")
+		}
+	}
+	defer reader.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	limit := p.SizeBytes + 1
+	if maxBytes > 0 && maxBytes+1 < limit {
+		limit = maxBytes + 1
+	}
+	b, err := io.ReadAll(io.LimitReader(reader, limit))
+	if err != nil {
+		return nil, RetryableIngestError("input_unavailable", "cannot read blob part")
+	}
+	if maxBytes > 0 && int64(len(b)) > maxBytes {
+		return nil, TerminalIngestError("blob_too_large", fmt.Sprintf("blob part %q exceeds max size of %d bytes", p.Key, maxBytes))
+	}
+	sum := sha256.Sum256(b)
+	if int64(len(b)) != p.SizeBytes || hex.EncodeToString(sum[:]) != p.SHA256 {
+		return nil, TerminalIngestError("input_integrity", "blob part size or SHA-256 differs")
+	}
+	return b, nil
+}
+
+// ImageRegion is normalized bounding-box provenance for an image segment.
+type ImageRegion struct {
+	CoordinateSystem string  `json:"coordinate_system"`
+	X                float64 `json:"x"`
+	Y                float64 `json:"y"`
+	Width            float64 `json:"width"`
+	Height           float64 `json:"height"`
+	ImageWidth       int     `json:"image_width,omitempty"`
+	ImageHeight      int     `json:"image_height,omitempty"`
+	Label            string  `json:"label,omitempty"`
+}
+
 // IngestRequest is a validated segment_and_embed request.
 type IngestRequest struct {
 	InvocationID   string          `json:"invocation_id"`
@@ -62,8 +165,9 @@ type IngestRequest struct {
 		RecordVersionID string `json:"record_version_id"`
 	} `json:"version"`
 	// Language is a BCP 47 hint, empty when the core knows none.
-	Language string       `json:"language,omitempty"`
-	Parts    []IngestPart `json:"parts"`
+	Language  string           `json:"language,omitempty"`
+	Parts     []IngestPart     `json:"parts"`
+	BlobParts []IngestBlobPart `json:"blob_parts,omitempty"`
 	// Spaces are the declared spaces to embed: every segment carries one
 	// vector for each. Empty (Plugin API 0.8) asks for the segments only.
 	Spaces []string           `json:"spaces"`
@@ -100,6 +204,7 @@ type Segment struct {
 	SourceSeparator string               `json:"source_separator,omitempty"`
 	Vectors         map[string][]float32 `json:"vectors"`
 	LexicalText     string               `json:"lexical_text,omitempty"`
+	Region          *ImageRegion         `json:"region,omitempty"`
 	Provenance      map[string]any       `json:"provenance,omitempty"`
 }
 
@@ -298,12 +403,16 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, fmt.Sprintf("%d segments exceed max_segments %d", len(segments), in.Limits.MaxSegments)
 	}
 	lengths := map[string]int{}
+	blobParts := map[string]bool{}
 	partOrder := map[string]int{}
 	hasTitle := false
 	for index, part := range req.Parts {
 		lengths[part.Key] = utf8.RuneCountInString(part.Text)
 		partOrder[part.Key] = index
 		hasTitle = hasTitle || part.Role == "title"
+	}
+	for _, bp := range req.BlobParts {
+		blobParts[bp.Key] = true
 	}
 	seen := map[string]bool{}
 	for i := range segments {
@@ -312,11 +421,41 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		}
 		s := segments[i]
 		n, ok := lengths[s.PartKey]
-		if !ok || s.Start < 0 || s.Start > s.End || s.End > n {
-			return nil, fmt.Sprintf("segment %d: [%d, %d) is not inside Part %q", i, s.Start, s.End, s.PartKey)
+		isBlob := blobParts[s.PartKey]
+		switch {
+		case !ok && !isBlob:
+			return nil, fmt.Sprintf("segment %d: Part %q is not a Part of the request", i, s.PartKey)
+		case isBlob:
+			if compareVersions(p.m.pluginAPI, "0.20.0") < 0 {
+				return nil, fmt.Sprintf("segment %d references a Blob Part, which requires Plugin API 0.20.0", i)
+			}
+			if s.Start != 0 || s.End != 0 {
+				return nil, fmt.Sprintf("segment %d: Blob Part %q offsets must be [0, 0)", i, s.PartKey)
+			}
+			if s.Region == nil {
+				return nil, fmt.Sprintf("segment %d: Blob Part %q requires region provenance", i, s.PartKey)
+			}
+			if len(s.SourceRanges) > 0 || s.SourceSeparator != "" {
+				return nil, fmt.Sprintf("segment %d: Blob Part %q may not carry source ranges or separator", i, s.PartKey)
+			}
+		default:
+			if s.Start < 0 || s.Start > s.End || s.End > n {
+				return nil, fmt.Sprintf("segment %d: [%d, %d) is not inside Part %q", i, s.Start, s.End, s.PartKey)
+			}
+			if s.Start == s.End && !hasTitle {
+				return nil, fmt.Sprintf("segment %d is empty without a title Part", i)
+			}
+			if s.Region != nil {
+				return nil, fmt.Sprintf("segment %d: region applies only to Blob Parts", i)
+			}
 		}
-		if s.Start == s.End && !hasTitle {
-			return nil, fmt.Sprintf("segment %d is empty without a title Part", i)
+		if s.Region != nil {
+			if compareVersions(p.m.pluginAPI, "0.20.0") < 0 {
+				return nil, fmt.Sprintf("segment %d uses region, which requires Plugin API 0.20.0", i)
+			}
+			if problem := imageRegionProblem(s.Region); problem != "" {
+				return nil, fmt.Sprintf("segment %d: region: %s", i, problem)
+			}
 		}
 		if len(s.SourceRanges) > 0 || s.SourceSeparator != "" {
 			if compareVersions(p.m.pluginAPI, "0.17.0") < 0 {
@@ -332,8 +471,10 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		if utf8.RuneCountInString(s.SourceSeparator) > 16 {
 			return nil, fmt.Sprintf("segment %d: source separator must be at most 16 code points", i)
 		}
-		if problem := sourceRangesProblem(s, lengths, partOrder); problem != "" {
-			return nil, fmt.Sprintf("segment %d: %s", i, problem)
+		if !isBlob {
+			if problem := sourceRangesProblem(s, lengths, partOrder); problem != "" {
+				return nil, fmt.Sprintf("segment %d: %s", i, problem)
+			}
 		}
 		identity := sourceSegmentIdentity(s)
 		if seen[identity] {
@@ -375,7 +516,32 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 	return body, ""
 }
 
+func imageRegionProblem(r *ImageRegion) string {
+	if r.CoordinateSystem != "normalized_bbox" {
+		return "coordinate_system must be normalized_bbox"
+	}
+	for _, v := range []float64{r.X, r.Y, r.Width, r.Height} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return "coordinates must be finite"
+		}
+	}
+	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
+		return "coordinates must satisfy 0 <= x,y <= 1 and 0 < width,height <= 1"
+	}
+	if r.X+r.Width > 1+1e-6 || r.Y+r.Height > 1+1e-6 {
+		return "region extends outside normalized [0, 1] image frame"
+	}
+	if r.Label != "" && (!utf8.ValidString(r.Label) || strings.ContainsRune(r.Label, 0) || utf8.RuneCountInString(r.Label) > 128) {
+		return "label must be valid UTF-8 without NUL and at most 128 code points"
+	}
+	return ""
+}
+
 func sourceSegmentIdentity(s Segment) string {
+	if s.Region != nil {
+		return fmt.Sprintf("%s\x00region\x00%s\x00%.6f\x00%.6f\x00%.6f\x00%.6f\x00%s",
+			s.PartKey, s.Region.CoordinateSystem, s.Region.X, s.Region.Y, s.Region.Width, s.Region.Height, s.Region.Label)
+	}
 	if len(s.SourceRanges) == 0 {
 		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
 	}

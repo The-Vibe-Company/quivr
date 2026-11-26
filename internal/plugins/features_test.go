@@ -33,6 +33,7 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 		{plugins.FeatureConnectorAttachmentOnly, "0.14.0", "0.15.0"},
 		{plugins.FeatureMultiPartSegments, "0.16.0", "0.17.0"},
 		{plugins.FeatureConnectorOrderedRecords, "0.18.0", "0.19.0"},
+		{plugins.FeatureMultimodalIngestion, "0.19.0", "0.20.0"},
 	} {
 		t.Run(string(tc.feature), func(t *testing.T) {
 			if got := plugins.FeatureSince(tc.feature); got != tc.since {
@@ -72,6 +73,26 @@ func TestManifestSupportsMultiPartSegmentsOnlyForStrictNewRanges(t *testing.T) {
 			m := &plugins.Manifest{Compatibility: plugins.Compatibility{PluginAPI: tc.apiRange}}
 			if got := m.SupportsMultiPartSegments(); got != tc.want {
 				t.Fatalf("SupportsMultiPartSegments() = %v, want %v for %q", got, tc.want, tc.apiRange)
+			}
+		})
+	}
+}
+
+func TestManifestSupportsMultimodalIngestionOnlyForStrictNewRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		apiRange string
+		want     bool
+	}{
+		{name: "new range", apiRange: ">=0.20.0 <0.21.0", want: true},
+		{name: "old range", apiRange: ">=0.6.0 <0.20.0", want: false},
+		{name: "wide range", apiRange: ">=0.6.0 <0.21.0", want: false},
+		{name: "malformed range", apiRange: "not-a-range", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &plugins.Manifest{Compatibility: plugins.Compatibility{PluginAPI: tc.apiRange}}
+			if got := m.SupportsMultimodalIngestion(); got != tc.want {
+				t.Fatalf("SupportsMultimodalIngestion() = %v, want %v for %q", got, tc.want, tc.apiRange)
 			}
 		})
 	}

@@ -739,5 +739,18 @@ func (sv *server) candidate(h content.Hydrated, score float64, explanation strin
 			c.SourceRanges = append(c.SourceRanges, plugins.SourceRange{PartKey: r.PartKey, Start: r.Start, End: r.End})
 		}
 	}
+	if h.Segment.Derivation.Region != nil && sv.s.Ranker.Manifest().SupportsMultimodalIngestion() {
+		r := h.Segment.Derivation.Region
+		c.Region = &plugins.ImageRegion{
+			CoordinateSystem: r.CoordinateSystem,
+			X:                r.X,
+			Y:                r.Y,
+			Width:            r.Width,
+			Height:           r.Height,
+			ImageWidth:       r.ImageWidth,
+			ImageHeight:      r.ImageHeight,
+			Label:            r.Label,
+		}
+	}
 	return c
 }

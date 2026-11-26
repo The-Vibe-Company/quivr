@@ -14,12 +14,66 @@
     "ingestion": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "parts"
+      "anyOf": [
+        {
+          "required": [
+            "parts"
+          ],
+          "properties": {
+            "parts": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "blob_parts"
+          ],
+          "properties": {
+            "blob_parts": {
+              "minItems": 1
+            }
+          }
+        }
       ],
       "properties": {
         "parts": {
           "$ref": "ingestion-segment-and-embed-request.schema.json#/properties/parts"
+        },
+        "blob_parts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 256,
+          "description": "Local Blob Parts referenced relative to the fixture file.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "role",
+              "path",
+              "media_type"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "media_type": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+                "maxLength": 255
+              }
+            }
+          }
         },
         "language": {
           "$ref": "ingestion-segment-and-embed-request.schema.json#/properties/language"

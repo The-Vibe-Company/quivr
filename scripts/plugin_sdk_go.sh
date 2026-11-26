@@ -101,7 +101,11 @@ for mod in "$root"/plugins/*/go.mod; do
     for f in $(cat "$work/$id-fixtures.txt"); do fixtures+=(--fixture "$f"); done
     [ ${#fixtures[@]} -gt 0 ] || { echo "$helper wrote no fixtures" >&2; exit 1; }
   fi
-  "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
+  env_prefix=()
+  if grep -q "name: CROSSMODAL_API_KEY" quivr-plugin.yaml; then
+    env_prefix=(CROSSMODAL_API_KEY=crossmodal-certify-secret)
+  fi
+  env ${env_prefix[@]+"${env_prefix[@]}"} "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
   # A retrieval plugin (core-retrieve) declares no secret: its searches must replay instead.
   if grep -q "^  retrieval:" quivr-plugin.yaml; then

@@ -69,9 +69,9 @@
     },
     "parts": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 256,
-      "description": "The Version's canonical text Parts, in Manifest order, with unique keys. Blob Parts are not sent. Segment offsets address these texts.",
+      "description": "The Version's canonical text Parts, in Manifest order, with unique keys. Segment offsets address these texts.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -93,6 +93,15 @@
             "type": "string"
           }
         }
+      }
+    },
+    "blob_parts": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "description": "Since Plugin API 0.20. The Version's verified Blob Parts (for example images) with read references; bodies are never inline.",
+      "items": {
+        "$ref": "#/$defs/IngestionBlobPart"
       }
     },
     "spaces": {
@@ -128,6 +137,28 @@
       }
     }
   },
+  "anyOf": [
+    {
+      "properties": {
+        "parts": {
+          "minItems": 1
+        }
+      },
+      "required": [
+        "parts"
+      ]
+    },
+    {
+      "properties": {
+        "blob_parts": {
+          "minItems": 1
+        }
+      },
+      "required": [
+        "blob_parts"
+      ]
+    }
+  ],
   "allOf": [
     {
       "if": {
@@ -138,10 +169,60 @@
       "then": {
         "properties": {
           "parts": {
+            "minItems": 1,
             "maxItems": 1
+          },
+          "blob_parts": {
+            "maxItems": 0
           }
         }
       }
     }
-  ]
+  ],
+  "$defs": {
+    "IngestionBlobPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "role",
+        "blob_id",
+        "media_type",
+        "size_bytes",
+        "sha256",
+        "reference"
+      ],
+      "description": "One verified Blob Part passed to a multimodal ingestion plugin by reference.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blob_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "maxLength": 255
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reference": {
+          "$ref": "normalizer-request.schema.json#/properties/input/properties/reference"
+        }
+      }
+    }
+  }
 }

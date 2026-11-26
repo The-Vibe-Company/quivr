@@ -10052,6 +10052,8 @@ components:
             - coordinate_system
         availability:
           $ref: '#/components/schemas/Availability'
+        region:
+          $ref: '#/components/schemas/ImageRegion'
         explanation:
           type: string
           minLength: 1
@@ -10083,6 +10085,48 @@ components:
         not:
           required:
           - vector_space_id
+    ImageRegion:
+      type: object
+      additionalProperties: false
+      properties:
+        coordinate_system:
+          type: string
+          enum:
+          - normalized_bbox
+        x:
+          type: number
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          minimum: 0
+          maximum: 1
+        width:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        height:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        image_width:
+          type: integer
+          minimum: 1
+        image_height:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[^\x00]*$
+      required:
+      - coordinate_system
+      - x
+      - y
+      - width
+      - height
+      description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
     SearchResponse:
       type: object
       additionalProperties: false

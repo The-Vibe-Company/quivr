@@ -564,6 +564,21 @@ func (e FieldMappingType) Valid() bool {
 	}
 }
 
+// Defines values for ImageRegionCoordinateSystem.
+const (
+	NormalizedBbox ImageRegionCoordinateSystem = "normalized_bbox"
+)
+
+// Valid indicates whether the value is a known member of the ImageRegionCoordinateSystem enum.
+func (e ImageRegionCoordinateSystem) Valid() bool {
+	switch e {
+	case NormalizedBbox:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManifestContentKind.
 const (
 	Manifest ManifestContentKind = "manifest"
@@ -2401,6 +2416,21 @@ type FieldMappingRoles string
 // FieldMappingType defines model for FieldMapping.Type.
 type FieldMappingType string
 
+// ImageRegion Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+type ImageRegion struct {
+	CoordinateSystem ImageRegionCoordinateSystem `json:"coordinate_system"`
+	Height           float32                     `json:"height"`
+	ImageHeight      *int                        `json:"image_height,omitempty"`
+	ImageWidth       *int                        `json:"image_width,omitempty"`
+	Label            *string                     `json:"label,omitempty"`
+	Width            float32                     `json:"width"`
+	X                float32                     `json:"x"`
+	Y                float32                     `json:"y"`
+}
+
+// ImageRegionCoordinateSystem defines model for ImageRegion.CoordinateSystem.
+type ImageRegionCoordinateSystem string
+
 // IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. When the normalizer fails, the Version is quarantined with a Diagnostic on the Version read (or, on an optional text/* route, published through the built-in text path with provenance.normalization.fallback). Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written only by its normalizer output, published on the Version; a submission writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
 type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
@@ -3202,9 +3232,12 @@ type SearchHit struct {
 	ProjectionGenerationId string  `json:"projection_generation_id"`
 	Rank                   int     `json:"rank"`
 	RecordId               string  `json:"record_id"`
-	SegmentId              string  `json:"segment_id"`
-	SegmentationId         string  `json:"segmentation_id"`
-	SourceExcerpts         *[]struct {
+
+	// Region Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+	Region         *ImageRegion `json:"region,omitempty"`
+	SegmentId      string       `json:"segment_id"`
+	SegmentationId string       `json:"segmentation_id"`
+	SourceExcerpts *[]struct {
 		CoordinateSystem SearchHitSourceExcerptsCoordinateSystem `json:"coordinate_system"`
 		End              int                                     `json:"end"`
 		PartKey          string                                  `json:"part_key"`

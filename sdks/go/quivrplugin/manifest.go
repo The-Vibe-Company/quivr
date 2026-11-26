@@ -290,6 +290,13 @@ func loadManifest(path string) (*loadedManifest, error) {
 		if in.Paging && !features.speaks("ingestion_pages") {
 			return nil, fmt.Errorf("ingestion pages require Plugin API %s", FeatureSince["ingestion_pages"])
 		}
+		for spaceID, space := range in.Spaces {
+			for _, idx := range space.Indexes {
+				if idx == "image" && !features.speaks("multimodal_ingestion") {
+					return nil, fmt.Errorf("vector space %q indexes image content, which requires Plugin API %s", spaceID, FeatureSince["multimodal_ingestion"])
+				}
+			}
+		}
 		if in.TimeoutMS == 0 {
 			in.TimeoutMS = 30000
 		}

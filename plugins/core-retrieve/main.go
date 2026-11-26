@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -53,6 +54,15 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			for _, space := range pending[:min(8, len(pending))] {
 				next := c
 				next.Space = space.ID
+				// Cross-modal spaces that index non-text modalities (for example image)
+				// carry no lexical text in that space; query them by near_vector so
+				// text-only spaces keep hybrid fusion while image spaces rank cleanly.
+				if next.Primitive == quivrplugin.PrimitiveHybrid && len(space.Indexes) > 0 && !slices.Contains(space.Indexes, "text") {
+					next.Primitive = quivrplugin.PrimitiveNearVector
+					next.Field = ""
+					next.Alpha = nil
+					next.Fusion = ""
+				}
 				requests = append(requests, next)
 			}
 		}

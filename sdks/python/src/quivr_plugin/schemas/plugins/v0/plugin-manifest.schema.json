@@ -548,10 +548,11 @@
           "uniqueItems": true,
           "items": {
             "enum": [
-              "text"
+              "text",
+              "image"
             ]
           },
-          "description": "Modalities of the content this space embeds. Plugin API 0.6 knows only text."
+          "description": "Modalities of the content this space embeds. Plugin API 0.6 knows text; Plugin API 0.20 adds image."
         },
         "query_modalities": {
           "type": "array",
