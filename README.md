@@ -35,6 +35,9 @@ created by the Quivr team.
 - **Let AI agents use it.** `quivr mcp` lets an agent search Quivr and quote what it
   finds, with the source of every passage.
 
+Self-hosted processes accept credentials from dedicated environment variables or mounted
+files. [Secret bindings](https://docs.quivr.thevibecompany.co/reference/configuration#secret-bindings)
+
 ## How it works
 
 ```mermaid

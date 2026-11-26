@@ -17,6 +17,8 @@ import socket
 import re
 import urllib.parse
 
+import local_secrets
+
 
 SQL = """
 BEGIN READ ONLY;
@@ -48,7 +50,7 @@ COMMIT;
 
 
 def connection_environment(cfg: dict) -> dict:
-    url = urllib.parse.urlsplit(cfg['database_url'])
+    url = urllib.parse.urlsplit(cfg.get('database_url') or '')
     if url.scheme not in ('postgres', 'postgresql') or not url.hostname:
         raise ValueError('unsupported database configuration')
     # Credentials go through the child environment, never argv or report text.
@@ -96,7 +98,10 @@ def connection_environment(cfg: dict) -> dict:
 
 
 def snapshot(config: Path) -> dict:
-    child_env = connection_environment(json.loads(config.read_text()))
+    cfg = json.loads(config.read_text())
+    env = local_secrets.engine_environment(config)
+    cfg['database_url'] = local_secrets.read_secret(env, 'DATABASE_URL', cfg.get('database_url'))
+    child_env = connection_environment(cfg)
     result = subprocess.run(['psql', '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
                             input=SQL, text=True, env=child_env,
                             capture_output=True, timeout=40, check=False)

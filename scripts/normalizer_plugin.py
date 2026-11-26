@@ -212,7 +212,7 @@ def refused(stack, name, plugin, code):
     path.write_text(json.dumps(cfg))
     path.chmod(0o600)
     for command in ['api', 'worker']:
-        result = subprocess.run([str(stack.directory / 'quivr'), command], cwd=ROOT, env={**os.environ, 'QUIVR_CONFIG': str(path)}, capture_output=True, text=True, timeout=30)
+        result = subprocess.run([str(stack.directory / 'quivr'), command], cwd=ROOT, env=stack.engine_environment(path.name), capture_output=True, text=True, timeout=30)
         (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stdout + result.stderr)
         assert result.returncode != 0 and code in result.stdout, (name, command, result.returncode, result.stdout + result.stderr)
 

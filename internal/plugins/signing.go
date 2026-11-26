@@ -10,11 +10,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/secretinput"
 )
 
 // EnvSigningKeys maps plugin ids to independent key rings. Secrets are
@@ -56,7 +56,7 @@ func (k SigningKey) validAt(now int64) bool {
 // configuration must never leak into logs or public diagnostics.
 func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	var ring SigningKeys
-	if !uniqueJSON(raw) || json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
+	if !secretinput.UniqueJSON(raw) || json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	seen := map[string]bool{}
@@ -82,14 +82,42 @@ func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	return ring, nil
 }
 
+// ParseEngineSigningKeys checks the complete deployment map at startup.
+func ParseEngineSigningKeys(raw []byte) (map[string]SigningKeys, error) {
+	all, err := decodeEngineSigningKeys(raw)
+	if err != nil {
+		return nil, err
+	}
+	rings := make(map[string]SigningKeys, len(all))
+	for id, rawRing := range all {
+		ring, err := ParseSigningKeys(rawRing)
+		if id == "" || err != nil {
+			return nil, ErrSigningKeys
+		}
+		rings[id] = ring
+	}
+	return rings, nil
+}
+
 // EngineSigningKeys resolves one plugin's secret ring, including registry pins.
 func EngineSigningKeys(id string) (SigningKeys, error) {
-	var all map[string]json.RawMessage
-	raw := []byte(os.Getenv(EnvSigningKeys))
-	if !uniqueJSON(raw) || json.Unmarshal(raw, &all) != nil {
+	raw, err := secretinput.Read(EnvSigningKeys)
+	if err != nil {
 		return SigningKeys{}, ErrSigningKeys
 	}
+	all, err := decodeEngineSigningKeys([]byte(raw))
+	if err != nil {
+		return SigningKeys{}, err
+	}
 	return ParseSigningKeys(all[id])
+}
+
+func decodeEngineSigningKeys(raw []byte) (map[string]json.RawMessage, error) {
+	var all map[string]json.RawMessage
+	if !secretinput.UniqueJSON(raw) || json.Unmarshal(raw, &all) != nil || all == nil {
+		return nil, ErrSigningKeys
+	}
+	return all, nil
 }
 
 // EngineToken binds exact request bytes and the operation to a plugin audience.
@@ -164,48 +192,4 @@ func SigningContext(ctx context.Context, pin *Pin) (context.Context, error) {
 		return ctx, err
 	}
 	return WithRequestSigning(ctx, pin.Manifest.ID, ring), nil
-}
-
-// uniqueJSON refuses ambiguous operator key configuration at every object level.
-func uniqueJSON(raw []byte) bool {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	var value func() bool
-	value = func() bool {
-		token, err := d.Token()
-		if err != nil {
-			return false
-		}
-		switch token {
-		case json.Delim('{'):
-			seen := map[string]bool{}
-			for d.More() {
-				token, err := d.Token()
-				name, ok := token.(string)
-				if err != nil || !ok || seen[name] {
-					return false
-				}
-				seen[name] = true
-				if !value() {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim('}')
-		case json.Delim('['):
-			for d.More() {
-				if !value() {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim(']')
-		default:
-			return true
-		}
-	}
-	if !value() {
-		return false
-	}
-	_, err := d.Token()
-	return err == io.EOF
 }

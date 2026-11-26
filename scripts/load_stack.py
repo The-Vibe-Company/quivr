@@ -12,6 +12,7 @@ import uuid
 
 from local import CAPTURE_SECRET, GO, ROOT, Stack, MACOS, MODEL, DISK_LIMIT
 import ports
+import local_secrets
 
 PLUGIN = ROOT / 'tests/fakes/load-plugin'
 SERVICES = ('postgres', 'temporal', 'seaweed', 'weaviate')
@@ -21,8 +22,17 @@ STEPS = ('accepted', 'materialized', 'segmented', 'retrieval_ready', 'enriched',
 
 def runtime_env():
     # Provider keys, external proxy settings and QUIVR_* deployment overrides
-    # never reach a measured process. All connection settings come from our config.
+    # never reach a measured process. Connection settings come from the owned stack.
     return {k: os.environ[k] for k in ('PATH', 'HOME', 'TMPDIR', 'LANG') if k in os.environ}
+
+
+def engine_environment(config):
+    env = runtime_env()
+    # The measured engine uses the same index authentication as the stack.
+    for name in ('WEAVIATE_API_KEY', 'WEAVIATE_API_KEY_FILE'):
+        if name in os.environ:
+            env[name] = os.environ[name]
+    return local_secrets.engine_environment(config, env)
 
 
 def local_docker_host():
@@ -100,8 +110,7 @@ class LoadStack(Stack):
                              'url': f"http://127.0.0.1:{s['receiver_port']}/capture", 'secret': CAPTURE_SECRET}},
             'delivery': {'allow_private_destinations': True},
         }
-        if os.environ.get('WEAVIATE_API_KEY'):
-            self.cfg['weaviate_api_key'] = os.environ['WEAVIATE_API_KEY']
+        local_secrets.split_config(self.directory, self.cfg)
         self.write_config('config.json', {**self.cfg, 'listen': f"127.0.0.1:{s['api_port']}",
                                          'probe_listen': f"127.0.0.1:{s['probe_port']}"})
 
@@ -142,7 +151,7 @@ class LoadStack(Stack):
         self.compose('up', '-d', '--wait', '--wait-timeout', '180', *SERVICES)
         self.config()
         subprocess.run([str(self.directory / 'quivr'), 'migrate'],
-                       env={**runtime_env(), 'QUIVR_CONFIG': str(self.directory / 'config.json')},
+                       env=engine_environment(self.directory / 'config.json'),
                        stdout=subprocess.DEVNULL, check=True)
         child = self.process([str(self.directory / 'load-plugin')], 'fake-plugin', {
             'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(self.plugin_port),
@@ -154,7 +163,7 @@ class LoadStack(Stack):
                 cfg = self.write_config(f'{role}-{index}.json', {**self.cfg,
                       'listen': f'127.0.0.1:{address}', 'probe_listen': f'127.0.0.1:{probe}'})
                 child = self.process([str(self.directory / 'quivr'), role], f'{role}-{index}',
-                                     {'QUIVR_CONFIG': str(cfg)})
+                                     engine_environment(cfg))
                 target.append({'process': child, 'url': f'http://127.0.0.1:{address}'})
                 self.ready(child, f'http://127.0.0.1:{probe}/readyz')
 

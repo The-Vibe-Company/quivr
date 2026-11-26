@@ -31,6 +31,28 @@ class Isolation(unittest.TestCase):
             self.assertGreaterEqual(len(a.state[key]), 32, key)
         self.assertNotEqual(a.state['api_port'], b.state['api_port'])
 
+    def test_generated_configs_bind_credentials_without_storing_them(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, [])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')):
+            stack.config()
+        for name, token_name in (('config.json', 'admin'), ('worker.json', 'admin'),
+                                 ('short-retention.json', 'admin'), ('keyless.json', 'keyless'),
+                                 ('keyless-worker.json', 'keyless')):
+            with self.subTest(config=name):
+                path = stack.directory / name
+                raw = path.read_text()
+                for key in ('password', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'admin', 'keyless'):
+                    self.assertNotIn(stack.state[key], raw)
+                self.assertNotIn(local.CAPTURE_SECRET, raw)
+                bindings = stack.engine_environment(name)
+                keys = pathlib.Path(bindings['QUIVR_API_KEYS_FILE'])
+                self.assertEqual(stat.S_IMODE(keys.stat().st_mode), 0o600)
+                self.assertIn(stack.state[token_name], json.loads(keys.read_text()))
+                self.assertEqual('QUIVR_CREDENTIAL_KEY_FILE' in bindings, token_name == 'admin')
+                self.assertIn(stack.state['password'], pathlib.Path(bindings['DATABASE_URL_FILE']).read_text())
+
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])
         again = local.Stack(self.names[0])

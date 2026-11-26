@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
@@ -165,7 +164,11 @@ func (c DeliveryConfig) parse() (monitoring.RetryPolicy, time.Duration, error) {
 func validateDestinations(destinations map[string]monitoring.Destination, allowPrivate bool) error {
 	for id, d := range destinations {
 		if d.SecretEnv != "" {
-			d.Secret = os.Getenv(d.SecretEnv)
+			secret, err := boundSecret(d.SecretEnv, "destinations")
+			if err != nil {
+				return err
+			}
+			d.Secret = secret
 		}
 		target, err := url.Parse(d.URL)
 		_, secretErr := monitoring.ParseSecret(d.Secret)

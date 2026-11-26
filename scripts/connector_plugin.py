@@ -26,6 +26,7 @@ built with ``go build`` into the stack directory whenever the stack starts
 them. The Railway image pins the same plugins (deploy/railway/core-entrypoint.py
 ``CONNECTORS``).
 """
+import local_secrets
 import plugin_environment
 import base64, hashlib, hmac, json, os, pathlib, signal, subprocess, time, urllib.request
 
@@ -75,7 +76,7 @@ def signing_ring(stack, row):
 
 
 def engine_environment(stack, inherited=None):
-    keys = json.loads((inherited or {}).get('QUIVR_ENGINE_PLUGIN_KEYS') or os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
+    keys = json.loads((inherited or {}).get('QUIVR_ENGINE_PLUGIN_KEYS') or local_secrets.read_secret(os.environ, 'QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
     for row in first_party(stack):
         if row.get('signing_id'):
             keys[row['signing_id']] = signing_ring(stack, row)
