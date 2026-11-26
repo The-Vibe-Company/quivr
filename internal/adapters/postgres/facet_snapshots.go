@@ -71,11 +71,14 @@ type snapshotField struct {
 type dayRange struct{ from, to time.Time }
 
 func (s RecordStore) CountFacetsFast(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
-	_, enforced := visibility.Principals(ctx)
-	if days, ok := snapshotScope(q); !enforced && ok && len(q.Records.FilterRoutes) > 0 {
-		counts, ok, err := s.snapshotFacets(ctx, org, q, days)
-		if err != nil || ok {
-			return counts, err
+	// Shared snapshots contain corpus-wide counts. Delegated reads instead
+	// take the bounded live count below, then a caller-scoped sample on timeout.
+	if _, enforced := visibility.Principals(ctx); !enforced {
+		if days, ok := snapshotScope(q); ok && len(q.Records.FilterRoutes) > 0 {
+			counts, ok, err := s.snapshotFacets(ctx, org, q, days)
+			if err != nil || ok {
+				return counts, err
+			}
 		}
 	}
 	counted, err := s.boundedFacetRows(ctx, org, q, "", facetExactAttempt)

@@ -35,8 +35,8 @@ type auditedRoute struct{ action, target, parameter string }
 
 // Sensitive commands commit their audit events in the same transaction.
 var auditedRoutes = map[string]auditedRoute{
-	"PUT /v0/corpora/{corpus_id}/visibility-grants":               {"visibility.set", "corpus", "corpus_id"},
-	"DELETE /v0/corpora/{corpus_id}/visibility-grants":            {"visibility.delete", "corpus", "corpus_id"},
+	"PUT " + visibilityGrantPath:                                  {"visibility.set", "corpus", "corpus_id"},
+	"DELETE " + visibilityGrantPath:                               {"visibility.delete", "corpus", "corpus_id"},
 	"PATCH /v0/corpora/{corpus_id}":                               {"corpus.rename", "corpus", "corpus_id"},
 	"POST /v0/corpora/{corpus_id}/archive":                        {"corpus.archive", "corpus", "corpus_id"},
 	"POST /v0/corpora/{corpus_id}/unarchive":                      {"corpus.unarchive", "corpus", "corpus_id"},

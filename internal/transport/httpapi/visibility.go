@@ -12,6 +12,8 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
+const visibilityGrantPath = "/v0/corpora/{corpus_id}/visibility-grants"
+
 func callerPrincipals(values []string) ([]string, bool) {
 	if len(values) != 1 || len(values[0]) > visibility.MaxHeaderBytes {
 		return nil, false
@@ -47,7 +49,7 @@ func readsData(r *http.Request) bool {
 // the caller's principals. Require a separately scoped, non-delegated key.
 func requiresNonDelegatedKey(pattern string) bool {
 	switch pattern {
-	case "/v0/uploads/{upload_id}", "/v0/blobs/{blob_id}", "/v0/operations/{operation_id}",
+	case visibilityGrantPath, "/v0/uploads/{upload_id}", "/v0/blobs/{blob_id}", "/v0/operations/{operation_id}",
 		"/v0/admin/audit", auditExportPath, "/v0/admin/queues",
 		evaluationBacklogPath, evaluationRetirementsPath, evaluatorMigrationsPath, "/v0/admin/backfills",
 		"/v0/admin/quarantine/reprocess", "/v0/admin/subscriptions/evaluation-retirements/{retirement_id}":
@@ -61,10 +63,6 @@ func WithVisibility(store visibility.Store) Option {
 }
 
 func (a *API) visibilityGrant(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id string) {
-	if scope.VisibilityMode == visibility.Enforce {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
 	permission := "visibility:write"
 	if r.Method == http.MethodGet {
 		permission = "visibility:read"

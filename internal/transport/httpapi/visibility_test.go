@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,10 +17,10 @@ func TestVisibilityRefusalOnReadRoutes(t *testing.T) {
 	const actor = "38e61a6d8a6f4849aca7b0f7dd7880d6"
 	sink := &auditSink{}
 	keys := map[string]corpus.Scope{
-		"enforced": {Organization: "example", VisibilityMode: "enforce"},
+		"enforced": {Organization: "example", VisibilityMode: "enforce", Actions: []string{"content:read", "visibility:read", "visibility:write"}, Corpora: []string{"corpus"}},
 		"existing": {Organization: "example"},
 	}
-	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink))
+	handler, err := httpapi.New(nil, content.Service{RecordStore: visibleRecordReader{}}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,20 +64,45 @@ func TestVisibilityRefusalOnReadRoutes(t *testing.T) {
 			}
 		})
 	}
-	// Version is an authenticated, no-storage read. This isolates the
-	// middleware from service permissions and proves old keys ignore headers.
-	for _, tc := range []struct{ key, actor, principals string }{
-		{"existing", "invalid", "invalid"},
-		{"enforced", actor, "user:one, group:two"},
-	} {
-		r := httptest.NewRequest("GET", "/v0/version", nil)
-		r.Header.Set("Authorization", "Bearer "+tc.key)
-		r.Header.Set("X-Quivr-Actor", tc.actor)
-		r.Header.Set("X-Quivr-Principals", tc.principals)
+	// A regular data read with valid context reaches canonical storage.
+	r := httptest.NewRequest("GET", "/v0/records/record", nil)
+	r.Header.Set("Authorization", "Bearer enforced")
+	r.Header.Set("X-Quivr-Actor", actor)
+	r.Header.Set("X-Quivr-Principals", "user:one, group:two")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("valid delegated record read: %d (%s)", w.Code, w.Body)
+	}
+
+	// Management routes require a separate key even if a delegated key
+	// was configured with permission to manage grants.
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		r := httptest.NewRequest(method, "/v0/corpora/corpus/visibility-grants?source_namespace=feed", nil)
+		r.Header.Set("Authorization", "Bearer enforced")
+		r.Header.Set("X-Quivr-Actor", actor)
+		r.Header.Set("X-Quivr-Principals", "group:reader")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
-		if w.Code != 200 {
-			t.Fatalf("version with %s: %d (%s)", tc.key, w.Code, w.Body)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("delegated %s grant: %d (%s)", method, w.Code, w.Body)
 		}
 	}
+
+	// A legacy key ignores the visibility headers.
+	r = httptest.NewRequest("GET", "/v0/version", nil)
+	r.Header.Set("Authorization", "Bearer existing")
+	r.Header.Set("X-Quivr-Actor", "invalid")
+	r.Header.Set("X-Quivr-Principals", "invalid")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy version read: %d (%s)", w.Code, w.Body)
+	}
+}
+
+type visibleRecordReader struct{}
+
+func (visibleRecordReader) Record(_ context.Context, _, id string) (content.Record, error) {
+	return content.Record{ID: id, Source: content.Source{CorpusID: "corpus", Namespace: "feed", RecordKey: "key"}}, nil
 }

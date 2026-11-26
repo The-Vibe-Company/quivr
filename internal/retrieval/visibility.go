@@ -37,7 +37,12 @@ func (sv *server) recheckServed(ctx context.Context, q Request, served []plugins
 	if err != nil {
 		return false, ErrUnavailable
 	}
-	return len(allowed) == len(candidates), nil
+	for i := range candidates {
+		if !allowed[i] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // A ranker can derive scores and explanations from any candidate it received,

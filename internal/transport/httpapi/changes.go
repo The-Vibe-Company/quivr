@@ -185,7 +185,14 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			}
 			lastWrite = time.Now()
 		}
-		if !enforced && len(page.Items) == 0 && page.Position != resume.Position {
+		idle := time.Since(lastWrite) >= streamKeepalive
+		checkpoint := len(page.Items) == 0 && page.Position != resume.Position
+		if enforced {
+			// Advance the client's resume cursor at a fixed idle cadence.
+			// Checkpoint timing cannot reveal changes the caller cannot see.
+			checkpoint = idle
+		}
+		if checkpoint {
 			if !write("id: %s\nevent: checkpoint\ndata: {\"cursor\":%q}\n\n", page.Next, page.Next) {
 				return
 			}
@@ -195,14 +202,8 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 		if page.HasMore && len(page.Items) > 0 {
 			continue
 		}
-		if time.Since(lastWrite) >= streamKeepalive {
-			// Send delegated checkpoints on the idle cadence, independent of
-			// whether concealed events advanced the journal.
-			if enforced {
-				if !write("id: %s\nevent: checkpoint\ndata: {\"cursor\":%q}\n\n", page.Next, page.Next) {
-					return
-				}
-			} else if !write(": keepalive\n\n") {
+		if idle && !checkpoint {
+			if !write(": keepalive\n\n") {
 				return
 			}
 			lastWrite = time.Now()

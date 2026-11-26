@@ -41,7 +41,12 @@ func requestAuditEvent(r *http.Request, scope corpus.Scope, keyID string) audit.
 
 func (a *API) serveAudited(w *responseWriter, r *http.Request, scope corpus.Scope, keyID string) {
 	refused := false
-	if keyID != "" && readsData(r) && scope.VisibilityMode == visibility.Enforce {
+	delegated := keyID != "" && scope.VisibilityMode == visibility.Enforce
+	if delegated && r.Pattern == visibilityGrantPath && (r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		// Policy administration is always performed by a management key.
+		refused = true
+	}
+	if delegated && readsData(r) {
 		actor := r.Header.Values("X-Quivr-Actor")
 		if len(actor) == 1 && audit.ValidActorID(actor[0]) {
 			scope.ActorID = actor[0]
