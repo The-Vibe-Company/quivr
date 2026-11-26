@@ -528,6 +528,7 @@ class DevProfile(unittest.TestCase):
         ports_map = {
             ('port', 'postgres', '5432'): '127.0.0.1:15432\n',
             ('port', 'weaviate', '8080'): '127.0.0.1:18080\n',
+            ('port', 'weaviate', '50051'): '127.0.0.1:15051\n',
             ('port', 'temporal', '7233'): '127.0.0.1:17233\n',
             ('port', 'seaweed', '8333'): '127.0.0.1:18333\n',
         }
@@ -543,6 +544,7 @@ class DevProfile(unittest.TestCase):
 
         cfg = json.loads((stack.directory / 'config.json').read_text())
         self.assertEqual(cfg['tei_url'], '')
+        self.assertEqual(cfg['weaviate_grpc_address'], '127.0.0.1:15051')
         self.assertEqual(cfg['ingestion'], {'default': 'example.hash_embedder'})
         self.assertIsNone(cfg['plugin'])
         manifests = [p['manifest'] for p in cfg['plugins']]
