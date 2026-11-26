@@ -44,8 +44,7 @@ fi
 python3 sdks/go/scripts/sync_schemas.py --check
 (cd sdks/go && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")
 
-"$GO" build -o "$work/quivr-go" ./cmd/quivr
-quivr="$work/quivr-go"
+quivr=$(GO="$GO" python3 "$root/scripts/go_bin_cache.py" ensure --name quivr --cwd "$root" --package ./cmd/quivr --materialize "$work/quivr-go")
 (cd "$root/sdks/go" && "$GO" build -o "$work/go-conformance-peer" ./quivrplugin/testdata/conformance)
 "$work/venv-go/bin/python" "$root/scripts/plugin_sdk_conformance.py" go "$quivr" "$work/go-conformance-peer"
 cd "$root/sdks/go/examples/static-source"

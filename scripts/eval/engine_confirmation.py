@@ -99,7 +99,7 @@ def lineage():
          'modal_engine.py', 'control_store.py', 'results.py', 'run.py', 'scoring.py', 'gates.py', 'embeddings.py', 'trec.py',
          'search_trial.py', 'direct_bakeoff.py', 'protected_inputs.py', 'ci_guard.py')]
     sources += ['scripts/' + name for name in
-                ('local.py', 'hosted_embed_plugin.py', 'ingestion_plugin.py', 'connector_plugin.py',
+                ('local.py', 'go_bin_cache.py', 'hosted_embed_plugin.py', 'ingestion_plugin.py', 'connector_plugin.py',
                  'core_ingest_plugin.py', 'retrieval_plugin.py', 'ports.py', 'push_plugin.py', 'fixture_plugin.py',
                  'normalizer_plugin.py', 'subscription_plugin.py', 'prepare_tokenizer.py', 'prepare_embeddings.py')]
     sources += ['deploy/mlflow/eval-control.sql']

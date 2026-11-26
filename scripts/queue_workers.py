@@ -20,9 +20,7 @@ def verify(stack):
     stack.tests('^TestQueueIsolationSeed$', run)
     directory = stack.directory / 'queue-workers'
     directory.mkdir(exist_ok=True)
-    binary = directory / 'hash-embedder'
-    subprocess.run([ingestion_plugin.GO, 'build', '-o', str(binary), './examples/hash-embedder'],
-                   cwd=ingestion_plugin.ROOT / 'sdks' / 'go', check=True)
+    binary = ingestion_plugin.hash_embedder_binary(stack.source)
     port = ports.allocate()
     plugin = ingestion_plugin.start_plugin(directory, binary, port,
                                           ingestion_plugin.SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
