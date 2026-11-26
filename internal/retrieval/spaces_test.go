@@ -183,3 +183,85 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		})
 	}
 }
+
+// A shared vector still goes through search authorization and projection, and
+// equivalent query text only shares it within its organization, space and generation.
+func TestServingReusesQueryVectorsWithinAuthorizedRoutes(t *testing.T) {
+	routing := spaceRouting{
+		"plugin": pluginGeneration("gen-first", true, "example.small@1", "example.large@1"),
+	}
+	projection := &fakeProjection{}
+	encoder := &cacheablePluginEncoder{pin: "first"}
+	ranker := &scriptedRanker{answer: passthrough}
+	s := retrieval.Service{Routing: routing, Projection: projection, Spaces: encoder, Ranker: ranker,
+		Registry: spaceRegistry{routing: routing}, QueryVectors: retrieval.NewQueryVectorCache()}
+
+	scope := searchScope
+	request := retrieval.Request{Query: "  alpha\r\nbeta  ", Mode: "semantic", CorpusIDs: []string{"plugin"}}
+	search := func(wantEncodes, wantProjections int) {
+		t.Helper()
+		if _, err := s.Search(t.Context(), scope, request); err != nil {
+			t.Fatalf("search %q: %v", request.Query, err)
+		}
+		if len(encoder.encoded) != wantEncodes || len(projection.searched) != wantProjections {
+			t.Fatalf("after %q, encodes = %v and projections = %d, want %d encodes and %d projections",
+				request.Query, encoder.encoded, len(projection.searched), wantEncodes, wantProjections)
+		}
+	}
+	search(1, 1)
+	request.Query = "alpha\nbeta"
+	search(1, 2)
+
+	scope.Corpora = []string{"another-corpus"}
+	if _, err := s.Search(t.Context(), scope, request); !errors.Is(err, corpus.ErrForbidden) {
+		t.Fatalf("unauthorized hot search error = %v, want %v", err, corpus.ErrForbidden)
+	}
+	scope = searchScope
+	scope.Organization = "another-org"
+	search(2, 3)
+	routing["plugin"] = pluginGeneration("gen-second", true, "example.small@1", "example.large@1")
+	search(3, 4)
+	routing["plugin"] = pluginGeneration("gen-second", true, "example.large@1", "example.small@1")
+	search(4, 5)
+}
+
+type cacheablePluginEncoder struct {
+	pluginEncoder
+	pin string
+}
+
+func (e *cacheablePluginEncoder) ResolveQueryEncoder(context.Context, string) (retrieval.QueryEncoder, string) {
+	return e, e.pin
+}
+
+func TestServingResolvesQueryEncoderInEachCandidateRound(t *testing.T) {
+	routing := spaceRouting{
+		"plugin": pluginGeneration("gen", true, "example.small@1"),
+	}
+	projection := &fakeProjection{}
+	encoder := &cacheablePluginEncoder{pin: "first"}
+	ranker := &scriptedRanker{answer: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+		if q.Round == 2 {
+			encoder.pin = "second"
+		}
+		if q.Round <= 2 {
+			return answer(map[string]any{"requests": []any{map[string]any{
+				"primitive": "near_vector", "space": "example.small@1", "query_text": q.Query.Text, "k": 10,
+			}}})
+		}
+		return answer(map[string]any{"ranking": map[string]any{"hits": []any{}}})
+	}}
+	s := retrieval.Service{Routing: routing, Projection: projection, Spaces: encoder, Ranker: ranker,
+		Registry: spaceRegistry{routing: routing}, QueryVectors: retrieval.NewQueryVectorCache()}
+
+	request := retrieval.Request{Query: "alpha", Mode: "semantic", CorpusIDs: []string{"plugin"}}
+	if _, err := s.Search(t.Context(), searchScope, request); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(projection.searched); got != 2 {
+		t.Fatalf("projection searches = %d, want one per candidate round", got)
+	}
+	if got := len(encoder.encoded); got != 2 {
+		t.Fatalf("encoder calls = %d, want one per serving pin", got)
+	}
+}

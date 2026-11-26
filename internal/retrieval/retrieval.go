@@ -189,10 +189,12 @@ type Service struct {
 	// Registry describes the vector spaces a ranker may request.
 	Registry SpaceRegistry
 	// Coverage, when set, keeps the Registry's answers for a short time.
-	Coverage   *CoverageCache
-	Routing    Routing
-	Projection Projection
-	Content    content.Service
+	Coverage *CoverageCache
+	// QueryVectors is shared by searches using these encoders.
+	QueryVectors *QueryVectorCache
+	Routing      Routing
+	Projection   Projection
+	Content      content.Service
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
