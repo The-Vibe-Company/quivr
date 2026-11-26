@@ -59,8 +59,12 @@ Quivr indexes the articles in the background, usually within seconds, so a searc
 When served vectors are unavailable, hybrid search returns keyword results with
 `retrieval_profile.degraded`. An entry whose `reason` is `vectors_unavailable`
 names the affected collections in `corpus_ids`, even when no documents match.
-Other collections keep their hybrid results. You can show this notice until a
-later response omits the marker; rebuilding needs no client-side retry loop.
+Other collections keep their hybrid results. When a `deep` search has too little
+remaining deadline budget for reranking (`reranker_budget_exceeded`) or its
+reranker fails (`reranker_unavailable`), it falls back to `default` hybrid
+results and reports the affected `corpus_ids` in `retrieval_profile.degraded`.
+You can show this notice until a later response omits the marker; rebuilding
+needs no client-side retry loop.
 
 An explicit `semantic` request has no keyword fallback. A collection with eligible
 documents returns `422 unsupported_search` when served vectors are unavailable.
@@ -357,7 +361,7 @@ These outputs come from the `make dev` stack, where `deep` maps to `core.retriev
 
 ## Retry a busy search
 
-Each API process admits at most 64 active searches across callers. When capacity is full, it returns `503 search_unavailable` with `retryable: true` and a `Retry-After` header. Wait at least that many seconds before retrying, and limit concurrent searches in your client. A dependency outage can return the same code without the header; use bounded backoff for those failures. The [API overview](/api-reference/overview) describes the error envelope.
+Each API process bounds active searches across callers with an adaptive concurrency limiter (starting at 64, adjusting automatically under latency or overload) and a short bounded wait queue. When admission is saturated, it returns `503 search_unavailable` with `retryable: true` and a `Retry-After` header. Wait at least that many seconds before retrying, and limit concurrent searches in your client. A dependency outage can return the same code without the header; use bounded backoff for those failures. The [API overview](/api-reference/overview) describes the error envelope.
 
 If Quivr cannot encode the query because its model is unavailable or times out, it returns retryable `503 model_unavailable`. Retry with increasing delays and stop at your client's retry deadline, or try `lexical` if the profile supports it. Query length limits still return `422 query_too_long`.
 

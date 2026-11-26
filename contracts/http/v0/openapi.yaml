@@ -3924,8 +3924,11 @@ paths:
         does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks
         the engine for candidates in up to three rounds and returns its ranking, which may hold only
         candidates the engine served in this search, each already authorized and hydrated.
-        Each API process admits at most 64 active searches across callers. At capacity it immediately
-        returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+        Each API process bounds active searches across callers with an adaptive concurrency limiter
+        and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with
+        Retry-After before storage or plugin work. When a deep search has insufficient remaining
+        deadline budget for reranking or the reranker is unavailable, it degrades gracefully to
+        default hybrid results and reports the reason in retrieval_profile.degraded.
         A query encoding model that cannot answer returns retryable 503 model_unavailable,
         including the legacy inference service and the ingestion plugin that owns the requested vector space.
       requestBody:
@@ -8177,8 +8180,10 @@ components:
           maxItems: 16
           items:
             $ref: '#/components/schemas/SearchDegradation'
-          description: Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora
-            whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+          description: Omitted when fully served. Reports authorized, non-excluded Corpora whose search
+            degraded, for example hybrid searches using keywords when vectors are unavailable, or deep
+            searches falling back to default results when reranking budget is tight or the reranker is
+            unavailable. Present even when no documents match.
       required:
       - name
       - version
@@ -8191,8 +8196,8 @@ components:
       properties:
         reason:
           type: string
-          enum: [vectors_unavailable]
-          description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+          enum: [vectors_unavailable, reranker_budget_exceeded, reranker_unavailable]
+          description: Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking so default results were returned. reranker_unavailable means the reranker failed or was overloaded so default results were returned.
         corpus_ids:
           type: array
           minItems: 1

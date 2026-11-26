@@ -137,18 +137,61 @@ func invocationID() string {
 	return "search-" + hex.EncodeToString(b[:])
 }
 
+func isDeepProfile(requested, local string) bool {
+	if requested == DefaultProfile {
+		return false
+	}
+	return requested == "deep" || local == "deep" || strings.HasSuffix(requested, "/deep")
+}
+
 // rank answers a search through the pinned retrieval plugin: each round the
 // plugin asks for candidates, which the engine serves after authorization,
 // withdrawal fences and generation routing, or returns the ranking, which may
 // hold only served candidates. The profile's max_latency_ms is its latency
 // objective: a search over it still answers and is reported with the time
-// each phase took. ctx carries the profile's hard bound, and started is when
-// Search began authorizing and routing (Search).
-func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
-	return s.rankProfile(ctx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil)
+// each phase took. ctx carries the profile's hard bound, parentCtx is the
+// caller context before applying the profile bound, and started is when Search
+// began authorizing and routing.
+func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
+	defRanker, defLocal, hasDefault := s.resolveProfile(DefaultProfile)
+	canFallback := isDeepProfile(out.Profile, q.Profile) && hasDefault &&
+		(defRanker.Manifest().ID != s.Ranker.Manifest().ID || defLocal != q.Profile)
+	if canFallback {
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
+			slog.WarnContext(ctx, "deep search degraded to default before reranking due to tight deadline",
+				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
+			return s.runDefaultFallback(ctx, scope, q, routes, out, started, defRanker, defLocal, DegradationRerankerBudgetExceeded)
+		}
+	}
+	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil, canFallback)
 }
 
-func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend) (Result, error) {
+func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, defRanker Ranker, defLocal, reason string) (Result, error) {
+	fb := s
+	fb.Ranker = defRanker
+	q.Profile = defLocal
+	res, err := fb.rankProfile(ctx, ctx, scope, q, routes, out, started, &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}, nil, false)
+	if err != nil {
+		return res, err
+	}
+	res.Degraded = appendDegradation(res.Degraded, reason, routes)
+	return res, nil
+}
+
+func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Request, routes []Route, fallback *Result, reason string, chain *searchChain, timing *Phases, started time.Time, rounds int, profile plugins.RetrievalProfile) Result {
+	slog.WarnContext(ctx, "deep search degraded to default hybrid results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
+	out.ProfileVersion = fallback.ProfileVersion
+	out.Hits = append([]Hit{}, fallback.Hits[:min(len(fallback.Hits), q.Limit)]...)
+	out.Degraded = appendDegradation(chain.degradations(), reason, routes)
+	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Phases: *timing}
+	for _, f := range chain.profiles {
+		out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
+	}
+	out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective()
+	return out
+}
+
+func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend, canFallback bool) (Result, error) {
 	m := s.Ranker.Manifest()
 	profile := m.Contributions.Retrieval.Profiles[q.Profile]
 	timing := &Phases{Routing: time.Since(started)}
@@ -213,8 +256,17 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile}
 	for {
+		clientCanceled := parentCtx != nil && errors.Is(parentCtx.Err(), context.Canceled)
+		if sv.fallback != nil && !clientCanceled {
+			if ctx.Err() != nil {
+				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
+			}
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
+				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
+			}
+		}
 		if ctx.Err() != nil {
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
@@ -233,6 +285,7 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		}
 		body, err := s.Ranker.Round(ctx, request)
 		timing.PluginRounds += time.Since(phase)
+		clientCanceled = parentCtx != nil && errors.Is(parentCtx.Err(), context.Canceled)
 		switch {
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
@@ -241,6 +294,21 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		case errors.Is(err, ErrPluginInvalid):
 			return out, err
 		default:
+			reason := DegradationRerankerUnavailable
+			if errors.Is(context.Cause(ctx), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrDeadline) {
+				reason = DegradationRerankerBudgetExceeded
+			}
+			if sv.fallback != nil && !clientCanceled {
+				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, reason, chain, timing, started, session.Round(), profile), nil
+			}
+			if canFallback && len(ancestors) == 0 && !clientCanceled && parentCtx != nil && parentCtx.Err() == nil {
+				if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok {
+					slog.WarnContext(ctx, "deep search degraded to default after reranker failure", "component", "search", "profile", out.Profile, "reason", reason)
+					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+					defer cancel()
+					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, defRanker, defLocal, reason)
+				}
+			}
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		answer, issues := session.Judge(body)
@@ -253,6 +321,9 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 			return out, err
 		}
 		if ctx.Err() != nil {
+			if sv.fallback != nil && !clientCanceled && errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
+			}
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if answer.Ranking != nil {
@@ -455,6 +526,9 @@ type server struct {
 	timing            *Phases
 	chain             *searchChain
 	frames            []*profileSpend
+	requestedProfile  string
+	localProfile      string
+	fallback          *Result
 }
 
 // serve runs one candidate request through the projection and hydrates what

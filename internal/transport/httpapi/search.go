@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -11,9 +14,15 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
-// maxConcurrentSearches bounds storage fan-out per API process across callers.
-// Excess work is rejected immediately; there is no unbounded search queue.
-const maxConcurrentSearches = 64
+func isSearchOverload(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, retrieval.ErrUnavailable) ||
+		errors.Is(err, retrieval.ErrModelUnavailable) ||
+		errors.Is(err, retrieval.ErrDeadline) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
 
 func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	raw, ok := decodeRequest(w, r, a.schemas["SearchRequest"])
@@ -65,17 +74,17 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 		}
 	}
 	started := time.Now()
-	select {
-	case a.searches <- struct{}{}:
-		defer func() { <-a.searches }()
-	default:
+	lease, retryAfter, admitted := a.searchAdmission.Acquire(r.Context())
+	if !admitted {
 		a.loadMetrics.SearchRefused()
 		a.recordSearch(scope.Organization, q, retrieval.Result{}, started, publicerr.SearchUnavailable)
-		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		writeError(w, publicerr.SearchUnavailable, nil)
 		return
 	}
+	defer lease.Release(false, true)
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
+	lease.Release(isSearchOverload(err), errors.Is(r.Context().Err(), context.Canceled))
 	a.recordSearch(scope.Organization, q, result, started, err)
 	if err != nil {
 		writeError(w, err, publicerr.SearchUnavailable)
@@ -85,6 +94,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if len(result.Degraded) > 0 {
 		degraded := make([]transport.SearchDegradation, 0, len(result.Degraded))
 		for _, d := range result.Degraded {
+			a.loadMetrics.SearchDegraded(d.Reason)
 			degraded = append(degraded, transport.SearchDegradation{Reason: transport.SearchDegradationReason(d.Reason), CorpusIds: d.CorpusIDs})
 		}
 		response.RetrievalProfile.Degraded = &degraded

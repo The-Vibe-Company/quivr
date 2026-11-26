@@ -25,7 +25,7 @@ This page lists what Quivr 2.0 does not do, and the limits you are most likely t
 | Text indexed for one version | 256 KiB and 64 `title` or `body` pieces, with the first-party ingestion plugin |
 | One search | up to 16 collections, 50 results, no pagination |
 | One query | 8,192 characters; for meaning search, also the model's limit (256 tokens with the default model) |
-| Searches running at once | 64 per API process; more are refused with a retryable error |
+| Searches running at once | Adaptive per API process (starts at 64, scales 4–128 with a short bounded queue); excess is shed with a retryable error and `Retry-After` |
 
 A version over the indexing limits is stored and readable, but not searchable; its receipt says which limit it hit. [Add content](/guides/add-content#limits) and [Search](/guides/search) give the details.
 

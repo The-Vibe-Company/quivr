@@ -42,7 +42,29 @@ func (c *searchChain) degradations() []Degradation {
 		return nil
 	}
 	slices.Sort(ids)
-	return []Degradation{{Reason: "vectors_unavailable", CorpusIDs: ids}}
+	return []Degradation{{Reason: DegradationVectorsUnavailable, CorpusIDs: ids}}
+}
+
+func appendDegradation(existing []Degradation, reason string, routes []Route) []Degradation {
+	ids := make([]string, 0, len(routes))
+	seen := map[string]bool{}
+	for _, r := range routes {
+		if r.CorpusID == "" || seen[r.CorpusID] {
+			continue
+		}
+		seen[r.CorpusID] = true
+		ids = append(ids, r.CorpusID)
+	}
+	if len(ids) == 0 {
+		return existing
+	}
+	slices.Sort(ids)
+	for _, d := range existing {
+		if d.Reason == reason {
+			return existing
+		}
+	}
+	return append(existing, Degradation{Reason: reason, CorpusIDs: ids})
 }
 
 func remainingCost(frames []*profileSpend) float64 {
@@ -115,9 +137,14 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	defer cancel()
 	inner := sv.s
 	inner.Ranker = ranker
-	result, err := inner.rankProfile(innerCtx, sv.scope, q, sv.routes, Result{Hits: []Hit{}, Profile: full}, time.Now(), sv.chain, sv.frames)
+	result, err := inner.rankProfile(innerCtx, innerCtx, sv.scope, q, sv.routes, Result{Hits: []Hit{}, Profile: full}, time.Now(), sv.chain, sv.frames, false)
 	if err != nil {
 		return nil, err
+	}
+	if len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) && sv.fallback == nil {
+		saved := result
+		saved.Hits = slices.Clone(result.Hits)
+		sv.fallback = &saved
 	}
 	if u := result.Usage; u != nil {
 		sv.timing.Coverage += u.Phases.Coverage
