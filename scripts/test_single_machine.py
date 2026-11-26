@@ -140,6 +140,9 @@ class SingleMachineTest(unittest.TestCase):
             combined = json.loads((directory / 'compose.yaml').read_text())
             self.assertEqual(combined['services']['api']['ports'], ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080'])
             self.assertEqual(combined['services']['api']['environment']['QUIVR_ADMIN_LISTEN'], 'off')
+            for non_api in ('migrate', 'worker'):
+                for key in ('QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY', 'QUIVR_ADMIN_LISTEN'):
+                    self.assertNotIn(key, combined['services'][non_api]['environment'])
             self.assertNotIn('QUIVR_ADMIN_URL', combined['services']['demo']['environment'])
             self.assertNotIn('QUIVR_ADMIN_KEY', combined['services']['demo']['environment'])
 
@@ -164,6 +167,8 @@ class SingleMachineTest(unittest.TestCase):
                       'custom-stack-temporal-data-backup\ncustom-stack-temporal-data\n']
             def fake_docker(args):
                 calls.append(args)
+                if args[:2] == ['volume', 'inspect']:
+                    return json.dumps([{'Labels': {'quivr.model': 'gemma'}}])
                 if args[:2] == ['volume', 'ls']:
                     self.assertIn('name=^custom-stack-temporal-data$', args)
                     return listed.pop(0)
@@ -186,3 +191,21 @@ class SingleMachineTest(unittest.TestCase):
             self.assertNotIn('custom-stack-temporal-data-backup', output.getvalue())
             self.assertNotIn('quivr-temporal-data', output.getvalue())
             self.assertFalse(any(args[:2] == ['volume', 'rm'] for args in calls))
+            self.assertTrue(any('--verify-only' in args for args in calls))
+
+            # If model cache verification fails (e.g. PyTorch -> ONNX upgrade), upgrade aborts before compose up.
+            fail_calls = []
+            def failing_verify(args):
+                fail_calls.append(args)
+                if args[:2] == ['volume', 'inspect']:
+                    return json.dumps([{'Labels': {'quivr.model': 'gemma'}}])
+                if '--verify-only' in args:
+                    raise RuntimeError('Docker operation failed')
+                return ''
+            err_buf = io.StringIO()
+            with patch.object(setup, 'docker', side_effect=failing_verify), \
+                 patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
+                 patch('sys.stderr', err_buf):
+                self.assertEqual(setup.main(), 1)
+            self.assertIn('setup.py prepare', err_buf.getvalue())
+            self.assertFalse(any('up' in args for args in fail_calls))

@@ -27,6 +27,20 @@ func TestDefaultClientRetainsConnectionsForConcurrentIndexRequests(t *testing.T)
 	if pool.MaxIdleConns != 512 || pool.MaxIdleConnsPerHost != 128 || pool.IdleConnTimeout != 90*time.Second {
 		t.Fatalf("idle pool total=%d per host=%d timeout=%s, want 512, 128, 90s", pool.MaxIdleConns, pool.MaxIdleConnsPerHost, pool.IdleConnTimeout)
 	}
+
+	// Unwrap must also reach *http.Transport when authTransport wraps the pool.
+	authed := weaviate.New("http://index.test", "fixture-api-key")
+	authedTransport := authed.Client.Transport
+	for {
+		unwrapper, ok := authedTransport.(interface{ Unwrap() http.RoundTripper })
+		if !ok {
+			break
+		}
+		authedTransport = unwrapper.Unwrap()
+	}
+	if _, ok := authedTransport.(*http.Transport); !ok {
+		t.Fatalf("authenticated index transport = %T, want *http.Transport", authedTransport)
+	}
 }
 
 func TestDefaultClientUsesCustomRoundTripper(t *testing.T) {

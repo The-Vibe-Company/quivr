@@ -520,7 +520,7 @@ var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='
  LEFT JOIN LATERAL (SELECT cb.organization,cb.blob_id,cb.object_key,cb.sha256,cb.byte_length FROM content_blobs cb
   WHERE sr.part_key<>c.part_key AND sp.blob_id IS NOT NULL AND (cb.organization,cb.blob_id)>=(c.organization,sp.blob_id)
   ORDER BY cb.organization,cb.blob_id LIMIT 1) sb ON (sb.organization,sb.blob_id)=(c.organization,sp.blob_id)
- WHERE sr.part_key=c.part_key OR sb.blob_id IS NOT NULL
+ WHERE (sr.part_key=c.part_key AND b.blob_id IS NOT NULL) OR sb.blob_id IS NOT NULL
 ) END`
 
 var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),p.pack_offset,p.pack_length,coalesce(e.id,''),coalesce(e.space_id,''),

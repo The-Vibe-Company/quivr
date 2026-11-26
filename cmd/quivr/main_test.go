@@ -86,6 +86,7 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		{"secret-conflict", `{}`, "config_conflict", "database_url"},
 		{"secret-map", `{` + required + `}`, "config_invalid", "keys"},
 		{"signing-map", `{` + required + `}`, "config_invalid", "QUIVR_ENGINE_PLUGIN_KEYS"},
+		{"invalid-admin-listen", `{` + required + `}`, "config_invalid", "admin_listen"},
 	}
 	secretEnvs := map[string][]string{
 		"invalid-database-secret": {"DATABASE_URL=postgres://user:secret-value-sentinel@localhost/%ZZ"},
@@ -93,6 +94,7 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		"secret-conflict":         {"DATABASE_URL=secret-value-sentinel", "DATABASE_URL_FILE=/missing/secret-value-sentinel"},
 		"secret-map":              {`QUIVR_API_KEYS={"secret-value-sentinel":{},"secret-value-sentinel":{}}`},
 		"signing-map":             {`QUIVR_ENGINE_PLUGIN_KEYS={"example":{"active":"primary","keys":[{"id":"primary","secret":"secret-value-sentinel"}]}}`},
+		"invalid-admin-listen":    {"QUIVR_ADMIN_LISTEN=secret-value-sentinel"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

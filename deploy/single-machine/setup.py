@@ -96,8 +96,6 @@ def stack(images, settings, values, initialized=False):
         'QUIVR_SINGLE_MACHINE': '1', 'QUIVR_ORGANIZATION': '${QUIVR_ORGANIZATION:-quivr}',
         'DATABASE_URL': 'postgres://quivr:${QUIVR_DB_PASSWORD:?}@postgres:5432/quivr?sslmode=disable',
         'QUIVR_API_KEY': '${QUIVR_API_KEY:?}', 'QUIVR_OPERATOR_KEY': '${QUIVR_OPERATOR_KEY:?}',
-        'QUIVR_ADMIN_KEY': '${QUIVR_ADMIN_KEY:?}', 'QUIVR_DEMO_ADMIN_KEY': '${QUIVR_DEMO_ADMIN_KEY:?}',
-        'QUIVR_ADMIN_LISTEN': admin_listen,
         'QUIVR_CURSOR_KEY': '${QUIVR_CURSOR_KEY:?}', 'QUIVR_CREDENTIAL_KEY': '${QUIVR_CREDENTIAL_KEY:?}',
         'TEMPORAL_ADDRESS': 'temporal:7233', 'WEAVIATE_URL': 'http://weaviate:8080',
         'WEAVIATE_GRPC_ADDRESS': f"weaviate:{settings['weaviate']['environment']['GRPC_PORT']}",
@@ -107,6 +105,10 @@ def stack(images, settings, values, initialized=False):
         'QUIVR_DEMO_CONNECTORS': '1', 'QUIVR_DEMO_ADMIN': '1',
         'QUIVR_WORKER_LIVE_SLOTS': '${QUIVR_WORKER_LIVE_SLOTS:-1}',
         'QUIVR_WORKER_BULK_SLOTS': '${QUIVR_WORKER_BULK_SLOTS:-1}'}
+    api_admin_env = {
+        'QUIVR_ADMIN_KEY': '${QUIVR_ADMIN_KEY:?}', 'QUIVR_DEMO_ADMIN_KEY': '${QUIVR_DEMO_ADMIN_KEY:?}',
+        'QUIVR_ADMIN_LISTEN': admin_listen,
+    }
     if model == 'gemma':
         core_env.update(QUIVR_DEMO_EMBEDDING='gemma', QUIVR_DEMO_CORE_INGEST='0',
                         EMBED_URL='http://embeddings:8080', EMBED_API_KEY='${EMBED_API_KEY:?}')
@@ -142,7 +144,7 @@ def stack(images, settings, values, initialized=False):
                 'cpus': '${QUIVR_EMBEDDING_CPUS:-4}', 'memory': '${QUIVR_EMBEDDING_MEMORY:-4g}'}}}},
         'migrate': {'image': images['core'], 'environment': {**core_env, 'QUIVR_ROLE': 'migrate'},
             'depends_on': healthy, 'restart': 'no', 'tmpfs': ['/tmp:mode=1777,size=128m']},
-        'api': {'image': images['core'], 'environment': {**core_env, 'QUIVR_ROLE': 'api'},
+        'api': {'image': images['core'], 'environment': {**core_env, **api_admin_env, 'QUIVR_ROLE': 'api'},
             'depends_on': {'migrate': {'condition': 'service_completed_successfully'}},
             'ports': ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080',
                       *([f'127.0.0.1:${{QUIVR_ADMIN_PORT:-8082}}:{admin_port}'] if admin_port else [])],
@@ -269,6 +271,25 @@ def prepare_cache(directory, mirror, source):
     docker(command)
 
 
+def verify_cache(directory, values, images):
+    volume = values['COMPOSE_PROJECT_NAME'] + '-model-cache'
+    try:
+        info = json.loads(docker(['volume', 'inspect', volume]))
+    except (RuntimeError, json.JSONDecodeError, ValueError) as error:
+        raise RuntimeError('model cache volume is missing or unreadable; inspect Docker privately or run setup.py prepare before setup.py upgrade') from error
+    labels = (info[0].get('Labels') or {}) if info else {}
+    if labels.get('quivr.model') != values['QUIVR_EMBEDDING']:
+        raise ValueError('cache model differs from this installation; use a fresh installation')
+    command = ['run', '--rm', '-v', volume + ':/models:ro', '--entrypoint',
+               '/opt/query-encoder/venv/bin/python',
+               images['cpu-embeddings'], '/app/deploy/single-machine/cache.py',
+               '--output', '/models', '--model', values['QUIVR_EMBEDDING'], '--verify-only']
+    try:
+        docker(command)
+    except RuntimeError as error:
+        raise RuntimeError('model cache verification failed; inspect Docker privately or run setup.py prepare before setup.py upgrade') from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['init', 'prepare', 'upgrade'])
@@ -291,8 +312,9 @@ def main():
                 if key not in SECRET_KEYS or not path:
                     raise ValueError('unsupported secret file key')
                 files[key] = Path(path)
-            values, _ = initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
+            values, images = initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
             if args.command == 'upgrade':
+                verify_cache(args.directory, values, images)
                 docker(['compose', '--project-directory', str(args.directory), 'stop', 'api', 'worker', 'demo'])
                 docker(['compose', '--project-directory', str(args.directory), 'rm', '-f', 'migrate'])
                 docker(['compose', '--project-directory', str(args.directory), 'up', '-d'])

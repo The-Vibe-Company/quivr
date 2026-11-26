@@ -16,8 +16,8 @@ write successfully. Keep later expansions independent of any deferred contract.
 `contracts/http/v0/checks/requirements.txt`. Its conservative allowlist accepts
 permanent tables without foreign keys into existing tables, sequences, enum types,
 non-concurrent indexes on tables created earlier in the same file, table reloption SETs,
-schema-qualified RESTRICT drops of declared nonunique performance indexes from earlier SQL, added columns without new checks, uniqueness or references, and dropping NOT NULL while retaining other constraints.
-Unknown or unique index drops remain rejected. Mixed ALTER commands are checked separately.
+schema-qualified RESTRICT drops of declared nonunique performance indexes from earlier SQL, RESTRICT drops of proven foreign keys from earlier SQL, added columns without new checks, uniqueness or references, and dropping NOT NULL while retaining other constraints.
+Unknown or unique index drops, and non-foreign-key or CASCADE constraint drops, remain rejected. Mixed ALTER commands are checked separately.
 Dropping NOT NULL preserves rollback only while writers supply the old required value. Document feature use that closes that window and drain all previous readers and writers first. API-only alerts close rollback; see the release notes for rollout and recovery.
 Renames, type changes, constraints and index creation on existing tables need a contract. Backfills use resumable work. The lint is a guard, not a semantic proof.
 

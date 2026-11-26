@@ -284,4 +284,105 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 			}
 		})
 	})
+
+	// 8. Round 1 failure after a wait must keep the reranker wait out of Phases.Routing
+	// and preserve the failed deep profile entry in Usage.Profiles.
+	t.Run("round 1 delayed failure preserves routing phase and profile chain", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			s, _, _ := newPair(nil, nil, 0)
+			// Wrap deep ranker with a 200ms delay before failing Round 1.
+			base, _, _ := s.ProfilesRouter.Resolve("default")
+			origDeep, _, _ := s.ProfilesRouter.Resolve("deep")
+			delayedDeep := &profileRanker{
+				m: *origDeep.Manifest(),
+				round: func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
+					time.Sleep(200 * time.Millisecond)
+					return nil, errors.New("reranker 503")
+				},
+			}
+			s.ProfilesRouter = namedProfileMap{entries: map[string]struct {
+				ranker retrieval.Ranker
+				local  string
+			}{
+				"default":               {ranker: base, local: "default"},
+				"core.retrieve/default": {ranker: base, local: "default"},
+				"deep":                  {ranker: delayedDeep, local: "deep"},
+				"example.rerank/deep":   {ranker: delayedDeep, local: "deep"},
+			}}
+			res, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "deep", Limit: 2})
+			if err != nil {
+				t.Fatalf("delayed round 1 fallback failed: %v", err)
+			}
+			if res.Usage == nil {
+				t.Fatal("expected usage on degraded fallback")
+			}
+			if res.Usage.Phases.Routing >= 100*time.Millisecond {
+				t.Fatalf("Phases.Routing=%s absorbed reranker wait; want < 100ms", res.Usage.Phases.Routing)
+			}
+			if res.Usage.Phases.PluginRounds < 200*time.Millisecond {
+				t.Fatalf("Phases.PluginRounds=%s missing 200ms reranker wait", res.Usage.Phases.PluginRounds)
+			}
+			if len(res.Usage.Profiles) != 2 || res.Usage.Profiles[0].Profile != "example.rerank/deep" || res.Usage.Profiles[1].Profile != "core.retrieve/default" {
+				t.Fatalf("Usage.Profiles=%+v; want [example.rerank/deep, core.retrieve/default]", res.Usage.Profiles)
+			}
+		})
+	})
+
+	// 9. Scoped inner default profile call (overridden query) must not be cached as fallback.
+	t.Run("overridden query inner default call is not reused as fallback", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var rewrittenRun atomic.Int32
+			var fallbackRun atomic.Int32
+			s, _, _ := newPair(nil, nil, 0)
+			origBase, _, _ := s.ProfilesRouter.Resolve("default")
+			origDeep, _, _ := s.ProfilesRouter.Resolve("deep")
+			trackedBase := &profileRanker{
+				m: *origBase.Manifest(),
+				round: func(ctx context.Context, q plugins.SearchRequest) ([]byte, error) {
+					if q.Round == 1 {
+						switch q.Query.Text {
+						case "narrow rewritten query":
+							rewrittenRun.Add(1)
+						case "harbour":
+							fallbackRun.Add(1)
+						}
+					}
+					return origBase.Round(ctx, q)
+				},
+			}
+			rewritingDeep := &profileRanker{
+				m: *origDeep.Manifest(),
+				round: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+					if q.Round == 1 {
+						return answer(map[string]any{"requests": []any{
+							map[string]any{"primitive": "profile", "profile": map[string]any{"name": "core.retrieve/default", "query": "narrow rewritten query", "mode": "hybrid", "limit": 10}},
+						}})
+					}
+					return nil, errors.New("reranker down")
+				},
+			}
+			s.ProfilesRouter = namedProfileMap{entries: map[string]struct {
+				ranker retrieval.Ranker
+				local  string
+			}{
+				"default":               {ranker: trackedBase, local: "default"},
+				"core.retrieve/default": {ranker: trackedBase, local: "default"},
+				"deep":                  {ranker: rewritingDeep, local: "deep"},
+				"example.rerank/deep":   {ranker: rewritingDeep, local: "deep"},
+			}}
+			res, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "deep", Limit: 2})
+			if err != nil {
+				t.Fatalf("fallback search failed: %v", err)
+			}
+			if rewrittenRun.Load() != 1 {
+				t.Fatalf("expected nested rewritten query call to run once, got %d", rewrittenRun.Load())
+			}
+			if fallbackRun.Load() != 1 {
+				t.Fatalf("expected clean fallback with original query 'harbour' to run once, got %d", fallbackRun.Load())
+			}
+			if len(res.Degraded) != 1 || res.Degraded[0].Reason != retrieval.DegradationRerankerUnavailable {
+				t.Fatalf("unexpected degradation: %+v", res.Degraded)
+			}
+		})
+	})
 }

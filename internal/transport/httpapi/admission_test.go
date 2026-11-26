@@ -425,3 +425,71 @@ func TestDeepDegradationWireContractAndMetrics(t *testing.T) {
 		}
 	})
 }
+
+// Owns regression protection against false AIMD collapse under healthy mixed
+// latency traffic (sub-10ms lexical/error responses + 60ms hybrid bursts) and
+// healthy slow-objective profiles (e.g., deep 1200ms alongside default 50ms).
+func TestSearchAdmissionMixedHealthyTrafficAndDeepProfileDoNotCollapseLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limiter := httpapi.NewSearchAdmission(httpapi.SearchAdmissionConfig{
+			InitialLimit:  64,
+			MinLimit:      4,
+			MaxLimit:      128,
+			TargetLatency: 300 * time.Millisecond,
+			GradientRatio: 3.0,
+			BackoffRatio:  0.75,
+			Window:        250 * time.Millisecond,
+		})
+
+		// Fast 5ms lexical hits establish low minRTT; subsequent 80ms healthy hybrid
+		// burst (< target/2 = 150ms) must not trip gradient backoff.
+		for i := 0; i < 4; i++ {
+			lease, _, ok := limiter.Acquire(context.Background())
+			if !ok {
+				t.Fatal("failed to acquire fast lexical slot")
+			}
+			time.Sleep(5 * time.Millisecond)
+			lease.Release(false, false)
+		}
+		for wave := 0; wave < 4; wave++ {
+			var leases []*httpapi.AdmissionLease
+			for i := 0; i < 16; i++ {
+				lease, _, ok := limiter.Acquire(context.Background())
+				if !ok {
+					t.Fatalf("wave %d slot %d refused", wave, i)
+				}
+				leases = append(leases, lease)
+			}
+			time.Sleep(80 * time.Millisecond)
+			for _, lease := range leases {
+				lease.Release(false, false)
+			}
+			time.Sleep(260 * time.Millisecond)
+		}
+		if stats := limiter.Stats(); stats.Limit < 64 {
+			t.Fatalf("healthy 80ms hybrid burst collapsed limit to %d; want >= 64", stats.Limit)
+		}
+
+		// Non-overload 403/422 errors (skipObserve=true) and healthy 1200ms deep
+		// requests (3000ms profile objective) must not degrade default capacity.
+		for i := 0; i < 12; i++ {
+			lease, _, ok := limiter.Acquire(context.Background())
+			if !ok {
+				t.Fatal("failed to acquire validation-error slot")
+			}
+			time.Sleep(1 * time.Millisecond)
+			lease.ReleaseWithTarget(false, true, 0)
+		}
+		for i := 0; i < 12; i++ {
+			lease, _, ok := limiter.Acquire(context.Background())
+			if !ok {
+				t.Fatalf("deep slot %d refused", i)
+			}
+			time.Sleep(1200 * time.Millisecond)
+			lease.ReleaseWithTarget(false, false, 3*time.Second)
+		}
+		if stats := limiter.Stats(); stats.Limit < 64 {
+			t.Fatalf("healthy deep profile traffic collapsed limit to %d; want >= 64", stats.Limit)
+		}
+	})
+}

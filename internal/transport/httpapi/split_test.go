@@ -165,20 +165,22 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, path, token string
 		want                      int
+		wantAuditAction           string
 	}{
-		{"unauthenticated admin rejected", "GET", "/v0/admin/queues", "", 401},
-		{"functional key rejected on admin port", "GET", "/v0/admin/queues", functionalKey, 401},
-		{"dedicated queue key allowed on queues", "GET", "/v0/admin/queues", queueOnlyKey, 200},
-		{"dedicated queue key forbidden on documents", "GET", "/v0/admin/documents", queueOnlyKey, 403},
-		{"dedicated admin key allowed on documents", "GET", "/v0/admin/documents", adminKey, 200},
-		{"dedicated admin key allowed on audit", "GET", "/v0/admin/audit", adminKey, 200},
-		{"non-admin functional route refused on admin port", "GET", "/v0/corpora", adminKey, 404},
-		{"version route refused on admin port", "GET", "/v0/version", adminKey, 404},
-		{"webhook route refused on admin port", "POST", "/v0/connector-webhooks/c1", "", 404},
-		{"connector api route refused on admin port", "POST", "/v0/connectors/c1/api/events", "", 404},
+		{"unauthenticated admin rejected", "GET", "/v0/admin/queues", "", 401, "auth.refused"},
+		{"functional key rejected on admin port", "GET", "/v0/admin/queues", functionalKey, 401, "auth.refused"},
+		{"dedicated queue key allowed on queues", "GET", "/v0/admin/queues", queueOnlyKey, 200, ""},
+		{"dedicated queue key forbidden on documents", "GET", "/v0/admin/documents", queueOnlyKey, 403, "permission.refused"},
+		{"dedicated admin key allowed on documents", "GET", "/v0/admin/documents", adminKey, 200, ""},
+		{"dedicated admin key allowed on audit", "GET", "/v0/admin/audit", adminKey, 200, ""},
+		{"non-admin functional route refused on admin port", "GET", "/v0/corpora", adminKey, 404, ""},
+		{"version route refused on admin port", "GET", "/v0/version", adminKey, 404, ""},
+		{"webhook route refused on admin port", "POST", "/v0/connector-webhooks/c1", "", 404, ""},
+		{"connector api route refused on admin port", "POST", "/v0/connectors/c1/api/events", "", 404, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs.Reset()
+			beforeAudits := len(audits.events)
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			req.RemoteAddr = "192.0.2.9:5555"
 			req.Header.Set("X-Forwarded-For", "198.51.100.77")
@@ -189,6 +191,14 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 			adminHandler.ServeHTTP(rec, req)
 			if rec.Code != tc.want {
 				t.Fatalf("admin %s %s: want %d got %d %s", tc.method, tc.path, tc.want, rec.Code, rec.Body.String())
+			}
+			appended := audits.events[beforeAudits:]
+			if tc.wantAuditAction != "" {
+				if len(appended) != 1 || appended[0].Action != tc.wantAuditAction || appended[0].Outcome != "refused" || appended[0].Detail.Status != tc.want || appended[0].Detail.Route == "" {
+					t.Fatalf("admin %s %s refusal audit = %+v; want action=%s outcome=refused status=%d", tc.method, tc.path, appended, tc.wantAuditAction, tc.want)
+				}
+			} else if len(appended) != 0 {
+				t.Fatalf("admin %s %s unexpected audit events = %+v", tc.method, tc.path, appended)
 			}
 			var event map[string]any
 			dec := json.NewDecoder(&logs)

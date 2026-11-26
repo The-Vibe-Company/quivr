@@ -782,6 +782,17 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 				return err
 			}
 			exhausted = len(rows) == scanLimit
+			if exhausted {
+				present, _ := groupPassageRows(rows)
+				bounded := ranked[:min(len(ranked), passageSelectionLimit(q, limit))]
+				if missing := missingCandidates(bounded, present); len(missing) > 0 {
+					recovered, err := s.recoverMissingPassages(ctx, collection, passageWhere, missing, passagesPerTopItem)
+					if err != nil {
+						return err
+					}
+					rows = append(rows, recovered...)
+				}
+			}
 		} else {
 			rows, exhausted, err = s.selectSparseGroupedPassages(ctx, collection, passageWhere, ranked, query, passageSelectionLimit(q, limit), densePassages)
 			if err != nil {

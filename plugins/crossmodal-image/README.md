@@ -16,7 +16,7 @@ First-party Quivr plugin (`crossmodal.image`) that enriches image Blobs and embe
 | Field | Default | Description |
 | --- | --- | --- |
 | `backend` | `builtin` | `builtin` deterministic visual/text encoder (`crossmodal.image.vision`), or `http` for an external cross-modal embedding endpoint (`crossmodal.image.external`). |
-| `base_url` | — | Required when `backend` is `http`. |
+| `base_url` | — | Required when `backend` is `http`. Valid `http` or `https` URL with a hostname, no userinfo, and no whitespace or control characters. |
 | `auth` | `none` | `none`, `bearer`, or `api-key` (reads `CROSSMODAL_API_KEY`). |
 | `model` | space default | Optional model identifier; must match the requested space's declared model (`crossmodal/builtin-vision-512` or `crossmodal/http-vision-512`). |
 | `region_mode` | `full` | `full` (whole image) or `grid` (full image plus `grid_rows x grid_cols` spatial crops). |

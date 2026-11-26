@@ -981,6 +981,25 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 		if textVers["v-tail-starved"] || textVers["v-tail-huge"] {
 			t.Fatalf("tail versions must not fetch passageText: %v", textVers)
 		}
+
+		// Ungrouped mode (GroupBy == "") must also recover starved top-ranked versions
+		// when a high-passage item fills the 512-row shared scan window.
+		ungroupedHits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "", Limit: 2, K: retrieval.CandidateLimit,
+		})
+		if err != nil {
+			t.Fatalf("ungrouped starvation test failed: %v", err)
+		}
+		foundStarved := false
+		for _, h := range ungroupedHits {
+			if h.VersionID == "v-top-starved" {
+				foundStarved = true
+				break
+			}
+		}
+		if !foundStarved {
+			t.Fatalf("ungrouped search starved v-top-starved; got %d hits", len(ungroupedHits))
+		}
 	})
 
 	t.Run("dense grouped refill caps scan depth below 2400", func(t *testing.T) {

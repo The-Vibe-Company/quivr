@@ -127,8 +127,7 @@ def main():
         values = {k: secrets.token_hex(32) for k in ['database_password', 'api_key', 'admin_key', 'demo_admin_key', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'demo_password']}
         secretfile.write_text(json.dumps(values))
     common = {
-        'QUIVR_API_KEY': values['api_key'], 'QUIVR_ADMIN_KEY': values['admin_key'],
-        'QUIVR_DEMO_ADMIN_KEY': values['demo_admin_key'], 'QUIVR_CURSOR_KEY': values['cursor_key'],
+        'QUIVR_API_KEY': values['api_key'], 'QUIVR_CURSOR_KEY': values['cursor_key'],
         'QUIVR_CREDENTIAL_KEY': values['credential_key'],
         'DATABASE_URL': f"postgres://quivr:{values['database_password']}@postgres.railway.internal:5432/quivr?sslmode=disable",
         'S3_ACCESS_KEY': values['s3_access'], 'S3_SECRET_KEY': values['s3_secret'],
@@ -137,6 +136,7 @@ def main():
         'WEAVIATE_GRPC_ADDRESS': 'weaviate.railway.internal:50051',
         'WEAVIATE_URL': 'http://weaviate.railway.internal:8080', 'TEI_URL': 'http://tei.railway.internal:80',
     }
+    api_admin = {'QUIVR_ADMIN_KEY': values['admin_key'], 'QUIVR_DEMO_ADMIN_KEY': values['demo_admin_key']}
     volumes = json.loads(cli('volume', 'list', '--json')).get('volumes', [])
     state = {}
     for name, spec in services.items():
@@ -153,8 +153,14 @@ def main():
             variables['POSTGRES_PWD'] = values['database_password']
         elif name == 'seaweed':
             variables.update({k: common[k] for k in ['S3_ACCESS_KEY', 'S3_SECRET_KEY']})
-        elif name in ('api', 'worker', 'worker-bulk'):
+        elif name == 'api':
             variables.update(common)
+            variables.update(api_admin)
+        elif name in ('worker', 'worker-bulk'):
+            variables.update(common)
+            # Explicitly clear legacy admin keys on existing worker services.
+            variables['QUIVR_ADMIN_KEY'] = ''
+            variables['QUIVR_DEMO_ADMIN_KEY'] = ''
         elif name == 'web':
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
             if 'QUIVR_ADMIN_URL' in variables:

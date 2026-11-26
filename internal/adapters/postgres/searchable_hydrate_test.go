@@ -21,7 +21,7 @@ func TestHydrateSQLMergesPackedSourcesAndScopeFence(t *testing.T) {
 		"ORDER BY sr.ordinality",
 		"WHERE sr.part_key<>c.part_key AND (vp.organization,vp.version_id,vp.part_key)>=(c.organization,sg.version_id,sr.part_key)",
 		"WHERE sr.part_key<>c.part_key AND sp.blob_id IS NOT NULL AND (cb.organization,cb.blob_id)>=(c.organization,sp.blob_id)",
-		"WHERE sr.part_key=c.part_key OR sb.blob_id IS NOT NULL",
+		"WHERE (sr.part_key=c.part_key AND b.blob_id IS NOT NULL) OR sb.blob_id IS NOT NULL",
 	} {
 		if !strings.Contains(hydrateSQL, fragment) {
 			t.Fatalf("hydrateSQL missing expected clause %q", fragment)

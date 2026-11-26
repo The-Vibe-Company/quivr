@@ -22,10 +22,16 @@ type metricsTransport struct {
 }
 
 func (t metricsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if m := t.store.metrics.Load(); m != nil {
-		m.Record(telemetry.DependencyWeaviate, telemetry.ProtocolHTTP, classifyOperation(req.Method, relativeAPIPath(t.basePath, req.URL.Path)))
+	if t.store != nil {
+		if m := t.store.metrics.Load(); m != nil {
+			m.Record(telemetry.DependencyWeaviate, telemetry.ProtocolHTTP, classifyOperation(req.Method, relativeAPIPath(t.basePath, req.URL.Path)))
+		}
 	}
-	return t.base.RoundTrip(req)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
 }
 
 func (t metricsTransport) CloseIdleConnections() {
@@ -37,6 +43,9 @@ func (t metricsTransport) CloseIdleConnections() {
 func (t metricsTransport) Unwrap() http.RoundTripper { return t.base }
 
 func (s *Store) countRequests(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
 	return metricsTransport{base: base, store: s, basePath: endpointBasePath(s.Endpoint)}
 }
 

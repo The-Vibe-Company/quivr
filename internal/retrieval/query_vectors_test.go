@@ -139,6 +139,70 @@ func TestQueryVectorCacheSkipsFailuresAndOversizedVectors(t *testing.T) {
 	}
 }
 
+type failingPinnedSpaceEncoder struct {
+	ownsCalls int
+	resolve   func(context.Context, string) (QueryEncoder, string, error)
+}
+
+func (f *failingPinnedSpaceEncoder) Owns(string) bool {
+	f.ownsCalls++
+	return true
+}
+
+func (f *failingPinnedSpaceEncoder) EncodeQuery(context.Context, string, string, string) ([]float32, error) {
+	return nil, errors.New("unexpected direct encode")
+}
+
+func (f *failingPinnedSpaceEncoder) ResolveQueryEncoder(ctx context.Context, space string) (QueryEncoder, string, error) {
+	return f.resolve(ctx, space)
+}
+
+func TestQueryVectorCacheCancelsFlightWhenAllWaitersLeave(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		canceled := make(chan struct{}, 1)
+		service := Service{QueryVectors: NewQueryVectorCache(), Embedder: testQueryEmbedder{
+			run: func(ctx context.Context, _ string) ([]float32, error) {
+				<-ctx.Done()
+				canceled <- struct{}{}
+				return nil, ctx.Err()
+			},
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			_, err := service.EncodeQuery(ctx, "org", "test-space", "stalled")
+			done <- err
+		}()
+		synctest.Wait()
+		cancel()
+		if err := <-done; !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("caller error = %v, want ErrUnavailable", err)
+		}
+		synctest.Wait()
+		select {
+		case <-canceled:
+		default:
+			t.Fatal("in-flight encode was not canceled when the last waiter left")
+		}
+	})
+}
+
+func TestResolveQueryEncoderErrorReturnsUnavailableWithoutCallingOwns(t *testing.T) {
+	enc := &failingPinnedSpaceEncoder{
+		resolve: func(context.Context, string) (QueryEncoder, string, error) {
+			return nil, "", errors.New("db unavailable")
+		},
+	}
+	service := Service{QueryVectors: NewQueryVectorCache(), Spaces: enc}
+	_, err := service.EncodeQuery(t.Context(), "org", "plugin-space", "hello")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if enc.ownsCalls != 0 {
+		t.Fatalf("Owns() called %d times on resolver error; want 0", enc.ownsCalls)
+	}
+}
+
 func BenchmarkEncodeQuery(b *testing.B) {
 	service := Service{QueryVectors: NewQueryVectorCache(), Embedder: testQueryEmbedder{
 		run: func(context.Context, string) ([]float32, error) { return make([]float32, 768), nil },

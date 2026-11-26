@@ -438,3 +438,30 @@ func TestInvalidImageSpaceBindingDecompressionBombAndSegmentLimit(t *testing.T) 
 		}
 	})
 }
+
+func TestDecodePluginConfigBaseURL(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		accept bool
+	}{
+		{"valid http loopback", `{"backend":"http","base_url":"http://127.0.0.1:8080/embed"}`, true},
+		{"valid https host", `{"backend":"http","base_url":"https://embed.example.test/v1"}`, true},
+		{"unsupported scheme", `{"backend":"http","base_url":"ftp://embed.example.test"}`, false},
+		{"userinfo rejected", `{"backend":"http","base_url":"http://user:pass@127.0.0.1:8080"}`, false},
+		{"whitespace rejected", `{"backend":"http","base_url":"http://127.0.0.1:8080/ embed"}`, false},
+		{"control char rejected", `{"backend":"http","base_url":"http://127.0.0.1:8080/\nembed"}`, false},
+		{"missing host rejected", `{"backend":"http","base_url":"http:///embed"}`, false},
+		{"port without hostname rejected", `{"backend":"http","base_url":"http://:8080"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodePluginConfig(json.RawMessage(tc.raw))
+			if tc.accept && err != nil {
+				t.Fatalf("expected %q accepted, got %v", tc.raw, err)
+			}
+			if !tc.accept && err == nil {
+				t.Fatalf("expected %q rejected, got nil", tc.raw)
+			}
+		})
+	}
+}

@@ -1130,31 +1130,38 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		return err
 	}
 	for _, object := range existing {
-		// A replayed identity has no acknowledgement from this batch.
+		// Verify replayed identities before destructive cleanup so a corrupt
+		// winner cannot trigger deletion of older objects.
 		if err := s.verifyObject(ctx, object); err != nil {
 			return err
 		}
 	}
-	if len(replacements) == 0 {
-		return nil
-	}
-
-	// Read the replacements together after the write. Concurrent publishers
-	// can see different sets, so each may only delete objects that lose to a
-	// higher-ranked object. This prevents writers from deleting both replacements.
-	rows, err = inventory(replacements)
-	if err != nil {
-		return err
-	}
-	if len(rows) >= embeddingInventoryLimit {
-		for _, segment := range replacements {
-			if err := s.removeStaleEnrichedOverflow(ctx, g, org, scope, segment); err != nil {
+	if len(replacements) > 0 {
+		// Read the replacements together after the write. Concurrent publishers
+		// can see different sets, so each may only delete objects that lose to a
+		// higher-ranked object. This prevents writers from deleting both replacements.
+		rows, err = inventory(replacements)
+		if err != nil {
+			return err
+		}
+		if len(rows) >= embeddingInventoryLimit {
+			for _, segment := range replacements {
+				if err := s.removeStaleEnrichedOverflow(ctx, g, org, scope, segment); err != nil {
+					return err
+				}
+			}
+		} else if err := s.removeStaleEnriched(ctx, g, org, rows); err != nil {
+			return err
+		}
+		for _, object := range existing {
+			// Re-verify after cleanup so a superseded replayed identity that was
+			// just retired cannot return nil and commit deleted vectors.
+			if err := s.verifyObject(ctx, object); err != nil {
 				return err
 			}
 		}
-		return nil
 	}
-	return s.removeStaleEnriched(ctx, g, org, rows)
+	return nil
 }
 
 // Embedding revisions order successive replacements. Creation time orders

@@ -22,10 +22,11 @@ const ledgerInsertDenied = "PostgreSQL role cannot insert into public.schema_mig
 // changing database state. Quivr's SQL uses public, including qualified
 // references in the embedded migrations.
 func CheckPrerequisites(ctx context.Context, pool *pgxpool.Pool, forMigration bool) error {
-	var writable, schemaExists, schemaUsage, schemaFirst, schemaCreate, plpgsql, ledgerReadable bool
+	var writable, inRecovery, schemaExists, schemaUsage, schemaFirst, schemaCreate, plpgsql, ledgerReadable bool
 	var ledgerWritable bool
 	err := pool.QueryRow(ctx, `SELECT
 		NOT pg_catalog.current_setting('transaction_read_only')::boolean,
+		pg_catalog.pg_is_in_recovery(),
 		n.oid IS NOT NULL,
 		COALESCE(pg_catalog.has_schema_privilege(n.oid, 'USAGE'), false),
 		pg_catalog.current_schema() IS NOT DISTINCT FROM 'public',
@@ -37,10 +38,12 @@ func CheckPrerequisites(ctx context.Context, pool *pgxpool.Pool, forMigration bo
 		LEFT JOIN pg_catalog.pg_namespace n ON n.nspname = 'public'
 		LEFT JOIN pg_catalog.pg_language l ON l.lanname = 'plpgsql'
 		LEFT JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid AND c.relname = 'schema_migrations'`).
-		Scan(&writable, &schemaExists, &schemaUsage, &schemaFirst, &schemaCreate, &plpgsql, &ledgerReadable, &ledgerWritable)
+		Scan(&writable, &inRecovery, &schemaExists, &schemaUsage, &schemaFirst, &schemaCreate, &plpgsql, &ledgerReadable, &ledgerWritable)
 	switch {
 	case err != nil:
 		return ErrPrerequisiteConnection
+	case inRecovery:
+		return &PrerequisiteError{"PostgreSQL server is a read-only standby in recovery. Connect Quivr to a writable primary"}
 	case !writable:
 		return &PrerequisiteError{"PostgreSQL session is read-only. Connect Quivr to a writable primary and check the role's default_transaction_read_only setting"}
 	case !schemaExists:

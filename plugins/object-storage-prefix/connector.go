@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -177,8 +178,8 @@ func decodeCheckpoint(req *quivrplugin.FetchRequest, c prefixConfig) (checkpoint
 	if cp.Mode != c.CheckpointMode {
 		return cp, time.Time{}, quivrplugin.SourceError("invalid_checkpoint", "checkpoint mode does not match connector configuration")
 	}
-	if cp.LastKey != "" && !c.acceptsKey(cp.LastKey) {
-		return cp, time.Time{}, quivrplugin.SourceError("invalid_checkpoint", "checkpoint last_key is outside the configured prefix or object patterns")
+	if cp.LastKey != "" && !strings.HasPrefix(cp.LastKey, c.Prefix) {
+		return cp, time.Time{}, quivrplugin.SourceError("invalid_checkpoint", "checkpoint last_key is outside the configured prefix")
 	}
 	var afterTime time.Time
 	if cp.LastModified != "" {
@@ -289,8 +290,27 @@ func (p *PrefixConnector) Fetch(ctx context.Context, req *quivrplugin.FetchReque
 				processed = i + 1
 				continue
 			}
+			if errors.Is(err, errObjectTooLarge) {
+				if !c.skipOversized() {
+					return nil, quivrplugin.SourceError("object_too_large", "object exceeds max_object_bytes")
+				}
+				cp.ObjectsSkipped++
+				advanceCheckpoint(&cp, c.CheckpointMode, obj)
+				processed = i + 1
+				continue
+			}
 			if errors.Is(err, errObjectChanged) {
-				// Benign churn: object overwritten after listing; retry to re-list.
+				// Benign churn: object overwritten after listing; invalidate any
+				// reused timestamp snapshot so the immediate retry re-lists.
+				if reusedSnapshot {
+					session.mu.Lock()
+					session.tsSnapshot = nil
+					session.tsSnapshotMore = false
+					session.tsCursorKey = ""
+					session.tsCursorTime = ""
+					session.tsSnapshotAt = time.Time{}
+					session.mu.Unlock()
+				}
 				return nil, quivrplugin.TransientError("object_changed", "the object changed after it was listed")
 			}
 			return nil, err
@@ -439,6 +459,9 @@ func (p *PrefixConnector) OpenAttachment(ctx context.Context, req *quivrplugin.A
 	if err != nil {
 		if errors.Is(err, errObjectMissing) {
 			return nil, quivrplugin.SourceError("object_missing", "the object is no longer available")
+		}
+		if errors.Is(err, errObjectTooLarge) {
+			return nil, quivrplugin.SourceError("object_too_large", "object exceeds max_object_bytes")
 		}
 		if errors.Is(err, errObjectChanged) {
 			return nil, quivrplugin.TransientError("object_changed", "the object changed before download completed")

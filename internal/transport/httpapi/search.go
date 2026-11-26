@@ -85,7 +85,15 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	defer lease.Release(false, true)
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
-	lease.Release(isSearchOverload(err), errors.Is(r.Context().Err(), context.Canceled))
+	overload := isSearchOverload(err)
+	skipObserve := errors.Is(r.Context().Err(), context.Canceled) ||
+		(err != nil && !overload) ||
+		(err == nil && (result.Usage == nil || result.Usage.Rounds == 0))
+	var targetLatency time.Duration
+	if result.Usage != nil && result.Usage.Objective > 0 && !result.Usage.DefaultProfile {
+		targetLatency = result.Usage.Objective
+	}
+	lease.ReleaseWithTarget(overload, skipObserve, targetLatency)
 	a.recordSearch(scope.Organization, q, result, started, err)
 	if err != nil {
 		writeError(w, err, publicerr.SearchUnavailable)

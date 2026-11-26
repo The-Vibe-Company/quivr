@@ -11,6 +11,7 @@ import (
 
 func TestLoadSecretBindings(t *testing.T) {
 	const apiToken = "fixture-bearer-key-with-sufficient-length"
+	const adminToken = "fixture-admin-key-with-sufficient-length!"
 	const db = "postgres://user:fixture-password@db/quivr?sslmode=disable"
 	const cursor = "fixture-cursor-secret-with-sufficient-length"
 	const access = "fixture-s3-user"
@@ -20,7 +21,8 @@ func TestLoadSecretBindings(t *testing.T) {
 		"DATABASE_URL":     db,
 		"QUIVR_CURSOR_KEY": cursor,
 		"S3_SECRET_KEY":    secret,
-		"QUIVR_API_KEYS":   `{"` + apiToken + `":{"organization":"example","actions":["corpora:read"],"corpora":["*"]}}`,
+		"QUIVR_API_KEYS":   `{"` + apiToken + `":{"organization":"example","actor_id":"0123456789abcdef0123456789abcdef","actions":["corpora:read"],"corpora":["*"]}}`,
+		"QUIVR_ADMIN_KEYS": `{"` + adminToken + `":{"organization":"example","actor_id":"fedcba9876543210fedcba9876543210","actions":["plugins:admin"],"corpora":["*"]}}`,
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "value")
@@ -50,8 +52,12 @@ func TestLoadSecretBindings(t *testing.T) {
 		t.Fatal("resolved credentials differ from their dedicated bindings or legacy fallback")
 	}
 	scope, ok := cfg.Keys[apiToken]
-	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" {
+	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" || scope.ActorID != "0123456789abcdef0123456789abcdef" {
 		t.Fatal("API secret binding did not preserve the bearer token's scope")
+	}
+	adminScope, ok := cfg.AdminKeys[adminToken]
+	if !ok || len(cfg.AdminKeys) != 1 || !adminScope.Allows("plugins:admin") || adminScope.Organization != "example" || adminScope.ActorID != "fedcba9876543210fedcba9876543210" {
+		t.Fatal("admin secret binding did not preserve the bearer token's scope")
 	}
 }
 
@@ -70,6 +76,10 @@ func TestRejectSecretBindingsWithoutLeakingInput(t *testing.T) {
 		{name: "unknown field", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"fixture":{"` + secret + `":true}}`, code: configInvalid},
 		{name: "duplicate tokens", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"` + secret + `":{},"` + secret + `":{}}`, code: configInvalid},
 		{name: "case variant scope field", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"fixture":{"organization":"example","Organization":"` + secret + `"}}`, code: configInvalid},
+		{name: "admin keys conflict", binding: "QUIVR_ADMIN_KEYS", field: "admin_keys", inline: `{}`, file: `{}`, mount: true, exists: true, code: configConflict},
+		{name: "admin keys malformed JSON", binding: "QUIVR_ADMIN_KEYS", field: "admin_keys", inline: `{"` + secret + `":`, code: configInvalid},
+		{name: "admin keys unknown field", binding: "QUIVR_ADMIN_KEYS", field: "admin_keys", inline: `{"fixture":{"` + secret + `":true}}`, code: configInvalid},
+		{name: "admin keys duplicate tokens", binding: "QUIVR_ADMIN_KEYS", field: "admin_keys", inline: `{"` + secret + `":{},"` + secret + `":{}}`, code: configInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("DATABASE_URL", "")

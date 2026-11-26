@@ -693,7 +693,7 @@ def main():
         raise ValueError('QUIVR_API_KEYS and QUIVR_ADMIN_KEYS cannot be combined with the individual Railway API key variables')
     if env.get('QUIVR_API_KEYS'):
         api_keys = env['QUIVR_API_KEYS']
-        admin_keys = env.get('QUIVR_ADMIN_KEYS', '')
+        admin_keys = '' if (env.get('QUIVR_ADMIN_LISTEN') or '').strip() == 'off' else env.get('QUIVR_ADMIN_KEYS', '')
     else:
         functional, admin = engine_key_sets(env)
         api_keys = json.dumps(functional)
@@ -714,7 +714,7 @@ def main():
     # go only to the sidecars that use them.
     core_env = {name: value for name, value in env.items()
                 if name not in PLUGIN_SECRETS and name not in SCOPED_KEY_SECRETS
-                and name not in ('QUIVR_PLUGIN_SIGNING_KEYS', 'QUIVR_PLUGIN_SIGNING_KEYS_FILE')}
+                and name not in ('QUIVR_PLUGIN_SIGNING_KEYS', 'QUIVR_PLUGIN_SIGNING_KEYS_FILE', 'QUIVR_ADMIN_LISTEN')}
     core_env.update(signing, QUIVR_API_KEYS=api_keys, QUIVR_CONFIG=str(path))
     if admin_keys:
         core_env['QUIVR_ADMIN_KEYS'] = admin_keys

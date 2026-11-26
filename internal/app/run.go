@@ -296,6 +296,10 @@ func Run(command string, args ...string) error {
 			cfg.Telemetry.ResourceAttributes[key] = value
 		}
 	}
+	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
+	if err != nil {
+		return err
+	}
 	telemetryRuntime, err := telemetry.Init(context.Background(), cfg.Telemetry)
 	if err != nil {
 		return invalidConfig("telemetry", "invalid telemetry settings", err)
@@ -416,10 +420,6 @@ func Run(command string, args ...string) error {
 		pinnedAttempts = cfg.PinnedPluginAttempts
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
-		return err
-	}
-	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
-	if err != nil {
 		return err
 	}
 	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {

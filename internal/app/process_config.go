@@ -62,7 +62,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 		cfg.ProbeListen = "127.0.0.1:8081"
 	}
 	secrets := cfg.logSecrets()
-	if value := os.Getenv("QUIVR_ADMIN_LISTEN"); value != "" {
+	if value := strings.TrimSpace(os.Getenv("QUIVR_ADMIN_LISTEN")); value != "" {
 		if value == "off" {
 			cfg.AdminListen = ""
 			cfg.AdminKeys = nil

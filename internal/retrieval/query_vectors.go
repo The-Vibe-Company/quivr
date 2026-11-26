@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
-	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -25,13 +24,21 @@ const (
 	queryVectorTimeout = 10 * time.Second
 )
 
+type queryFlight struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	vector  []float32
+	err     error
+}
+
 // QueryVectorCache keeps completed encodings for one service's encoders.
 // Its pointer is shared across the copies of Service used to serve searches.
 type QueryVectorCache struct {
 	maxEntries, maxBytes int
 	lookups, evictions   *telemetry.Family
-	flight               singleflight.Group
 	mu                   sync.Mutex
+	flights              map[string]*queryFlight
 	lru                  list.List
 	entries              map[string]*list.Element
 	bytes                int
@@ -53,6 +60,7 @@ func newQueryVectorCache(maxEntries, maxBytes int) *QueryVectorCache {
 		maxBytes:   maxBytes,
 		lookups:    telemetry.NewFamily("quivr_query_vector_cache_lookups_total", "Query vector cache lookups by outcome.", []string{"result"}, nil, 2),
 		evictions:  telemetry.NewFamily("quivr_query_vector_cache_evictions_total", "Query vectors evicted by the cache limits.", nil, nil, 1),
+		flights:    make(map[string]*queryFlight),
 		entries:    make(map[string]*list.Element),
 	}
 	c.lookups.Add(0, "hit")
@@ -108,6 +116,12 @@ func (c *QueryVectorCache) store(key string, vector []float32) {
 	}
 	key = strings.Clone(key)
 	c.mu.Lock()
+	if node := c.entries[key]; node != nil {
+		// Another flight already populated this immutable key; refresh LRU without duplicating nodes.
+		c.lru.MoveToFront(node)
+		c.mu.Unlock()
+		return
+	}
 	evicted := int64(0)
 	for c.lru.Len() >= c.maxEntries || c.bytes+size > c.maxBytes {
 		node := c.lru.Back()
@@ -132,37 +146,61 @@ func (c *QueryVectorCache) encode(ctx context.Context, key string, run func(cont
 	if ctx.Err() != nil {
 		return nil, ErrUnavailable
 	}
-	if vector, ok := c.lookup(key); ok {
+	c.mu.Lock()
+	if node := c.entries[key]; node != nil {
+		c.lru.MoveToFront(node)
+		vector := slices.Clone(node.Value.(queryVectorEntry).vector)
+		c.mu.Unlock()
 		c.lookups.Add(1, "hit")
-		return slices.Clone(vector), nil
-	}
-	c.lookups.Add(1, "miss")
-	result := c.flight.DoChan(key, func() (any, error) {
-		// An earlier flight may have filled the cache after our first lookup.
-		if vector, ok := c.lookup(key); ok {
-			return vector, nil
-		}
-		// A canceled waiter must not abort work another search is waiting for.
-		work, cancel := context.WithTimeout(context.WithoutCancel(ctx), queryVectorTimeout)
-		defer cancel()
-		vector, err := run(work)
-		if err != nil {
-			return nil, err
-		}
-		vector = slices.Clone(vector)
-		c.store(key, vector)
 		return vector, nil
-	})
+	}
+	f := c.flights[key]
+	if f != nil {
+		f.waiters++
+		c.mu.Unlock()
+		c.lookups.Add(1, "miss")
+	} else {
+		work, cancel := context.WithTimeout(context.WithoutCancel(ctx), queryVectorTimeout)
+		f = &queryFlight{done: make(chan struct{}), cancel: cancel, waiters: 1}
+		c.flights[key] = f
+		c.mu.Unlock()
+		c.lookups.Add(1, "miss")
+		go func() {
+			defer cancel()
+			vector, err := run(work)
+			if err == nil {
+				vector = slices.Clone(vector)
+				c.store(key, vector)
+			}
+			c.mu.Lock()
+			f.vector = vector
+			f.err = err
+			if c.flights[key] == f {
+				delete(c.flights, key)
+			}
+			close(f.done)
+			c.mu.Unlock()
+		}()
+	}
 	select {
 	case <-ctx.Done():
+		c.mu.Lock()
+		f.waiters--
+		if f.waiters == 0 {
+			if c.flights[key] == f {
+				delete(c.flights, key)
+			}
+			f.cancel()
+		}
+		c.mu.Unlock()
 		return nil, ErrUnavailable
-	case res := <-result:
+	case <-f.done:
 		if ctx.Err() != nil {
 			return nil, ErrUnavailable
 		}
-		if res.Err != nil {
-			return nil, res.Err
+		if f.err != nil {
+			return nil, f.err
 		}
-		return slices.Clone(res.Val.([]float32)), nil
+		return slices.Clone(f.vector), nil
 	}
 }

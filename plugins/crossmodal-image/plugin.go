@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -56,8 +57,17 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	if cfg.Backend != "builtin" && cfg.Backend != "http" {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "backend must be builtin or http")
 	}
-	if cfg.Backend == "http" && cfg.BaseURL == "" {
-		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url is required when backend is http")
+	if cfg.Backend == "http" {
+		if cfg.BaseURL == "" {
+			return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url is required when backend is http")
+		}
+		if strings.IndexFunc(cfg.BaseURL, func(r rune) bool { return r <= 0x20 || r == 0x7f }) >= 0 {
+			return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url must not contain whitespace or control characters")
+		}
+		u, err := url.Parse(cfg.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url must be a valid http or https URL without userinfo")
+		}
 	}
 	if cfg.Auth != "none" && cfg.Auth != "bearer" && cfg.Auth != "api-key" {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "auth must be none, bearer, or api-key")
