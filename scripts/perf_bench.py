@@ -789,7 +789,15 @@ def main(argv: list[str] | None = None) -> int:
                 cold_reset_strategy = "command"
             elif args.no_restart_cold:
                 before_cold_hook = None
-                cold_reset_strategy = "disabled_by_flag"
+                if args.assume_cold:
+                    cold_reset_strategy = "caller_acknowledged"
+                else:
+                    cold_available = False
+                    cold_reset_strategy = "disabled_by_flag"
+                    cold_unavailable_reason = (
+                        "--no-restart-cold skipped the local API restart; pass "
+                        "--cold-reset-cmd <cmd> or --assume-cold to measure cold_search"
+                    )
             else:
                 before_cold_hook = lambda: _restart_local_api(stack)
                 cold_reset_strategy = "local_api_restart"

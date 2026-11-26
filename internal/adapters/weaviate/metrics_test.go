@@ -17,6 +17,10 @@ func TestStoreCountsClassifiedHTTPCalls(t *testing.T) {
 	for _, prefix := range []string{"", "/proxy/weaviate"} {
 		t.Run("prefix="+prefix, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if prefix != "" && !strings.HasPrefix(r.URL.Path, prefix+"/") {
+					http.NotFound(w, r)
+					return
+				}
 				apiPath := strings.TrimPrefix(r.URL.Path, prefix)
 				switch {
 				case r.Method == http.MethodGet && apiPath == "/v1/.well-known/ready":

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
@@ -549,6 +550,64 @@ class LocalSafetyAndReadinessContract(unittest.TestCase):
         self.assertEqual(client.last_search["corpus_ids"], ["probe-corpus-1"])
         self.assertEqual(client.last_search["mode"], "semantic")
         self.assertIn(("POST", "/v0/records"), calls)
+
+    def test_local_no_restart_cold_marks_cold_unavailable_without_assume_cold(self):
+        cluster = _FakeQuivrCluster(phase_scale=1.0)
+        self.addCleanup(cluster.close)
+        port = cluster.server.server_address[1]
+        fake_stack = types.SimpleNamespace(
+            state={
+                "api_port": port,
+                "admin": "bench-token",
+                "probe_port": port,
+                "worker_probe_port": port,
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            unacked = pathlib.Path(tmp) / "unacked"
+            acked = pathlib.Path(tmp) / "acked"
+            with mock.patch.object(perf_bench, "_start_local_stack", return_value=(fake_stack, False)):
+                rc1 = perf_bench.main(
+                    [
+                        "--mode", "local",
+                        "--stack", "dev",
+                        "--no-restart-cold",
+                        "--api-metrics-url", cluster.base_url + "/api-metrics",
+                        "--worker-metrics-url", cluster.base_url + "/worker-metrics",
+                        "--ingest-docs", "2",
+                        "--words-per-doc", "24",
+                        "--cold-queries", "2",
+                        "--warm-queries", "2",
+                        "--warm-passes", "1",
+                        "--modes", "hybrid",
+                        "--out", str(unacked),
+                    ]
+                )
+                rc2 = perf_bench.main(
+                    [
+                        "--mode", "local",
+                        "--stack", "dev",
+                        "--no-restart-cold",
+                        "--assume-cold",
+                        "--api-metrics-url", cluster.base_url + "/api-metrics",
+                        "--worker-metrics-url", cluster.base_url + "/worker-metrics",
+                        "--ingest-docs", "2",
+                        "--words-per-doc", "24",
+                        "--cold-queries", "2",
+                        "--warm-queries", "2",
+                        "--warm-passes", "1",
+                        "--modes", "hybrid",
+                        "--out", str(acked),
+                    ]
+                )
+            self.assertEqual(rc1, 0)
+            self.assertEqual(rc2, 0)
+            rep1 = json.loads((unacked / "bench.json").read_text())
+            rep2 = json.loads((acked / "bench.json").read_text())
+            self.assertFalse(rep1["cold_search"]["available"])
+            self.assertIn("--no-restart-cold", rep1["cold_search"]["reason"])
+            self.assertTrue(rep2["cold_search"]["available"])
+            self.assertEqual(rep2["cold_search"]["reset_strategy"], "caller_acknowledged")
 
 
 if __name__ == "__main__":
