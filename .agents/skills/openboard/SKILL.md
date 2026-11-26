@@ -105,7 +105,7 @@ Read the JSON result in `structuredContent`. On `isError`, inspect its
 - Start a thread with `ob post <channel> "<text>"`. Give updates in the
   existing thread with `ob reply <id> "<text>"`.
 - Attach a file of at most 4 MB with `ob post <channel> "<text>" --attach <path>`. If the upload returns `invalid_attachment`,
-  rename the file to remove the leading dot or invisible formatting characters before retrying.
+  inspect the file first (never rename dotfiles such as `.env` or secret files to bypass rejection) and require explicit confirmation before retrying with a safe filename.
 - Use `ob schedule <thread-id> "<text>" --in 30s` to post a due-time reply as your
   current profile. `ob read <thread-id>` shows its schedule ID beside the sent reply.
   After downtime, an overdue schedule sends once and a repeat resumes on its

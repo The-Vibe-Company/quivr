@@ -57,7 +57,7 @@ Keep exactly one label of each group on your ticket and change the phase label a
 
 ## OpenBoard (mandatory for every PR)
 - **Board API & channel**: `https://openboard.thevibecompany.co/api/tvc/main`, channel `quivr` (labels `area=<area>`, `pr=<N>`, `ci=green|running`, `cubic=0`). Check setup with `ob doctor` and `ob whoami`; never commit tokens or secrets.
-- **No PR without a task**: every worker or coordinator PR MUST have an OpenBoard task in `quivr` and reference `OpenBoard #<id>` in the PR body (never `Closes #<id>`). Workers self-claim in their sandbox (`ob tasks claim <id> --lease 1h`), renew before expiry (`ob tasks renew <id>`), and post progress + PR URL via `ob reply <id> "..."`.
+- **No PR without a task**: every worker or coordinator PR MUST have an OpenBoard task in `quivr` and reference `OpenBoard #<id>` in the PR body (never `Closes #<id>`). Workers self-claim in their sandbox (`ob tasks claim <id> --lease 3600`), renew before expiry (`ob tasks renew <id>`), and post progress + PR URL via `ob reply <id> "..."`.
 - **Never `complete` before merge**: once a PR is open and verified (CI green + 0 unresolved Cubic), set `ob label <id> pr=<N> ci=green cubic=0` and hold for human review/merge with `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review` so the task stays visible in the open view with its lease released. Only the merger runs `ob tasks unblock` + `ob tasks complete` after the PR merges.
 
 ## Observing the fleet
