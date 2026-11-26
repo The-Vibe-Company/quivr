@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import tempfile
 import time
 import urllib.parse
@@ -17,6 +18,16 @@ LOCK_PATH = ROOT / 'third_party' / 'query-encoder' / 'model-lock.json'
 DOWNLOAD_TIMEOUT_SECONDS = 120  # Socket idle timeout.
 DOWNLOAD_TOTAL_SECONDS = 600
 CHUNK_SIZE = 1024 * 1024
+_SUPPORTED_BACKENDS = ('onnx', 'pytorch')
+
+
+def _valid_repository(value):
+    if not isinstance(value, str) or not value or len(value) > 128 or '--' in value or '..' in value:
+        return False
+    parts = value.split('/')
+    return (len(parts) in (1, 2)
+            and all(re.fullmatch(r'[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?', part)
+                    for part in parts))
 
 
 def _read_lock(lock_path):
@@ -34,6 +45,21 @@ def _read_lock(lock_path):
         raise RuntimeError('invalid query encoder asset lock metadata')
     if type(dimensions) is not int or dimensions != 768 or not isinstance(files, dict) or not files:
         raise RuntimeError('invalid query encoder asset lock metadata')
+    backend = lock.get('backend')
+    if backend is not None and backend not in _SUPPORTED_BACKENDS:
+        raise RuntimeError('invalid query encoder asset lock backend')
+    precision = lock.get('precision')
+    if precision is not None and (not isinstance(precision, str) or not precision.strip()):
+        raise RuntimeError('invalid query encoder asset lock precision')
+    asset_repository = lock.get('asset_repository')
+    if asset_repository is not None and not _valid_repository(asset_repository):
+        raise RuntimeError('invalid query encoder asset repository')
+    asset_revision = lock.get('asset_revision')
+    if asset_revision is not None and (
+            not isinstance(asset_revision, str) or not asset_revision
+            or any(char.isspace() or '/' in char for char in asset_revision)
+            or '..' in asset_revision):
+        raise RuntimeError('invalid query encoder asset revision')
     normalized = {}
     for name, entry in files.items():
         if not isinstance(name, str) or not name or pathlib.PurePosixPath(name).is_absolute():
@@ -48,6 +74,9 @@ def _read_lock(lock_path):
                 or type(size) is not int or size < 0):
             raise RuntimeError('invalid query encoder asset lock')
         normalized[name] = {'sha256': digest, 'size': size}
+    model_file = lock.get('model_file')
+    if model_file is not None and (not isinstance(model_file, str) or model_file not in normalized):
+        raise RuntimeError('invalid query encoder model_file in asset lock')
     lock['files'] = normalized
     return lock
 
@@ -83,8 +112,10 @@ def _asset_url(lock, name, mirror_base_url=None):
     mirror = _mirror_base_url(mirror_base_url)
     if mirror is None:
         mirror = 'https://huggingface.co'
-    return (mirror + '/' + urllib.parse.quote(lock['model'], safe='/')
-            + '/resolve/' + urllib.parse.quote(lock['source_revision'], safe='') + '/'
+    repository = lock.get('asset_repository') or lock['model']
+    revision = lock.get('asset_revision') or lock['source_revision']
+    return (mirror + '/' + urllib.parse.quote(repository, safe='/')
+            + '/resolve/' + urllib.parse.quote(revision, safe='') + '/'
             + urllib.parse.quote(name, safe='/') + '?download=true')
 
 
@@ -191,13 +222,16 @@ def _parser():
     parser.add_argument('--output', required=True, type=pathlib.Path)
     parser.add_argument('--verify-only', action='store_true')
     parser.add_argument('--mirror-base-url', '--mirror', dest='mirror_base_url')
+    parser.add_argument('--lock-path', type=pathlib.Path, default=None)
     return parser
 
 
 def main(argv=None):
     args = _parser().parse_args(argv)
-    lock = prepare(args.output, verify_only=args.verify_only,
-                   mirror_base_url=args.mirror_base_url)
+    kwargs = {'verify_only': args.verify_only, 'mirror_base_url': args.mirror_base_url}
+    if args.lock_path is not None:
+        kwargs['lock_path'] = args.lock_path
+    lock = prepare(args.output, **kwargs)
     print(json.dumps({
         'model': lock['model'],
         'model_revision': lock['model_revision'],

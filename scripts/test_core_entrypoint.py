@@ -107,6 +107,23 @@ class CoreEntrypointTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_THREADS'):
                 core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
                                                   'QUIVR_QUERY_ENCODER_THREADS': threads}, 'api')
+        for backend in ('auto', 'onnx', 'pytorch'):
+            commands = core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                         'QUIVR_QUERY_ENCODER_BACKEND': backend}, 'api')
+            encoder_env = next(child for name, _, _, child in commands if name == 'text-encoder')
+            self.assertEqual(encoder_env['QUIVR_QUERY_ENCODER_BACKEND'], backend)
+        with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_BACKEND'):
+            core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                              'QUIVR_QUERY_ENCODER_BACKEND': 'invalid'}, 'api')
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = pathlib.Path(tmp)
+            self.assertFalse(core_entrypoint._encoder_model_present(model_dir))
+            (model_dir / 'onnx').mkdir()
+            (model_dir / 'onnx' / 'model_quantized.onnx').write_bytes(b'onnx')
+            self.assertTrue(core_entrypoint._encoder_model_present(model_dir))
+            (model_dir / 'onnx' / 'model_quantized.onnx').unlink()
+            (model_dir / 'model.safetensors').write_bytes(b'pt')
+            self.assertTrue(core_entrypoint._encoder_model_present(model_dir))
 
     def test_core_processes_keep_runtime_config_without_provider_secret(self):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.

@@ -98,6 +98,19 @@ class CpuEmbeddingHttpTest(unittest.TestCase):
             {"status": "ok", "model": embedding_api.MODEL,
              "revision": embedding_api.REVISION, "dimensions": 768},
         )
+        onnx_health = embedding_server._health_metadata({
+            **METADATA,
+            "backend": "onnx",
+            "precision": "int8",
+            "onnxruntime_version": "1.32.0",
+            "tokenizers_version": "0.23.2",
+            "numpy_version": "2.5.2",
+            "ignored_secret": "do-not-expose",
+        })
+        self.assertEqual(onnx_health["backend"], "onnx")
+        self.assertEqual(onnx_health["precision"], "int8")
+        self.assertEqual(onnx_health["onnxruntime_version"], "1.32.0")
+        self.assertNotIn("ignored_secret", onnx_health)
 
     def test_embedding_response_keeps_input_order_and_sanitizes_failures(self):
         vectors = [[1.0] + [0.0] * 767, [0.0, 1.0] + [0.0] * 766]

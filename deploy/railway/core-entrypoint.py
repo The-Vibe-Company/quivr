@@ -80,7 +80,17 @@ def encoder_settings(env):
         if not raw.isascii() or not raw.isdigit() or not 1 <= int(raw) <= limit:
             raise ValueError(name + ' must be an integer from 1 to ' + str(limit))
         values[name] = int(raw)
+    backend = env.get('QUIVR_QUERY_ENCODER_BACKEND', '').strip().lower()
+    if backend:
+        if backend not in ('auto', 'onnx', 'pytorch'):
+            raise ValueError('QUIVR_QUERY_ENCODER_BACKEND must be auto, onnx or pytorch')
+        values['QUIVR_QUERY_ENCODER_BACKEND'] = backend
     return values
+
+
+def _encoder_model_present(model_dir=ENCODER_MODEL):
+    root = pathlib.Path(model_dir)
+    return (root / 'onnx' / 'model_quantized.onnx').is_file() or (root / 'model.safetensors').is_file()
 
 
 def plugins_enabled(env):
@@ -378,13 +388,16 @@ def sidecar_commands(env, role='worker'):
         return commands
     settings = encoder_settings(env) if role == 'api' else None
     if settings and role == 'api':
+        encoder_env = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
+                       'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
+                       'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
+                       'TOKENIZERS_PARALLELISM': 'false'}
+        if 'QUIVR_QUERY_ENCODER_BACKEND' in settings:
+            encoder_env['QUIVR_QUERY_ENCODER_BACKEND'] = settings['QUIVR_QUERY_ENCODER_BACKEND']
         commands.append(('text-encoder', [ENCODER_PYTHON, '-m', 'deploy.cpu.text_encoder',
                          '--model-dir', ENCODER_MODEL, '--port', '9995',
                          '--threads', str(settings['QUIVR_QUERY_ENCODER_THREADS'])], '/app',
-                         {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
-                          'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
-                          'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
-                          'TOKENIZERS_PARALLELISM': 'false'}))
+                         encoder_env))
     for connector in runtime_connectors(env):
         if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
@@ -512,7 +525,7 @@ def main():
     settings = encoder_settings(os.environ) if mode == 'api' else None
     readiness = None
     if mode == 'api' and settings:
-        if not pathlib.Path(ENCODER_PYTHON).is_file() or not pathlib.Path(ENCODER_MODEL + '/model.safetensors').is_file():
+        if not pathlib.Path(ENCODER_PYTHON).is_file() or not _encoder_model_present(ENCODER_MODEL):
             raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
         readiness = {'name': 'text-encoder', 'url': ENCODER_URL + '/health',
                      'timeout': settings['QUIVR_QUERY_ENCODER_STARTUP_SECONDS'], **ENCODER_IDENTITY}
