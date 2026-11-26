@@ -821,6 +821,168 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 		}
 	})
 
+	t.Run("max limit retains hydration headroom for text-based passage selection", func(t *testing.T) {
+		const maxLimitItems = 70
+		rows := make([]itemSearchRow, maxLimitItems)
+		passages := make(map[string][]itemSearchRow, maxLimitItems)
+		for i := 0; i < maxLimitItems; i++ {
+			ver := fmt.Sprintf("m-%03d", i)
+			rows[i] = itemSearchRow{Version: ver, Score: fmt.Sprintf("%.2f", float64(maxLimitItems-i))}
+			passages[ver] = []itemSearchRow{
+				{Segment: fmt.Sprintf("aaa-%03d", i), Version: ver, Text: "Harbour."},
+				{Segment: fmt.Sprintf("zzz-%03d", i), Version: ver, Text: rich},
+			}
+		}
+		var mu sync.Mutex
+		textVers := map[string]bool{}
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLimit(query)
+			if lim >= 2400 {
+				return nil, fmt.Errorf("unexpected 2400-passage scan limit %d", lim)
+			}
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(rows), nil
+			case strings.Contains(query, "passageText"):
+				var out []itemSearchRow
+				for i := 0; i < maxLimitItems; i++ {
+					ver := fmt.Sprintf("m-%03d", i)
+					for _, row := range passages[ver] {
+						if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+							out = append(out, row)
+							mu.Lock()
+							textVers[ver] = true
+							mu.Unlock()
+						}
+					}
+				}
+				return itemSearchResponse(out), nil
+			default:
+				var out []itemSearchRow
+				for i := 0; i < maxLimitItems; i++ {
+					ver := fmt.Sprintf("m-%03d", i)
+					if !strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(ver)) {
+						continue
+					}
+					for _, row := range passages[ver] {
+						row.Text = ""
+						out = append(out, row)
+					}
+				}
+				if lim > 0 && len(out) > lim {
+					out = out[:lim]
+				}
+				return itemSearchResponse(out), nil
+			}
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: retrieval.MaxLimit, K: retrieval.CandidateLimit,
+		})
+		if err != nil || len(hits) != maxLimitItems {
+			t.Fatalf("max-limit search: len=%d, err=%v", len(hits), err)
+		}
+		wantSelected := retrieval.MaxLimit + 10
+		if len(textVers) != wantSelected {
+			t.Fatalf("fetched passageText for %d versions, want %d (MaxLimit + 10 headroom)", len(textVers), wantSelected)
+		}
+		byVer := map[string]string{}
+		for _, h := range hits {
+			byVer[h.VersionID] = h.SegmentID
+		}
+		for i := 0; i < wantSelected; i++ {
+			ver := fmt.Sprintf("m-%03d", i)
+			if want := fmt.Sprintf("zzz-%03d", i); byVer[ver] != want {
+				t.Fatalf("version %s picked %s, want rich passage %s", ver, byVer[ver], want)
+			}
+		}
+		for i := wantSelected; i < maxLimitItems; i++ {
+			ver := fmt.Sprintf("m-%03d", i)
+			if textVers[ver] {
+				t.Fatalf("unexpected passageText fetch for tail version %s", ver)
+			}
+		}
+	})
+
+	t.Run("high-passage item saturating top or tail scan cap cannot starve other ranked versions", func(t *testing.T) {
+		var allPassages []itemSearchRow
+		// v-huge has 600 early-sorting passages ("aaa-0000".."aaa-0599"), enough
+		// to fill the entire 512-row shared scan window before later segmentIds appear.
+		for i := 0; i < 600; i++ {
+			allPassages = append(allPassages, itemSearchRow{Segment: fmt.Sprintf("aaa-%04d", i), Version: "v-huge", Text: "Harbour."})
+		}
+		allPassages = append(allPassages,
+			itemSearchRow{Segment: "zzz-top-short", Version: "v-top-starved", Text: "Harbour."},
+			itemSearchRow{Segment: "zzz-top-rich", Version: "v-top-starved", Text: rich},
+		)
+		for i := 0; i < 600; i++ {
+			allPassages = append(allPassages, itemSearchRow{Segment: fmt.Sprintf("aab-%04d", i), Version: "v-tail-huge", Text: "Harbour."})
+		}
+		allPassages = append(allPassages, itemSearchRow{Segment: "zzz-tail-only", Version: "v-tail-starved", Text: rich})
+
+		// Sort all passages by segmentId asc, matching Weaviate's passageOrder.
+		bm25 := []itemSearchRow{
+			{Version: "v-top-starved", Score: "10.0"},
+			{Version: "v-huge", Score: "9.0"},
+			{Version: "v-tail-huge", Score: "5.0"},
+			{Version: "v-tail-starved", Score: "4.0"},
+		}
+		var mu sync.Mutex
+		textVers := map[string]bool{}
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLimit(query)
+			if lim >= 2400 {
+				return nil, fmt.Errorf("unexpected 2400-passage scan limit %d", lim)
+			}
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(bm25), nil
+			case strings.Contains(query, "passageText"):
+				var out []itemSearchRow
+				for _, row := range allPassages {
+					if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+						out = append(out, row)
+						mu.Lock()
+						textVers[row.Version] = true
+						mu.Unlock()
+					}
+				}
+				return itemSearchResponse(out), nil
+			default:
+				var out []itemSearchRow
+				for _, row := range allPassages {
+					if strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(row.Version)) {
+						row.Text = ""
+						out = append(out, row)
+					}
+				}
+				if lim > 0 && len(out) > lim {
+					out = out[:lim]
+				}
+				return itemSearchResponse(out), nil
+			}
+		})
+		// Limit 1 gives selectionK = 2, so v-top-starved and v-huge are in top,
+		// while v-tail-huge and v-tail-starved are in tail.
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: 1, K: retrieval.CandidateLimit,
+		})
+		if err != nil {
+			t.Fatalf("starvation test failed: %v", err)
+		}
+		if len(hits) != 4 {
+			t.Fatalf("got %d hits (%+v), want all 4 versions preserved without starvation", len(hits), hits)
+		}
+		if hits[0].VersionID != "v-top-starved" || hits[0].SegmentID != "zzz-top-rich" {
+			t.Fatalf("top-ranked starved version got %+v, want v-top-starved/zzz-top-rich", hits[0])
+		}
+		if hits[3].VersionID != "v-tail-starved" || hits[3].SegmentID != "zzz-tail-only" {
+			t.Fatalf("tail starved version got %+v, want v-tail-starved/zzz-tail-only", hits[3])
+		}
+		if textVers["v-tail-starved"] || textVers["v-tail-huge"] {
+			t.Fatalf("tail versions must not fetch passageText: %v", textVers)
+		}
+	})
+
 	t.Run("dense grouped refill caps scan depth below 2400", func(t *testing.T) {
 		var maxSeen int
 		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {

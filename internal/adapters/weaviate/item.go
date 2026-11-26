@@ -25,15 +25,18 @@ const maxItemPassages = 2400
 
 const (
 	// Bound text-based passage selection to the top items that can reach the
-	// caller; tail items only need one valid segment for fusion and fallback.
-	maxPassageSelectionItems = retrieval.MaxLimit
-	minTopKPassageScan       = 256
-	maxTopKPassageScan       = 512
-	passagesPerTopItem       = 16
-	maxTailPassageScan       = 512
-	passagesPerTailItem      = 4
-	minDensePassageScan      = 64
-	maxDensePassageScan      = 600
+	// caller, plus modest headroom for candidates replacing entries rejected
+	// during hydration. Tail items only need one valid segment for fusion and fallback.
+	maxPassageSelectionItems    = retrieval.MaxLimit
+	maxPassageSelectionHeadroom = 10
+	minTopKPassageScan          = 256
+	maxTopKPassageScan          = 512
+	passagesPerTopItem          = 16
+	maxTailPassageScan          = 512
+	passagesPerTailItem         = 4
+	missingPassageConcurrency   = 8
+	minDensePassageScan         = 64
+	maxDensePassageScan         = 600
 
 	// Minimum lexical information density for a substantive passage. Shorter
 	// boilerplate fragments (headers, footers, page markers) rank below
@@ -465,12 +468,13 @@ func pickBestPassage(group []itemRow, query []passageTerms) itemRow {
 const passageOrder = `sort:[{path:["segmentId"],order:asc}],`
 
 func passageSelectionLimit(q retrieval.Request, limit int) int {
-	target := limit
 	if q.Limit > 0 {
-		// Keep modest headroom above q.Limit for items filtered during hydration.
-		target = min(limit, q.Limit+min(q.Limit, 10))
+		// Keep modest headroom above q.Limit (including at retrieval.MaxLimit)
+		// for candidates replacing entries filtered during hydration.
+		headroom := min(q.Limit, maxPassageSelectionHeadroom)
+		return min(limit, min(q.Limit, maxPassageSelectionItems)+headroom)
 	}
-	return min(target, maxPassageSelectionItems)
+	return min(limit, maxPassageSelectionItems)
 }
 
 func topPassageScanLimit(itemCount int) int {
@@ -503,6 +507,11 @@ func versionFilter(items []content.Candidate) string {
 func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow) {
 	best := map[string]itemRow{}
 	ambiguous := map[string][]itemRow{}
+	addPassageRows(best, ambiguous, rows)
+	return best, ambiguous
+}
+
+func addPassageRows(best map[string]itemRow, ambiguous map[string][]itemRow, rows []itemRow) {
 	for _, row := range rows {
 		if row.SegmentID == "" {
 			continue
@@ -518,7 +527,51 @@ func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow)
 			ambiguous[key] = append(ambiguous[key], row)
 		}
 	}
-	return best, ambiguous
+}
+
+func missingCandidates(items []content.Candidate, present map[string]itemRow) []content.Candidate {
+	var missing []content.Candidate
+	for _, c := range items {
+		if _, ok := present[candidateKey(c, true)]; !ok {
+			missing = append(missing, c)
+		}
+	}
+	return missing
+}
+
+// recoverMissingPassages guarantees that a high-passage item filling a shared
+// segmentId-ordered scan window cannot starve other ranked versions.
+func (s *Store) recoverMissingPassages(ctx context.Context, collection, passageWhere string, missing []content.Candidate, perVersionLimit int) ([]itemRow, error) {
+	seen := make(map[string]bool, len(missing))
+	versions := make([]string, 0, len(missing))
+	for _, c := range missing {
+		if c.VersionID == "" || seen[c.VersionID] {
+			continue
+		}
+		seen[c.VersionID] = true
+		versions = append(versions, c.VersionID)
+	}
+	if len(versions) == 0 {
+		return nil, nil
+	}
+	results := make([][]itemRow, len(versions))
+	group, gctx := errgroup.WithContext(ctx)
+	group.SetLimit(missingPassageConcurrency)
+	for i, ver := range versions {
+		group.Go(func() error {
+			rows, err := s.itemQuery(gctx, collection, passageOrder, and(passageWhere, equal("versionId", ver)), perVersionLimit, false)
+			results[i] = rows
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	var out []itemRow
+	for _, rows := range results {
+		out = append(out, rows...)
+	}
+	return out, nil
 }
 
 // Choose a representative only where text affects the answer. Ungrouped
@@ -735,7 +788,6 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 	if err != nil {
 		return nil, false, err
 	}
-	exhausted := len(topRows) == topLimit
 	best, ambiguous := groupPassageRows(topRows)
 
 	var denseMap map[string]content.Candidate
@@ -750,6 +802,21 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 				if d, ok := denseMap[key]; ok {
 					best[key] = itemRow{SegmentID: d.SegmentID, GenerationID: d.GenerationID, VersionID: d.VersionID}
 				}
+			}
+		}
+	}
+
+	// If a high-passage version filled the shared segmentId-ordered scan cap,
+	// recover omitted top-ranked versions individually so none are starved.
+	if len(topRows) == topLimit {
+		if missingTop := missingCandidates(top, best); len(missingTop) > 0 {
+			recovered, err := s.recoverMissingPassages(ctx, collection, passageWhere, missingTop, passagesPerTopItem)
+			if err != nil {
+				return nil, false, err
+			}
+			addPassageRows(best, ambiguous, recovered)
+			for key := range denseMap {
+				delete(ambiguous, key)
 			}
 		}
 	}
@@ -773,11 +840,29 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 		tailNeed = append(tailNeed, c)
 	}
 
+	var exhausted bool
 	if len(tailNeed) > 0 {
 		tailLimit := tailPassageScanLimit(len(tailNeed))
 		tailWhere := and(passageWhere, versionFilter(tailNeed))
+		fetchTail := func(tailCtx context.Context, perMissing int) (map[string]itemRow, map[string][]itemRow, error) {
+			tailRows, err := s.itemQuery(tailCtx, collection, passageOrder, tailWhere, tailLimit, false)
+			if err != nil {
+				return nil, nil, err
+			}
+			tailBest, tailAmbiguous := groupPassageRows(tailRows)
+			if len(tailRows) == tailLimit {
+				if missingTail := missingCandidates(tailNeed, tailBest); len(missingTail) > 0 {
+					recovered, err := s.recoverMissingPassages(tailCtx, collection, passageWhere, missingTail, perMissing)
+					if err != nil {
+						return nil, nil, err
+					}
+					addPassageRows(tailBest, tailAmbiguous, recovered)
+				}
+			}
+			return tailBest, tailAmbiguous, nil
+		}
 		if topCovered >= selectK {
-			var tailRows []itemRow
+			var tailBest map[string]itemRow
 			var textExhausted bool
 			group, gctx := errgroup.WithContext(ctx)
 			group.Go(func() error {
@@ -787,26 +872,23 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 			})
 			group.Go(func() error {
 				var err error
-				tailRows, err = s.itemQuery(gctx, collection, passageOrder, tailWhere, tailLimit, false)
+				tailBest, _, err = fetchTail(gctx, 1)
 				return err
 			})
 			if err := group.Wait(); err != nil {
 				return nil, false, err
 			}
-			exhausted = exhausted || textExhausted || len(tailRows) == tailLimit
-			tailBest, _ := groupPassageRows(tailRows)
+			exhausted = textExhausted
 			for key, row := range tailBest {
 				if _, ok := best[key]; !ok {
 					best[key] = row
 				}
 			}
 		} else {
-			tailRows, err := s.itemQuery(ctx, collection, passageOrder, tailWhere, tailLimit, false)
+			tailBest, tailAmbiguous, err := fetchTail(ctx, passagesPerTopItem)
 			if err != nil {
 				return nil, false, err
 			}
-			exhausted = exhausted || len(tailRows) == tailLimit
-			tailBest, tailAmbiguous := groupPassageRows(tailRows)
 			for _, c := range tail {
 				key := candidateKey(c, true)
 				if _, already := best[key]; already {
@@ -831,14 +913,14 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection, pas
 			if err != nil {
 				return nil, false, err
 			}
-			exhausted = exhausted || textExhausted
+			exhausted = textExhausted
 		}
 	} else {
 		textExhausted, err := s.resolveAmbiguousPassages(ctx, collection, passageWhere, best, ambiguous, query)
 		if err != nil {
 			return nil, false, err
 		}
-		exhausted = exhausted || textExhausted
+		exhausted = textExhausted
 	}
 
 	selected := make([]itemRow, 0, len(best))
