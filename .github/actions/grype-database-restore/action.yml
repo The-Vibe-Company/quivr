@@ -1,16 +1,34 @@
-name: Restore the vulnerability database
-description: Restore into GRYPE_DB_CACHE_DIR or runner temp and export the directory
+name: Restore image security inputs
+description: Restore the verified tools and database from the selected producer in this workflow run
+inputs:
+  artifact-id:
+    description: Immutable artifact ID from the producer job outputs
+    required: true
 runs:
   using: composite
   steps:
-  - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-    with:
-      path: ${{ runner.temp }}/grype-database
-      key: grype-run-${{ github.run_id }}
-      fail-on-cache-miss: true
-  - shell: bash
+  - name: Require the producer's artifact ID
+    shell: bash
+    env:
+      ARTIFACT_ID: ${{ inputs.artifact-id }}
     run: |
-      database_dir="${GRYPE_DB_CACHE_DIR:-$RUNNER_TEMP/grype-db}"
-      mkdir -p "$database_dir"
-      tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$database_dir"
-      echo "GRYPE_DB_CACHE_DIR=$database_dir" >> "$GITHUB_ENV"
+      if [[ ! "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+        echo "::error::Missing image security artifact ID. Rerun all jobs to regenerate the bundle."
+        exit 1
+      fi
+  - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+    with:
+      artifact-ids: ${{ inputs.artifact-id }}
+      path: ${{ runner.temp }}/image-security-download
+      digest-mismatch: error
+  - name: Restore database and executables
+    shell: bash
+    run: |
+      bundle="$RUNNER_TEMP/image-security"
+      mkdir -p "$bundle"
+      tar --zstd -xf "$RUNNER_TEMP/image-security-download/image-security.tar.zst" -C "$bundle"
+      for tool in syft grype cosign; do
+        test -x "$bundle/tools/$tool"
+      done
+      echo "$bundle/tools" >> "$GITHUB_PATH"
+      echo "GRYPE_DB_CACHE_DIR=$bundle/grype-db" >> "$GITHUB_ENV"

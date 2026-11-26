@@ -51,11 +51,29 @@ def select(paths, full=False):
     eval_groups = {g for g in all_groups if g.startswith('eval-')}
     connector_plugins = {'rss', 'x-list', 'm365-mail', 'object-storage-archive', 'object-storage-prefix'}
     for path in paths or []:
-        # Documentation can change lint/site inputs, but cannot change a runtime image.
-        if path in documentation or path.startswith(('docs/', 'docs-site/')) or path.endswith('/README.md') or path in {'README.md', 'AGENTS.md', 'CLAUDE.md', 'CONTEXT.md', 'LICENSE'}:
+        if path.startswith(('.agents/', '.claude/', '.codex/')):
+            # Agent instructions are excluded from build contexts and checked by the guards.
+            pass
+        elif path.startswith('sdks/') and (path not in documentation or path == 'sdks/python/README.md'):
+            language = path.split('/')[1]
+            if language not in {'go', 'python'}:
+                full, reason = True, 'unknown SDK input'
+                continue
+            groups.add('sdk-' + language)
+            groups.update(eval_groups)
+            parts.update(all_parts)
+            images.update(i['plugin'] for i in all_images if i['plugin']
+                          and (i['target'] == 'python-plugin') == (language == 'python'))
+            # The Python SDK packages its README as metadata.
+            site |= path == 'sdks/python/README.md'
+        elif path in documentation or path.startswith(('docs/', 'docs-site/')) or path in {
+            'README.md', 'AGENTS.md', 'CLAUDE.md', 'CONTEXT.md', 'LICENSE',
+            'scripts/docs.py', 'scripts/mintlify_site.py',
+        }:
             site = True
         elif path.startswith('quivr-search/'):
             parts.add('demo')
+            images.add('web')
         elif path.startswith('scripts/eval/') or path.startswith('deploy/mlflow/'):
             groups.update(eval_groups)
         elif path.startswith('plugins/'):
@@ -74,15 +92,6 @@ def select(paths, full=False):
             # These plugins are also pinned by the default stack and its core proofs.
             if plugin in {'core-ingest', 'hosted-embed', 'pdf-text', 'newsml-g2'}:
                 parts.update(all_parts)
-        elif path.startswith('sdks/'):
-            language = path.split('/')[1]
-            if language not in {'go', 'python'}:
-                full, reason = True, 'unknown SDK input'
-                continue
-            groups.add('sdk-' + language)
-            groups.update(eval_groups)
-            parts.update(all_parts)
-            images.update(i['plugin'] for i in all_images if i['plugin'])
         elif path.startswith('internal/monitoring/'):
             groups.update(eval_groups)
             parts.add('monitoring')
@@ -93,12 +102,17 @@ def select(paths, full=False):
             parts.add('connectors')
             images.add('')
             vulnerabilities = True
-        elif path.startswith(('internal/', 'cmd/', 'client/')):
+        elif path in {'go.mod', 'go.sum'} or path.startswith(('internal/', 'cmd/', 'client/')):
             groups.update(eval_groups)
             parts.update(all_parts)
             images.add('')
             vulnerabilities = True
-            if path.startswith(('cmd/quivr-plugin-api/', 'cmd/quivr-reference/', 'internal/transport/generated/', 'client/')):
+            if path in {'go.mod', 'go.sum'}:
+                # Other release images use their own modules. Keep the engine's
+                # dependency, generated-contract and upgrade compatibility checks.
+                groups.update({'contracts', 'sdk-go', 'sdk-python'})
+                migration = True
+            elif path.startswith(('cmd/quivr-plugin-api/', 'cmd/quivr-reference/', 'internal/transport/generated/', 'client/')):
                 groups.update({'contracts', 'sdk-go', 'sdk-python'})
         elif path.startswith('migrations/'):
             groups.update(eval_groups)
@@ -113,15 +127,17 @@ def select(paths, full=False):
         elif path.startswith(('scripts/measure_', 'tests/load/', 'conformance/')):
             # Local-only measurement inputs; the cheap lane validates Python/conformance.
             pass
-        elif path in {'.gitignore', '.gitattributes', '.editorconfig', 'armada.toml', 'skills-lock.json'} or path.startswith(('.agents/', '.claude/', '.codex/')):
+        elif path.startswith('scripts/test_') and path.endswith('.py') and path.count('/') == 1:
+            # The Python check discovers these tests on every PR.
+            pass
+        elif path in {'.gitignore', '.gitattributes', '.editorconfig', 'armada.toml', 'skills-lock.json',
+                      'scripts/denylist.py', 'scripts/denylist.sha256'}:
             pass
         else:
             # Includes workflow/action, Go dependency, deployment, test and shared harness changes.
             full, reason = True, 'shared or unclassified input'
-    if images:
+    if images - {'web'}:
         images.add('core')
-    if any(path.startswith('quivr-search/') for path in paths or []):
-        images.add('web')
     if full:
         return {'groups': all_groups, 'parts': all_parts, 'images': all_images, 'site': True,
                 'migration-compatibility': True, 'vulnerabilities': True, 'full': True, 'reason': reason}

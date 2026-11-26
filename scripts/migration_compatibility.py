@@ -79,8 +79,9 @@ def exercise(args):
     try:
         stack.up()
         # Apply candidate expansion while the prior API and worker are live.
+        migrate_env = stack.engine_environment('config.json') if hasattr(stack, 'engine_environment') else {**os.environ, 'QUIVR_CONFIG': str(stack.directory / 'config.json')}
         with (args.output / 'candidate-migrate.log').open('w') as log:
-            run([str(args.candidate), 'migrate'], env={**os.environ, 'QUIVR_CONFIG': str(stack.directory / 'config.json')}, stdout=log, stderr=log)
+            run([str(args.candidate), 'migrate'], env=migrate_env, stdout=log, stderr=log)
         for key in ('probe_port', 'worker_probe_port'):
             stack.await_ready(key)
         stack.tests(PATTERN)
@@ -90,12 +91,22 @@ def exercise(args):
         stack.stop_processes()
         # Give the reused acceptance journeys a fresh Organization after restart
         # so they prove new writes instead of merely replaying stored receipts.
+        updated_keys_files = set()
         for config in ('config.json', 'worker.json'):
             path = stack.directory / config
             cfg = json.loads(path.read_text())
-            for scope in cfg['keys'].values():
-                scope['organization'] += '_rollback'
-            path.write_text(json.dumps(cfg))
+            if 'keys' in cfg:
+                for scope in cfg['keys'].values():
+                    scope['organization'] += '_rollback'
+                path.write_text(json.dumps(cfg))
+                continue
+            keys_file = pathlib.Path(stack.engine_environment(config)['QUIVR_API_KEYS_FILE'])
+            if keys_file not in updated_keys_files:
+                keys = json.loads(keys_file.read_text())
+                for scope in keys.values():
+                    scope['organization'] += '_rollback'
+                keys_file.write_text(json.dumps(keys))
+                updated_keys_files.add(keys_file)
         stack.start_processes()
         stack.tests(PATTERN)
         shutil.copyfile(stack.directory / 'acceptance.log', args.output / 'restarted-previous.log')

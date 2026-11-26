@@ -40,7 +40,7 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 0
+        fetch-depth: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 && '0' || '2' }}
         ref: ${{ github.event_name == 'pull_request' && github.run_attempt > 1 && format('refs/pull/{0}/merge', github.event.pull_request.number) || inputs.ref || github.sha }}
         persist-credentials: false
     - name: Resolve the immutable commit for every verification job
@@ -93,7 +93,7 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 0
+        fetch-depth: ${{ matrix.group == 'guards' && '0' || '1' }}
         ref: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
         persist-credentials: false
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -226,7 +226,8 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 0
+        # The lifecycle check compares the candidate to its first parent.
+        fetch-depth: 2
         ref: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
         persist-credentials: false
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -267,7 +268,7 @@ jobs:
         && df -h /
     - run: make verify part=${{ matrix.part }}
       env:
-        QUIVR_VERIFY_BASE: ${{ needs.paths-filter.outputs.full != 'true' && (github.event.pull_request.base.sha || github.event.before) || '' }}
+        QUIVR_VERIFY_BASE: ${{ needs.paths-filter.outputs.full != 'true' && needs.paths-filter.outputs.base || '' }}
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
@@ -371,23 +372,18 @@ jobs:
     if: needs.paths-filter.outputs.vulnerabilities == 'true'
   image-inventory:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
-      matrix: ${{ needs.paths-filter.outputs.images }}
+      artifact-id: ${{ steps.prepare.outputs.artifact-id }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false
         ref: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
-    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
-      with:
-        python-version: 3.12.16
-        cache: pip
-        cache-dependency-path: |
-          scripts/ci-requirements-*.txt
-          scripts/ci-constraints.txt
-    - run: python3 scripts/ci_fetch.py -- pip install --require-hashes -r scripts/ci-requirements-base.txt
     - uses: ./.github/actions/grype-database
+      id: prepare
+      with:
+        artifact-prefix: verify
     needs:
     - paths-filter
     if: needs.paths-filter.outputs.has-images == 'true'
@@ -396,7 +392,6 @@ jobs:
     - paths-filter
     - image-inventory
     runs-on: ubuntu-24.04
-    # Allow the pinned source build; signing retains its separate five-minute cap.
     timeout-minutes: 20
     env:
       GRYPE_DB_AUTO_UPDATE: false
@@ -409,7 +404,7 @@ jobs:
         - 5000:5000
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.image-inventory.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.paths-filter.outputs.images) }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -433,7 +428,8 @@ jobs:
           org.opencontainers.image.version=dev
           org.opencontainers.image.revision=${{ github.sha }}
         cache-from: type=gha,scope=scan-${{ matrix.component || matrix.plugin || 'engine' }}
-        cache-to: type=gha,mode=max,scope=scan-${{ matrix.component || matrix.plugin || 'engine' }}
+        # PRs read the default branch's layers without exporting their own.
+        cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,scope=scan-{0}', matrix.component || matrix.plugin || 'engine') || '' }}
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
       if: matrix.plugin == 'hosted-embed'
       with:
@@ -450,14 +446,9 @@ jobs:
       env:
         REVISION: ${{ github.sha }}
       run: python3 scripts/image_smoke.py quivr-scan:local --plugin hosted-embed --plugin-id hosted.embed --version dev --revision "$REVISION"
-    - name: Install checksum-verified inventory and scan tools
-      env:
-        TOOLS_DIR: ${{ runner.temp }}/security-tools
-      run: |
-        bash scripts/security_tools.sh syft "$TOOLS_DIR"
-        bash scripts/security_tools.sh grype "$TOOLS_DIR"
-        echo "$TOOLS_DIR" >> "$GITHUB_PATH"
     - uses: ./.github/actions/grype-database-restore
+      with:
+        artifact-id: ${{ needs.image-inventory.outputs.artifact-id }}
     - name: Inventory the image in the local registry
       env:
         SYFT_CHECK_FOR_APP_UPDATE: false
@@ -469,15 +460,6 @@ jobs:
         syft "registry:$image" --output spdx-json=sbom.spdx.json
     - name: Reject critical vulnerabilities with an available fix
       run: bash scripts/scan_image.sh "registry:$IMAGE"
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-      with:
-        go-version-file: tools/cosign/go.mod
-        cache-dependency-path: tools/cosign/go.sum
-    - name: Build checksum-verified Cosign with existing-entry recovery
-      timeout-minutes: 10
-      run: |
-        bash scripts/install_cosign.sh "$RUNNER_TEMP/signing-tools"
-        echo "$RUNNER_TEMP/signing-tools" >> "$GITHUB_PATH"
     - name: Sign, attest and verify without publishing packages
       timeout-minutes: 5
       run: |

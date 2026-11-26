@@ -1,37 +1,84 @@
-name: Prepare the vulnerability database
-description: Update once per workflow and distribute the same database to every image job
+name: Prepare image security inputs
+description: Verify the scan and signing tools and publish them with a fresh vulnerability database
+inputs:
+  artifact-prefix:
+    description: Distinguishes verification and publishing bundles in the same release run
+    required: true
+outputs:
+  artifact-id:
+    description: Immutable bundle ID kept in the producer job outputs across failed-only reruns
+    value: ${{ steps.upload.outputs.artifact-id }}
 runs:
   using: composite
   steps:
-  - name: Install checksum-verified scanner
+  - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    with:
+      go-version-file: tools/cosign/go.mod
+      cache-dependency-path: tools/cosign/go.sum
+  - name: Install checksum-verified Syft and Grype
     shell: bash
     run: |
-      timeout --kill-after=5s 45s bash scripts/security_tools.sh grype "$RUNNER_TEMP/security-tools"
-      echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
+      tools_dir="$RUNNER_TEMP/image-security/tools"
+      bash scripts/security_tools.sh syft "$tools_dir"
+      bash scripts/security_tools.sh grype "$tools_dir"
   - id: day
     shell: bash
     run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-  - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+  # This cache only warms the producer. Consumers always use the workflow artifact.
+  - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+    id: warm-db
+    continue-on-error: true
     with:
       path: ${{ runner.temp }}/grype-database
       key: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-${{ steps.day.outputs.day }}
       restore-keys: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-
-  - name: Check upstream for a fresh database
+  - name: Verify Cosign and prepare the current Grype database
     shell: bash
     env:
-      GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
-      GRYPE_CHECK_FOR_APP_UPDATE: false
+      GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/image-security/grype-db
+      GRYPE_DB_VALIDATE_AGE: 'true'
+      GRYPE_DB_VALIDATE_BY_HASH_ON_START: 'true'
+      GRYPE_DB_UPDATE_DOWNLOAD_TIMEOUT: 5m
+      GRYPE_CHECK_FOR_APP_UPDATE: 'false'
     run: |
-      if [ -f "$RUNNER_TEMP/grype-database/grype-db.tar.zst" ]; then
+      tools_dir="$RUNNER_TEMP/image-security/tools"
+      cached_db="$RUNNER_TEMP/grype-database/grype-db.tar.zst"
+      if [ -f "$cached_db" ]; then
         mkdir -p "$GRYPE_DB_CACHE_DIR"
-        tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR"
+        if ! tar --zstd -xf "$cached_db" -C "$GRYPE_DB_CACHE_DIR"; then
+          rm -rf "$GRYPE_DB_CACHE_DIR"
+        fi
       fi
-      timeout --kill-after=5s 120s grype db update
-      grype db status
+      # A cold update downloads and unpacks a multi-gigabyte database.
+      timeout --kill-after=5s 6m "$tools_dir/grype" db update &
+      database_update=$!
+      timeout --kill-after=5s 10m bash scripts/install_cosign.sh "$tools_dir"
+      if ! wait "$database_update"; then
+        echo "::error::Failed to update the Grype vulnerability database"
+        exit 1
+      fi
+      "$tools_dir/grype" db status
+  - name: Pack the checked inputs with executable modes
+    shell: bash
+    run: tar --zstd -cf "$RUNNER_TEMP/image-security.tar.zst" -C "$RUNNER_TEMP/image-security" tools grype-db
+  - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+    id: upload
+    with:
+      name: ${{ inputs.artifact-prefix }}-image-security-${{ github.run_attempt }}
+      path: ${{ runner.temp }}/image-security.tar.zst
+      if-no-files-found: error
+      retention-days: 1
+      compression-level: 0
+  - name: Pack a warm database for future runs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.warm-db.outputs.cache-hit != 'true'
+    shell: bash
+    continue-on-error: true
+    run: |
       mkdir -p "$RUNNER_TEMP/grype-database"
-      tar --zstd -cf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR" .
+      tar --zstd -cf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$RUNNER_TEMP/image-security/grype-db" .
   - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.warm-db.outputs.cache-hit != 'true'
+    continue-on-error: true
     with:
       path: ${{ runner.temp }}/grype-database
-      # Failed-only reruns skip this successful producer; keep its database available.
-      key: grype-run-${{ github.run_id }}
+      key: ${{ steps.warm-db.outputs.cache-primary-key }}
