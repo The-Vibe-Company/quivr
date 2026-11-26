@@ -13,7 +13,7 @@ type PrerequisiteError struct {
 
 func (e *PrerequisiteError) Error() string { return e.problem }
 
-const ledgerInsertDenied = "PostgreSQL role cannot insert into public.schema_migrations. Ask the DBA to verify ownership of the Quivr schema objects and INSERT access to the migration ledger"
+const ledgerInsertDenied = "PostgreSQL role cannot insert into public.schema_migrations. Ask the DBA to check ledger ownership, INSERT privileges, and row-level security policies"
 
 // CheckPrerequisites checks the actual session's schema and privileges without
 // changing database state. Quivr's SQL uses public, including qualified

@@ -655,6 +655,7 @@ func Run(command string, args ...string) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		// The child deadline is reported as a prerequisite failure by the adapter.
 		return err
 	}
 	// The api migrates before it serves; a worker started first waits for it.

@@ -83,6 +83,13 @@ func TestExternalPostgresPrerequisites(t *testing.T) {
 		if _, err := pool.Exec(ctx, "GRANT SELECT ON public.schema_migrations TO quivr_ledger_reader"); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if _, err := pool.Exec(cleanup, "REVOKE SELECT ON public.schema_migrations FROM quivr_ledger_reader"); err != nil {
+				t.Errorf("revoke ledger SELECT: %v", err)
+			}
+		})
 		cfg := pool.Config()
 		cfg.ConnConfig.User = "quivr_ledger_reader"
 		reader, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -120,7 +127,8 @@ func TestExternalPostgresPrerequisites(t *testing.T) {
 		pending := fstest.MapFS{"99991231T2359Z_ledger_probe.sql": {Data: []byte("CREATE TABLE migration_ledger_probe (id int)")}}
 		err := postgres.MigrateFS(ctx, pool, pending)
 		var prerequisite *postgres.PrerequisiteError
-		if !errors.As(err, &prerequisite) || !strings.Contains(prerequisite.Error(), "cannot insert into public.schema_migrations") {
+		if !errors.As(err, &prerequisite) || !strings.Contains(prerequisite.Error(), "cannot insert into public.schema_migrations") ||
+			!strings.Contains(prerequisite.Error(), "row-level security policies") {
 			t.Fatalf("denied ledger write must report DBA guidance: %v", err)
 		}
 		var rolledBack bool
