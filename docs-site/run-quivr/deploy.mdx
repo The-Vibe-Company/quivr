@@ -26,7 +26,7 @@ For an image-only evaluation installation, follow [Run Quivr on one machine](/ru
 
 ## Choose shared dependency settings
 
-Compose and Railway resolve PostgreSQL, Weaviate and autoscaler settings from the
+Compose and Railway resolve PostgreSQL, Temporal, Weaviate and autoscaler settings from the
 [shared infrastructure declaration](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md).
 The `small` profile is the conservative starting point. The opt-in `large` profile gives
 PostgreSQL, Weaviate, API and live/bulk workers 32,000,000,000 bytes and 32 vCPUs on a
@@ -42,7 +42,7 @@ report the filesystem minimum and do not resize volumes or verify shared filesys
 
 For local development, `make dev` reads `QUIVR_INFRASTRUCTURE_PROFILE` and
 `QUIVR_INFRASTRUCTURE_OVERRIDES` and writes an ignored Compose overlay, including on
-macOS. Compose manages PostgreSQL and Weaviate; API and worker processes stay native
+macOS. Compose manages PostgreSQL, Temporal and Weaviate; API and worker processes stay native
 host processes. For example:
 
 ```sh
@@ -67,7 +67,7 @@ maintenance and verify readiness before continuing.
 
 The [deployment settings guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md)
 covers Railway `preview`, `apply`, `initialize-monitoring` and `check`, including the
-`match`, `drift` and `unknown` exit statuses. Small Railway defaults to PostgreSQL and
+`match`, `drift` and `unknown` exit statuses. Small Railway defaults to PostgreSQL, Temporal and
 Weaviate; large also applies limits to API, live worker and bulk worker. Without an
 explicit `--service`, an existing uniquely named autoscaler is included automatically;
 it is never created or replica-reset. Apply stages settings and resource limits without

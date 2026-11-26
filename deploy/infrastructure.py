@@ -26,6 +26,12 @@ POSTGRES_KEYS = {
     'QUIVR_POSTGRES_COMMIT_DELAY', 'QUIVR_POSTGRES_COMMIT_SIBLINGS',
     'QUIVR_POSTGRES_AUTOPREWARM',
 }
+TEMPORAL_KEYS = {
+    'DB', 'DB_PORT', 'DBNAME', 'VISIBILITY_DBNAME', 'NUM_HISTORY_SHARDS',
+    'SQL_MAX_CONNS', 'SQL_MAX_IDLE_CONNS', 'SQL_VIS_MAX_CONNS', 'SQL_VIS_MAX_IDLE_CONNS',
+    'DEFAULT_NAMESPACE', 'DEFAULT_NAMESPACE_RETENTION',
+    'SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES', 'SKIP_DB_CREATE', 'SKIP_SCHEMA_SETUP',
+}
 WEAVIATE_KEYS = {
     'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED', 'AUTOSCHEMA_ENABLED',
     'DEFAULT_VECTORIZER_MODULE', 'PERSISTENCE_DATA_PATH', 'DEFAULT_QUANTIZATION',
@@ -37,8 +43,10 @@ AUTOSCALER_KEYS = {
     'QUIVR_AUTOSCALER_DOWNSCALE_WINDOW', 'QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL',
     'QUIVR_AUTOSCALER_REQUEST_TIMEOUT',
 }
-KEYS = {'postgres': POSTGRES_KEYS, 'weaviate': WEAVIATE_KEYS, 'autoscaler': AUTOSCALER_KEYS,
-        'api': set(), 'worker': set(), 'worker-bulk': set()}
+KEYS = {'postgres': POSTGRES_KEYS, 'temporal': TEMPORAL_KEYS, 'weaviate': WEAVIATE_KEYS,
+        'autoscaler': AUTOSCALER_KEYS, 'api': set(), 'worker': set(), 'worker-bulk': set()}
+# Unprefixed Temporal container keys such as DB or DB_PORT collide with common shell/CI variables.
+ENV_PREFIX = {'temporal': 'QUIVR_TEMPORAL_'}
 VECTOR_HOST_AUTH = {'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED': 'false',
     'AUTHENTICATION_APIKEY_ENABLED': 'true', 'AUTHENTICATION_APIKEY_USERS': 'quivr-engine',
     'AUTHORIZATION_ADMINLIST_ENABLED': 'true', 'AUTHORIZATION_ADMINLIST_USERS': 'quivr-engine',
@@ -85,6 +93,15 @@ def validate(services, resolved=False):
                 maximum_mb = memory_bytes(maximum) // 1048576 if maximum else min(32768, max(64, capacity // 10))
                 if memory_bytes(environment['QUIVR_POSTGRES_MIN_WAL_SIZE']) // 1048576 > maximum_mb:
                     raise ValueError('invalid infrastructure value')
+        if name == 'temporal':
+            primary, visibility = environment.get('DBNAME'), environment.get('VISIBILITY_DBNAME')
+            if primary and visibility and primary.lower() == visibility.lower():
+                raise ValueError('invalid infrastructure value')
+            for maximum_key, idle_key in (('SQL_MAX_CONNS', 'SQL_MAX_IDLE_CONNS'),
+                                          ('SQL_VIS_MAX_CONNS', 'SQL_VIS_MAX_IDLE_CONNS')):
+                if environment.get(maximum_key) and environment.get(idle_key):
+                    if int(environment[idle_key]) > int(environment[maximum_key]):
+                        raise ValueError('invalid infrastructure value')
         deployment = service.get('deploy', {})
         if set(deployment) - {'resources'} or set(deployment.get('resources', {})) - {'limits'}:
             raise ValueError('unsupported infrastructure resource field')
@@ -113,8 +130,11 @@ def resolve(profile='small', overrides=None, environ=None, declaration_path=DECL
     services = merge(services, profiles[profile])
     if environ is not None:
         for name, service in services.items():
-            service.setdefault('environment', {}).update({key: environ[key] for key in KEYS[name]
-                                                         if environ.get(key)})
+            prefix = ENV_PREFIX.get(name, '')
+            service.setdefault('environment', {}).update({
+                key: environ[prefix + key] for key in KEYS[name]
+                if environ.get(prefix + key)
+            })
     if overrides:
         override = json.loads(Path(overrides).read_text())
         if not isinstance(override, dict) or set(override) != {'services'}:
@@ -132,7 +152,7 @@ def resolve(profile='small', overrides=None, environ=None, declaration_path=DECL
 
 
 def compose_model(services):
-    return {'services': {name: service for name, service in services.items() if name in ('postgres', 'weaviate')}}
+    return {'services': {name: service for name, service in services.items() if name in ('postgres', 'temporal', 'weaviate')}}
 
 
 def memory_bytes(value):
@@ -335,7 +355,23 @@ def safe_environment(name, value):
     elif name == 'QUIVR_POSTGRES_CHECKPOINT_TIMEOUT':
         match = re.fullmatch(r'([1-9][0-9]{0,11})(s|min|h)', value)
         valid = bool(match) and 30 <= int(match[1]) * {'s': 1, 'min': 60, 'h': 3600}[match[2]] <= 3600
-    elif name in ('ASYNC_INDEXING', 'AUTOSCHEMA_ENABLED', 'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED'):
+    elif name == 'DB':
+        valid = value in ('postgres12', 'postgres12_pgx')
+    elif name == 'DB_PORT':
+        valid = bool(re.fullmatch(r'[0-9]{1,5}', value)) and 1 <= int(value) <= 65535
+    elif name in ('DBNAME', 'VISIBILITY_DBNAME'):
+        valid = bool(re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]{0,62}', value)) and value.lower() != 'quivr'
+    elif name == 'NUM_HISTORY_SHARDS':
+        valid = bool(re.fullmatch(r'[0-9]{1,5}', value)) and 1 <= int(value) <= 16384
+    elif name in ('SQL_MAX_CONNS', 'SQL_MAX_IDLE_CONNS', 'SQL_VIS_MAX_CONNS', 'SQL_VIS_MAX_IDLE_CONNS'):
+        valid = bool(re.fullmatch(r'[0-9]{1,4}', value)) and 1 <= int(value) <= 1000
+    elif name == 'DEFAULT_NAMESPACE':
+        valid = bool(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}', value))
+    elif name == 'DEFAULT_NAMESPACE_RETENTION':
+        match = re.fullmatch(r'([1-9][0-9]{0,5})(h|d)', value)
+        valid = bool(match) and int(match[1]) * (24 if match[2] == 'd' else 1) >= 24
+    elif name in ('ASYNC_INDEXING', 'AUTOSCHEMA_ENABLED', 'AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED',
+                  'SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES', 'SKIP_DB_CREATE', 'SKIP_SCHEMA_SETUP'):
         valid = value in ('true', 'false')
     elif name == 'DEFAULT_QUANTIZATION':
         valid = value in ('rq-8', 'none', 'rq-1', 'pq', 'bq', 'sq')

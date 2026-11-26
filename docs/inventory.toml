@@ -134,7 +134,7 @@ excluded = [
 [budgets]
 "docs-site/run-quivr/dedicated-vector-host.mdx" = 115
 "deploy/compose/README.md" = 85
-"deploy/infrastructure.md" = 155
+"deploy/infrastructure.md" = 170
 "deploy/modal/README.md" = 100
 "conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
