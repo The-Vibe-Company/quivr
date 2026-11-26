@@ -32,6 +32,7 @@ Finally (THE-785) TestQuarantineReprocessIngestion reprocesses the Record
 TestRollback stopped. The stack's configuration and processes are restored
 afterwards, even on failure.
 """
+import go_bin_cache
 import plugin_environment
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -41,6 +42,58 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / 'sdks' / 'go' / 'examples' / 'hash-embedder'
 GO = os.environ.get('GO', 'go')
 SPACES = {'example.hash_embedder.small': 'served', 'example.hash_embedder.large': 'evaluation'}
+FAST_SPACES = {'example.hash_embedder.small': 'served'}
+
+
+def hash_embedder_binary(source=ROOT):
+    return go_bin_cache.ensure('hash-embedder', pathlib.Path(source) / 'sdks' / 'go', './examples/hash-embedder', go=GO)
+
+
+def fast_manifest(stack):
+    return stack.source / 'sdks' / 'go' / 'examples' / 'hash-embedder' / 'quivr-plugin.yaml'
+
+
+def fast_port(stack):
+    if 'fast_ingestion_port' not in stack.state:
+        stack.state['fast_ingestion_port'] = ports.allocate()
+        stack.save()
+    return stack.state['fast_ingestion_port']
+
+
+def fast_pins(stack):
+    """Pin hash-embedder when the stack runs the fast dev profile without TEI."""
+    if not stack.uses_fast_ingestion():
+        return []
+    return [{'manifest': str(fast_manifest(stack)), 'endpoint': f'http://127.0.0.1:{fast_port(stack)}', 'spaces': FAST_SPACES}]
+
+
+def start_fast(stack):
+    """Build (cached in .scratch/bin) and run hash-embedder for the fast dev profile."""
+    stop_fast(stack)
+    if not stack.uses_fast_ingestion():
+        return
+    executable = hash_embedder_binary(stack.source)
+    port = fast_port(stack)
+    log = stack.directory / 'hash-embedder-plugin.log'
+    plugin = start_plugin(stack.directory, executable, port, fast_manifest(stack), log.name)
+    stack.state['fast_ingestion_pid'] = plugin.pid
+    stack.save()
+    await_healthy(plugin, port, log)
+
+
+def stop_fast(stack):
+    pid = stack.state.pop('fast_ingestion_pid', None)
+    stack.save()
+    if pid is None:
+        return
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+    port = stack.state.get('fast_ingestion_port')
+    deadline = time.monotonic() + 10
+    while port is not None and healthy(port) and time.monotonic() < deadline:
+        time.sleep(.05)
 
 
 def healthy(port):
@@ -83,8 +136,7 @@ def verify(stack):
     run = {'QUIVR_TEST_INGESTION_PLUGIN': '1', 'QUIVR_TEST_INGESTION_RUN': uuid.uuid4().hex}
     stack.tests('^TestIngestionPluginBefore$', run)
     directory.mkdir(exist_ok=True)
-    binary = directory / 'hash-embedder'
-    subprocess.run([GO, 'build', '-o', str(binary), './examples/hash-embedder'], cwd=ROOT / 'sdks' / 'go', check=True)
+    binary = hash_embedder_binary(stack.source)
     port = ports.allocate()
     plugin = start_plugin(directory, binary, port, SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
     # The next build of the same plugin: its manifest at version 0.2.0, same spaces.
@@ -167,8 +219,7 @@ def verify_routes(stack):
     """Use the manifest-driven fakeplugin beside core.ingest and pdf-text."""
     directory = stack.directory / 'ingestion-routes'
     directory.mkdir(exist_ok=True)
-    binary = directory / 'fixture-ingestion'
-    subprocess.run([GO, 'test', '-c', '-o', str(binary), './tests/plugin-contract'], cwd=ROOT, check=True)
+    binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=GO, mode='test')
     manifest = directory / 'quivr-plugin.yaml'
     manifest.write_text((SAMPLE / 'quivr-plugin.yaml').read_text().replace('example.hash_embedder', 'example.fixture_ingest'))
     port = ports.allocate()
