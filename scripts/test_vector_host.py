@@ -5,6 +5,7 @@ import io
 import os
 from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -195,6 +196,40 @@ class VectorHost(unittest.TestCase):
                 code, result = cli('apply')
                 self.assertEqual((code, result['check']['status']), (2, 'unknown'))
 
+    def test_azure_rollout_publishes_host_intent_only_after_apply_succeeds(self):
+        module_spec = importlib.util.spec_from_file_location('vector_azure', HOST.with_name('azure.py'))
+        azure = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(azure)
+        args = SimpleNamespace(profile='small', operator_cidr=['192.0.2.0/24'], startup_timeout=0)
+        bootstrap, desired = 'a' * 64, 'b' * 64
+        with tempfile.TemporaryDirectory() as directory, patch.object(azure, 'SOURCE', Path(directory)):
+            root = Path(directory)
+            (root / 'deploy/vector-host').mkdir(parents=True)
+            marker = root / 'applied-intent'
+            installed = root / 'deploy/vector-host/host.py'
+            installed.write_text('raise SystemExit(0)\n')
+
+            def run(command):
+                return subprocess.run(shlex.split(command)[1:], input='fixture-key', capture_output=True,
+                                      text=True, timeout=5)
+
+            def normal(fingerprint):
+                return run(azure.host_apply_command(args, 'index.example.invalid', None, fingerprint, bootstrap))
+
+            self.assertEqual(normal(bootstrap).returncode, 0)
+            for exit_code in (1, 0):
+                stage = root / f'stage-{exit_code}'
+                for relative in azure.HOST_FILES:
+                    destination = stage / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_text(desired if relative == 'applied-intent' else '')
+                (stage / azure.HOST_SCRIPT).write_text(f'raise SystemExit({exit_code})\n')
+                rollout = run(azure.host_apply_command(args, 'index.example.invalid', stage, desired, bootstrap))
+                self.assertEqual(rollout.returncode, exit_code, rollout.stderr)
+                self.assertEqual(marker.read_text(), '' if exit_code else desired)
+                self.assertNotEqual(normal(bootstrap).returncode, 0)
+                self.assertEqual(normal(desired).returncode, exit_code)
+
     def test_azure_cli_provisions_zonal_disk_and_has_no_repeat_writes(self):
         # Cloud boundary owner: provider replies describe fixed resources. The
         # real provisioner decides creation and no-op; no real az/SSH runs.
@@ -206,9 +241,10 @@ class VectorHost(unittest.TestCase):
         drift = None
         failure = None
         uploads = []
+        applied_intent = None
         sentinel = 'private-provider-payload-never-print'
         def transport(command, **kwargs):
-            nonlocal init
+            nonlocal init, applied_intent
             calls.append(command)
             if command[0] == 'ssh':
                 if isinstance(kwargs.get('input'), bytes):
@@ -216,6 +252,9 @@ class VectorHost(unittest.TestCase):
                         uploads.append({entry.name: archive.extractfile(entry).read() for entry in archive})
                     return subprocess.CompletedProcess(command, 0, b'.update.Abc12345\n', b'')
                 phase = 'bootstrap' if kwargs.get('input') is None else 'apply'
+                staged = phase == 'apply' and '.update.Abc12345/' in command[-1]
+                if staged:
+                    applied_intent = ''
                 if failure == phase + '-timeout':
                     raise subprocess.TimeoutExpired([*command, sentinel], 1800, output=sentinel, stderr=sentinel)
                 if failure == phase + '-request':
@@ -223,7 +262,12 @@ class VectorHost(unittest.TestCase):
                 if failure == 'apply-json' and phase == 'apply':
                     return subprocess.CompletedProcess(command, 0, sentinel, '')
                 if kwargs.get('input') is None:
+                    if 'applied-intent' in command[-1] and applied_intent is not None:
+                        if not applied_intent or applied_intent not in command[-1]:
+                            return subprocess.CompletedProcess(command, 1, '', '')
                     return subprocess.CompletedProcess(command, 0, '', '')
+                if staged:
+                    applied_intent = uploads[-1]['applied-intent'].decode()
                 return subprocess.CompletedProcess(command, 0, '{"status":"unchanged"}', '')
             args = command[1:]
             def arg(name):
@@ -238,6 +282,17 @@ class VectorHost(unittest.TestCase):
                          ('UncachedDiskBytesPerSecond', '290000000')]]}]
             elif args[:2] == ['resource', 'list']:
                 response = list(resources.values())
+            elif args[:2] == ['tag', 'update']:
+                vm = resources['example-index']
+                self.assertEqual(arg('--resource-id'), vm['id'])
+                self.assertEqual(arg('--operation'), 'Merge')
+                name, value = arg('--tags').split('=', 1)
+                self.assertEqual(name, 'quivr-vector-applied-intent')
+                self.assertEqual(value, applied_intent)
+                if failure == 'tag-request':
+                    return subprocess.CompletedProcess(command, 1, sentinel, sentinel)
+                vm['tags'][name] = value
+                response = {}
             elif args[:3] == ['vm', 'run-command', 'invoke']:
                 if failure == 'trust-request':
                     return subprocess.CompletedProcess(command, 1, sentinel, sentinel)
@@ -391,8 +446,21 @@ class VectorHost(unittest.TestCase):
                                      {'create', 'update', 'attach'}.intersection(command) for command in calls))
                 calls.clear()
                 with patch.object(sys, 'argv', [*argv, '--reconcile']):
+                    failure = 'apply-request'
+                    with redirect_stderr(io.StringIO()):
+                        self.assertEqual(azure.main(), 2)
+                    self.assertNotIn('quivr-vector-applied-intent', resources['example-index']['tags'])
+                    self.assertFalse(any(command[1:3] == ['tag', 'update'] for command in calls))
+                    failure = 'tag-request'
+                    with redirect_stderr(io.StringIO()):
+                        self.assertEqual(azure.main(), 2)
+                    self.assertNotIn('quivr-vector-applied-intent', resources['example-index']['tags'])
+                    failure = None
+                    calls.clear()
+                    uploads.clear()
                     self.assertEqual(azure.main(), 0)
-                    self.assertFalse(any('create' in command or 'update' in command or 'attach' in command for command in calls))
+                    self.assertEqual(calls[-1][1:3], ['tag', 'update'])
+                    self.assertFalse(any({'create', 'update', 'attach'}.intersection(command) for command in calls[:-1]))
                     verify, upload, apply = [command[-1] for command in calls if command[0] == 'ssh']
                     self.assertIn('a' * 64, verify)
                     self.assertIn('tar -xzm -f -', upload)
@@ -400,11 +468,22 @@ class VectorHost(unittest.TestCase):
                     self.assertNotIn('--initialize-empty-disk', apply)
                     self.assertEqual(len(uploads), 1)
                     self.assertNotIn('bootstrap-intent', uploads[0])
+                    self.assertEqual(resources['example-index']['tags']['quivr-vector-intent'], 'a' * 64)
                     self.assertNotIn(b'fixture-api-key-never-in-cloud-init', b''.join(uploads[0].values()))
                     self.assertEqual(uploads[0]['deploy/infrastructure.json'],
                                      (ROOT / 'deploy/infrastructure.json').read_bytes())
                     limits = json.loads(uploads[0]['override.json'])['services']['weaviate']['deploy']['resources']['limits']
                     self.assertEqual(limits['cpus'], '8.0')
+                calls.clear()
+                self.assertEqual(azure.main(), 0)
+                self.assertEqual(len(uploads), 1)
+                self.assertFalse(any({'create', 'update', 'attach'}.intersection(command) for command in calls))
+                applied_intent = 'b' * 64
+                calls.clear()
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(azure.main(), 2)
+                self.assertEqual(len([command for command in calls if command[0] == 'ssh']), 1)
+                with patch.object(sys, 'argv', [*argv, '--reconcile']):
                     resources['example-index-disk']['tags']['quivr-vector-intent'] = 'b' * 64
                     calls.clear()
                     with redirect_stderr(io.StringIO()):
