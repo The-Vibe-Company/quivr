@@ -17,6 +17,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // ErrDeadline reports a search that outran its profile's hard bound
@@ -157,7 +158,7 @@ func isDeepProfile(requested, local string) bool {
 // each phase took. ctx carries the profile's hard bound, parentCtx is the
 // caller context before applying the profile bound, and started is when Search
 // began authorizing and routing.
-func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
+func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain) (Result, error) {
 	defRanker, defLocal, hasDefault := s.resolveProfile(DefaultProfile)
 	canFallback := isDeepProfile(out.Profile, q.Profile) && hasDefault &&
 		(defRanker.Manifest().ID != s.Ranker.Manifest().ID || defLocal != q.Profile)
@@ -167,10 +168,11 @@ func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Requ
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
 			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
 			defer cancel()
-			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
+			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
 	}
-	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil, nil, canFallback)
+	chain.enforce = s.Ranker.Manifest().SupportsSearchBudget()
+	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, chain, nil, nil, canFallback)
 }
 
 func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, timing *Phases, defRanker Ranker, defLocal, reason string) (Result, error) {
@@ -291,6 +293,11 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		}
 		if ctx.Err() != nil {
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
+		}
+		if sv.chain.visibleCandidates != nil {
+			if err := sv.recheckServed(ctx, q, session); err != nil {
+				return out, s.unserved(ctx, m.ID, err, timing)
+			}
 		}
 		phase := time.Now()
 		request := session.Request()
@@ -652,7 +659,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			return nil, ErrUnsupported
 		}
 		more, cached := sv.keywordCandidates[string(key)]
-		if !cached {
+		if _, enforced := visibility.Principals(ctx); !cached || enforced {
 			more, err = search(fallback, keywords)
 			if err != nil {
 				return nil, ErrUnavailable
@@ -732,6 +739,9 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 				records[h.RecordID] = true
 			}
 			out = append(out, sv.candidate(h, f.Score, ""))
+			if sv.chain.visibleCandidates != nil {
+				sv.chain.visibleCandidates[visibilityCandidate(h, q)] = struct{}{}
+			}
 			if len(out) == c.K {
 				break
 			}
@@ -756,10 +766,11 @@ func fetch(k int) int {
 // not read, or that is no longer current, is absent.
 func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[int]content.Hydrated, error) {
 	out := map[int]content.Hydrated{}
+	_, enforced := visibility.Principals(ctx)
 	var batch []content.Candidate
 	var at []int
 	for i, f := range found {
-		if h, cached := sv.hydrated[f.SegmentID]; cached {
+		if h, cached := sv.hydrated[f.SegmentID]; cached && !enforced {
 			out[i] = h
 			continue
 		}

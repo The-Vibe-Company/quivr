@@ -22,7 +22,9 @@ var _ content.RelationResolver = RecordStore{}
 
 func (s RecordStore) Record(ctx context.Context, org, id string) (content.Record, error) {
 	r := content.Record{}
-	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND id=$2", org, id).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID)
+	args := []any{org, id}
+	where := visibilityPredicate(ctx, &args, "records")
+	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,''),record_acl FROM records WHERE organization=$1 AND id=$2"+where, args...).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID, &r.ACL)
 	return r, notFound(err)
 }
 
@@ -90,7 +92,7 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 		where = catalogRange(q, &args)
 	}
 	cursor, order := catalogCursor(q, &args)
-	where += cursor
+	where += cursor + visibilityPredicate(ctx, &args, "records")
 	args = append(args, q.Limit)
 	// Each corpus contributes at most one page. The outer merge can never
 	// sort the corpus; its input is bounded by the requested corpus count.
@@ -139,7 +141,9 @@ func catalogCursor(q content.RecordQuery, args *[]any) (where, order string) {
 func (s RecordStore) CountRecords(ctx context.Context, org, corpusID string, q content.RecordQuery) (int64, error) {
 	args := []any{org, corpusID}
 	var count int64
-	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT count(*) FROM records WHERE "+catalogRange(q, &args), args...).Scan(&count)
+	where := catalogRange(q, &args)
+	where += visibilityPredicate(ctx, &args, "records")
+	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT count(*) FROM records WHERE "+where, args...).Scan(&count)
 	return count, err
 }
 
@@ -155,7 +159,9 @@ func (s RecordStore) Resolve(ctx context.Context, scope corpus.Scope, relations 
 			continue
 		}
 		var recordID, versionID string
-		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL+` AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
+		args := []any{scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey}
+		acl := visibilityPredicate(ctx, &args, "r")
+		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL+` AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`+acl, args...).Scan(&recordID, &versionID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}

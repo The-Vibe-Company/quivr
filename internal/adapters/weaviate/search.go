@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -24,6 +25,40 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 	if len(routes) == 0 || len(routes) > 16 {
 		return nil, errors.New("invalid projection route count")
 	}
+	principals, enforced := visibility.Principals(ctx)
+	if !enforced {
+		return s.searchRouted(ctx, routes, scope, q)
+	}
+	if s.Visibility == nil {
+		return nil, retrieval.ErrUnavailable
+	}
+	q.RankAcrossRoutes = q.RankAcrossRoutes || s.UsesRouteRankFusion(routes)
+	for range 2 {
+		allowed, filters, revisions, err := s.resolveVisibility(ctx, routes, scope, principals)
+		if err != nil {
+			return nil, err
+		}
+		rows := []content.Candidate{}
+		if len(allowed) > 0 {
+			rows, err = s.searchRouted(context.WithValue(ctx, routeVisibilityKey{}, filters), allowed, scope, q)
+			if err != nil {
+				return nil, err
+			}
+		}
+		current, err := s.Visibility.Current(ctx, scope.Organization, revisions)
+		if err != nil {
+			return nil, err
+		}
+		if current {
+			return rows, nil
+		}
+		// A concurrent change can admit or remove namespaces while the
+		// index ranks. Discard the entire candidate set and resolve again.
+	}
+	return nil, retrieval.ErrUnavailable
+}
+
+func (s *Store) searchRouted(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
 	if len(routes) == 1 {
 		rows, err := s.searchRoute(ctx, routes[0], scope, q)
 		if err == nil && q.RankAcrossRoutes {

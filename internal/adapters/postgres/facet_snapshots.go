@@ -16,6 +16,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // Fast facet counting (THE-1387). Exact aggregation reads every current
@@ -70,6 +71,11 @@ type snapshotField struct {
 type dayRange struct{ from, to time.Time }
 
 func (s RecordStore) CountFacetsFast(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
+	_, enforced := visibility.Principals(ctx)
+	if enforced {
+		items, err := s.CountFacets(ctx, org, q)
+		return content.FacetCounts{Items: items}, err
+	}
 	if days, ok := snapshotScope(q); ok && len(q.Records.FilterRoutes) > 0 {
 		counts, ok, err := s.snapshotFacets(ctx, org, q, days)
 		if err != nil || ok {

@@ -36,6 +36,7 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -61,6 +62,7 @@ type API struct {
 	Spaces     SpaceRegistry
 	Uploads    uploads.Service
 	Changes    changes.Service
+	Visibility visibility.Store
 	Monitoring monitoring.Service
 	Operations operations.Service
 
@@ -194,6 +196,7 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, publicerr.InvalidApiKey, nil)
 		return
 	}
+	scope.Principals, _ = visibility.Principals(r.Context())
 	r = r.WithContext(context.WithValue(r.Context(), scopeContextKey{}, scope))
 	// Streams and routed searches own their service deadlines.
 	if r.Method == "GET" && r.URL.Path == "/v0/changes/stream" ||
@@ -282,11 +285,16 @@ type cursor struct {
 
 func scopeDigest(s corpus.Scope) string {
 	s.ActorID = "" // Audit attribution does not change permissions or pagination.
+	s.VisibilityMode = ""
 	s.Actions = append([]string{}, s.Actions...)
 	s.Corpora = append([]string{}, s.Corpora...)
 	sort.Strings(s.Actions)
 	sort.Strings(s.Corpora)
 	b, _ := json.Marshal(s)
+	if len(s.Principals) > 0 {
+		principals, _ := json.Marshal(s.Principals)
+		b = append(b, principals...)
+	}
 	h := sha256.Sum256(b)
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }

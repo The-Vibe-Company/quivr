@@ -54,6 +54,7 @@ func facetRows(ctx context.Context, db querier, org string, q content.FacetQuery
 	rangeQuery := q.Records
 	rangeQuery.Metadata = nil
 	where := catalogRange(rangeQuery, &args)
+	where += visibilityPredicate(ctx, &args, "records")
 	where += " AND (" + metadataRouteConditions(q.Records, &args) + ")"
 	if len(q.SourceNamespaces) > 0 {
 		where += " AND records.namespace=ANY(" + bind(q.SourceNamespaces) + "::text[])"

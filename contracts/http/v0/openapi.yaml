@@ -6,6 +6,9 @@ info:
     criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent
     at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes.
     THE-640 adds text search and asynchronous Corpus projection rebuild initiation.
+    On read routes a key configured with visibility_mode=enforce requires X-Quivr-Actor
+    (32 lowercase hexadecimal characters) and X-Quivr-Principals (up to 64 distinct comma-separated
+    kind:id values and 8192 bytes). Requests without valid caller context are refused with 403.
 security:
 - ApiKey: []
 # Public engine error classes and the operations that can return them.
@@ -1149,6 +1152,65 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CorpusRenameRequest'
+  /v0/corpora/{corpus_id}/visibility-grants:
+    parameters:
+    - name: corpus_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    - name: source_namespace
+      in: query
+      required: true
+      schema: {type: string, minLength: 1}
+    get:
+      operationId: getVisibilityGrant
+      description: Read the grant for a source namespace in an authorized Corpus.
+      x-required-permissions: [visibility:read]
+      responses:
+        '200':
+          description: Current source grant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityGrant'
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      operationId: setVisibilityGrant
+      description: Replace or create the grant for a source namespace in an authorized Corpus.
+      x-required-permissions: [visibility:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityGrant'
+      responses:
+        '204':
+          description: Grant write committed.
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: deleteVisibilityGrant
+      description: Remove the grant for a source namespace in an authorized Corpus.
+      x-required-permissions: [visibility:write]
+      responses:
+        '204':
+          description: Grant write committed.
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v0/corpora/{corpus_id}/archive:
     post:
       operationId: archiveCorpus
@@ -4377,6 +4439,23 @@ components:
       $ref: ../../shared/v0/manifest.schema.json#/$defs/Provenance
     NormalizationProvenance:
       $ref: ../../shared/v0/manifest.schema.json#/$defs/NormalizationProvenance
+    VisibilityPrincipal:
+      type: string
+      pattern: '^[A-Za-z0-9_.-]{1,32}:[A-Za-z0-9_.-]{1,128}$'
+    VisibilityGrant:
+      type: object
+      additionalProperties: false
+      required: [visibility, allowed_principals]
+      properties:
+        visibility:
+          type: string
+          enum: [public, restricted]
+        allowed_principals:
+          type: array
+          uniqueItems: true
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/VisibilityPrincipal'
     IngestCommand:
       type: object
       additionalProperties: false
@@ -4386,6 +4465,13 @@ components:
           minLength: 1
         source:
           $ref: '#/components/schemas/SourceIdentity'
+        record_acl:
+          description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
+          type: array
+          uniqueItems: true
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/VisibilityPrincipal'
         source_revision:
           type: string
           minLength: 1

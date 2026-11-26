@@ -143,7 +143,7 @@ With `true`, Quivr also retains full canonical request copies and successful nor
 
 Level 1 is always on. Quivr records sensitive writes, administrative commands, credential changes, audit exports, and HTTP authentication and permission refusals in PostgreSQL. Because scoped lookups use the same 404 for inaccessible and missing resources, 404s on known routes also enter the audit trail. Attempts without an authenticated key have no API key ID, actor ID, or assigned Organization. These deployment-level entries remain in PostgreSQL and appear in the API process's `quivr.audit` logs. Organization-scoped readers see their own Organization's entries.
 
-Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry unless Level 2 is enabled. API keys and their permissions are deployment configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
+Audited commands cover Corpus creation, retrieval configuration and source visibility grants, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry unless Level 2 is enabled. API keys and their permissions are deployment configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
 
 Set `"audit_read_access": true` in the JSON file named by `QUIVR_CONFIG` and restart the API to enable Level 2 for HTTP reads, search, facets, subscription previews and successful dry-run estimates. This uses the same binary. Entries contain route templates and bounded status details. They exclude bearer tokens, credentials, request bodies, search terms and read target IDs. Sensitive command entries can contain resolved target IDs and credential versions. Evaluator migrations identify the version transition as `plugin_id@from_version->to_version`.
 
@@ -229,6 +229,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | --- | --- |
 | `organization` | The Organization the key acts for. Ordinary requests stay within it; explicit operator grants can expose installation-wide counts. |
 | `actor_id` | Optional opaque actor identifier for audit attribution. Generate a random 128-bit value encoded as 32 lowercase hexadecimal characters. Reuse it for the same actor across key rotations. |
+| `visibility_mode` | `none` (default) preserves the key’s Organization, action and Corpus permissions. `enforce` also requires caller context and applies source and record visibility to delegated reads. |
 | `actions` | What the key may do, from the list below |
 | `corpora` | The Corpus ids it may reach, or `["*"]` for all of its Organization's Corpora. Creating a Corpus needs `*`. |
 
@@ -239,6 +240,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `blobs:read`, `blobs:write` | reading upload sessions and Blobs; uploading files |
 | `search:query` | searching |
 | `changes:read` | reading the change feed |
+| `visibility:read`, `visibility:write` | reading and changing source visibility grants within the key’s Corpora |
 | `monitoring:read`, `monitoring:write` | reading and managing Saved Queries, Subscriptions, Matches and Deliveries |
 | `connectors:read`, `connectors:write` | reading and managing Connector Instances |
 | `connectors:admin` | creating, listing, rotating and revoking a Connector Instance's push tokens on authorized Corpora; give it only to an operator key |
@@ -249,6 +251,18 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
 | `audit:read` | Listing and exporting audit entries in the key's Organization (`/v0/admin/audit` and `/v0/admin/audit/export`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
+
+### Delegated reads
+
+Keep an enforced key in a trusted application or gateway that authenticates the caller, derives their principals and replaces any caller-supplied visibility headers. Use opaque IDs throughout.
+
+Send exactly one `X-Quivr-Actor` with 32 lowercase hexadecimal characters and one `X-Quivr-Principals` with a comma-separated list, for example `user:8f31,group:readers`. The list accepts up to 64 distinct `kind:id` values and 8,192 bytes. Each component uses letters, digits, periods, underscores or hyphens. The actor identifies the request in the audit trail. Missing or invalid context yields an audited `403`.
+
+Manage a source at `/v0/corpora/{corpus_id}/visibility-grants?source_namespace=feed` with a separate management key. `GET` reads the grant, `PUT` creates or replaces it, and `DELETE` removes it. For example, send `{"visibility":"restricted","allowed_principals":["group:readers"]}`. Use `public` with an empty principal list for access by any valid caller. An absent grant denies source access.
+
+An ingestion command can set `record_acl` on a new Record. A nonempty ACL takes precedence over the source grant and admits callers who have at least one listed principal. Versions inherit that ACL. Later submissions may omit it or repeat the same nonempty set. Upgrade API and worker binaries before submitting record ACLs so every projection writer includes the ACL. A source grant change requires no re-indexing. Search uses up to 10,000 canonical Version IDs per Corpus when the index cannot distinguish namespaces with different visibility. Requests that exceed that fallback limit fail closed. Search refreshes its source partition if a grant changes or a new source arrives while the index is ranking.
+
+Search, catalog pages, counts, facets, Version Parts and change events use the caller's visibility. Concealed Records return the same `404` as missing Records. Delegated change cursors bind the principal set, and each stream rechecks authorization before sending an event. Use separate keys for upload session and raw Blob metadata, Operation status, and administrative aggregates and audit exports. These resources have no caller-specific record scope. Vector space coverage remains unknown on delegated reads.
 
 ## Object storage
 

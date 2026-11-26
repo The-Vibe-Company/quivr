@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // SpaceDescriptions reads registry metadata without counting segments.
@@ -44,6 +45,9 @@ func (c *SpaceSnapshots) VectorSpaces(ctx context.Context, org, corpusID string)
 	g, spaces, err := c.registry.DescribeVectorSpaces(ctx, org, corpusID)
 	if err != nil {
 		return g, nil, 0, err
+	}
+	if _, enforced := visibility.Principals(ctx); enforced {
+		return g, spaces, 0, nil
 	}
 	key := snapshotKey(org, corpusID, g)
 	now := time.Now()

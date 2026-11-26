@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 var (
@@ -121,6 +122,7 @@ type Command struct {
 	// SourceMediaType is engine-owned acceptance metadata, stored apart from
 	// the canonical command so existing receipt replays keep their identity.
 	SourceMediaType string         `json:"-"`
+	ACL             []string       `json:"record_acl,omitempty"`
 	Key             string         `json:"idempotency_key"`
 	Source          Source         `json:"source"`
 	Revision        string         `json:"source_revision,omitempty"`
@@ -181,6 +183,7 @@ type Receipt struct {
 	NewRevision bool `json:"-"`
 }
 type Record struct {
+	ACL               []string   `json:"-"`
 	ID                string     `json:"record_id"`
 	Source            Source     `json:"source"`
 	Withdrawn         bool       `json:"withdrawn"`
@@ -188,6 +191,7 @@ type Record struct {
 	CurrentAcceptedAt *time.Time `json:"-"`
 }
 type Version struct {
+	RecordACL []string `json:"-"`
 	// SourceMediaType routes ingestion after normalization.
 	SourceMediaType string             `json:"-"`
 	RecordID        string             `json:"record_id"`
@@ -250,6 +254,7 @@ type Publication struct {
 }
 
 type StoredVersion struct {
+	RecordACL              []string
 	SourceMediaType        string
 	RecordID, ID, CorpusID string
 	AcceptedAt             *time.Time
@@ -322,12 +327,12 @@ type Service struct {
 	// memory during hydration, keyed by (organization, blob_key, sha256).
 	// Authorization, current-version, quarantine, ACL, and Tombstone checks
 	// always run in canonical storage regardless of cache hits.
-	BlobCache       *HydrationBlobCache
-	Baseline        BaselineRepository
-	Embeddings      EmbeddingRepository
-	BlobSource      BlobSource
-	Relations       RelationResolver
-	Extensions      ExtensionValidator
+	BlobCache  *HydrationBlobCache
+	Baseline   BaselineRepository
+	Embeddings EmbeddingRepository
+	BlobSource BlobSource
+	Relations  RelationResolver
+	Extensions ExtensionValidator
 	// Routes names the Blob media types an external normalizer handles; nil
 	// routes none. Normalizations holds their durable validated output.
 	Routes         NormalizerRoutes
@@ -353,6 +358,11 @@ func (s Service) accept(ctx context.Context, scope corpus.Scope, c Command, reve
 	if !scope.Contains(c.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
+	acl, ok := visibility.Normalize(c.ACL)
+	if !ok {
+		return Receipt{}, ErrInvalid
+	}
+	c.ACL = acl
 	if _, forged := c.Provenance["normalization"]; forged {
 		// Normalization provenance is engine-owned; only publication writes it.
 		return Receipt{}, ErrInvalid
@@ -759,7 +769,7 @@ func (s Service) versionFromStored(ctx context.Context, scope corpus.Scope, reco
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
-	return Version{SourceMediaType: stored.SourceMediaType, RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Steps: stored.Steps, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
+	return Version{RecordACL: stored.RecordACL, SourceMediaType: stored.SourceMediaType, RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Steps: stored.Steps, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
 }
 
 // resolveRelations expands source Relations independently of the immutable

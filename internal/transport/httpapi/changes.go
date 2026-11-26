@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // Option configures optional API capabilities.
@@ -144,6 +145,7 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 	timer := time.NewTimer(poll)
 	defer timer.Stop()
 	lastWrite := time.Now()
+	_, enforced := visibility.Principals(r.Context())
 	for {
 		read, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		page, err := a.Changes.Read(read, scope, corpusID, resume, streamPageSize)
@@ -162,13 +164,28 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			return
 		}
 		for _, c := range page.Items {
+			if enforced {
+				check, cancel := context.WithTimeout(r.Context(), requestTimeout)
+				allowed, err := a.Changes.VisibleChange(check, scope, c.Event)
+				cancel()
+				if err != nil {
+					_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+					correlateError(r.Context(), &body)
+					b, _ := json.Marshal(body)
+					write("event: stream_error\ndata: %s\n\n", b)
+					return
+				}
+				if !allowed {
+					continue
+				}
+			}
 			b, _ := json.Marshal(changeToTransport(c))
 			if !write("id: %s\nevent: change\ndata: %s\n\n", c.Cursor, b) {
 				return
 			}
 			lastWrite = time.Now()
 		}
-		if len(page.Items) == 0 && page.Position != resume.Position {
+		if !enforced && len(page.Items) == 0 && page.Position != resume.Position {
 			if !write("id: %s\nevent: checkpoint\ndata: {\"cursor\":%q}\n\n", page.Next, page.Next) {
 				return
 			}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -95,6 +96,12 @@ func (s ChangeStore) ReadChangesResume(ctx context.Context, org, corpusID string
 	// scope components in the same read snapshot. A missing or expired row is
 	// reported through Window.Expired so the service exposes cursor_expired.
 	head := "COALESCE(" + journalHeadSQL("$1") + ",0)"
+	args := []any{org, corpusID, resume.Position, max(limit, 0) + 1, retention.Seconds(), resume.StartID}
+	visibleEvent := ""
+	if principals, enforced := visibility.Principals(ctx); enforced {
+		args = append(args, principals)
+		visibleEvent = "AND " + changeVisibilitySQL("$7")
+	}
 	query := `
 WITH head AS (
   SELECT (` + head + `)::bigint AS h
@@ -119,6 +126,7 @@ WITH head AS (
       FROM change_events e
       WHERE e.organization=$1 AND e.corpus_id=$2
         AND e.sequence>$3::bigint AND e.sequence<=b.h
+        ` + visibleEvent + `
         AND (b.start_id IS NULL OR
           (e.sequence>b.start_position AND
             (e.writer_xid IS NULL OR NOT pg_visible_in_snapshot(e.writer_xid,b.start_snapshot))))
@@ -137,6 +145,7 @@ LEFT JOIN LATERAL (
   FROM change_events e
   WHERE e.organization=$1 AND e.corpus_id=$2 AND NOT b.archived
     AND e.sequence>$3::bigint AND e.sequence<=b.h
+        ` + visibleEvent + `
     AND (b.start_id IS NULL OR
       (e.sequence>b.start_position AND
         (e.writer_xid IS NULL OR NOT pg_visible_in_snapshot(e.writer_xid,b.start_snapshot))))
@@ -147,7 +156,7 @@ LEFT JOIN monitoring_notices n ON n.organization=$1 AND n.event_id=e.event_id
 LEFT JOIN subscriptions s ON s.organization=$1 AND s.id=n.subscription_id
 ORDER BY e.sequence`
 
-	rows, err := s.Pool.Query(ctx, query, org, corpusID, resume.Position, max(limit, 0)+1, retention.Seconds(), resume.StartID)
+	rows, err := s.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return changes.Window{}, err
 	}
@@ -205,6 +214,30 @@ ORDER BY e.sequence`
 		w.Resume = changes.Resume{Position: w.Through, StartID: keep}
 	}
 	return w, nil
+}
+
+func changeVisibilitySQL(principals string) string {
+	return `EXISTS (
+ SELECT 1 FROM records r
+ WHERE r.organization=e.organization AND r.corpus_id=e.corpus_id
+ AND r.id=CASE e.resource_type
+   WHEN 'record' THEN e.resource_id
+   WHEN 'receipt' THEN (SELECT record_id FROM ingestion_receipts rc WHERE rc.organization=e.organization AND rc.id=e.resource_id)
+   WHEN 'match' THEN (SELECT record_id FROM monitoring_notices n WHERE n.organization=e.organization AND n.event_id=e.event_id)
+   WHEN 'delivery' THEN (SELECT record_id FROM monitoring_notices n WHERE n.organization=e.organization AND n.event_id=e.event_id)
+   ELSE (SELECT record_id FROM record_versions v WHERE v.organization=e.organization AND v.id=e.record_version_id)
+ END AND ` + recordVisibilitySQL("r", principals) + ")"
+}
+
+func (s ChangeStore) VisibleChange(ctx context.Context, org, corpusID string, position int64) (bool, error) {
+	principals, enforced := visibility.Principals(ctx)
+	if !enforced {
+		return true, nil
+	}
+	var allowed bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM change_events e
+ WHERE e.organization=$1 AND e.corpus_id=$2 AND e.sequence=$3 AND `+changeVisibilitySQL("$4")+`)`, org, corpusID, position, principals).Scan(&allowed)
+	return allowed, err
 }
 
 func startID() (string, error) {

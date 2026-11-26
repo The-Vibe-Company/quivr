@@ -31,7 +31,9 @@ WHERE a.organization=$1 AND a.delivery_id=$2 AND a.number>$3 ORDER BY a.number L
 }
 
 func (s MatchStore) Match(ctx context.Context, org, id string) (monitoring.Match, error) {
-	m, err := scanMatch(s.Pool.QueryRow(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.id=$2 AND m.position<=`+journalHeadSQL("$1"), org, id))
+	args := []any{org, id}
+	acl := matchVisibility(ctx, &args)
+	m, err := scanMatch(s.Pool.QueryRow(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.id=$2 AND m.position<=`+journalHeadSQL("$1")+acl, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, monitoring.ErrNotFound
 	}
@@ -39,7 +41,9 @@ func (s MatchStore) Match(ctx context.Context, org, id string) (monitoring.Match
 }
 
 func (s MatchStore) Matches(ctx context.Context, org, subscriptionID string, after int64, limit int) ([]monitoring.Match, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.subscription_id=$2 AND m.position>$3 AND m.position<=`+journalHeadSQL("$1")+` ORDER BY m.position LIMIT $4`, org, subscriptionID, after, limit)
+	args := []any{org, subscriptionID, after, limit}
+	acl := matchVisibility(ctx, &args)
+	rows, err := s.Pool.Query(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.subscription_id=$2 AND m.position>$3 AND m.position<=`+journalHeadSQL("$1")+acl+` ORDER BY m.position LIMIT $4`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +67,8 @@ func (s MatchStore) Delivery(ctx context.Context, org, id string) (monitoring.De
 	var later monitoring.Later
 	var kind string
 	var next *time.Time
+	args := []any{org, id}
+	acl := visibilityPredicate(ctx, &args, "r")
 	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,n.kind,s.enabled,s.deleted,
   `+recordGoneSQL+`,`+laterNoticesSQL+`,
   d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,''),
@@ -75,7 +81,7 @@ JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2 AND m.position<=`+journalHeadSQL("d.organization")+` AND n.position<=`+journalHeadSQL("d.organization")+``, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &kind, &enabled, &deleted, &withdrawn, &later.Corrected, &later.NoLongerMatches,
+WHERE d.organization=$1 AND d.id=$2 AND m.position<=`+journalHeadSQL("d.organization")+` AND n.position<=`+journalHeadSQL("d.organization")+acl, args...).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &kind, &enabled, &deleted, &withdrawn, &later.Corrected, &later.NoLongerMatches,
 		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, monitoring.ErrNotFound
@@ -97,6 +103,14 @@ WHERE d.organization=$1 AND d.id=$2 AND m.position<=`+journalHeadSQL("d.organiza
 		}
 	}
 	return d, nil
+}
+
+func matchVisibility(ctx context.Context, args *[]any) string {
+	acl := visibilityPredicate(ctx, args, "r")
+	if acl == "" {
+		return ""
+	}
+	return ` AND EXISTS (SELECT 1 FROM records r WHERE (r.organization,r.id)=(m.organization,m.record_id)` + acl + ")"
 }
 
 // MatchStore persists monitoring matches, deliveries and attempt history.

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -125,6 +126,10 @@ func scanSpaces(raw []byte) ([]content.GenerationSpace, error) {
 // the registry describes them, with the current segments that hold a vector
 // in each, and the total of current segments the generation projects.
 func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error) {
+	if _, enforced := visibility.Principals(ctx); enforced {
+		g, spaces, err := s.DescribeVectorSpaces(ctx, org, corpusID)
+		return g, spaces, 0, err
+	}
 	g, err := (ProjectionStore{Pool: s.Pool}).Generation(ctx, org, corpusID)
 	if err != nil {
 		return g, nil, 0, notFound(err)

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
@@ -20,13 +21,14 @@ type profileSpend struct {
 }
 
 type searchChain struct {
-	profiles  []*profileSpend
-	paidCalls int
-	totalCost plugins.SearchCost
-	costCents float64
-	enforce   bool
-	degraded  map[string]bool
-	vectors   map[string]bool
+	profiles          []*profileSpend
+	paidCalls         int
+	totalCost         plugins.SearchCost
+	costCents         float64
+	enforce           bool
+	degraded          map[string]bool
+	vectors           map[string]bool
+	visibleCandidates map[content.Candidate]struct{}
 }
 
 func (c *searchChain) degradations() []Degradation {

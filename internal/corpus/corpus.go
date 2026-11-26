@@ -27,10 +27,12 @@ type Corpus struct {
 const ActionConnectorPush = "connector:push"
 
 type Scope struct {
-	Organization string   `json:"organization"`
-	ActorID      string   `json:"actor_id,omitempty"`
-	Actions      []string `json:"actions"`
-	Corpora      []string `json:"corpora"`
+	Organization   string   `json:"organization"`
+	VisibilityMode string   `json:"visibility_mode,omitempty"`
+	Principals     []string `json:"-"`
+	ActorID        string   `json:"actor_id,omitempty"`
+	Actions        []string `json:"actions"`
+	Corpora        []string `json:"corpora"`
 }
 
 func (s Scope) Allows(action string) bool {

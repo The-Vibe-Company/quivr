@@ -586,6 +586,7 @@ func Run(command string, args ...string) error {
 	submissions := postgres.SubmissionStore{Pool: pool, RetainImportAuditDetail: cfg.RetainImportAuditDetail}
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
+	grants := &postgres.VisibilityStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
 	var hydrationBlobCache *content.HydrationBlobCache
 	if command == "api" {
@@ -602,6 +603,7 @@ func Run(command string, args ...string) error {
 		return err
 	}
 	projection.SetMetrics(dependencyMetrics)
+	projection.Visibility = grants
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	rebuilds.Projection = projection
@@ -992,6 +994,7 @@ func Run(command string, args ...string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
 		apiOptions := []httpapi.Option{
+			httpapi.WithVisibility(grants),
 			httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll),
 			httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}),
 			httpapi.WithOperations(operations.Service{Store: operationStore}),

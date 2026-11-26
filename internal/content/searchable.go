@@ -746,16 +746,7 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	for j, i := range found {
 		recheck[j] = cs[i]
 	}
-	still := map[int]bool{}
-	if guard, ok := s.Baseline.(HydrationRechecker); ok {
-		still, err = guard.RecheckHydration(ctx, scope, recheck)
-	} else {
-		var hydrated map[int]Located
-		hydrated, err = s.Baseline.Hydrate(ctx, scope, recheck)
-		for j := range hydrated {
-			still[j] = true
-		}
-	}
+	still, err := s.RecheckHydration(ctx, scope, recheck)
 	if err != nil {
 		return nil, err
 	}
@@ -765,6 +756,28 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 		}
 	}
 	return out, nil
+}
+
+// RecheckHydration verifies currentness and access without rereading Parts.
+func (s Service) RecheckHydration(ctx context.Context, scope corpus.Scope, candidates []Candidate) (map[int]bool, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	if err := scope.Require(corpus.ActionContentHydrate); err != nil {
+		return nil, err
+	}
+	if guard, ok := s.Baseline.(HydrationRechecker); ok {
+		return guard.RecheckHydration(ctx, scope, candidates)
+	}
+	hydrated, err := s.Baseline.Hydrate(ctx, scope, candidates)
+	if err != nil {
+		return nil, err
+	}
+	still := make(map[int]bool, len(hydrated))
+	for i := range hydrated {
+		still[i] = true
+	}
+	return still, nil
 }
 
 // excerpts reads each distinct blob of a batch once, serving verified immutable

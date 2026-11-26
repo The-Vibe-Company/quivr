@@ -3,7 +3,10 @@
 package changes
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 var (
@@ -90,6 +94,21 @@ type Resume struct {
 // limit visible events; when more exist, Through is the last returned one.
 type Journal interface {
 	ReadChanges(ctx context.Context, organization, corpusID string, after int64, limit int, retention time.Duration) (Window, error)
+}
+
+// VisibilityJournal rechecks the current policy for an event about to be emitted.
+type VisibilityJournal interface {
+	VisibleChange(ctx context.Context, organization, corpusID string, position int64) (bool, error)
+}
+
+func (s Service) VisibleChange(ctx context.Context, scope corpus.Scope, event Event) (bool, error) {
+	if _, enforced := visibility.Principals(ctx); !enforced {
+		return true, nil
+	}
+	if journal, ok := s.Journal.(VisibilityJournal); ok {
+		return journal.VisibleChange(ctx, scope.Organization, event.CorpusID, event.Position)
+	}
+	return false, publicerr.ChangesUnavailable
 }
 
 // SnapshotJournal adds exact start-now and resume support without changing the
@@ -185,6 +204,11 @@ func (s Service) Read(ctx context.Context, scope corpus.Scope, corpusID string, 
 }
 
 func (s Service) readWindow(ctx context.Context, scope corpus.Scope, corpusID string, resume Resume, limit int) (Window, error) {
+	if _, enforced := visibility.Principals(ctx); enforced {
+		if _, ok := s.Journal.(VisibilityJournal); !ok {
+			return Window{}, publicerr.ChangesUnavailable
+		}
+	}
 	if snapshot, ok := s.Journal.(SnapshotJournal); ok {
 		return snapshot.ReadChangesResume(ctx, scope.Organization, corpusID, resume, limit, s.retention())
 	}
@@ -278,6 +302,14 @@ func (s Service) CursorResume(scope corpus.Scope, corpusID string, resume Resume
 		version = 2
 	}
 	b, _ := json.Marshal(cursorPayload{Version: version, Corpus: corpusID, Scope: digest(scope), Position: resume.Position, StartID: resume.StartID})
+	if len(scope.Principals) > 0 {
+		// A cursor's encoded length must be independent of journal position
+		// and whether a short-lived start snapshot is still pinned.
+		size := 256 + 6*len(corpusID)
+		b = append(b, bytes.Repeat([]byte{' '}, max(0, size-len(b)))...)
+		sealed := s.visibilityCursorCipher().Seal(nil, nil, b, nil)
+		return "v3." + base64.RawURLEncoding.EncodeToString(sealed)
+	}
 	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(s.sign(b))
 }
 
@@ -286,10 +318,26 @@ func (s Service) decode(scope corpus.Scope, corpusID, token string) (Resume, err
 	if len(parts) != 2 {
 		return Resume{}, ErrCursorInvalid
 	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+	var b []byte
+	if parts[0] == "v3" {
+		sealed, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return Resume{}, ErrCursorInvalid
+		}
+		b, err = s.visibilityCursorCipher().Open(nil, nil, sealed, nil)
+		if err != nil {
+			return Resume{}, ErrCursorInvalid
+		}
+	} else {
+		var err error
+		b, err = base64.RawURLEncoding.DecodeString(parts[0])
+		sig, signErr := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil || signErr != nil || !hmac.Equal(sig, s.sign(b)) {
+			return Resume{}, ErrCursorInvalid
+		}
+	}
 	var c cursorPayload
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, s.sign(b)) || json.Unmarshal(b, &c) != nil || (c.Version != 1 && c.Version != 2) || (c.Version == 1 && c.StartID != "") || c.Position < 0 {
+	if json.Unmarshal(b, &c) != nil || (c.Version != 1 && c.Version != 2) || (c.Version == 1 && c.StartID != "") || c.Position < 0 {
 		return Resume{}, ErrCursorInvalid
 	}
 	if c.Corpus != corpusID || c.Scope != digest(scope) {
@@ -325,6 +373,16 @@ func asResume(value any) (Resume, error) {
 	}
 }
 
+// A signed legacy cursor exposes its numeric position. Delegated callers
+// receive an authenticated encrypted cursor so hidden events leave no gap.
+func (s Service) visibilityCursorCipher() cipher.AEAD {
+	key := hmac.New(sha256.New, s.Key)
+	key.Write([]byte("quivr/visibility-change-cursor/v3"))
+	block, _ := aes.NewCipher(key.Sum(nil))
+	sealed, _ := cipher.NewGCMWithRandomNonce(block)
+	return sealed
+}
+
 func (s Service) sign(b []byte) []byte {
 	h := hmac.New(sha256.New, s.Key)
 	h.Write([]byte("change-cursor\x00"))
@@ -341,11 +399,16 @@ func (s Service) retention() time.Duration {
 
 func digest(s corpus.Scope) string {
 	s.ActorID = "" // Audit attribution does not change the cursor scope.
+	s.VisibilityMode = ""
 	s.Actions = append([]string{}, s.Actions...)
 	s.Corpora = append([]string{}, s.Corpora...)
 	sort.Strings(s.Actions)
 	sort.Strings(s.Corpora)
 	b, _ := json.Marshal(s)
+	if len(s.Principals) > 0 {
+		principals, _ := json.Marshal(s.Principals)
+		b = append(b, principals...)
+	}
 	h := sha256.Sum256(b)
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }

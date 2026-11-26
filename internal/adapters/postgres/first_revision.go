@@ -26,12 +26,12 @@ func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.C
 	batch.Queue(journalClaimSQL, org, "ingestion", c.Key)
 	batch.Queue(journalClaimSQL, org, "record", recordID)
 	batch.Queue(`WITH record AS (
- INSERT INTO records(organization,id,corpus_id,namespace,record_key,acceptance_order,desired_order,desired_position,desired_version_id)
- SELECT $1,$2,$4,$5,$6,1,1,$7,$8
+ INSERT INTO records(organization,id,corpus_id,namespace,record_key,acceptance_order,desired_order,desired_position,desired_version_id,record_acl)
+ SELECT $1,$2,$4,$5,$6,1,1,$7,$8,$21::text[]
  WHERE EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$4)
  AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$14)
- ON CONFLICT DO NOTHING RETURNING id
-), revision AS (
+ ON CONFLICT DO NOTHING RETURNING id,organization,corpus_id,namespace,record_acl
+)`+recordVisibilityAdmissionSQL+`, revision AS (
  INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,command,accepted_at,title,source_media_type,connector_instance_id)
  SELECT $1,id,$9,$10,$8,1,$7,$19::jsonb,now(),nullif($12,''),coalesce(nullif($13,''),'text/plain'),coalesce(nullif($20,''),'unknown') FROM record
  RETURNING record_id
@@ -44,7 +44,7 @@ func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.C
 ), bulk_outbox AS (
  INSERT INTO bulk_ingestion_outbox(organization,receipt_id,trace_context,work_queue)
  SELECT $1,id,$15,$16 FROM receipt WHERE $16='bulk' RETURNING receipt_id
-) SELECT EXISTS(SELECT 1 FROM receipt)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx), receiptCommand, requestDigest[:], execution, c.ConnectorInstanceID)
+) SELECT EXISTS(SELECT 1 FROM receipt)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx), receiptCommand, requestDigest[:], execution, c.ConnectorInstanceID, c.ACL)
 	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 	for range batch.Len() - 1 {

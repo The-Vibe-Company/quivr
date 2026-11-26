@@ -6,7 +6,7 @@
 
 Quivr V2 public text foundation contract, version `0.0.0-draft`.
 
-THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes. THE-640 adds text search and asynchronous Corpus projection rebuild initiation.
+THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes. THE-640 adds text search and asynchronous Corpus projection rebuild initiation. On read routes a key configured with visibility_mode=enforce requires X-Quivr-Actor (32 lowercase hexadecimal characters) and X-Quivr-Principals (up to 64 distinct comma-separated kind:id values and 8192 bytes). Requests without valid caller context are refused with 403.
 
 ## Authentication
 
@@ -35,6 +35,9 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/corpora`](#get-v0corpora) | `listCorpora` | `corpora:read` |
 | [`GET /v0/corpora/{corpus_id}`](#get-v0corporacorpus_id) | `getCorpus` | `corpora:read` |
 | [`PATCH /v0/corpora/{corpus_id}`](#patch-v0corporacorpus_id) | `renameCorpus` | `corpora:rename` |
+| [`GET /v0/corpora/{corpus_id}/visibility-grants`](#get-v0corporacorpus_idvisibility-grants) | `getVisibilityGrant` | `visibility:read` |
+| [`PUT /v0/corpora/{corpus_id}/visibility-grants`](#put-v0corporacorpus_idvisibility-grants) | `setVisibilityGrant` | `visibility:write` |
+| [`DELETE /v0/corpora/{corpus_id}/visibility-grants`](#delete-v0corporacorpus_idvisibility-grants) | `deleteVisibilityGrant` | `visibility:write` |
 | [`POST /v0/corpora/{corpus_id}/archive`](#post-v0corporacorpus_idarchive) | `archiveCorpus` | `corpora:archive` |
 | [`POST /v0/corpora/{corpus_id}/unarchive`](#post-v0corporacorpus_idunarchive) | `unarchiveCorpus` | `corpora:archive` |
 | [`PUT /v0/corpora/{corpus_id}/retrieval`](#put-v0corporacorpus_idretrieval) | `configureRetrieval` | `corpora:write`, `operations:write` |
@@ -392,6 +395,68 @@ Rename an authorized corpus. Does not change its identity or content. Requires a
 | --- | --- | --- |
 | `200` | `application/json` [`Corpus`](#corpus) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/corpora/{corpus_id}/visibility-grants`
+
+Operation `getVisibilityGrant`. Requires `visibility:read`.
+
+Read the grant for a source namespace in an authorized Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+| `source_namespace` | query | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`VisibilityGrant`](#visibilitygrant) | Current source grant. |
+| `default` | `application/json` [`Error`](#error) | Structured error. |
+
+#### `PUT /v0/corpora/{corpus_id}/visibility-grants`
+
+Operation `setVisibilityGrant`. Requires `visibility:write`.
+
+Replace or create the grant for a source namespace in an authorized Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+| `source_namespace` | query | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`VisibilityGrant`](#visibilitygrant)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `204` |  | Grant write committed. |
+| `default` | `application/json` [`Error`](#error) | Structured error. |
+
+#### `DELETE /v0/corpora/{corpus_id}/visibility-grants`
+
+Operation `deleteVisibilityGrant`. Requires `visibility:write`.
+
+Remove the grant for a source namespace in an authorized Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+| `source_namespace` | query | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `204` |  | Grant write committed. |
+| `default` | `application/json` [`Error`](#error) | Structured error. |
 
 #### `POST /v0/corpora/{corpus_id}/archive`
 
@@ -2982,6 +3047,48 @@ allOf:
 
 </details>
 
+### `VisibilityPrincipal`
+
+Type: string. Pattern `^[A-Za-z0-9_.-]{1,32}:[A-Za-z0-9_.-]{1,128}$`.
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: string
+pattern: '^[A-Za-z0-9_.-]{1,32}:[A-Za-z0-9_.-]{1,128}$'
+```
+
+</details>
+
+### `VisibilityGrant`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `visibility` | string | yes | One of `public`, `restricted`. |
+| `allowed_principals` | array of [`VisibilityPrincipal`](#visibilityprincipal) | yes | At most `64` items. Items are unique. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [visibility, allowed_principals]
+properties:
+  visibility:
+    type: string
+    enum: [public, restricted]
+  allowed_principals:
+    type: array
+    uniqueItems: true
+    maxItems: 64
+    items:
+      $ref: '#/components/schemas/VisibilityPrincipal'
+```
+
+</details>
+
 ### `IngestCommand`
 
 Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. When the normalizer fails, the Version is quarantined with a Diagnostic on the Version read (or, on an optional text/* route, published through the built-in text path with provenance.normalization.fallback). Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written only by its normalizer output, published on the Version; a submission writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
@@ -2990,6 +3097,7 @@ Initial request shape. Same source identity creates or corrects a Record. Same e
 | --- | --- | --- | --- |
 | `idempotency_key` | string | yes | Minimum length `1`. |
 | `source` | [`SourceIdentity`](#sourceidentity) | yes |  |
+| `record_acl` | array of [`VisibilityPrincipal`](#visibilityprincipal) |  | Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set. At most `64` items. Items are unique. |
 | `source_revision` | string |  | Minimum length `1`. |
 | `source_position` | string |  | Optional monotonic source position, encoded as decimal text to avoid JSON numeric precision loss. Pattern `^[0-9]+$`. |
 | `content` | one of [`TextContent`](#textcontent), [`BlobContent`](#blobcontent), [`ManifestContent`](#manifestcontent) | yes |  |
@@ -3171,6 +3279,13 @@ properties:
     minLength: 1
   source:
     $ref: '#/components/schemas/SourceIdentity'
+  record_acl:
+    description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
+    type: array
+    uniqueItems: true
+    maxItems: 64
+    items:
+      $ref: '#/components/schemas/VisibilityPrincipal'
   source_revision:
     type: string
     minLength: 1

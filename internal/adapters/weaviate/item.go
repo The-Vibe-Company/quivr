@@ -245,7 +245,7 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		if err = s.ensureMetadata(ctx, r.Generation); err != nil {
 			return filter{}, err
 		}
-		var values []filter
+		values := []filter{routeVisibility(ctx, r.CorpusID)}
 		if tenantFrom(ctx) == "" {
 			values = append(values, equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID))
 		}

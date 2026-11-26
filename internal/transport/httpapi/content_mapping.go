@@ -123,6 +123,10 @@ func withdrawalFromTransport(in transport.WithdrawalCommand) content.Withdrawal 
 
 func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
 	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
+	if in.RecordAcl != nil {
+		c.ACL = *in.RecordAcl
+	}
+
 	switch unionKind(in.Content) {
 	case "text":
 		text, err := in.Content.AsTextContent()
