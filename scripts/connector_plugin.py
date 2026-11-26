@@ -169,8 +169,9 @@ def start_first_party(stack, only=None):
     rows = [row for row in first_party(stack) if only is None or row['id'] in only]
     if not rows:
         return
+    inherited = plugin_environment.inherited()
     binaries = go_bin_cache.ensure_many([
-        {'name': f"quivr-{row['id']}", 'cwd': stack.source / 'plugins' / row['id'], 'package': '.', 'go': GO}
+        {'name': f"quivr-{row['id']}", 'cwd': stack.source / 'plugins' / row['id'], 'package': '.', 'go': GO, 'env': inherited}
         for row in rows
     ])
     started = []
@@ -178,7 +179,6 @@ def start_first_party(stack, only=None):
         directory = stack.source / 'plugins' / row['id']
         binary = binaries[f"quivr-{row['id']}"]
         log = stack.directory / f"{row['id']}-plugin.log"
-        inherited = plugin_environment.inherited()
         port = first_party_port(stack, row)
         env = {**inherited, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         if row.get('signing_id'):

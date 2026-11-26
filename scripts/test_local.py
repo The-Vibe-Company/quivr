@@ -110,12 +110,13 @@ class Isolation(unittest.TestCase):
             'QUIVR_API_KEYS_FILE': '/fixture/api-keys',
         }
         with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True), \
-                mock.patch.object(plugins.subprocess, 'run') as build, \
+                mock.patch.object(plugins.ports, 'allocate', return_value=41001), \
+                mock.patch.object(plugins.go_bin_cache, 'ensure_many', return_value={'quivr-object-storage-archive': pathlib.Path('/bin/true')}) as build, \
                 mock.patch.object(plugins.subprocess, 'Popen', return_value=mock.Mock(pid=12345)) as launch, \
                 mock.patch.object(plugins, 'healthy_port', return_value=True):
             plugins.start_first_party(stack)
 
-        build_env = build.call_args.kwargs['env']
+        build_env = build.call_args.args[0][0]['env']
         launch_env = launch.call_args.kwargs['env']
         for env in (build_env, launch_env):
             self.assertTrue(engine_secrets.keys().isdisjoint(env))
