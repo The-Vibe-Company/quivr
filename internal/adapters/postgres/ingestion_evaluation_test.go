@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,16 +24,21 @@ import (
 // Publication is independently exercised by the projection adapter. This
 // observer checks which independent segmentation reached that boundary.
 type evaluationPublication struct {
+	mu           sync.Mutex
 	segmentation content.Segmentation
 	vectors      int
 	artifacts    []content.Embedding
 }
 
 func (p *evaluationPublication) Publish(_ context.Context, _ content.Generation, _, _, _ string, _ content.Version, seg content.Segmentation) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.segmentation = seg
 	return nil
 }
 func (p *evaluationPublication) PublishEmbeddings(_ context.Context, _ content.Generation, _ string, data []content.EmbeddingData) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.vectors = len(data)
 	p.artifacts = nil
 	for _, d := range data {
