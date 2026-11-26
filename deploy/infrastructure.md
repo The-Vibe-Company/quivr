@@ -1,7 +1,7 @@
 # Shared infrastructure settings
 
 `deploy/infrastructure.json` is the source of truth for portable Compose and Railway settings. It contains no credentials or deployment selectors.
-`small` is the conservative default; `large` is an unbenchmarked operational starting point for object-heavy imports, not a capacity promise. For a separate index VM, follow [Run the vector index on a dedicated host](../docs-site/run-quivr/dedicated-vector-host.mdx). Adapter `check` accepts `--vector-host [SSH_TARGET]`; without a reachable observer, external settings are unknown. Reset refuses external or unverifiable endpoints before mutations.
+`small` is the conservative default. `large` is an unbenchmarked starting point for object-heavy imports. For a separate index VM, follow [Run the vector index on a dedicated host](../docs-site/run-quivr/dedicated-vector-host.mdx). Use `python3 deploy/vector-host/azure.py --reconcile` with the existing host's deployment arguments to apply the current declaration. Adapter `check --vector-host [SSH_TARGET]` compares the running image, version and settings against the checkout's resolved declaration. Without a reachable observer, external settings are unknown. Reset refuses external or unverifiable endpoints before mutations.
 
 ## Profiles
 
@@ -10,6 +10,7 @@ Both profiles keep the pinned images and PostgreSQL tuning; bytes are decimal un
 | Service | small memory / CPU | large memory / CPU |
 | --- | ---: | ---: |
 | PostgreSQL | 1,073,741,824 / 1 | 32,000,000,000 / 32 |
+| Temporal | 1,073,741,824 / 1 | 4,000,000,000 / 4 |
 | Weaviate | 2,147,483,648 / 2 | 64,000,000,000 / 32 |
 | API | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
 | worker (live) | no shared limit (native host on Compose) | 32,000,000,000 / 32 |
@@ -42,6 +43,10 @@ Weaviate image overrides require a digest. PostgreSQL and autoscaler image chang
 | `QUIVR_POSTGRES_WAL_COMPRESSION` / `QUIVR_POSTGRES_STAT_STATEMENTS_TRACK` | lz4 / all; reduce full-page WAL bytes while retaining complete statement statistics for diagnosis. |
 | `QUIVR_POSTGRES_JIT` / `QUIVR_POSTGRES_SYNCHRONOUS_COMMIT` | on / on; JIT supports planned compilation and may override to off, while only `on` is accepted for durable acknowledgements. |
 | `QUIVR_POSTGRES_COMMIT_DELAY` / `QUIVR_POSTGRES_COMMIT_SIBLINGS` | 100 microseconds / 5 active transactions; allow a small durable WAL group-commit window during concurrent writes. Delay accepts 0–100000 microseconds (0 disables the window); siblings accepts 0–1000. Acknowledgements still wait for WAL flush. Tune against storage and throughput measurements. |
+| Temporal `DB` / `DB_PORT` | `postgres12` / `5432`; durable PostgreSQL persistence (`postgres12` or `postgres12_pgx` only, never SQLite). Host/shell overrides use `QUIVR_TEMPORAL_<KEY>`; JSON overrides use container keys directly. Connection host, user and password stay outside the declaration. |
+| Temporal `DBNAME` / `VISIBILITY_DBNAME` | `temporal` / `temporal_visibility`; separate PostgreSQL databases bootstrapped and migrated idempotently by `auto-setup` (`SKIP_DB_CREATE=false`, `SKIP_SCHEMA_SETUP=false`). Must differ from each other and `quivr`. |
+| Temporal `NUM_HISTORY_SHARDS` / `DEFAULT_NAMESPACE` / `DEFAULT_NAMESPACE_RETENTION` | `4` small / `64` large (immutable once initialized; existing `small` stacks moving to `large` must override `NUM_HISTORY_SHARDS=4`) / `default` / `72h` (minimum `24h`); `SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES=true` skips test search attributes. |
+| Temporal `SQL_MAX_CONNS` / `SQL_VIS_MAX_CONNS` | `20` / `10` small, `50` / `20` large (matching idle pools); bounded within PostgreSQL `max_connections` alongside API/worker pools. |
 | Weaviate `DEFAULT_QUANTIZATION` | rq-8; reduce vector memory, retaining explicit per-space configuration. |
 | `ASYNC_INDEXING` | false in small, true in large; decouple large writes from ANN indexing with visibility lag. |
 | `PERSISTENCE_MEMTABLES_MAX_SIZE_MB` | 200 in small, 1024 in large; fewer flushes consume more bucket/shard memory and recovery work. |
@@ -83,9 +88,9 @@ generated PostgreSQL and autoscaler artifacts in sync.
 ## Apply and verify
 
 The Compose adapter exposes `preview`, `apply`, `check`, and `initialize-monitoring`; it
-manages PostgreSQL and Weaviate only, while API and worker processes stay native hosts.
-`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json`.
-Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
+manages PostgreSQL, Temporal and Weaviate, while API and worker processes stay native hosts.
+`apply` writes its resolved overlay to `.scratch/PROJECT/infrastructure.json` and waits for readiness (bounded).
+Use `apply` for an existing `make dev` project; launch a fresh local project with `make dev`. Switching an existing SQLite-backed project to PostgreSQL Temporal starts a fresh Temporal history (drain active work first; `deploy/reset.py` or manual `docker volume rm` retires the unused legacy `temporal-data` volume). If `QUIVR_DB_PASSWORD` is unset, it reuses the selected local state password and supplies `QUIVR_LOCAL_ROOT`/`QUIVR_MODEL_ROOT` interpolation privately; external Compose projects provide the password through the environment, and `apply` never creates or rotates credentials.
 
 ```sh
 python3 deploy/compose/infrastructure.py preview \
@@ -128,6 +133,7 @@ python3 deploy/railway/infrastructure.py apply \
 railway up --project ID --environment ID \
   --service POSTGRES_SERVICE_ID --detach
 # Large: restart changed application services; rebuild with railway up for code/build-pin changes.
+railway redeploy --project ID --environment ID --service TEMPORAL_SERVICE_ID --from-source --yes
 railway redeploy --project ID --environment ID --service WEAVIATE_SERVICE_ID --from-source --yes
 railway redeploy --project ID --environment ID --service API_SERVICE_ID --yes
 railway redeploy --project ID --environment ID --service WORKER_SERVICE_ID --yes
@@ -139,7 +145,7 @@ python3 deploy/railway/infrastructure.py check \
   --project-id ID --environment-id ID --profile large --overrides .scratch/provider-limits.json
 ```
 
-The Railway adapter targets PostgreSQL, Weaviate and API by default; large adds worker, worker-bulk and API's 32,000,000,000-byte/32-vCPU limits. Without `--service`, an existing uniquely named `autoscaler` is included automatically, never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` is an exact replacement for defaults. `apply` does not deploy or reset scaler-owned replicas.
+The Railway adapter targets PostgreSQL, Temporal, Weaviate and API by default; large adds worker, worker-bulk and API's 32,000,000,000-byte/32-vCPU limits. Without `--service`, an existing uniquely named `autoscaler` is included automatically, never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` is an exact replacement for defaults. `apply` does not deploy or reset scaler-owned replicas.
 `initialize-monitoring` runs the deployment-owned PostgreSQL script; fresh databases already run `init.sql`, while existing ones receive
 the statistics extension. It is separate from the Quivr core migration.
 

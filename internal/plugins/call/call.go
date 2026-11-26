@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
@@ -49,10 +50,10 @@ func Timeout(pin *plugins.Pin, operation string) time.Duration {
 func Discover(ctx context.Context, pin *plugins.Pin) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout(pin, Normalize))
 	defer cancel()
-	return discover(ctx, pin)
+	return discover(ctx, pin, keyFor(pin), discoveryTTL())
 }
 
-func discover(ctx context.Context, pin *plugins.Pin) (string, error) {
+func discover(ctx context.Context, pin *plugins.Pin, key discoveryKey, ttl time.Duration) (string, error) {
 	if err := guard(ctx, pin); err != nil {
 		return "", err
 	}
@@ -60,14 +61,14 @@ func discover(ctx context.Context, pin *plugins.Pin) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", plugins.ErrUnavailable, err)
 	}
-	served, issues, err := devhost.Discover(ctx, pin.Endpoint, pin.Report())
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", plugins.ErrUnavailable, err)
+	if ttl == 0 {
+		return verifyDiscovery(ctx, pin)
 	}
-	if len(issues) > 0 {
-		return "", fmt.Errorf("%w: discovery does not match the pinned manifest: %s", plugins.ErrUnavailable, plugins.DescribeIssues(issues))
+	served, err := discoveries.get(ctx, key, pin, ttl)
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("%w: %w", plugins.ErrUnavailable, err)
 	}
-	return served, nil
+	return served, err
 }
 
 func guard(ctx context.Context, pin *plugins.Pin) error {
@@ -89,7 +90,8 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 		invoke, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-	served, err := discover(invoke, pin)
+	key, ttl := keyFor(pin), discoveryTTL()
+	served, err := discover(invoke, pin, key, ttl)
 	if err != nil {
 		return nil, invocationFailure(ctx, invoke, operation, err)
 	}
@@ -114,6 +116,25 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 	if err != nil {
 		return nil, invocationFailure(ctx, invoke, operation, err)
 	}
+	invalidated := false
+	invalidate := func() {
+		if ttl > 0 && !invalidated {
+			discoveries.invalidate(key)
+			invalidated = true
+		}
+	}
+	invoke = devhost.WithResponseCheck(invoke, func(status int, header http.Header) error {
+		if status == http.StatusUnauthorized || status == http.StatusNotFound || status >= 500 && status <= 599 {
+			invalidate()
+		}
+		for _, digest := range header.Values("X-Quivr-Manifest-Digest") {
+			if digest != pin.ManifestDigest {
+				invalidate()
+				return fmt.Errorf("%w: response does not match the pinned manifest digest", plugins.ErrUnavailable)
+			}
+		}
+		return nil
+	})
 	validate := func(b []byte) []plugins.Issue {
 		if check == nil {
 			return nil
@@ -147,6 +168,10 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 		return nil, fmt.Errorf("unknown plugin operation %q", operation)
 	}
 	if err != nil {
+		var transportErr *devhost.TransportError
+		if errors.As(err, &transportErr) {
+			invalidate()
+		}
 		return result, invocationFailure(ctx, invoke, operation, err)
 	}
 	if err := guard(invoke, pin); err != nil {
@@ -173,7 +198,11 @@ func connectorOperation(operation string) bool {
 }
 func unavailable(operation string, err error) error {
 	if connectorOperation(operation) {
-		return connectors.TransientError("plugin_unavailable")
+		classified := connectors.TransientError("plugin_unavailable")
+		if errors.Is(err, plugins.ErrUnavailable) {
+			return fmt.Errorf("%w: %w", classified, plugins.ErrUnavailable)
+		}
+		return classified
 	}
 	if operation == EvaluateSubscription {
 		return fmt.Errorf("%w: %w", monitoring.ErrEvaluatorUnavailable, err)

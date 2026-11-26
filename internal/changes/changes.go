@@ -340,6 +340,7 @@ func (s Service) retention() time.Duration {
 }
 
 func digest(s corpus.Scope) string {
+	s.ActorID = "" // Audit attribution does not change the cursor scope.
 	s.Actions = append([]string{}, s.Actions...)
 	s.Corpora = append([]string{}, s.Corpora...)
 	sort.Strings(s.Actions)

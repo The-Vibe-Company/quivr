@@ -40,6 +40,11 @@ func (s *spyAuditStore) Record(ctx context.Context, event *audit.Event, work fun
 	return nil
 }
 
+func (s *spyAuditStore) Append(_ context.Context, e *audit.Event) error {
+	s.events = append(s.events, *e)
+	return nil
+}
+
 func (s *spyAuditStore) List(context.Context, string, audit.Filter) ([]audit.Event, error) {
 	return s.events, nil
 }
@@ -186,8 +191,16 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 				t.Fatalf("admin %s %s: want %d got %d %s", tc.method, tc.path, tc.want, rec.Code, rec.Body.String())
 			}
 			var event map[string]any
-			if err := json.NewDecoder(&logs).Decode(&event); err != nil {
-				t.Fatal(err)
+			dec := json.NewDecoder(&logs)
+			for {
+				var line map[string]any
+				if err := dec.Decode(&line); err != nil {
+					t.Fatalf("missing http request log: %v", err)
+				}
+				if line["msg"] == "http request" {
+					event = line
+					break
+				}
 			}
 			// Admin listener must ignore X-Forwarded-For even when push proxies are configured.
 			if event["client_ip"] != "192.0.2.9" {
@@ -200,6 +213,7 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 	}
 
 	// 4. Sensitive admin commands on the admin listener execute and record accepted audit events.
+	audits.events = nil
 	dryReq := httptest.NewRequest("POST", "/v0/admin/backfills", strings.NewReader(`{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`))
 	dryReq.Header.Set("Authorization", "Bearer "+adminKey)
 	dryReq.Header.Set("Content-Type", "application/json")

@@ -217,3 +217,52 @@ func TestIngestionNormativeResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestMultimodalBlobPartsAndRegions(t *testing.T) {
+	if _, err := New(filepath.Join(fixtures, "manifests/invalid/ingestion-image-plugin-api-0.19.yaml")); err == nil {
+		t.Fatal("image vector space accepted below Plugin API 0.20")
+	}
+	p, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-multimodal.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.Ingestion(ingestionAnswer{segments: []Segment{
+		{
+			PartKey: "image",
+			Region:  &ImageRegion{CoordinateSystem: "normalized_bbox", X: 0, Y: 0, Width: 1, Height: 1, Label: "full"},
+			Vectors: map[string][]float32{"example.vision.image": {0.5, 0.5, 0.5, 0.5}},
+		},
+		{
+			PartKey: "image",
+			Region:  &ImageRegion{CoordinateSystem: "normalized_bbox", X: 0, Y: 0, Width: 0.5, Height: 0.5, Label: "grid:0,0"},
+			Vectors: map[string][]float32{"example.vision.image": {0.6, 0.4, 0.5, 0.5}},
+		},
+	}})
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(fixtures, "requests/ingestion/segment-and-embed-blob.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, out, raw := callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 200 {
+		t.Fatalf("multimodal status=%d body=%s", status, raw)
+	}
+	segs := out["segments"].([]any)
+	if len(segs) != 2 {
+		t.Fatalf("expected 2 distinct regions on same Blob Part, got %d", len(segs))
+	}
+
+	// Out-of-bounds region is rejected by SDK response validation.
+	_ = p.Ingestion(ingestionAnswer{segments: []Segment{{
+		PartKey: "image",
+		Region:  &ImageRegion{CoordinateSystem: "normalized_bbox", X: 0.8, Y: 0, Width: 0.5, Height: 1},
+		Vectors: map[string][]float32{"example.vision.image": {0.5, 0.5, 0.5, 0.5}},
+	}}})
+	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 500 || out["code"] != "invalid_response" {
+		t.Fatalf("out-of-bounds region accepted: status=%d body=%s", status, raw)
+	}
+}

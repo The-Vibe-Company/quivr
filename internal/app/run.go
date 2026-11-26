@@ -78,6 +78,7 @@ type Config struct {
 	AdminListen             string                  `json:"admin_listen"`
 	CursorKey               string                  `json:"cursor_key"`
 	RetainImportAuditDetail bool                    `json:"retain_import_audit_detail"`
+	AuditReadAccess         bool                    `json:"audit_read_access"`
 	AuditRetentionMonths    int                     `json:"audit_retention_months"`
 	ChangeRetention         string                  `json:"change_retention"`
 	Keys                    map[string]corpus.Scope `json:"keys"`
@@ -163,6 +164,9 @@ type RetrievalConfig struct {
 	Profiles map[string]string `json:"profiles"`
 	// CoverageRefresh paces background snapshots (Go duration, default 10s).
 	CoverageRefresh string `json:"coverage_refresh"`
+	// HydrationBlobCacheBytes bounds the API's in-memory content-addressed text
+	// blob LRU cache in bytes (default 64 MiB; 0 disables; at most 1 GiB).
+	HydrationBlobCacheBytes *int64 `json:"hydration_blob_cache_bytes,omitempty"`
 }
 
 func (cfg Config) purgeTimeout() (time.Duration, error) {
@@ -267,6 +271,9 @@ func Run(command string, args ...string) error {
 	if err = decoder.Decode(new(any)); err != io.EOF {
 		return badConfig(configInvalid, ConfigEnv, "invalid configuration JSON: expected a single object")
 	}
+	if err := cfg.loadSecrets(command == "storage" || command == "journal"); err != nil {
+		return err
+	}
 	if command == "journal" {
 		return runJournal(cfg, args, os.Stdout)
 	}
@@ -343,8 +350,12 @@ func Run(command string, args ...string) error {
 		return badConfig(configMissing, "cursor_key", "cursor_key is required")
 	case len(cfg.CursorKey) < 32:
 		return badConfig(configInvalid, "cursor_key", "cursor_key must have at least 32 bytes")
-	case len(cfg.Keys) == 0:
-		return badConfig(configMissing, "keys", "keys must contain at least one scoped API key")
+	}
+	if err := cfg.validateAccessKeys(); err != nil {
+		return err
+	}
+	if err := validateEngineSigning(pins, time.Now()); err != nil {
+		return err
 	}
 	logger := slog.Default()
 	if command == "migrate" {
@@ -385,6 +396,10 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	hydrationBlobCacheBytes, err := cfg.Retrieval.hydrationBlobCacheBytes()
+	if err != nil {
+		return err
+	}
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
 		return err
@@ -401,11 +416,6 @@ func Run(command string, args ...string) error {
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
 		return err
-	}
-	for token, s := range cfg.Keys {
-		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
-			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
-		}
 	}
 	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
 	if err != nil {
@@ -486,6 +496,19 @@ func Run(command string, args ...string) error {
 	if command == "api" && len(pins.Retrievals()) == 0 {
 		return badConfig(configMissing, "plugins", "no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
 	}
+	for _, required := range []struct{ field, value string }{
+		{"weaviate_url", cfg.WeaviateURL}, {"temporal_address", cfg.TemporalAddress},
+		{"s3.endpoint", cfg.S3.Endpoint}, {"s3.bucket", cfg.S3.Bucket},
+		{"s3.access_key", cfg.S3.AccessKey}, {"s3.secret_key", cfg.S3.SecretKey},
+	} {
+		if required.value == "" {
+			return badConfig(configMissing, required.field, "required setting is missing")
+		}
+	}
+	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
+	if err != nil {
+		return invalidConfig("s3", "invalid object storage settings", err)
+	}
 	signals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	loops := lifecycle.New()
@@ -510,10 +533,12 @@ func Run(command string, args ...string) error {
 		closeResources(deadline)
 		graceExpired = deadline.Err() != nil
 	}()
+	dependencyMetrics := telemetry.NewDependencyMetrics()
 	poolConfig, err := cfg.poolConfig()
 	if err != nil {
 		return err
 	}
+	postgres.AttachDependencyMetrics(poolConfig, dependencyMetrics)
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return badConfig(configInvalid, "database_url", "invalid database configuration")
@@ -528,19 +553,7 @@ func Run(command string, args ...string) error {
 		}
 	}
 
-	for _, required := range []struct{ field, value string }{
-		{"weaviate_url", cfg.WeaviateURL}, {"temporal_address", cfg.TemporalAddress},
-		{"s3.endpoint", cfg.S3.Endpoint}, {"s3.bucket", cfg.S3.Bucket},
-		{"s3.access_key", cfg.S3.AccessKey}, {"s3.secret_key", cfg.S3.SecretKey},
-	} {
-		if required.value == "" {
-			return badConfig(configMissing, required.field, "required setting is missing")
-		}
-	}
-	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
-	if err != nil {
-		return invalidConfig("s3", "invalid object storage settings", err)
-	}
+	blobs.SetMetrics(dependencyMetrics)
 	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}
 	normalizations := postgres.NormalizationStore{Pool: pool, Blobs: blobs, RetainImportAuditDetail: cfg.RetainImportAuditDetail}
@@ -569,22 +582,28 @@ func Run(command string, args ...string) error {
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
-	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Stats: postgres.CorpusStatsStore{Pool: pool}, Facets: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
+	var hydrationBlobCache *content.HydrationBlobCache
+	if command == "api" {
+		hydrationBlobCache = content.NewHydrationBlobCache(hydrationBlobCacheBytes)
+	}
+	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Stats: postgres.CorpusStatsStore{Pool: pool}, Facets: records, Blobs: blobs, BlobCache: hydrationBlobCache, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection, err := weaviate.NewWithTLS(cfg.WeaviateURL, cfg.TLS.Weaviate, cfg.WeaviateAPIKey)
 	if err != nil {
 		return err
 	}
+	projection.SetMetrics(dependencyMetrics)
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
+		var prerequisite *postgres.PrerequisiteError
 		if contract {
 			contractCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrMigrationBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
@@ -592,7 +611,7 @@ func Run(command string, args ...string) error {
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
@@ -650,6 +669,18 @@ func Run(command string, args ...string) error {
 					err = projection.Ready(ctx)
 				}
 			}
+		}
+		return err
+	}
+	preflight, cancelPreflight := context.WithTimeout(ctx, 5*time.Second)
+	err = postgres.CheckPrerequisites(preflight, pool, false)
+	cancelPreflight()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return postgres.ErrPrerequisiteConnection
 		}
 		return err
 	}
@@ -863,6 +894,9 @@ func Run(command string, args ...string) error {
 	spaceSnapshots := retrieval.NewSpaceSnapshots(lifecycle.WorkContext(ctx), spaces, coverageRefresh)
 	metadataProjection := retrieval.MetadataProjection{Projection: projection, Metadata: records}
 	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaceSnapshots, Projection: metadataProjection, Content: contents}
+	if command == "api" {
+		search.QueryVectors = retrieval.NewQueryVectorCache()
+	}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
@@ -870,7 +904,7 @@ func Run(command string, args ...string) error {
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
-	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore}
+	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore, BlobSource: uploadStore, Signer: blobs}
 	deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
@@ -929,12 +963,16 @@ func Run(command string, args ...string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots), loadMetrics, poolMetrics))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, func(w io.Writer) {
+			recorder.WriteMetrics(w)
+			hydrationBlobCache.WriteMetrics(w)
+			search.QueryVectors.WriteMetrics(w)
+		})), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
 	}
 	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes, loadMetrics), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
@@ -950,6 +988,7 @@ func Run(command string, args ...string) error {
 			httpapi.WithQueues(queueSnapshots),
 			httpapi.WithLifecycle(loops),
 			httpapi.WithAudit(auditStore),
+			httpapi.WithReadAudit(cfg.AuditReadAccess),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}),
 			httpapi.WithCommands(commands),
 			httpapi.WithLoadMetrics(loadMetrics),

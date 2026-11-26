@@ -51,7 +51,7 @@ CONNECTORS = [
     {'id': 'object-storage-archive', 'port': 9990, 'signing_id': 'connector.object_storage_archive'},
     # Token windows and E5 embeddings through the deployment's TEI (plugins/core-ingest).
     {'id': 'core-ingest', 'port': 9950, 'api': True,
-     'configuration': lambda env: {'tei_url': env['TEI_URL'], 'tokenizer': TOKENIZER}},
+     'configuration': lambda env: {'tei_url': config_url(env, 'TEI_URL'), 'tokenizer': TOKENIZER}},
     # Today's search: keywords, vectors or both, from the candidates the engine serves (plugins/core-retrieve).
     {'id': 'core-retrieve', 'port': 9960, 'api': True, 'worker': False},
 ]
@@ -62,6 +62,7 @@ HOSTED_EMBED = {'id': 'hosted-embed', 'signing_id': 'hosted.embed', 'port': 9980
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
 ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
 ENCODER_MODEL = '/opt/query-encoder/model'
+ENCODER_LOCK = '/app/third_party/query-encoder/model-lock.json'
 ENCODER_URL = 'http://127.0.0.1:9995'
 ENCODER_IDENTITY = {'model': 'google/embeddinggemma-2',
                     'model_revision': '914f7f89142e33e7',
@@ -81,7 +82,53 @@ def encoder_settings(env):
         if not raw.isascii() or not raw.isdigit() or not 1 <= int(raw) <= limit:
             raise ValueError(name + ' must be an integer from 1 to ' + str(limit))
         values[name] = int(raw)
+    backend = env.get('QUIVR_QUERY_ENCODER_BACKEND', '').strip().lower()
+    if backend:
+        if backend not in ('auto', 'onnx', 'pytorch'):
+            raise ValueError('QUIVR_QUERY_ENCODER_BACKEND must be auto, onnx or pytorch')
+        values['QUIVR_QUERY_ENCODER_BACKEND'] = backend
     return values
+
+
+def _encoder_image_backend(model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    """Return the baked query-encoder backend ('onnx' or 'pytorch') when its assets exist."""
+    root = pathlib.Path(model_dir)
+    lock_file = pathlib.Path(lock_path)
+    if lock_file.is_file():
+        try:
+            lock = json.loads(lock_file.read_text())
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(lock, dict):
+            return None
+        files = lock.get('files') if isinstance(lock.get('files'), dict) else {}
+        backend = lock.get('backend')
+        if backend not in ('onnx', 'pytorch'):
+            backend = 'onnx' if any(str(name).endswith('.onnx') for name in files) else 'pytorch'
+        if backend == 'onnx':
+            model_file = lock.get('model_file') or 'onnx/model_quantized.onnx'
+            if not isinstance(model_file, str) or not model_file.endswith('.onnx'):
+                return None
+            return 'onnx' if (root / pathlib.PurePosixPath(model_file)).is_file() else None
+        return 'pytorch' if (root / 'model.safetensors').is_file() else None
+    if (root / 'onnx' / 'model_quantized.onnx').is_file():
+        return 'onnx'
+    if (root / 'model.safetensors').is_file():
+        return 'pytorch'
+    return None
+
+
+def _validate_encoder_runtime(settings, *, python_path=ENCODER_PYTHON,
+                              model_dir=ENCODER_MODEL, lock_path=ENCODER_LOCK):
+    baked = _encoder_image_backend(model_dir, lock_path) if pathlib.Path(python_path).is_file() else None
+    if baked is None:
+        raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+    requested = settings.get('QUIVR_QUERY_ENCODER_BACKEND')
+    if requested and requested not in ('auto', baked):
+        raise ValueError(
+            f'QUIVR_QUERY_ENCODER_BACKEND={requested} does not match the baked {baked} query encoder image'
+        )
+    return baked
 
 
 def plugins_enabled(env):
@@ -169,7 +216,7 @@ def hosted_configuration(env):
         if not env.get(name, '').strip():
             raise ValueError('Missing runtime variable: ' + name)
     return {'format': 'cohere',
-            'base_url': env['AZURE_FOUNDRY_ENDPOINT'].strip().rstrip('/') + '/providers/cohere/v2',
+            'base_url': config_url(env, 'AZURE_FOUNDRY_ENDPOINT').rstrip('/') + '/providers/cohere/v2',
             'auth': 'api-key', 'model': 'Cohere-Embed-V5-Pro', 'dimensions': 1024,
             # Conservative UTF-8 byte/token bound, not an exact provider token window.
             'max_tokens_per_segment': 6144,
@@ -241,16 +288,62 @@ def parse_admin_listen(raw):
     return value
 
 
-def build_config(env):
-    """Build the core configuration from Railway runtime variables."""
+# Resolve mounted secrets once so migration, core and sidecars use the same
+# values even if a mounted secret rotates during startup.
+REQUIRED_CORE_SECRETS = ('DATABASE_URL', 'QUIVR_CURSOR_KEY', 'S3_ACCESS_KEY', 'S3_SECRET_KEY')
+OPTIONAL_CORE_SECRETS = ('QUIVR_CREDENTIAL_KEY', 'WEAVIATE_API_KEY', 'QUIVR_ENGINE_PLUGIN_KEYS',
+                         'QUIVR_API_KEYS', 'QUIVR_ADMIN_KEYS', 'QUIVR_TELEMETRY_HEADERS')
+SCOPED_KEY_SECRETS = ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY',
+                      'QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY')
+PLUGIN_SECRETS = ('TYPESAFE_API_KEY', 'AZURE_FOUNDRY_KEY', 'EMBED_API_KEY')
+
+
+def runtime_environment(environ):
+    env = dict(environ)
+    for name in (*REQUIRED_CORE_SECRETS, *OPTIONAL_CORE_SECRETS, *SCOPED_KEY_SECRETS, *PLUGIN_SECRETS):
+        path = env.pop(name + '_FILE', '')
+        if path:
+            if env.get(name):
+                raise ValueError('Set either ' + name + ' or ' + name + '_FILE')
+            try:
+                value = pathlib.Path(path).read_bytes().decode('utf-8')
+            except (OSError, ValueError):
+                raise ValueError('Cannot read secret from ' + name + '_FILE') from None
+            if value.endswith('\r\n'):
+                value = value[:-2]
+            elif value.endswith('\n'):
+                value = value[:-1]
+            if not value.strip() or '\0' in value:
+                raise ValueError(name + '_FILE must contain a nonempty secret')
+            env[name] = value
+    for name in REQUIRED_CORE_SECRETS:
+        if not env.get(name, '').strip():
+            raise ValueError('Missing runtime secret: ' + name)
+    return env
+
+
+def config_url(env, name):
+    value = env[name].strip()
+    try:
+        url = urlsplit(value)
+        port = url.port
+        if (url.scheme in ('http', 'https') and url.hostname and url.username is None
+                and port != 0 and not url.netloc.endswith(':')
+                and not any(char.isspace() or ord(char) < 32 for char in value)
+                and not url.query and not url.fragment):
+            return value
+    except ValueError:
+        pass
+    raise ValueError(name + ' must be an HTTP(S) URL without credentials, query or fragment')
+
+
+def engine_key_sets(env):
+    """Build separated functional keys and dedicated admin_keys from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
     admin_listen = parse_admin_listen(env.get('QUIVR_ADMIN_LISTEN', ''))
     organization = env.get('QUIVR_ORGANIZATION', 'quivr-demo').strip()
     if not organization:
         raise ValueError('QUIVR_ORGANIZATION must not be empty')
-    recording = env.get('QUIVR_RECORD_QUERY_TEXT', '0' if env.get('QUIVR_SINGLE_MACHINE') == '1' else '1')
-    if recording not in ('0', '1'):
-        raise ValueError('QUIVR_RECORD_QUERY_TEXT must be 0 or 1')
     # changes:read feeds the web app's live Veille page (read-only, fenced to the demo corpus).
     actions = ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query',
                'changes:read']
@@ -264,39 +357,13 @@ def build_config(env):
     # separated onto admin_listen, observability:read belongs only to admin_keys.
     if not admin_listen and env.get('QUIVR_DEMO_ADMIN') == '1':
         actions += ['observability:read']
-    pool_limit = env.get('QUIVR_POSTGRES_MAX_CONNECTIONS', '16').strip()
-    if not pool_limit.isdecimal() or not 1 <= int(pool_limit) <= 2147483647:
-        raise ValueError('QUIVR_POSTGRES_MAX_CONNECTIONS must be a positive int32')
-    config = {
-        'database_url': env['DATABASE_URL'],
-        'postgres': {'max_connections': int(pool_limit)},
-        'cursor_key': env['QUIVR_CURSOR_KEY'],
-        'listen': '0.0.0.0:8080',
-        'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
-        # Workers may start before the API builds and applies new migrations.
-        'migration_wait': '10m',
-        'temporal_address': env['TEMPORAL_ADDRESS'],
-        'weaviate_url': env['WEAVIATE_URL'],
-        # Encodes queries for generations built before core.ingest, until each Corpus is rebuilt.
-        'tei_url': env['TEI_URL'],
-        's3': {'endpoint': env['S3_ENDPOINT'], 'access_key': env['S3_ACCESS_KEY'],
-               'secret_key': env['S3_SECRET_KEY'], 'bucket': 'quivr-content'},
-        'keys': {key: {'organization': organization,
-                       'actions': actions,
-                       'corpora': ['*']}},
-        # The demo lists its most frequent searches, so it records query text (7 days).
-        # Its queries are demo traffic; a deployment with private queries leaves this off.
-        'observability': {'record_query_text': recording == '1'},
-    }
-    weaviate_key = env.get('WEAVIATE_API_KEY', '')
-    if weaviate_key:
-        config['weaviate_api_key'] = weaviate_key
+    keys = {key: {'organization': organization, 'actions': actions, 'corpora': ['*']}}
+    admin_keys = {}
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
     queue_key = env.get('QUIVR_QUEUE_KEY', '').strip()
     admin_key = env.get('QUIVR_ADMIN_KEY', '').strip()
     demo_admin_key = env.get('QUIVR_DEMO_ADMIN_KEY', '').strip()
     if admin_listen:
-        config['admin_listen'] = admin_listen
         seen = {key}
         for name, value in (('QUIVR_OPERATOR_KEY', operator), ('QUIVR_ADMIN_KEY', admin_key),
                             ('QUIVR_QUEUE_KEY', queue_key), ('QUIVR_DEMO_ADMIN_KEY', demo_admin_key)):
@@ -305,15 +372,14 @@ def build_config(env):
             if value in seen:
                 raise ValueError(name + ' must differ from other API, operator and admin keys')
             seen.add(value)
-        admin_keys = {}
         admin_actions = ['plugins:admin', 'observability:read', 'queues:read', 'audit:read']
         if admin_key:
             admin_keys[admin_key] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
         if operator:
             if admin_key:
-                config['keys'][operator] = {'organization': organization, 'corpora': ['*'],
-                                            'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
-                                                        'operations:write', 'corpora:archive', 'corpora:rename']}
+                keys[operator] = {'organization': organization, 'corpora': ['*'],
+                                  'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
+                                              'operations:write', 'corpora:archive', 'corpora:rename']}
             else:
                 admin_keys[operator] = {'organization': organization, 'corpora': ['*'], 'actions': admin_actions}
         if queue_key:
@@ -323,7 +389,6 @@ def build_config(env):
                                           'actions': ['observability:read']}
         if not admin_keys:
             raise ValueError('QUIVR_ADMIN_LISTEN requires at least one dedicated admin key')
-        config['admin_keys'] = admin_keys
     else:
         # Optional operator key, never given to the web app: rebuilds a Corpus projection
         # (for example after a migration adds a projected field), reads the plugin
@@ -332,14 +397,53 @@ def build_config(env):
         if operator:
             if operator == key:
                 raise ValueError('API and operator keys must differ')
-            config['keys'][operator] = {'organization': organization, 'corpora': ['*'],
-                                        'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
-                                                    'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
+            keys[operator] = {'organization': organization, 'corpora': ['*'],
+                              'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
+                                          'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
         if queue_key:
-            if queue_key in config['keys']:
+            if queue_key in keys:
                 raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
-            config['keys'][queue_key] = {'organization': organization, 'corpora': ['*'],
-                                         'actions': ['queues:read']}
+            keys[queue_key] = {'organization': organization, 'corpora': ['*'],
+                               'actions': ['queues:read']}
+    return keys, admin_keys
+
+
+def engine_api_keys(env):
+    keys, _ = engine_key_sets(env)
+    return keys
+
+
+def engine_admin_keys(env):
+    _, admin_keys = engine_key_sets(env)
+    return admin_keys
+
+
+def build_config(env):
+    """Build the nonsecret core configuration from Railway runtime variables."""
+    admin_listen = parse_admin_listen(env.get('QUIVR_ADMIN_LISTEN', ''))
+    recording = env.get('QUIVR_RECORD_QUERY_TEXT', '0' if env.get('QUIVR_SINGLE_MACHINE') == '1' else '1')
+    if recording not in ('0', '1'):
+        raise ValueError('QUIVR_RECORD_QUERY_TEXT must be 0 or 1')
+    pool_limit = env.get('QUIVR_POSTGRES_MAX_CONNECTIONS', '16').strip()
+    if not pool_limit.isdecimal() or not 1 <= int(pool_limit) <= 2147483647:
+        raise ValueError('QUIVR_POSTGRES_MAX_CONNECTIONS must be a positive int32')
+    config = {
+        'postgres': {'max_connections': int(pool_limit)},
+        'listen': '0.0.0.0:8080',
+        'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
+        # Workers may start before the API builds and applies new migrations.
+        'migration_wait': '10m',
+        'temporal_address': env['TEMPORAL_ADDRESS'],
+        'weaviate_url': config_url(env, 'WEAVIATE_URL'),
+        # Encodes queries for generations built before core.ingest, until each Corpus is rebuilt.
+        'tei_url': config_url(env, 'TEI_URL'),
+        's3': {'endpoint': config_url(env, 'S3_ENDPOINT'), 'bucket': 'quivr-content'},
+        # The demo lists its most frequent searches, so it records query text (7 days).
+        # Its queries are demo traffic; a deployment with private queries leaves this off.
+        'observability': {'record_query_text': recording == '1'},
+    }
+    if admin_listen:
+        config['admin_listen'] = admin_listen
     # Omitted queue variables keep one worker serving both queues.
     worker = {}
     if 'QUIVR_WORKER_QUEUES' in env:
@@ -371,13 +475,10 @@ def build_config(env):
         config['ingestion'] = {'default': 'hosted.embed'}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
-    # Optional: without it the core starts and refuses only credential deposits.
-    if env.get('QUIVR_CREDENTIAL_KEY'):
-        config['credential_key'] = env['QUIVR_CREDENTIAL_KEY']
     # Optional: the API's public address, from which push instances get their webhook
     # address (x_list webhook mode); without it they only poll.
     if env.get('QUIVR_PUBLIC_URL', '').strip():
-        config['public_url'] = env['QUIVR_PUBLIC_URL'].strip()
+        config['public_url'] = config_url(env, 'QUIVR_PUBLIC_URL')
     if 'QUIVR_CONNECTOR_MIN_INTERVAL' in env:
         interval = env['QUIVR_CONNECTOR_MIN_INTERVAL'].strip()
         if not interval:
@@ -424,7 +525,7 @@ def engine_signing_environment(env):
     return {'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps(keys)}
 
 
-def sidecar_commands(env, role='worker'):
+def sidecar_commands(env, role='worker', *, signing=None):
     """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
     plugin but the retrieval plugin, the API only the connector plugins it relays push
     deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
@@ -439,13 +540,17 @@ def sidecar_commands(env, role='worker'):
         return commands
     settings = encoder_settings(env) if role == 'api' else None
     if settings and role == 'api':
+        encoder_env = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
+                       'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
+                       'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
+                       'TOKENIZERS_PARALLELISM': 'false'}
+        if 'QUIVR_QUERY_ENCODER_BACKEND' in settings:
+            encoder_env['QUIVR_QUERY_ENCODER_BACKEND'] = settings['QUIVR_QUERY_ENCODER_BACKEND']
         commands.append(('text-encoder', [ENCODER_PYTHON, '-m', 'deploy.cpu.text_encoder',
                          '--model-dir', ENCODER_MODEL, '--port', '9995',
                          '--threads', str(settings['QUIVR_QUERY_ENCODER_THREADS'])], '/app',
-                         {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
-                          'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
-                          'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
-                          'TOKENIZERS_PARALLELISM': 'false'}))
+                         encoder_env))
+    rings = json.loads((signing or engine_signing_environment(env))['QUIVR_ENGINE_PLUGIN_KEYS'])
     for connector in runtime_connectors(env):
         if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
@@ -456,7 +561,6 @@ def sidecar_commands(env, role='worker'):
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
                  'QUIVR_PLUGIN_MANIFEST': connector.get('manifest', str(directory / 'quivr-plugin.yaml'))}
         if connector.get('signing_id'):
-            rings = json.loads(engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])
             child['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(rings[connector['signing_id']])
         child.update({connector.get('secret_names', {}).get(name, name): env[name]
                       for name in connector.get('secrets', []) if env.get(name, '').strip()})
@@ -565,38 +669,63 @@ def supervise(commands, grace=10.0, poll=0.2, readiness=None):
             signal.signal(s, handler)
 
 
+def validate_image_role(env, mode):
+    image_role = env.get('QUIVR_IMAGE_ROLE', '')
+    if not image_role:
+        return
+    if image_role not in ('core', 'api', 'worker'):
+        raise ValueError('QUIVR_IMAGE_ROLE must be core, api or worker')
+    if image_role == 'api' and mode == 'worker':
+        raise ValueError('QUIVR_ROLE=worker requires the worker or core image')
+    if image_role == 'worker' and mode == 'api':
+        raise ValueError('QUIVR_ROLE=api requires the api or core image')
+
+
 def main():
     mode = os.environ.get('QUIVR_ROLE', 'api')
     if mode not in ('api', 'worker', 'migrate'):
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
-    config = build_config(os.environ)
-    settings = encoder_settings(os.environ) if mode == 'api' else None
+    validate_image_role(os.environ, mode)
+    env = runtime_environment(os.environ)
+    if (env.get('QUIVR_API_KEYS') or env.get('QUIVR_ADMIN_KEYS')) and any(env.get(name) for name in SCOPED_KEY_SECRETS):
+        raise ValueError('QUIVR_API_KEYS and QUIVR_ADMIN_KEYS cannot be combined with the individual Railway API key variables')
+    if env.get('QUIVR_API_KEYS'):
+        api_keys = env['QUIVR_API_KEYS']
+        admin_keys = env.get('QUIVR_ADMIN_KEYS', '')
+    else:
+        functional, admin = engine_key_sets(env)
+        api_keys = json.dumps(functional)
+        admin_keys = json.dumps(admin) if admin else ''
+    signing = engine_signing_environment(env)
+    config = build_config(env)
+    settings = encoder_settings(env) if mode == 'api' else None
     readiness = None
     if mode == 'api' and settings:
-        if not pathlib.Path(ENCODER_PYTHON).is_file() or not pathlib.Path(ENCODER_MODEL + '/model.safetensors').is_file():
-            raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+        _validate_encoder_runtime(settings)
         readiness = {'name': 'text-encoder', 'url': ENCODER_URL + '/health',
                      'timeout': settings['QUIVR_QUERY_ENCODER_STARTUP_SECONDS'], **ENCODER_IDENTITY}
     os.umask(0o077)
-    prepare_hosted_manifest(os.environ)
+    prepare_hosted_manifest(env)
     path = pathlib.Path('/tmp/quivr-runtime.json')
     path.write_text(json.dumps(config))
-    os.environ['QUIVR_CONFIG'] = str(path)
-    # Plugin-only credentials belong to declared sidecar environments, not the engine.
-    plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ) + [HOSTED_EMBED]
-                      for name in plugin.get('secrets', [])}
-    plugin_secrets.add('EMBED_API_KEY')
-    core_env = {name: value for name, value in os.environ.items()
-                if name not in plugin_secrets | {'WEAVIATE_API_KEY'} and name != 'QUIVR_PLUGIN_SIGNING_KEYS'}
-    core_env.update(engine_signing_environment(os.environ))
+    # The engine receives the scoped map. Provider keys and verification rings
+    # go only to the sidecars that use them.
+    core_env = {name: value for name, value in env.items()
+                if name not in PLUGIN_SECRETS and name not in SCOPED_KEY_SECRETS
+                and name not in ('QUIVR_PLUGIN_SIGNING_KEYS', 'QUIVR_PLUGIN_SIGNING_KEYS_FILE')}
+    core_env.update(signing, QUIVR_API_KEYS=api_keys, QUIVR_CONFIG=str(path))
+    if admin_keys:
+        core_env['QUIVR_ADMIN_KEYS'] = admin_keys
+    else:
+        core_env.pop('QUIVR_ADMIN_KEYS', None)
     # Only the API applies startup migrations; failures abort before serving.
-    if mode == 'api' and os.environ.get('QUIVR_SINGLE_MACHINE') != '1':
+    if mode == 'api' and env.get('QUIVR_SINGLE_MACHINE') != '1':
         subprocess.run(['quivr', 'migrate'], check=True, env=core_env)
     # The worker calls every plugin but the retrieval plugin, and the API the push
     # connector plugins it relays webhook deliveries to, the ingestion plugin it encodes
     # queries with and the retrieval plugin that ranks its searches, so each runs those
     # beside itself.
-    sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
+    sidecars = sidecar_commands(env, mode, signing=signing) if mode in ('api', 'worker') else []
     if sidecars:
         commands = sidecars + [('quivr ' + mode, ['quivr', mode], None, core_env)]
         sys.exit(supervise(commands, readiness=readiness) if readiness else supervise(commands))

@@ -18,7 +18,6 @@ SECRET_KEYS = ('QUIVR_DB_PASSWORD', 'QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY',
                'QUIVR_ADMIN_KEY', 'QUIVR_DEMO_ADMIN_KEY',
                'QUIVR_CURSOR_KEY', 'QUIVR_CREDENTIAL_KEY', 'S3_ACCESS_KEY',
                'S3_SECRET_KEY', 'EMBED_API_KEY', 'DEMO_PASSWORD')
-TEMPORAL = 'temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d'
 
 
 def read_env(path):
@@ -116,10 +115,16 @@ def stack(images, settings, values, initialized=False):
             'POSTGRES_PASSWORD': '${QUIVR_DB_PASSWORD:?}'}, 'deploy': settings['postgres']['deploy'],
             'volumes': ['postgres-data:/var/lib/postgresql/data'],
             'healthcheck': health(['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'quivr', '-d', 'quivr'])},
-        'temporal': {'image': TEMPORAL,
-            'command': ['server', 'start-dev', '--ip', '0.0.0.0', '--headless', '--db-filename', '/home/temporal/temporal.db'],
-            'volumes': ['temporal-data:/home/temporal'],
-            'healthcheck': health(['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', '127.0.0.1:7233'])},
+        'temporal': {'image': settings['temporal']['image'], 'environment': {
+            **settings['temporal']['environment'], 'POSTGRES_SEEDS': 'postgres',
+            'POSTGRES_USER': 'quivr', 'POSTGRES_PWD': '${QUIVR_DB_PASSWORD:?}',
+            'BIND_ON_IP': '0.0.0.0', 'TEMPORAL_BROADCAST_ADDRESS': '127.0.0.1',
+            'TEMPORAL_ADDRESS': '127.0.0.1:7233'}, 'deploy': settings['temporal']['deploy'],
+            'depends_on': {'postgres': {'condition': 'service_healthy'}},
+            'healthcheck': health([
+                'CMD-SHELL',
+                'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"',
+            ], 90)},
         'seaweed': {'image': images['seaweed'], 'environment': {
             'S3_ACCESS_KEY': '${S3_ACCESS_KEY:?}', 'S3_SECRET_KEY': '${S3_SECRET_KEY:?}'},
             'volumes': ['seaweed-data:/data'], 'healthcheck': health([
@@ -167,7 +172,7 @@ def stack(images, settings, values, initialized=False):
             'x-quivr-initialized': initialized, 'services': services,
             'networks': {'stack': {'internal': values.get('QUIVR_OFFLINE', '0') == '1'}, 'access': {}},
             'volumes': {name: {'name': project + '-' + name} for name in
-                ('postgres-data', 'temporal-data', 'seaweed-data', 'weaviate-data', 'model-cache')}}
+                ('postgres-data', 'seaweed-data', 'weaviate-data', 'model-cache')}}
 
 
 def write_private(path, content):
@@ -285,11 +290,15 @@ def main():
                 if key not in SECRET_KEYS or not path:
                     raise ValueError('unsupported secret file key')
                 files[key] = Path(path)
-            initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
+            values, _ = initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
             if args.command == 'upgrade':
                 docker(['compose', '--project-directory', str(args.directory), 'stop', 'api', 'worker', 'demo'])
                 docker(['compose', '--project-directory', str(args.directory), 'rm', '-f', 'migrate'])
                 docker(['compose', '--project-directory', str(args.directory), 'up', '-d'])
+                legacy_volume = values['COMPOSE_PROJECT_NAME'] + '-temporal-data'
+                if legacy_volume in docker(['volume', 'ls', '-q', '--filter', 'name=^' + legacy_volume + '$']).split():
+                    print(f'Notice: legacy SQLite Temporal volume {legacy_volume} is no longer mounted; '
+                          f'remove it after verifying the upgrade: docker volume rm {legacy_volume}')
         print('Ready: one Compose file and protected .env; model cache preparation is a separate install step.')
     except (ValueError, RuntimeError, KeyError, OSError) as error:
         # Do not echo exception values: paths and provider responses may contain secrets.

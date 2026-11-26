@@ -5,6 +5,8 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 )
 
 func (cfg Config) validateAdminListener() (separated bool, shareProbe bool, err error) {
@@ -32,7 +34,10 @@ func (cfg Config) validateAdminListener() (separated bool, shareProbe bool, err 
 		return false, false, badConfig(configMissing, "admin_keys", "admin_keys must contain at least one scoped admin key when admin_listen is configured")
 	}
 	for token, s := range cfg.AdminKeys {
-		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
+		if s.ActorID != "" && !audit.ValidActorID(s.ActorID) {
+			return false, false, badConfig(configInvalid, "admin_keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
+		}
+		if len(token) < 32 || invalidBearerToken(token) || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return false, false, badConfig(configInvalid, "admin_keys", "invalid scoped admin credential configuration")
 		}
 		if _, overlap := cfg.Keys[token]; overlap {

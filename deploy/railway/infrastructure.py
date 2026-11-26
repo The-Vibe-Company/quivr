@@ -164,13 +164,15 @@ class Railway:
             infra.observation(rows, name, 'configured', 'dockerfile', expected,
                               actual if actual in (None, expected) else '<other>')
             infra.observation(rows, name, 'configured', 'image_source_cleared', True, not state.get('image'))
-        if name == 'weaviate' and spec.get('image'):
+        if name in ('temporal', 'weaviate') and spec.get('image'):
             actual = state.get('image')
             if actual and not isinstance(actual, str):
                 actual = '<invalid>'
             if actual and not re.fullmatch(r'[a-zA-Z0-9./:_-]+(@sha256:[0-9a-f]{64})?', actual):
                 actual = '<invalid>'
             infra.observation(rows, name, 'configured', 'image', spec['image'], actual)
+            if name == 'temporal':
+                infra.observation(rows, name, 'configured', 'dockerfile_cleared', True, not state.get('dockerfile'))
         for key, value in spec.get('deploy', {}).get('resources', {}).get('limits', {}).items():
             infra.observation(rows, name, 'configured', key, value, state['limits'].get(key))
         return rows
@@ -229,9 +231,13 @@ class Railway:
                 self.api(UPDATE, {'serviceId': self.targets[name], 'environmentId': self.environment,
                                   'input': {'dockerfilePath': 'deploy/railway/postgres.Dockerfile',
                                             'source': {'image': None}}})
-            if name == 'weaviate' and state.get('image') != spec.get('image'):
+            if name in ('temporal', 'weaviate') and (state.get('image') != spec.get('image')
+                                                     or (name == 'temporal' and state.get('dockerfile'))):
+                update = {'source': {'image': spec['image']}}
+                if name == 'temporal' and state.get('dockerfile'):
+                    update['dockerfilePath'] = None
                 self.api(UPDATE, {'serviceId': self.targets[name], 'environmentId': self.environment,
-                                  'input': {'source': {'image': spec['image']}}})
+                                  'input': update})
 
     def initialize_monitoring(self):
         if 'postgres' not in self.targets:

@@ -19,9 +19,13 @@ type indexDefinition struct {
 	Name, Table string
 	Columns     []string
 	Predicate   string
+	// ExpressionKeys is the complete key list in pg_get_indexdef spelling.
+	// Expression indexes compare the full definition, including key options.
+	ExpressionKeys string
 }
 
 var concurrentIndexes = []indexDefinition{
+	{Name: "audit_events_by_actor_id", Table: "audit_events", ExpressionKeys: "organization, " + auditActorExpression + ", id"},
 	{Name: "parallel_queue_observations_by_age", Table: "parallel_queue_observations", Columns: []string{"dirty_since"}, Predicate: "(revision <> applied_revision)"},
 	{Name: "change_events_by_corpus", Table: "change_events", Columns: []string{"organization", "corpus_id", "sequence"}},
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
@@ -152,8 +156,10 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
 	}
 	inspect := func(index indexDefinition) (found, valid, matches bool, err error) {
 		err = conn.QueryRow(ctx, `SELECT COALESCE(i.indisvalid, false), COALESCE(
- i.indrelid=to_regclass($2) AND am.amname='btree' AND NOT i.indisunique
- AND i.indexprs IS NULL AND i.indnatts=i.indnkeyatts
+ i.indrelid=to_regclass($2) AND am.amname='btree' AND NOT i.indisunique AND
+ CASE WHEN $5<>'' THEN pg_get_indexdef(c.oid)=format('CREATE INDEX %I ON %I.%I USING btree (%s)%s',
+  c.relname, ns.nspname, tab.relname, $5, CASE WHEN $4='' THEN '' ELSE ' WHERE ' || $4 END)
+ ELSE i.indexprs IS NULL AND i.indnatts=i.indnkeyatts
  AND NOT EXISTS(SELECT FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal)
                 JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
                 JOIN pg_opclass opc ON opc.oid=i.indclass[k.ordinal::int-1]
@@ -161,10 +167,12 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
  AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal)
            JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
            ORDER BY k.ordinal)=$3::text[]
- AND COALESCE(pg_get_expr(i.indpred, i.indrelid), '')=$4, false)
+ AND COALESCE(pg_get_expr(i.indpred, i.indrelid), '')=$4 END, false)
 FROM pg_class c LEFT JOIN pg_index i ON i.indexrelid=c.oid
+LEFT JOIN pg_class tab ON tab.oid=i.indrelid
+LEFT JOIN pg_namespace ns ON ns.oid=tab.relnamespace
 LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
-			index.Name, index.Table, index.Columns, index.Predicate).Scan(&valid, &matches)
+			index.Name, index.Table, index.Columns, index.Predicate, index.ExpressionKeys).Scan(&valid, &matches)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, false, false, nil
 		}
@@ -193,8 +201,12 @@ LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
 		for n, column := range index.Columns {
 			columns[n] = pgx.Identifier{column}.Sanitize()
 		}
+		keys := strings.Join(columns, ", ")
+		if index.ExpressionKeys != "" {
+			keys = index.ExpressionKeys
+		}
 		sql := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + pgx.Identifier{index.Name}.Sanitize() +
-			" ON " + pgx.Identifier{index.Table}.Sanitize() + " (" + strings.Join(columns, ", ") + ")"
+			" ON " + pgx.Identifier{index.Table}.Sanitize() + " (" + keys + ")"
 		if index.Predicate != "" {
 			sql += " WHERE " + index.Predicate
 		}

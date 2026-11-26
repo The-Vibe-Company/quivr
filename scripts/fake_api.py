@@ -8,24 +8,19 @@ import select
 import subprocess
 import tempfile
 
+import go_bin_cache
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 @functools.cache
 def binary(name):
-    work = ROOT / '.scratch' / 'fakes'
-    work.mkdir(parents=True, exist_ok=True)
-    # Publish an entire binary atomically even if another suite builds it too.
-    fd, temporary = tempfile.mkstemp(prefix=name + '-', dir=work)
-    os.close(fd)
-    try:
-        subprocess.run([os.environ.get('GO', 'go'), 'build', '-o', temporary, './cmd/' + name],
-                       cwd=ROOT / 'tests' / 'fakes', check=True)
-        target = work / name
-        os.replace(temporary, target)
-        return target
-    finally:
-        pathlib.Path(temporary).unlink(missing_ok=True)
+    return go_bin_cache.ensure(
+        f'fake-{name}',
+        ROOT / 'tests' / 'fakes',
+        './cmd/' + name,
+        go=os.environ.get('GO', 'go'),
+    )
 
 
 class Fake:

@@ -7,7 +7,7 @@ from pathlib import Path
 import tarfile
 
 # Keep reports and log tails, not models, source bodies, configs or dependency trees.
-SKIP_DIRS = {'node_modules', 'venv', '.venv', '.git', 'e5-model', 'tokenizer', 'query-encoder'}
+SKIP_DIRS = {'node_modules', 'venv', '.venv', '.git', 'e5-model', 'tokenizer', 'query-encoder', 'secrets', 'keyless-secrets'}
 
 
 def diagnostic(path):

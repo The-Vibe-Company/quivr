@@ -8,12 +8,13 @@ import sys
 from deploy.compose.infrastructure import Compose
 from deploy.reset_support import Checkpoint, terminate_workflows, vector_objects, require_local_vector
 from deploy.weaviate_client import WeaviateClient
+from scripts import local_secrets
 
 ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = {'postgres': ('data', '/var/lib/postgresql/data'),
-           'temporal': ('temporal-data', '/home/temporal'),
            'seaweed': ('seaweed-data', '/data'),
            'weaviate': ('weaviate-data', '/var/lib/weaviate')}
+LEGACY_VOLUMES = {'temporal': 'temporal-data'}
 
 
 def check_tracked_processes(state, directory, prune=False):
@@ -51,6 +52,7 @@ class ComposeReset:
         self.adapter = Compose(spec['project'])
         self.directory = ROOT / '.scratch' / spec['project']
         self.volumes = {}
+        self.legacy_volumes = {}
 
     def preview(self):
         if sys.version_info < (3, 12):
@@ -62,7 +64,7 @@ class ComposeReset:
             raise RuntimeError('selected Stack private state is missing or unsafe')
         self.state = json.loads(statefile.read_text())
         check_tracked_processes(self.state, self.directory)
-        self.config = json.loads((self.directory / 'config.json').read_text())
+        self.config = local_secrets.read_dependencies(self.directory / 'config.json')
         # Prove this runtime points at the selected index before any destructive
         # work. Merely finding a local container does not establish that link.
         self.adapter.configured('weaviate')
@@ -91,19 +93,44 @@ class ComposeReset:
             if attached != [container]:
                 raise RuntimeError('data volume is attached outside the selected service')
             self.volumes[role] = name
+        if not self.adapter.configured('temporal'):
+            raise RuntimeError('reset requires the selected Stack dependencies running')
+        for role, logical in LEGACY_VOLUMES.items():
+            candidates = self.adapter.run([
+                'volume', 'ls', '-q',
+                '--filter', 'label=com.docker.compose.project=' + self.spec['project'],
+                '--filter', 'label=com.docker.compose.volume=' + logical,
+            ]).split()
+            if not candidates:
+                continue
+            if len(candidates) != 1:
+                raise RuntimeError('legacy data volume is ambiguous')
+            name = candidates[0]
+            volume = json.loads(self.adapter.run(['volume', 'inspect', name]))[0]
+            labels = volume.get('Labels') or {}
+            if labels.get('com.docker.compose.project') != self.spec['project'] or labels.get('com.docker.compose.volume') != logical:
+                raise RuntimeError('legacy data volume is outside the selected Compose declaration')
+            attached = self.adapter.run(['ps', '-aq', '--filter', 'volume=' + name]).split()
+            if any(cid != self.adapter.containers.get(role) for cid in attached):
+                raise RuntimeError('legacy data volume is attached outside the selected service')
+            self.legacy_volumes[role] = name
         # An archive used as a source must live outside the storage being reset.
         from deploy.reset_storage import inventory
         self.storage = inventory(self.config['s3'])
         self.index_count = vector_objects(WeaviateClient.from_config(self.config).request_json('/v1/objects?limit=1'))
-        return {'volumes': self.volumes, 'object_store': self.storage,
-                'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
-                'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
+        preview = {'volumes': self.volumes, 'object_store': self.storage,
+                   'vector_objects': self.index_count, 'workflows': 'terminate running workflows in default namespace',
+                   'writers': 'tracked Stack API and worker processes', 'preserves': 'credentials, infrastructure profile, model cache'}
+        if self.legacy_volumes:
+            preview['legacy_volumes'] = self.legacy_volumes
+        return preview
 
     def reset(self):
         checkpoint = Checkpoint(self.directory / 'reset-state.json', self.spec)
         stack = None
         try:
-            checkpoint.save('stopping-writers', volumes=self.volumes)
+            legacy = {'legacy_volumes': self.legacy_volumes} if self.legacy_volumes else {}
+            checkpoint.save('stopping-writers', volumes=self.volumes, **legacy)
             sys.path.insert(0, str(ROOT / 'scripts'))
             from local import Stack
             stack = Stack(self.spec['project'])
@@ -111,18 +138,21 @@ class ComposeReset:
             stack.save()
             stack.stop_processes()
             postgres = self.adapter.containers['postgres']
-            query = "SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' AND pid<>pg_backend_pid()"
+            query = "SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' AND datname=current_database() AND pid<>pg_backend_pid()"
             connections = self.adapter.run(['exec', postgres, 'sh', '-c',
                 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c ' + shlex.quote(query)])
             if connections.strip() != '0':
                 raise RuntimeError('untracked database clients remain; reset refused with writers stopped')
             workflows = terminate_workflows(lambda args: self.adapter.run(
                 ['exec', self.adapter.containers['temporal'], 'temporal', *args]))
-            checkpoint.save('deleting-volumes', terminated_workflows=workflows)
+            checkpoint.save('deleting-volumes', terminated_workflows=workflows, **legacy)
             check_tracked_processes(stack.state, self.directory, prune=True)
             stack.save()
             stack.down(True)
-            for name in self.volumes.values():
+            for name in self.legacy_volumes.values():
+                self.adapter.run(['volume', 'rm', name])
+            all_volumes = list(self.volumes.values()) + list(self.legacy_volumes.values())
+            for name in all_volumes:
                 # A successful inspect proves deletion did not complete.
                 remaining = self.adapter.run(['volume', 'ls', '-q', '--filter', 'name=^' + name + '$']).split()
                 if name in remaining:
@@ -131,7 +161,7 @@ class ComposeReset:
             stack.up()
             # Bootstrap may recreate index classes; documents and blob objects must be absent.
             from deploy.reset_storage import inventory
-            config = json.loads((stack.directory / 'config.json').read_text())
+            config = local_secrets.read_dependencies(stack.directory / 'config.json')
             storage = inventory(config['s3'])
             if storage['objects_at_least'] != 0 or storage['truncated']:
                 raise RuntimeError('new object store is not empty')
@@ -144,7 +174,7 @@ class ComposeReset:
             if counts.strip() != '0':
                 raise RuntimeError('replacement database is not empty')
             checkpoint.save('complete')
-            return {'deleted_volumes': list(self.volumes.values()), 'deleted_vector_objects': self.index_count,
+            return {'deleted_volumes': all_volumes, 'deleted_vector_objects': self.index_count,
                     'deleted_blob_objects_at_least': self.storage['objects_at_least'],
                     'terminated_workflows': workflows, 'schema': 'fresh migrations applied', 'writers': 'restarted'}
         except Exception:

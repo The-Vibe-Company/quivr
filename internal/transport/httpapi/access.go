@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
@@ -23,16 +24,13 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(lifecycle.WithWorkContext(r.Context(), a.processWork))
 	}
 	surfaceBlocked := a.surfaceBlocked(r.URL.Path)
+	var scope corpus.Scope
 	keyID := ""
 	if !surfaceBlocked {
-		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			if _, valid := a.Keys[token]; valid {
-				keyID = apiKeyID(token)
-			}
-		}
+		scope, keyID = a.auditKey(r)
 	}
 	r.Pattern = a.router.Pattern(r)
-	logRequest(w, r, keyID, a.pushClientIP(r).String(), a.loadMetrics, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	logRequest(w, r, keyID, a.pushClientIP(r).String(), a.loadMetrics, func(w *responseWriter, r *http.Request) {
 		if a.draining != nil && a.draining() {
 			writeError(w, publicerr.ContentUnavailable, nil)
 			return
@@ -41,8 +39,8 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 			writeError(w, publicerr.NotFound, nil)
 			return
 		}
-		a.serveSensitive(w, r)
-	}))
+		a.serveAudited(w, r, scope, keyID)
+	})
 }
 
 // WithDraining stops public request admissions during process shutdown.
@@ -84,19 +82,27 @@ func AccessLog(next http.Handler, metrics ...*telemetry.LoadMetrics) http.Handle
 			r.Pattern = pattern
 		}
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		logRequest(w, r, "", ip, load, next)
+		logRequest(w, r, "", ip, load, func(w *responseWriter, r *http.Request) { next.ServeHTTP(w, r) })
 	})
 }
 
-func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metrics *telemetry.LoadMetrics, next http.Handler) {
+func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metrics *telemetry.LoadMetrics, next func(*responseWriter, *http.Request)) {
 	start := time.Now()
 	var requestID [16]byte
 	_, _ = rand.Read(requestID[:])
-	id := r.Header.Get("X-Request-ID")
-	if len(r.Header.Values("X-Request-ID")) != 1 || !validRequestID(id) {
+	correlationID := callerID(r.Header, "X-Correlation-ID")
+	id := callerID(r.Header, "X-Request-ID")
+	if id == "" {
+		id = correlationID
+	}
+	if id == "" {
 		id = hex.EncodeToString(requestID[:])
 	}
+	if correlationID == "" {
+		correlationID = id
+	}
 	w.Header().Set("X-Request-ID", id)
+	w.Header().Set("X-Correlation-ID", correlationID)
 	ctx := telemetry.Extract(logging.WithRequestID(r.Context(), id), r.Header)
 	route := r.Pattern
 	if route == "" {
@@ -111,7 +117,7 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 		}
 		finish(metricStatus, time.Since(start))
 	}()
-	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method))))
+	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method)), attribute.String("correlation_id", correlationID)))
 	defer span.End()
 	sc := span.SpanContext()
 	if sc.IsValid() {
@@ -130,11 +136,11 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 		if status >= 500 {
 			span.SetStatus(codes.Error, "request failed")
 		}
-		slog.InfoContext(r.Context(), "http request", "request_id", id, "route", route, "method", method,
+		slog.InfoContext(r.Context(), "http request", "request_id", id, "correlation_id", correlationID, "route", route, "method", method,
 			"status", status, "duration_ms", float64(time.Since(start).Microseconds())/1000,
 			"response_size", observed.size, "client_ip", ip, "api_key_id", keyID, "error_code", observed.errorCode)
 	}()
-	next.ServeHTTP(observed, r)
+	next(observed, r)
 	metricStatus = http.StatusOK
 }
 
@@ -142,6 +148,8 @@ type responseWriter struct {
 	http.ResponseWriter
 	status, size int
 	errorCode    string
+	beforeFinal  func(int, string) error
+	writeErr     error
 }
 
 func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -151,6 +159,17 @@ func (w *responseWriter) WriteHeader(status int) {
 		return
 	}
 	if status >= 200 {
+		if before := w.beforeFinal; before != nil {
+			w.beforeFinal = nil
+			if err := before(status, w.errorCode); err != nil {
+				w.Header().Del("Content-Disposition")
+				w.Header().Del("Content-Length")
+				w.Header().Del("Location")
+				writeError(w, publicerr.StorageUnavailable, nil)
+				w.writeErr = err
+				return
+			}
+		}
 		w.status = status
 	}
 	w.ResponseWriter.WriteHeader(status)
@@ -158,6 +177,9 @@ func (w *responseWriter) WriteHeader(status int) {
 func (w *responseWriter) Write(data []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
+	}
+	if w.writeErr != nil {
+		return 0, w.writeErr
 	}
 	n, err := w.ResponseWriter.Write(data)
 	w.size += n
@@ -167,7 +189,18 @@ func (w *responseWriter) FlushError() error {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
+	if w.writeErr != nil {
+		return w.writeErr
+	}
 	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+// callerID returns the single, valid value a caller sent in header, or "".
+func callerID(h http.Header, header string) string {
+	if values := h.Values(header); len(values) == 1 && validRequestID(values[0]) {
+		return values[0]
+	}
+	return ""
 }
 
 // Caller request IDs are bounded opaque correlation values, never free text.

@@ -33,6 +33,7 @@ MAX_SOURCE_RANGE_CODEPOINTS = 4096
 MAX_PACKED_TEXT_CODEPOINTS = 16384
 MAX_SOURCE_SEPARATOR_CODEPOINTS = 16
 MULTI_PART_SEGMENTS_API = FEATURE_SINCE.get("multi_part_segments", "0.17.0")
+MULTIMODAL_INGESTION_API = FEATURE_SINCE.get("multimodal_ingestion", "0.20.0")
 
 SegmentAndEmbedHandler = Callable[[SegmentAndEmbedRequest], SegmentAndEmbedResponse | dict[str, Any]]
 EmbedQueryHandler = Callable[[EmbedQueryRequest], EmbedQueryResponse | dict[str, Any]]
@@ -80,6 +81,22 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
 
 def _supports_multi_part_segments(manifest: LoadedManifest) -> bool:
     return _version_tuple(manifest.plugin_api) >= _version_tuple(MULTI_PART_SEGMENTS_API)
+
+
+def _supports_multimodal_ingestion(manifest: LoadedManifest) -> bool:
+    return _version_tuple(manifest.plugin_api) >= _version_tuple(MULTIMODAL_INGESTION_API)
+
+
+def _region_problems(region: dict[str, Any], prefix: str) -> list[str]:
+    # ImageRegion schema validation already enforces coordinate_system, finite
+    # per-field ranges, and label constraints; enforce only the cross-field frame bounds here.
+    x = float(region["x"])
+    y = float(region["y"])
+    width = float(region["width"])
+    height = float(region["height"])
+    if x + width > 1 or y + height > 1:
+        return [f"{prefix}: region extends outside the normalized [0, 1] image frame"]
+    return []
 
 
 def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], prefix: str,
@@ -165,6 +182,7 @@ def _output_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
         problems.append("the response exceeds max_segments")
 
     lengths = {part.key: len(part.text) for part in request.parts}
+    blob_parts = {part.key for part in (request.blob_parts or [])}
     part_order = {part.key: index for index, part in enumerate(request.parts)}
     has_title = any(part.role == "title" for part in request.parts)
     spaces = manifest.model.contributions.ingestion.spaces
@@ -175,15 +193,48 @@ def _output_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
         part_key = segment.get("part_key")
         start = segment.get("start")
         end = segment.get("end")
-        if part_key not in lengths:
+        region = segment.get("region")
+        if "region" in segment and not _supports_multimodal_ingestion(manifest):
+            problems.append(f"{prefix}/region: region requires Plugin API {MULTIMODAL_INGESTION_API}")
+        is_text = part_key in lengths
+        is_blob = part_key in blob_parts
+        if not is_text and not is_blob:
             problems.append(f"{prefix}/part_key: the Part key is not in the request")
+        elif is_blob:
+            if not _supports_multimodal_ingestion(manifest):
+                problems.append(f"{prefix}/part_key: Blob Part segments require Plugin API {MULTIMODAL_INGESTION_API}")
+            if start != 0 or end != 0:
+                problems.append(f"{prefix}: Blob Part offsets must be [0, 0)")
+            if region is None:
+                problems.append(f"{prefix}/region: Blob Part segment requires region provenance")
+            if segment.get("source_ranges") or segment.get("source_separator"):
+                problems.append(f"{prefix}/source_ranges: Blob Part segments may not carry source_ranges or source_separator")
         elif start > end or end > lengths[part_key]:
             problems.append(f"{prefix}: offsets [{start}, {end}) are outside the Part text")
         elif start == end and not has_title:
             problems.append(f"{prefix}: an empty segment requires a title Part")
-        problems.extend(_source_ranges_problems(manifest, segment, prefix, part_order, lengths))
+        if is_text and region is not None:
+            problems.append(f"{prefix}/region: region applies only to Blob Parts")
+        if region is not None:
+            problems.extend(_region_problems(region, f"{prefix}/region"))
+        if not is_blob:
+            problems.extend(_source_ranges_problems(manifest, segment, prefix, part_order, lengths))
         source_ranges = segment.get("source_ranges") or []
-        identity = tuple((item["part_key"], item["start"], item["end"]) for item in source_ranges) if source_ranges else (part_key, start, end)
+        if region is not None:
+            identity = (
+                part_key,
+                "region",
+                region.get("coordinate_system"),
+                float(region.get("x", 0.0)),
+                float(region.get("y", 0.0)),
+                float(region.get("width", 0.0)),
+                float(region.get("height", 0.0)),
+                region.get("label", ""),
+            )
+        elif source_ranges:
+            identity = tuple((item["part_key"], item["start"], item["end"]) for item in source_ranges)
+        else:
+            identity = (part_key, start, end)
         if identity in seen:
             problems.append(f"{prefix}: the segment is duplicated")
         seen.add(identity)

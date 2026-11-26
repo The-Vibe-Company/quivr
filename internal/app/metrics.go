@@ -25,14 +25,18 @@ func buildMetrics(next http.Handler) http.Handler {
 	})
 }
 
-// processMetrics keeps local load and pool pressure available even when the
-// database-backed backlog gauges cannot be read. It adds no dependency calls.
-func processMetrics(next http.Handler, load *telemetry.LoadMetrics, pool *postgres.PoolMetrics) http.Handler {
+// processMetrics keeps local load, pool pressure and dependency call counts
+// available even when database-backed backlog gauges cannot be read.
+// Dependency counters are rendered after next.ServeHTTP so PostgreSQL queries
+// performed by the scrape itself are included in the current snapshot instead
+// of leaking into the next delta.
+func processMetrics(next http.Handler, load *telemetry.LoadMetrics, pool *postgres.PoolMetrics, deps *telemetry.DependencyMetrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		load.Write(w)
 		pool.Write(w)
 		next.ServeHTTP(w, r)
+		deps.Write(w)
 	})
 }
 

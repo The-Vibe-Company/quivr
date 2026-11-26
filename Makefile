@@ -1,8 +1,11 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf demo-journeys measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
+.PHONY: dev dev-fast env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf demo-journeys measure measure-backfill measure-upgrade measure-archive perf-bench eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility infrastructure-check
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
+# Fast local loop: skips TEI/model download and optional sidecars, using cached hash-embedder + core-retrieve.
+dev-fast:
+	GO=$(GO) QUIVR_DEV_PROFILE=fast python3 scripts/local.py dev
 # Prints the export lines of the make dev stack's API address, key and webhook destination: eval "$$(make -s env)".
 env:
 	@python3 scripts/local.py env
@@ -57,6 +60,9 @@ measure-upgrade:
 # Synthetic archive throughput on an existing stack; add --hosted-fake for loopback provider measurements. Outside CI.
 measure-archive:
 	GO=$(GO) python3 scripts/measure_archive.py $(args)
+# Reproducible local or remote cold/warm search + ingestion benchmark harness; not part of verify.
+perf-bench:
+	GO=$(GO) python3 scripts/perf_bench.py $(args)
 # Search quality on public evaluation sets (THE-775, docs/agents/evaluation.md); not part of verify.
 # Needs scripts/eval/requirements.txt. make eval [args='--sets scifact --baseline <report.json>']
 eval:

@@ -1,24 +1,6 @@
-// Command x-list is the first-party X list connector plugin (kind x_list),
-// built only on the Quivr Go plugin SDK.
+// Command quivr-x-list runs the first-party connector.x_list plugin.
 package main
 
-import (
-	"fmt"
-	"os"
+import "github.com/The-Vibe-Company/quivr/plugins/x-list/plugin"
 
-	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
-)
-
-func main() {
-	plugin, err := quivrplugin.New("")
-	if err == nil {
-		err = plugin.Connector("x_list", XList{})
-	}
-	if err == nil {
-		err = plugin.Serve()
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "x-list:", err)
-		os.Exit(1)
-	}
-}
+func main() { plugin.Main() }

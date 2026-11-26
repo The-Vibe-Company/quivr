@@ -93,8 +93,8 @@ class RailwayIsolation(unittest.TestCase):
                     'mountPath': '/var/lib/weaviate' if role == 'weaviate' else '/data',
                     'sizeMB': 65536 if role == 'postgres' else 32768,
                     'region': 'us-west', 'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None}
-                    for role in ('postgres', 'temporal', 'seaweed', 'weaviate')]
-                removed, redeployed, deleted, delays = [], {}, [], []
+                    for role in ('postgres', 'seaweed', 'weaviate')]
+                removed, redeployed, restore_order, deleted, delays = [], {}, [], [], []
                 clock = [0]
                 workflow_reads = [0]
                 pending, removing = [], {}
@@ -185,6 +185,7 @@ class RailwayIsolation(unittest.TestCase):
                         if role == 'web' and failure == 'restore':
                             raise RuntimeError('provider-secret-payload')
                         redeployed[role] = identifier
+                        restore_order.append(role)
                         current[role] = role + '-restored'
                         owners[current[role]] = role
                         deployments[current[role]] = {'id': current[role], 'status': 'SUCCESS',
@@ -256,10 +257,10 @@ class RailwayIsolation(unittest.TestCase):
                     self.assertEqual(result, 0, errors.getvalue())
                     self.assertEqual(state['phase'], 'complete')
                     self.assertEqual(redeployed, {role: role + '-original' for role in roles})
-                    self.assertEqual(len(deleted), 4)
+                    self.assertLess(restore_order.index('postgres'), restore_order.index('temporal'))
+                    self.assertEqual(len(deleted), 3)
                     self.assertEqual({v['serviceId']: v['mountPath'] for v in volumes},
-                        {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data',
-                         'weaviate': '/var/lib/weaviate'})
+                        {'postgres': '/data', 'seaweed': '/data', 'weaviate': '/var/lib/weaviate'})
                     self.assertTrue(all(deployments[current[r]]['instances'][0]['status'] == 'RUNNING' for r in roles))
                     decoder = json.JSONDecoder()
                     preview, end = decoder.raw_decode(output.getvalue())
@@ -294,7 +295,7 @@ class RailwayIsolation(unittest.TestCase):
                         self.assertLessEqual(clock[0] - attached['postgres'], 180, 'attachment cleanup was unbounded')
                     if failure is None:
                         self.assertEqual({identifier for identifier, _ in removed if '-attach-' in identifier},
-                            {role + '-attach-' + str(number) for role in ('postgres', 'temporal', 'seaweed', 'weaviate')
+                            {role + '-attach-' + str(number) for role in ('postgres', 'seaweed', 'weaviate')
                              for number in range(1, len(attach_delays) + 1)})
                     self.assertTrue(delays)
                     self.assertTrue(all(delay >= 1 for delay in delays), delays)
@@ -357,3 +358,92 @@ class ComposeProcessScope(unittest.TestCase):
                         self.assertIsNone(process.poll(), 'scope validation signaled a process')
                     finally:
                         process.communicate(b'', timeout=5)
+
+    def test_legacy_temporal_volume_is_previewed_verified_and_deleted_on_reset(self):
+        from deploy.compose import reset as compose_reset
+        for foreign_attachment in (False, True):
+            with self.subTest(foreign_attachment=foreign_attachment), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                project_dir = root / '.scratch/legacy-stack'
+                project_dir.mkdir(parents=True)
+                state = project_dir / 'state.json'
+                state.write_text(json.dumps({'pids': []}))
+                state.chmod(0o600)
+                (project_dir / 'config.json').write_text(json.dumps({
+                    'weaviate_url': 'http://127.0.0.1:18080',
+                    's3': {'endpoint': 'http://127.0.0.1:18333', 'access_key': 'k', 'secret_key': 's', 'bucket': 'quivr-content'},
+                }))
+                removed = []
+                def docker(args):
+                    if args[0] == 'ps' and '--filter' in args and any(a.startswith('label=com.docker.compose.service=') for a in args):
+                        service = [a.rsplit('=', 1)[1] for a in args if a.startswith('label=com.docker.compose.service=')][0]
+                        return service + '-cid'
+                    if args[0] == 'inspect':
+                        cid = args[1]
+                        role = cid.removesuffix('-cid')
+                        mounts = []
+                        if role in compose_reset.VOLUMES:
+                            logical, dst = compose_reset.VOLUMES[role]
+                            mounts.append({'Type': 'volume', 'Destination': dst, 'Name': 'legacy-stack_' + logical})
+                        ports = {'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '18080'}]} if role == 'weaviate' else {}
+                        return json.dumps([{'Config': {'Image': 'registry/image@sha256:' + 'a' * 64, 'Env': [],
+                            'Labels': {'com.docker.compose.project': 'legacy-stack', 'com.docker.compose.service': role}},
+                            'State': {'Running': True}, 'HostConfig': {}, 'Mounts': mounts,
+                            'NetworkSettings': {'Ports': ports}}])
+                    if args[:2] == ['volume', 'ls']:
+                        if 'label=com.docker.compose.volume=temporal-data' in args:
+                            return '' if 'legacy-stack_temporal-data' in removed else 'legacy-stack_temporal-data\n'
+                        return ''
+                    if args[:2] == ['volume', 'inspect']:
+                        logical = args[2].removeprefix('legacy-stack_')
+                        return json.dumps([{'Labels': {'com.docker.compose.project': 'legacy-stack',
+                                                       'com.docker.compose.volume': logical}}])
+                    if args[0] == 'ps' and any(a.startswith('volume=') for a in args):
+                        vol = [a.split('=', 1)[1] for a in args if a.startswith('volume=')][0]
+                        if vol == 'legacy-stack_temporal-data':
+                            return 'outside-cid\n' if foreign_attachment else ''
+                        role = next(r for r, (logical, _) in compose_reset.VOLUMES.items() if vol.endswith('_' + logical))
+                        return role + '-cid\n'
+                    if args[:2] == ['volume', 'rm']:
+                        removed.append(args[2])
+                        return args[2] + '\n'
+                    if args[0] == 'exec':
+                        if 'workflow' in args:
+                            return '{}'
+                        return '0\n'
+                    raise AssertionError(f'unexpected docker call: {args}')
+                class StubStack:
+                    def __init__(self, project):
+                        self.directory = project_dir
+                        self.state = {'pids': []}
+                    def save(self):
+                        pass
+                    def stop_processes(self):
+                        pass
+                    def down(self, reset=False):
+                        pass
+                    def up(self):
+                        pass
+                    def compose(self, *args, **kwargs):
+                        return subprocess.CompletedProcess(args, 0, 'postgres-cid\n', '')
+                with patch.object(compose_reset, 'ROOT', root), \
+                     patch.object(compose_reset.sys, 'version_info', (3, 12, 0)), \
+                     patch('deploy.reset_storage.inventory', return_value={'objects_at_least': 0, 'truncated': False}), \
+                     patch.object(compose_reset.WeaviateClient, 'from_config') as client:
+                    client.return_value.request_json.return_value = {'objects': []}
+                    resetter = compose_reset.ComposeReset({'deployment': 'legacy', 'project': 'legacy-stack'})
+                    resetter.adapter.run = docker
+                    if foreign_attachment:
+                        with self.assertRaisesRegex(RuntimeError, 'legacy data volume is attached outside'):
+                            resetter.preview()
+                    else:
+                        preview = resetter.preview()
+                        self.assertEqual(preview['legacy_volumes'], {'temporal': 'legacy-stack_temporal-data'})
+                        sys.path.insert(0, str(ROOT / 'scripts'))
+                        import local as local_module
+                        with patch.object(local_module, 'Stack', StubStack):
+                            result = resetter.reset()
+                        self.assertEqual(removed, ['legacy-stack_temporal-data'])
+                        self.assertIn('legacy-stack_temporal-data', result['deleted_volumes'])
+                        checkpoint = json.loads((project_dir / 'reset-state.json').read_text())
+                        self.assertEqual(checkpoint['legacy_volumes'], {'temporal': 'legacy-stack_temporal-data'})

@@ -31,7 +31,8 @@ plugin protocol, pinned at startup by `scripts/fixture_plugin.py`.
 
 | Target | Required behavior |
 | --- | --- |
-| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed. Runs on Linux x86_64 and macOS arm64 (see below); fails at once elsewhere |
+| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed. Runs on Linux x86_64 and macOS arm64 (see below); fails at once elsewhere. Compiled Go engine and plugin binaries are cached in `.scratch/bin` (`scripts/go_bin_cache.py`) and rebuilt only when sources change |
+| `make dev-fast` | Fast local dev profile (`QUIVR_DEV_PROFILE=fast make dev`): skips TEI, E5 model/tokenizer downloads and non-essential sidecars, running core dependencies with cached `hash-embedder` and `core-retrieve` for core/search/API work. Individual sidecars remain opt-in (`QUIVR_RSS=on`, `QUIVR_NORMALIZER=pdf-text`, `QUIVR_ALERTS=on`); `make verify` ignores `QUIVR_DEV_PROFILE` |
 | `make check` | Run everything that needs no Docker stack: docs, denylist, migrations, contracts, image context, `go vet`, `go test`, the scripts tests and the plugin SDK. Works on macOS; the command to run before pushing |
 | `make verify` | Run `make check`, then the acceptance scenarios in an isolated Compose project; collect a report and return nonzero on failure |
 | `make down` | Stop the development project's processes and containers and preserve its data volumes |
@@ -478,8 +479,14 @@ received and Match rollups every 200 ms and records query text (`timing_override
 | Worker | `quivr_delivery_pending`, `quivr_delivery_oldest_pending_age_seconds` (THE-656) | gauges |
 | Both | `quivr_plugin_calls_total{plugin,operation,outcome=succeeded\|failed}`, `quivr_plugin_call_duration_seconds{plugin,operation}` (THE-795) | counter, histogram |
 | API | `quivr_searches_total{mode,profile,outcome}`, `quivr_search_duration_seconds{mode,profile}` (THE-795) | counter, histogram |
+| API | `quivr_query_vector_cache_lookups_total{result=hit\|miss}`, `quivr_query_vector_cache_evictions_total` | counters |
 | Worker | `quivr_matches_created_total{evaluator}` (THE-798) | counter |
 | Both | `quivr_observability_flush_failures_total`, `quivr_observability_dropped_events_total` | counters |
+
+The query vector cache holds up to 4,096 entries within a 12 MiB per-process
+budget. A miss counts each caller that finds no completed vector, including
+callers that join an in-flight encoding. Divide hits by total lookups to
+calculate the hit rate.
 
 Logs are structured JSON with bounded fields:
 - `command accepted`: `request_id`, `receipt_id`, `record_id`.

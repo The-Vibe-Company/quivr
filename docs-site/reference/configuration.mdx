@@ -6,9 +6,28 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 
 `quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen` and the queues each worker serves. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
 
-In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; only the dedicated environment overrides listed below override its fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; the dedicated bindings below can supply credentials and override selected fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+
+## Secret bindings
+
+Set these variables on the engine process, or append `_FILE` to the variable name and set it to the path of a mounted secret. A nonempty binding overrides the corresponding legacy JSON field. Use one source per variable. An unreadable or empty mounted secret or two nonempty sources for the same variable cause startup to fail. Quivr removes one final LF or CRLF from a mounted value.
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string, including credentials |
+| `S3_ACCESS_KEY` and `S3_SECRET_KEY` | Object-storage access key and secret key |
+| `WEAVIATE_API_KEY` | Optional Weaviate bearer token |
+| `QUIVR_CURSOR_KEY` | Cursor signing key, at least 32 bytes |
+| `QUIVR_CREDENTIAL_KEY` | Optional credential encryption key, at least 32 bytes |
+| `QUIVR_API_KEYS` | Complete JSON object of [scoped API keys](#api-keys) |
+| `QUIVR_ENGINE_PLUGIN_KEYS` | JSON object mapping plugin IDs to [engine signing rings](/reference/plugin-protocol#signed-engine-requests) |
+| `QUIVR_TELEMETRY_HEADERS` | Optional JSON object mapping OTLP header names to strings |
+
+A Vault or Kubernetes secret mount must be readable by Quivr. For example, set `DATABASE_URL_FILE=/run/secrets/database-url` and `QUIVR_API_KEYS_FILE=/run/secrets/api-keys`, mount both files read-only, and omit `database_url` and `keys` from the runtime JSON. Restart the engine processes after changing bindings. For webhook secrets, set `secret_env` to the name of a dedicated variable and use that variable or its `_FILE` counterpart.
 
 ## Top-level fields
+
+Required fields can come from a secret binding where listed above. Existing inline fields remain readable for upgrades.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -47,7 +66,8 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
 | `connector_push` | no | Declared source API protection: `rate_per_second` (default `10`, range `0.001`–`100000`), `burst` (default `100`, maximum `100000`), `idempotency_ttl` (Go duration, default `24h`, range `1ms`–`168h`) and `trusted_proxy_cidrs` (default empty). Instance `push_policy` can override rate/burst and set `allowed_cidrs`. |
 | `retain_import_audit_detail` | no | Retain full canonical import requests and successful plugin invocation ledger detail. Default `false`. Required work input, request digest, normalization outcomes, extensions and failure/conflict diagnostics remain durable. |
-| `audit_retention_months` | no | Calendar months to retain sensitive-action audit entries. Default `12`, range `1`–`1200`; `0` selects the default. The worker prunes them on the change-pruning schedule. See [Audit trail](#audit-trail). |
+| `audit_read_access` | no | Audit HTTP reads and searches. Default `false`. Restart the API after changing it. See [Audit trail](#audit-trail). |
+| `audit_retention_months` | no | Calendar months to retain audit entries. Default `12`, range `1`–`1200`; `0` selects the default. The worker prunes them on the change-pruning schedule. See [Audit trail](#audit-trail). |
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
 | `history_retention` | no | Installation-wide retention of import and alert detail. Defaults: `import_detail: "720h"`, `alert_detail: "720h"`, `interval: "1h"`, `disabled: false`. See [History retention](#history-retention). |
 | `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
@@ -119,13 +139,17 @@ With `true`, Quivr also retains full canonical request copies and successful nor
 
 ## Audit trail
 
-Quivr records sensitive HTTP commands in PostgreSQL and emits a `quivr.audit` JSON log event after each audit entry commits. The API key identifier matches `api_key_id` in the access log; bearer tokens, issued token secrets, credential values and request bodies are excluded. Audit targets retain resolved Record IDs even when a write-only command response omits them; reading those entries still requires `audit:read` and organization-wide Corpus scope. Each entry records the time, organization, action, target, accepted or refused outcome, request ID and bounded status details. Plugin activation and rollback also record the resulting plan ID. Connector creation includes any credential deposit in the same transaction; credential deposits and replacements record the credential version.
+Level 1 is always on. Quivr records sensitive writes, administrative commands, credential changes, audit exports, and HTTP authentication and permission refusals in PostgreSQL. Because scoped lookups use the same 404 for inaccessible and missing resources, 404s on known routes also enter the audit trail. Attempts without an authenticated key have no API key ID, actor ID, or assigned Organization. These deployment-level entries remain in PostgreSQL and appear in the API process's `quivr.audit` logs. Organization-scoped readers see their own Organization's entries.
 
-Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry. API keys and their permissions are file configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
+Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry unless Level 2 is enabled. API keys and their permissions are deployment configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
 
-Read entries with `GET /v0/admin/audit` using a key with `audit:read` and `corpora: ["*"]`. Other admin permissions do not grant access. Results belong only to that key's organization. Filter by `since` (inclusive), `until` (exclusive), `actor`, `action`, `target_type` and `target_id`; use `limit` (default `50`, range `1`–`200`) and `page_cursor` for paging. Pass a response's `next_page_cursor` as the next request's `page_cursor`, carrying the same filters and limit. The last page omits `next_page_cursor`. Time filters use RFC3339 timestamps; other filters match exact identifiers or action names. Audit IDs are decimal strings. Unknown API keys are refused before database admission and remain visible in structured access logs. Authenticated command refusals are retained in the organization's audit trail.
+Set `"audit_read_access": true` in the JSON file named by `QUIVR_CONFIG` and restart the API to enable Level 2 for HTTP reads, search, facets, subscription previews and successful dry-run estimates. This uses the same binary. Entries contain route templates and bounded status details. They exclude bearer tokens, credentials, request bodies, search terms and read target IDs. Sensitive command entries can contain resolved target IDs and credential versions. Evaluator migrations identify the version transition as `plugin_id@from_version->to_version`.
 
-Successful command changes and their entry commit together. If the audit write fails, the command rolls back and returns `503`. Refused commands roll back any command writes before recording their refusal. Process configuration changes made outside the HTTP API are outside this request audit trail.
+Each entry includes the time, action, outcome, `correlation_id` from `X-Request-ID`, and the authenticated `actor_id` and `api_key_id` when available. A key's configured actor ID can be reused on rotation to group events across keys. Keys without a configured actor ID use their API key ID as a fallback. The legacy `actor` and `request_id` fields still carry the API key ID and request ID.
+
+Use `GET /v0/admin/audit` to list entries and `GET /v0/admin/audit/export` to download JSON pages. Both require `audit:read` and `corpora: ["*"]`. Filter by exact `actor_id`, legacy `actor` (API key ID), `action`, `target_type`, `target_id` and RFC3339 timestamps `since` (inclusive) and `until` (exclusive). Reuse the same endpoint, filters, and `limit` (default `50`, maximum `200`) with each `next_page_cursor` until the field is absent. The API or worker builds the actor filter index concurrently after startup.
+
+Successful sensitive commands and their entries commit together. Refused commands roll back any command writes before their audit entries commit. Standalone refusal, read, and export events commit before the response is sent. A standalone audit write failure returns `503`. In an ingestion batch it returns a retryable `storage_unavailable` for that entry and the batch response still carries other entries’ receipts or errors. The API emits a `quivr.audit` log after each entry commits.
 
 `audit_retention_months` defaults to twelve calendar months. Restart the worker after changing this configuration. The existing worker pruning loop removes expired entries in bounded batches; no worker means no retention pruning. Ordinary `UPDATE`, `DELETE` and `TRUNCATE` of `audit_events` are rejected. The retention function is the supported removal path; its execution privilege is revoked from `PUBLIC`. The migration role owns the function and retains execution; a separate runtime role needs an explicit grant on `public.prune_audit_events(integer, integer)`. For privilege separation, run migrations as a schema owner and use a separate runtime role with `SELECT` and `INSERT` on `audit_events`, sequence access and `EXECUTE` on `prune_audit_events`, without table ownership or `UPDATE`, `DELETE`, `TRUNCATE` grants. A database owner or superuser can change schema guards and must remain outside the runtime role.
 
@@ -191,17 +215,18 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 
 ## API keys
 
-`keys` maps each bearer token to what it may do. Every request's key decides its Organization, its actions and its Corpora:
+`QUIVR_API_KEYS` holds a JSON object mapping each bearer token to what it may do. The same object can be supplied through `QUIVR_API_KEYS_FILE` or the legacy `keys` field. Every request's key decides its Organization, its actions and its Corpora:
 
 ```json
-"keys": {
-  "<random token>": {"organization": "acme", "actions": ["corpora:read", "content:write", "search:query"], "corpora": ["*"]}
+{
+  "<random token>": {"organization": "example", "actions": ["corpora:read", "content:write", "search:query"], "corpora": ["*"]}
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `organization` | The Organization the key acts for. Ordinary requests stay within it; explicit operator grants can expose installation-wide counts. |
+| `actor_id` | Optional opaque actor identifier for audit attribution. Generate a random 128-bit value encoded as 32 lowercase hexadecimal characters. Reuse it for the same actor across key rotations. |
 | `actions` | What the key may do, from the list below |
 | `corpora` | The Corpus ids it may reach, or `["*"]` for all of its Organization's Corpora. Creating a Corpus needs `*`. |
 
@@ -220,7 +245,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `projections:rebuild` | starting a Corpus rebuild |
 | `queues:read` | reading installation-wide document backlog (`GET /v0/admin/queues`); requires all-Corpora scope; use a dedicated key with only this action for autoscalers |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
-| `audit:read` | Reading sensitive-action audit entries in the key's organization (`/v0/admin/audit`); requires `corpora: ["*"]`. |
+| `audit:read` | Listing and exporting audit entries in the key's Organization (`/v0/admin/audit` and `/v0/admin/audit/export`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
 
 ## Object storage
@@ -284,6 +309,8 @@ The search protocol carries at most 16 enabled vector spaces, counting served an
 
 `retrieval.coverage_refresh` is a positive Go duration, default `10s`, between background coverage refresh attempts after the previous count finishes. Shorter intervals update informational counts sooner and perform more database work. At most one count runs per process, with a one-minute bound. See [Search profiles](/run-quivr/search-profiles) for unknown and stale coverage.
 
+`retrieval.hydration_blob_cache_bytes` bounds the API's in-memory content-addressed LRU cache for immutable canonical text blobs during hydration, in bytes. Omitting it selects the `64 MiB` (`67108864`) default; `0` disables caching; values above `1 GiB` (`1073741824`) or negative values refuse startup. `QUIVR_HYDRATION_BLOB_CACHE_BYTES` overrides this setting from the environment. Cached bytes never bypass PostgreSQL authorization, current-version, quarantine, or Tombstone checks.
+
 `retrieval.profiles` maps deployment short names to full `plugin_id/profile` names. Pin several retrieval plugins in `plugins`, then choose which profile serves each short name. An explicit map must contain `default`; every target must be declared by an installed retrieval plugin. Short names cannot contain `/` or surrounding whitespace.
 
 This illustrative configuration selects profiles from two installed retrieval plugins:
@@ -327,7 +354,7 @@ The setting is part of each generation. Changing the recorded setting applies to
 | `organization` | The Organization whose Subscriptions may use it |
 | `url` | The receiver's URL. Private and loopback addresses are refused unless `delivery.allow_private_destinations` is set. |
 | `secret` | The Standard Webhooks signing secret, `whsec_` followed by base64 |
-| `secret_env` | The name of an environment variable holding the secret instead; prefer it in real deployments |
+| `secret_env` | The variable name for a secret binding. Use that variable for the value or add `_FILE` to supply a mounted file. |
 
 ## Delivery
 

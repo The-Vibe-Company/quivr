@@ -45,13 +45,14 @@ type API struct {
 	RoutingOperations *adminrouting.Service
 	Queues            workqueue.Reader
 	Audit             audit.Store
+	auditReads        bool
 	draining          func() bool
 	processWork       context.Context
 	router            *routing.Mux
 	routes            http.Handler
 	surface           routeSurface
 	loadMetrics       *telemetry.LoadMetrics
-	searches          chan struct{}
+	searchAdmission   *SearchAdmission
 	facets            chan struct{}
 	pushProxyCIDRs    []string
 	Content           content.Service
@@ -109,7 +110,7 @@ func buildAPI(store corpus.Store, contents content.Service, search retrieval.Ser
 	if err != nil {
 		return nil, err
 	}
-	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, surface: surface}
+	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, surface: surface}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
@@ -141,7 +142,7 @@ func buildAPI(store corpus.Store, contents content.Service, search retrieval.Ser
 	a.router = mux
 	a.loadMetrics.RegisterRoutes(mux.Templates()...)
 	if surface != surfaceAdmin {
-		a.loadMetrics.BindSearch(a.searches)
+		a.loadMetrics.BindSearchAdmission(a.searchAdmission.Stats)
 	}
 	return a, nil
 }
@@ -280,6 +281,7 @@ type cursor struct {
 }
 
 func scopeDigest(s corpus.Scope) string {
+	s.ActorID = "" // Audit attribution does not change permissions or pagination.
 	s.Actions = append([]string{}, s.Actions...)
 	s.Corpora = append([]string{}, s.Corpora...)
 	sort.Strings(s.Actions)

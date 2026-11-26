@@ -1,4 +1,5 @@
 """Run the offline push-source sample in local and guide-verification stacks."""
+import local_secrets
 import plugin_environment
 import os
 import base64
@@ -68,7 +69,7 @@ def engine_environment(stack):
     key_file = stack.directory / 'push-source-signing.json'
     if not key_file.exists():
         return {}
-    engine_keys = json.loads(os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
+    engine_keys = json.loads(local_secrets.read_secret(os.environ, 'QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
     engine_keys['push-source'] = json.loads(key_file.read_text())
     return {'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps(engine_keys)}
 

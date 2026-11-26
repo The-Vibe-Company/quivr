@@ -1,0 +1,7 @@
+{
+  "description": "Synthetic PNG image normalized into an immutable Blob Part with crossmodal.image.metadata dimensions.",
+  "input": {
+    "path": "sample-red.png",
+    "media_type": "image/png"
+  }
+}

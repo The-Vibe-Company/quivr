@@ -31,3 +31,18 @@ func TestAuditRetentionCalendarMonths(t *testing.T) {
 		}
 	}
 }
+
+func TestReadAccessAuditConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{{`{}`, false}, {`{"audit_read_access":true}`, true}, {`{"audit_read_access":false}`, false}} {
+		var cfg Config
+		if err := json.Unmarshal([]byte(tc.raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AuditReadAccess != tc.want {
+			t.Fatalf("%s: audit_read_access=%v, want %v", tc.raw, cfg.AuditReadAccess, tc.want)
+		}
+	}
+}

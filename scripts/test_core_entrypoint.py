@@ -30,8 +30,9 @@ class CoreEntrypointTest(unittest.TestCase):
                'EMBED_URL': 'http://embeddings:8080', 'EMBED_API_KEY': 'fixture-local-key',
                'QUIVR_OPERATOR_KEY': 'fixture-operator'}
         config = core_entrypoint.build_config(env)
-        self.assertEqual(config['keys'][env['QUIVR_API_KEY']]['organization'], 'example')
-        self.assertEqual(config['keys']['fixture-operator']['organization'], 'example')
+        keys = core_entrypoint.engine_api_keys(env)
+        self.assertEqual(keys[env['QUIVR_API_KEY']]['organization'], 'example')
+        self.assertEqual(keys['fixture-operator']['organization'], 'example')
         self.assertFalse(config['observability']['record_query_text'])
         pins = [p for p in config['plugins'] if p['manifest'] == core_entrypoint.HOSTED_MANIFEST]
         self.assertEqual(pins[0]['configuration']['base_url'], 'http://embeddings:8080/v1')
@@ -52,7 +53,7 @@ class CoreEntrypointTest(unittest.TestCase):
         for external in ('0', '1'):
             with self.subTest(external=external), tempfile.TemporaryDirectory() as temporary:
                 runtime = pathlib.Path(temporary) / 'runtime.json'
-                real_path = pathlib.Path
+                real_path = type(runtime)
                 with patch.dict(os.environ, {**ENV, 'QUIVR_ROLE': 'api', 'QUIVR_SINGLE_MACHINE': external}, clear=True), \
                         patch.object(core_entrypoint.pathlib, 'Path', side_effect=lambda value: runtime if value == '/tmp/quivr-runtime.json' else real_path(value)), \
                         patch.object(core_entrypoint.subprocess, 'run') as migrate, \
@@ -107,21 +108,100 @@ class CoreEntrypointTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_THREADS'):
                 core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
                                                   'QUIVR_QUERY_ENCODER_THREADS': threads}, 'api')
+        for backend in ('auto', 'onnx', 'pytorch'):
+            commands = core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                         'QUIVR_QUERY_ENCODER_BACKEND': backend}, 'api')
+            encoder_env = next(child for name, _, _, child in commands if name == 'text-encoder')
+            self.assertEqual(encoder_env['QUIVR_QUERY_ENCODER_BACKEND'], backend)
+        with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_BACKEND'):
+            core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                              'QUIVR_QUERY_ENCODER_BACKEND': 'invalid'}, 'api')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            python_bin = root / 'python'
+            python_bin.write_text('#!/bin/sh\n')
+            model_dir = root / 'model'
+            model_dir.mkdir()
+            lock_path = root / 'model-lock.json'
+            self.assertIsNone(core_entrypoint._encoder_image_backend(model_dir, lock_path))
+
+            # ONNX baked image: lock + ONNX file accepts auto/onnx and rejects pytorch.
+            (model_dir / 'onnx').mkdir()
+            (model_dir / 'onnx' / 'model_quantized.onnx').write_bytes(b'onnx')
+            lock_path.write_text(json.dumps({
+                'backend': 'onnx',
+                'model_file': 'onnx/model_quantized.onnx',
+                'files': {'onnx/model_quantized.onnx': {}},
+            }))
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {}, python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'onnx',
+            )
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'onnx'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'onnx',
+            )
+            with self.assertRaisesRegex(ValueError, 'does not match the baked onnx'):
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'pytorch'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
+
+            # Lock/asset mismatch refuses startup before launching the sidecar.
+            (model_dir / 'onnx' / 'model_quantized.onnx').unlink()
+            (model_dir / 'model.safetensors').write_bytes(b'pt')
+            with self.assertRaisesRegex(ValueError, 'QUIVR_BUILD_LOCAL_QUERY_ENCODER=1'):
+                core_entrypoint._validate_encoder_runtime(
+                    {}, python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
+
+            # PyTorch baked fallback image accepts auto/pytorch and rejects onnx.
+            lock_path.write_text(json.dumps({
+                'backend': 'pytorch',
+                'files': {'model.safetensors': {}},
+            }))
+            self.assertEqual(
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'pytorch'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path),
+                'pytorch',
+            )
+            with self.assertRaisesRegex(ValueError, 'does not match the baked pytorch'):
+                core_entrypoint._validate_encoder_runtime(
+                    {'QUIVR_QUERY_ENCODER_BACKEND': 'onnx'},
+                    python_path=python_bin, model_dir=model_dir, lock_path=lock_path)
 
     def test_core_processes_keep_runtime_config_without_provider_secret(self):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / 'runtime.json'
             manifest = pathlib.Path(tmp) / 'hosted-embed' / 'quivr-plugin.yaml'
+            real_path = type(runtime)
+            fixture_secrets = {name: ENV[name] for name in
+                               ('DATABASE_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'QUIVR_CURSOR_KEY', 'QUIVR_API_KEY')}
+            fixture_secrets.update(QUIVR_CREDENTIAL_KEY='fixture-credential-key',
+                                   WEAVIATE_API_KEY='fixture-weaviate-key', QUIVR_OPERATOR_KEY='fixture-operator',
+                                   QUIVR_QUEUE_KEY='fixture-queue')
+            signing_ring = {'active': 'primary', 'keys': [
+                {'id': 'primary', 'secret': 'c3ludGhldGljLXNpZ25pbmcta2V5LXdpdGgtMzItYnl0ZXM'}]}
+            signing_file = pathlib.Path(tmp) / 'engine-rings'
+            signing_file.write_text(json.dumps({'connector.object_storage_archive': signing_ring}))
+            secret_env = {'QUIVR_ENGINE_PLUGIN_KEYS_FILE': str(signing_file)}
+            for name, value in fixture_secrets.items():
+                secret = pathlib.Path(tmp) / name
+                secret.write_bytes((value + '\r\n').encode())
+                secret_env[name + '_FILE'] = str(secret)
+            base_env = {name: value for name, value in ENV.items() if name not in fixture_secrets}
             for role, provider in ((r, p) for r in ('api', 'worker', 'migrate') for p in ('cohere', 'gemma')):
                 with self.subTest(role=role, provider=provider), patch.dict(os.environ, {
-                    **ENV, 'QUIVR_ROLE': role, 'QUIVR_DEMO_JEV_RERANK': '1',
+                    **base_env, **secret_env, 'QUIVR_ROLE': role, 'QUIVR_DEMO_JEV_RERANK': '1',
                     'TYPESAFE_API_KEY': 'fixture-typesafe-key', 'PATH': '/usr/bin',
                     'AZURE_FOUNDRY_KEY': 'fixture-foundry-key', 'QUIVR_DEMO_EMBEDDING': provider,
                     'EMBED_URL': 'https://example--embeddings.modal.run', 'EMBED_API_KEY': 'fixture-modal-token',
                     'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org', 'QUIVR_DEMO_HOSTED_EMBED': '1',
                 }, clear=True), patch.object(core_entrypoint.pathlib, 'Path',
-                    side_effect=lambda value: runtime if value == '/tmp/quivr-runtime.json' else manifest), \
+                    side_effect=lambda value: runtime if value == '/tmp/quivr-runtime.json' else manifest if value == core_entrypoint.HOSTED_MANIFEST else real_path(value)), \
                     patch.object(core_entrypoint.os, 'umask'), \
                     patch.object(core_entrypoint.subprocess, 'run') as migrate, \
                     patch.object(core_entrypoint, 'supervise', return_value=0) as supervise, \
@@ -154,7 +234,20 @@ class CoreEntrypointTest(unittest.TestCase):
                     self.assertNotIn('AZURE_FOUNDRY_KEY', effective)
                     self.assertNotIn('EMBED_API_KEY', effective)
                     self.assertEqual(effective['QUIVR_CONFIG'], str(runtime))
-                    self.assertEqual(effective['DATABASE_URL'], ENV['DATABASE_URL'])
+                    for name, value in fixture_secrets.items():
+                        self.assertNotIn(value, runtime.read_text())
+                        self.assertNotIn(name + '_FILE', effective)
+                        if name not in ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY'):
+                            self.assertEqual(effective[name], value)
+                    self.assertEqual(set(json.loads(effective['QUIVR_API_KEYS'])),
+                                     {fixture_secrets[name] for name in
+                                      ('QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY')})
+                    rings = json.loads(effective['QUIVR_ENGINE_PLUGIN_KEYS'])
+                    self.assertEqual(rings['connector.object_storage_archive'], signing_ring)
+                    self.assertNotIn('QUIVR_ENGINE_PLUGIN_KEYS_FILE', effective)
+                    for ring in rings.values():
+                        for key in ring['keys']:
+                            self.assertNotIn(key['secret'], runtime.read_text())
                     if role == 'api':
                         migration_env = migrate.call_args.kwargs.get('env', dict(os.environ))
                         self.assertNotIn('TYPESAFE_API_KEY', migration_env)
@@ -163,6 +256,36 @@ class CoreEntrypointTest(unittest.TestCase):
                         self.assertEqual(migration_env['QUIVR_CONFIG'], str(runtime))
                     else:
                         self.assertEqual(migrate.call_count, 1)  # configure only; no migration
+
+    def test_core_accepts_inline_credential_and_weaviate_keys(self):
+        inline = {'QUIVR_CREDENTIAL_KEY': 'fixture-inline-credential',
+                  'WEAVIATE_API_KEY': 'fixture-inline-index-token'}
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp) / 'runtime.json'
+            with patch.dict(os.environ, {**ENV, **inline, 'QUIVR_ROLE': 'migrate'}, clear=True), \
+                    patch.object(core_entrypoint.pathlib, 'Path', return_value=runtime), \
+                    patch.object(core_entrypoint.os, 'umask'), \
+                    patch.object(core_entrypoint.os, 'execvpe', side_effect=SystemExit(0)) as launch, \
+                    self.assertRaises(SystemExit):
+                core_entrypoint.main()
+            effective = launch.call_args.args[2]
+            for name, value in inline.items():
+                self.assertEqual(effective[name], value)
+                self.assertNotIn(value, runtime.read_text())
+
+    def test_refuses_secret_binding_errors_before_writing_config(self):
+        for variables, message in (
+            ({'DATABASE_URL': '', 'DATABASE_URL_FILE': '/missing/secret-path-sentinel'}, 'DATABASE_URL_FILE'),
+            ({'DATABASE_URL_FILE': '/missing/secret-path-sentinel'}, 'Set either DATABASE_URL'),
+            ({'QUIVR_CURSOR_KEY': ''}, 'Missing runtime secret: QUIVR_CURSOR_KEY'),
+            ({'S3_ENDPOINT': 'http://user:secret-path-sentinel@s3'}, 'S3_ENDPOINT'),
+        ):
+            with self.subTest(message=message), patch.dict(os.environ, {**ENV, **variables}, clear=True), \
+                    patch.object(core_entrypoint.pathlib.Path, 'write_text') as write:
+                with self.assertRaisesRegex(ValueError, message) as caught:
+                    core_entrypoint.main()
+                self.assertNotIn('secret-path-sentinel', str(caught.exception))
+                write.assert_not_called()
 
     def test_jev_adds_deep_beside_normal_search_and_runs_only_on_api(self):
         # Owns the deployment switch, process selection and secret boundary; no provider call.
@@ -306,64 +429,48 @@ class CoreEntrypointTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'EMBED_API_KEY'):
                 core_entrypoint.build_config({**env, 'EMBED_API_KEY': key})
 
-    def test_credential_key_is_passed_when_set(self):
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_CREDENTIAL_KEY': 'placeholder-credential-key'})
-        self.assertEqual(config['credential_key'], 'placeholder-credential-key')
-
-    def test_credential_key_is_omitted_when_unset_or_empty(self):
-        for env in (ENV, {**ENV, 'QUIVR_CREDENTIAL_KEY': ''}):
-            config = core_entrypoint.build_config(env)
-            self.assertNotIn('credential_key', config)
-            self.assertEqual(config['cursor_key'], 'placeholder-cursor-key')
-
-    def test_weaviate_api_key_is_passed_when_set_and_omitted_when_empty(self):
-        config = core_entrypoint.build_config({**ENV, 'WEAVIATE_API_KEY': 'literal-weaviate-key'})
-        self.assertEqual(config['weaviate_api_key'], 'literal-weaviate-key')
-        for env in (ENV, {**ENV, 'WEAVIATE_API_KEY': ''}):
-            self.assertNotIn('weaviate_api_key', core_entrypoint.build_config(env))
-
     def test_demo_records_query_text(self):
         # The engine default is off; the demo's usage view lists its most frequent queries.
         self.assertIs(core_entrypoint.build_config(ENV)['observability']['record_query_text'], True)
 
     def test_operator_key_is_separate_and_opt_in(self):
-        self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
-        keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']
+        self.assertEqual(len(core_entrypoint.engine_api_keys(ENV)), 1)
+        keys = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})
         for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'queues:read', 'corpora:archive', 'corpora:rename'):
             self.assertIn(action, keys['placeholder-operator-key']['actions'])
         # The web app's key never administers plugins, whatever else is enabled.
         everything = {**ENV, 'QUIVR_DEMO_CONNECTORS': '1', 'QUIVR_DEMO_PLUGINS': '1', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'}
         for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'queues:read', 'corpora:archive', 'corpora:rename'):
-            self.assertNotIn(action, core_entrypoint.build_config(everything)['keys'][ENV['QUIVR_API_KEY']]['actions'])
+            self.assertNotIn(action, core_entrypoint.engine_api_keys(everything)[ENV['QUIVR_API_KEY']]['actions'])
 
     def test_connector_permissions_are_opt_in(self):
-        base = core_entrypoint.build_config(ENV)['keys']['placeholder-api-key']['actions']
+        base = core_entrypoint.engine_api_keys(ENV)['placeholder-api-key']['actions']
         self.assertFalse({'connectors:read', 'connectors:write'} & set(base))
         self.assertIn('changes:read', base)
         for value in ('', '0', 'true'):
-            actions = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_CONNECTORS': value})['keys']['placeholder-api-key']['actions']
+            actions = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_DEMO_CONNECTORS': value})['placeholder-api-key']['actions']
             self.assertEqual(actions, base, value)
-        enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_CONNECTORS': '1'})['keys']['placeholder-api-key']['actions']
+        enabled = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_DEMO_CONNECTORS': '1'})['placeholder-api-key']['actions']
         self.assertEqual(set(enabled) - set(base), {'connectors:read', 'connectors:write'})
 
     def test_admin_read_is_opt_in(self):
-        base = core_entrypoint.build_config(ENV)['keys']['placeholder-api-key']['actions']
+        base = core_entrypoint.engine_api_keys(ENV)['placeholder-api-key']['actions']
         for value in ('', '0', 'true'):
-            actions = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_ADMIN': value})['keys']['placeholder-api-key']['actions']
+            actions = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_DEMO_ADMIN': value})['placeholder-api-key']['actions']
             self.assertEqual(actions, base, value)
-        enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_ADMIN': '1'})['keys']['placeholder-api-key']['actions']
+        enabled = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_DEMO_ADMIN': '1'})['placeholder-api-key']['actions']
         self.assertEqual(set(enabled) - set(base), {'observability:read'})
-        operator = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']['placeholder-operator-key']
+        operator = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['placeholder-operator-key']
         self.assertIn('observability:read', operator['actions'])
 
     def test_queue_reader_key_is_read_only_and_separate(self):
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_QUEUE_KEY': ' fixture-queue-key '})
-        self.assertEqual(config['keys']['fixture-queue-key'], {
+        keys = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_QUEUE_KEY': ' fixture-queue-key '})
+        self.assertEqual(keys['fixture-queue-key'], {
             'organization': 'quivr-demo', 'actions': ['queues:read'], 'corpora': ['*']})
         for existing in ('placeholder-api-key', 'placeholder-operator-key'):
             with self.subTest(existing=existing), self.assertRaises(ValueError):
-                core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
-                                             'QUIVR_QUEUE_KEY': existing})
+                core_entrypoint.engine_api_keys({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
+                                                'QUIVR_QUEUE_KEY': existing})
 
     def test_worker_queue_environment_translation(self):
         # Literal external keys and omitted config preserve existing mixed workers.
@@ -382,13 +489,6 @@ class CoreEntrypointTest(unittest.TestCase):
                 with self.subTest(name=name, value=value), self.assertRaises(ValueError):
                     core_entrypoint.build_config({**ENV, name: value})
 
-    def test_required_variables_still_fail_fast(self):
-        env = dict(ENV)
-        del env['QUIVR_CURSOR_KEY']
-        with self.assertRaises(KeyError):
-            core_entrypoint.build_config(env)
-
-
     def test_plugins_are_opt_in(self):
         base = core_entrypoint.build_config(ENV)
         for value in ('', '0', 'true'):
@@ -396,8 +496,8 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertEqual(config, base, value)
         self.assertNotIn('destinations', base)
         enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
-        actions = enabled['keys']['placeholder-api-key']['actions']
-        self.assertEqual(set(actions) - set(base['keys']['placeholder-api-key']['actions']), {'monitoring:read', 'monitoring:write'})
+        actions = core_entrypoint.engine_api_keys({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})[ENV['QUIVR_API_KEY']]['actions']
+        self.assertEqual(set(actions) - set(core_entrypoint.engine_api_keys(ENV)[ENV['QUIVR_API_KEY']]['actions']), {'monitoring:read', 'monitoring:write'})
         self.assertNotIn('destinations', enabled)
         self.assertEqual(enabled['plugins'][:len(base['plugins'])], base['plugins'])
 
@@ -551,52 +651,70 @@ class CoreEntrypointTest(unittest.TestCase):
     def test_admin_listener_separates_admin_keys_from_functional_keys(self):
         admin_actions = {'plugins:admin', 'observability:read', 'queues:read', 'audit:read'}
         # QUIVR_DEMO_ADMIN_KEY must register observability:read even when QUIVR_DEMO_ADMIN is unset (default Railway web).
-        separated = core_entrypoint.build_config({
+        sep_env = {
             **ENV,
             'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082',
             'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
             'QUIVR_ADMIN_KEY': 'placeholder-admin-key',
             'QUIVR_QUEUE_KEY': 'placeholder-queue-key',
             'QUIVR_DEMO_ADMIN_KEY': 'placeholder-demo-admin-key',
-        })
+        }
+        separated = core_entrypoint.build_config(sep_env)
+        sep_keys, sep_admin_keys = core_entrypoint.engine_key_sets(sep_env)
         self.assertEqual(separated['admin_listen'], '0.0.0.0:8082')
+        self.assertNotIn('keys', separated)
+        self.assertNotIn('admin_keys', separated)
         # Neither functional key receives any admin action when separated (even if QUIVR_DEMO_ADMIN=1).
-        self.assertFalse(admin_actions & set(separated['keys'][ENV['QUIVR_API_KEY']]['actions']))
-        self.assertFalse(admin_actions & set(separated['keys']['placeholder-operator-key']['actions']))
-        with_demo_flag = core_entrypoint.build_config({
+        self.assertFalse(admin_actions & set(sep_keys[ENV['QUIVR_API_KEY']]['actions']))
+        self.assertFalse(admin_actions & set(sep_keys['placeholder-operator-key']['actions']))
+        demo_keys, _ = core_entrypoint.engine_key_sets({
             **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', 'QUIVR_DEMO_ADMIN': '1',
             'QUIVR_ADMIN_KEY': 'placeholder-admin-key',
         })
-        self.assertFalse(admin_actions & set(with_demo_flag['keys'][ENV['QUIVR_API_KEY']]['actions']))
+        self.assertFalse(admin_actions & set(demo_keys[ENV['QUIVR_API_KEY']]['actions']))
         # Operator key retains functional operator actions while dedicated keys own admin_keys.
-        self.assertEqual(set(separated['keys']), {ENV['QUIVR_API_KEY'], 'placeholder-operator-key'})
-        self.assertIn('projections:rebuild', separated['keys']['placeholder-operator-key']['actions'])
-        self.assertEqual(set(separated['admin_keys']), {'placeholder-admin-key', 'placeholder-queue-key', 'placeholder-demo-admin-key'})
-        self.assertEqual(separated['admin_keys']['placeholder-queue-key']['actions'], ['queues:read'])
-        self.assertEqual(separated['admin_keys']['placeholder-demo-admin-key']['actions'], ['observability:read'])
-        self.assertEqual(set(separated['admin_keys']['placeholder-admin-key']['actions']), admin_actions)
+        self.assertEqual(set(sep_keys), {ENV['QUIVR_API_KEY'], 'placeholder-operator-key'})
+        self.assertIn('projections:rebuild', sep_keys['placeholder-operator-key']['actions'])
+        self.assertEqual(set(sep_admin_keys), {'placeholder-admin-key', 'placeholder-queue-key', 'placeholder-demo-admin-key'})
+        self.assertEqual(sep_admin_keys['placeholder-queue-key']['actions'], ['queues:read'])
+        self.assertEqual(sep_admin_keys['placeholder-demo-admin-key']['actions'], ['observability:read'])
+        self.assertEqual(set(sep_admin_keys['placeholder-admin-key']['actions']), admin_actions)
         # Without QUIVR_ADMIN_KEY, QUIVR_OPERATOR_KEY moves cleanly into admin_keys without token reuse.
-        operator_only = core_entrypoint.build_config({
+        op_keys, op_admin_keys = core_entrypoint.engine_key_sets({
             **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8081', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})
-        self.assertEqual(set(operator_only['keys']), {ENV['QUIVR_API_KEY']})
-        self.assertEqual(set(operator_only['admin_keys']), {'placeholder-operator-key'})
+        self.assertEqual(set(op_keys), {ENV['QUIVR_API_KEY']})
+        self.assertEqual(set(op_admin_keys), {'placeholder-operator-key'})
         # QUIVR_ADMIN_LISTEN=off keeps combined mode.
         self.assertEqual(core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': 'off'}), core_entrypoint.build_config(ENV))
+        self.assertEqual(core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': 'off'}), core_entrypoint.engine_key_sets(ENV))
         # Missing admin keys, port 8080, invalid bind, or key reuse fail fast.
         with self.assertRaisesRegex(ValueError, 'dedicated admin key'):
-            core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082'})
+            core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082'})
         for bad in ('0.0.0.0:8080', '127.0.0.1:8080', 'bad-host:8082', '0.0.0.0:0'):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'QUIVR_ADMIN_LISTEN'):
                 core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': bad, 'QUIVR_ADMIN_KEY': 'placeholder-admin-key'})
         # Every credential variable must refuse token reuse against QUIVR_API_KEY and against each other.
         for env_var in ('QUIVR_ADMIN_KEY', 'QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY', 'QUIVR_DEMO_ADMIN_KEY'):
             with self.subTest(reuse_api_key=env_var), self.assertRaisesRegex(ValueError, 'must differ'):
-                core_entrypoint.build_config({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', env_var: ENV['QUIVR_API_KEY']})
+                core_entrypoint.engine_key_sets({**ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082', env_var: ENV['QUIVR_API_KEY']})
         for pair_var in ('QUIVR_OPERATOR_KEY', 'QUIVR_QUEUE_KEY', 'QUIVR_DEMO_ADMIN_KEY'):
             with self.subTest(reuse_admin_key=pair_var), self.assertRaisesRegex(ValueError, 'must differ'):
-                core_entrypoint.build_config({
+                core_entrypoint.engine_key_sets({
                     **ENV, 'QUIVR_ADMIN_LISTEN': '0.0.0.0:8082',
                     'QUIVR_ADMIN_KEY': 'shared-secret-value', pair_var: 'shared-secret-value'})
+
+    def test_image_role_guard_matches_slim_targets_and_services(self):
+        services = json.loads((ROOT / 'deploy' / 'railway' / 'services.json').read_text())
+        self.assertEqual(services['api']['variables']['QUIVR_IMAGE_ROLE'], 'api')
+        self.assertEqual(services['worker']['variables']['QUIVR_IMAGE_ROLE'], 'worker')
+        self.assertEqual(services['worker-bulk']['variables']['QUIVR_IMAGE_ROLE'], 'worker')
+        for image_role, mode in [('', 'api'), ('', 'worker'), ('core', 'api'), ('core', 'worker'), ('core', 'migrate'),
+                                 ('api', 'api'), ('api', 'migrate'), ('worker', 'worker'), ('worker', 'migrate')]:
+            with self.subTest(image_role=image_role, mode=mode):
+                core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
+        for image_role, mode in [('api', 'worker'), ('worker', 'api'), ('other', 'api'), (' ', 'api'), (' api ', 'api')]:
+            with self.subTest(rejected=(image_role, mode)), self.assertRaises(ValueError):
+                core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
 
 
 class SuperviseTest(unittest.TestCase):

@@ -24,24 +24,35 @@ type requestSeries struct {
 	attrs         attribute.Set
 }
 
+// SearchAdmissionStats is a point-in-time snapshot of process-local search
+// admission state.
+type SearchAdmissionStats struct {
+	Limit     int
+	InUse     int
+	Available int
+	Queued    int
+}
+
 // LoadMetrics records process-local HTTP load and search admission pressure.
 // Register routes and bind admission before serving. Only those templates and
 // fixed methods/status classes can become labels, even for refused requests.
 type LoadMetrics struct {
 	requests, durations *Family
 	refusals            *Family
+	degradations        *Family
 	mu                  sync.RWMutex
 	routes              map[string]struct{}
 	series              map[[2]string]*requestSeries
-	searchSlots         <-chan struct{}
+	searchStats         func() SearchAdmissionStats
 }
 
 func NewLoadMetrics() *LoadMetrics {
 	m := &LoadMetrics{
-		requests:  newFamily("quivr_http_requests_total", "Completed HTTP requests by registered route, method and status class.", []string{"route", "method", "status_class"}, nil, 0, "{request}"),
-		durations: newFamily("quivr_http_request_duration_seconds", "HTTP request lifetime, including streaming responses.", []string{"route", "method"}, []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60}, 0, "s"),
-		refusals:  newFamily("quivr_search_admission_refused_total", "Searches refused because every admission slot was occupied.", nil, nil, 1, "{request}"),
-		routes:    map[string]struct{}{}, series: map[[2]string]*requestSeries{},
+		requests:     newFamily("quivr_http_requests_total", "Completed HTTP requests by registered route, method and status class.", []string{"route", "method", "status_class"}, nil, 0, "{request}"),
+		durations:    newFamily("quivr_http_request_duration_seconds", "HTTP request lifetime, including streaming responses.", []string{"route", "method"}, []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60}, 0, "s"),
+		refusals:     newFamily("quivr_search_admission_refused_total", "Searches shed because search admission was saturated.", nil, nil, 1, "{request}"),
+		degradations: newFamily("quivr_search_degradations_total", "Completed searches that returned degraded results, by fixed reason.", []string{"reason"}, nil, 8, "{request}"),
+		routes:       map[string]struct{}{}, series: map[[2]string]*requestSeries{},
 	}
 	m.RegisterRoutes("unmatched")
 	gauge, err := otel.Meter("quivr").Int64ObservableGauge("quivr_http_requests_in_flight", metric.WithDescription("HTTP requests still executing, including streams."), metric.WithUnit("{request}"))
@@ -142,35 +153,66 @@ func (m *LoadMetrics) snapshot() []*requestSeries {
 	return series
 }
 
-// BindSearch observes the actual admission channel rather than a second count
-// that can drift from it. Only the API binds it; worker processes omit these gauges.
+// BindSearch observes a fixed-capacity admission channel directly so gauges
+// cannot drift from it. Only the API binds it; worker processes omit these gauges.
 func (m *LoadMetrics) BindSearch(slots <-chan struct{}) {
-	if m == nil {
+	if m == nil || slots == nil {
+		return
+	}
+	m.BindSearchAdmission(func() SearchAdmissionStats {
+		used, capacity := len(slots), cap(slots)
+		return SearchAdmissionStats{Limit: capacity, InUse: used, Available: max(0, capacity-used)}
+	})
+}
+
+// BindSearchAdmission observes the live adaptive search admission state.
+// Only the API binds it; worker processes omit these gauges.
+func (m *LoadMetrics) BindSearchAdmission(sample func() SearchAdmissionStats) {
+	if m == nil || sample == nil {
 		return
 	}
 	m.mu.Lock()
-	m.searchSlots = slots
+	m.searchStats = sample
 	m.mu.Unlock()
 	RegisterGauges(searchGauges, func(context.Context) ([]float64, error) { return m.searchValues(), nil })
 }
 
 var searchGauges = []GaugeDefinition{
-	{Name: "quivr_search_admission_capacity", Help: "Maximum simultaneous admitted searches in this API process.", Unit: "{request}"},
+	{Name: "quivr_search_admission_capacity", Help: "Current adaptive concurrency limit for simultaneous admitted searches in this API process.", Unit: "{request}"},
 	{Name: "quivr_search_admission_in_use", Help: "Search admission slots currently occupied.", Unit: "{request}"},
 	{Name: "quivr_search_admission_available", Help: "Search admission slots currently available.", Unit: "{request}"},
+	{Name: "quivr_search_admission_queued", Help: "Searches currently waiting in the bounded admission queue.", Unit: "{request}"},
 }
 
 func (m *LoadMetrics) searchValues() []float64 {
 	m.mu.RLock()
-	slots := m.searchSlots
+	sample := m.searchStats
 	m.mu.RUnlock()
-	used, capacity := len(slots), cap(slots)
-	return []float64{float64(capacity), float64(used), float64(capacity - used)}
+	if sample == nil {
+		return []float64{0, 0, 0, 0}
+	}
+	s := sample()
+	return []float64{float64(s.Limit), float64(s.InUse), float64(s.Available), float64(s.Queued)}
 }
+
 func (m *LoadMetrics) SearchRefused() {
 	if m != nil {
 		m.refusals.Add(1)
 	}
+}
+
+// SearchDegraded counts one search degradation under a fixed, low-cardinality
+// reason. Unknown values normalize to "other" so dynamic data never enters.
+func (m *LoadMetrics) SearchDegraded(reason string) {
+	if m == nil {
+		return
+	}
+	switch reason {
+	case "vectors_unavailable", "reranker_budget_exceeded", "reranker_unavailable":
+	default:
+		reason = "other"
+	}
+	m.degradations.Add(1, reason)
 }
 
 func (m *LoadMetrics) Write(w io.Writer) {
@@ -184,7 +226,7 @@ func (m *LoadMetrics) Write(w io.Writer) {
 		fmt.Fprintf(w, "quivr_http_requests_in_flight{route=%q,method=%q} %d\n", s.route, s.method, s.active.Load())
 	}
 	m.mu.RLock()
-	bound := m.searchSlots != nil
+	bound := m.searchStats != nil
 	m.mu.RUnlock()
 	if bound {
 		values := m.searchValues()
@@ -192,5 +234,6 @@ func (m *LoadMetrics) Write(w io.Writer) {
 			Gauge(w, g.Name, g.Help, values[i])
 		}
 		m.refusals.Write(w)
+		m.degradations.Write(w)
 	}
 }

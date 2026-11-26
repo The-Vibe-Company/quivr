@@ -80,6 +80,7 @@ type SegmentAndEmbedRequest struct {
 	Version        IngestionVersion      `json:"version"`
 	Language       string                `json:"language,omitempty"`
 	Parts          []IngestionPart       `json:"parts"`
+	BlobParts      []IngestionBlobPart   `json:"blob_parts,omitempty"`
 	Spaces         []string              `json:"spaces"`
 	Page           *IngestionPageRequest `json:"page,omitempty"`
 }

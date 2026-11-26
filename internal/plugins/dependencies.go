@@ -87,6 +87,26 @@ func (m *Manifest) SupportsMultiPartSegments() bool {
 	return true
 }
 
+// SupportsMultimodalIngestion requires the declared range to exclude older
+// retrieval candidate schemas that reject segment region metadata.
+func (m *Manifest) SupportsMultimodalIngestion() bool {
+	r, err := ParseRange(m.Compatibility.PluginAPI)
+	if err != nil {
+		return false
+	}
+	version, ok := NegotiatePluginAPI(r)
+	if !ok || !ResolveAPI(version).Speaks(FeatureMultimodalIngestion) {
+		return false
+	}
+	for _, version := range SupportedPluginAPIVersions {
+		v, _ := ParseVersion(version)
+		if r.Contains(v) && !ResolveAPI(version).Speaks(FeatureMultimodalIngestion) {
+			return false
+		}
+	}
+	return true
+}
+
 func dependencyIssues(pins []*Pin) []Issue {
 	byID := map[string]*Pin{}
 	for _, p := range pins {

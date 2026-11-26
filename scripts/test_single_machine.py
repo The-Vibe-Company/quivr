@@ -52,7 +52,26 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual((directory / '.env').stat().st_mode & 0o777, 0o600)
             compose = json.loads((directory / 'compose.yaml').read_text())
             self.assertEqual(compose['name'], 'example-evaluation')
-            self.assertEqual(len(compose['volumes']), 5)
+            self.assertEqual(len(compose['volumes']), 4)
+            self.assertNotIn('temporal-data', compose['volumes'])
+            temporal = compose['services']['temporal']
+            self.assertIn('temporalio/auto-setup:', temporal['image'])
+            self.assertEqual(temporal['environment']['DB'], 'postgres12')
+            self.assertEqual(temporal['environment']['DBNAME'], 'temporal')
+            self.assertEqual(temporal['environment']['VISIBILITY_DBNAME'], 'temporal_visibility')
+            self.assertEqual(temporal['environment']['POSTGRES_SEEDS'], 'postgres')
+            self.assertEqual(temporal['environment']['POSTGRES_PWD'], '${QUIVR_DB_PASSWORD:?}')
+            self.assertEqual(temporal['depends_on'], {'postgres': {'condition': 'service_healthy'}})
+            self.assertEqual(temporal['healthcheck']['test'], [
+                'CMD-SHELL',
+                'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"',
+            ])
+            self.assertNotIn('volumes', temporal)
+            self.assertNotIn('command', temporal)
+            for rendered in ((directory / 'compose.yaml').read_text(),
+                             (ROOT / 'deploy/single-machine/compose.yaml').read_text()):
+                self.assertNotIn('start-dev', rendered)
+                self.assertNotIn('temporal.db', rendered)
             self.assertEqual(compose['services']['worker']['depends_on']['migrate']['condition'],
                              'service_completed_successfully')
             self.assertEqual(compose['services']['demo']['profiles'], ['demo'])
@@ -118,3 +137,47 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual(combined['services']['api']['environment']['QUIVR_ADMIN_LISTEN'], 'off')
             self.assertNotIn('QUIVR_ADMIN_URL', combined['services']['demo']['environment'])
             self.assertNotIn('QUIVR_ADMIN_KEY', combined['services']['demo']['environment'])
+
+    def test_upgrade_reports_exact_legacy_temporal_volume_without_deleting_it(self):
+        import io
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('single_machine_setup', SCRIPT)
+        setup = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            manifest = {'version': '2.0.0', 'revision': 'b' * 40,
+                'models': {'gemma': 'c' * 40, 'e5': 'd' * 40}, 'images': {
+                name: {'reference': f'ghcr.io/example/quivr-{name}@sha256:' + 'a' * 64,
+                       'version': '2.0.0', 'revision': 'b' * 40}
+                for name in ('core', 'web', 'cpu-embeddings', 'postgres', 'seaweed', 'tei')}}
+            release = directory / 'release.json'
+            release.write_text(json.dumps(manifest))
+            setup.initialize(directory, release, 'custom-stack', 'gemma', 'small', {})
+            calls = []
+            listed = ['custom-stack-temporal-data-backup\n',
+                      'custom-stack-temporal-data-backup\ncustom-stack-temporal-data\n']
+            def fake_docker(args):
+                calls.append(args)
+                if args[:2] == ['volume', 'ls']:
+                    self.assertIn('name=^custom-stack-temporal-data$', args)
+                    return listed.pop(0)
+                return ''
+            # A near-miss volume name alone must not trigger a retirement notice.
+            output = io.StringIO()
+            with patch.object(setup, 'docker', side_effect=fake_docker), \
+                 patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
+                 patch('sys.stdout', output):
+                self.assertEqual(setup.main(), 0)
+            self.assertNotIn('docker volume rm', output.getvalue())
+            # When both a near-miss and the exact volume appear, only the exact volume is reported.
+            output = io.StringIO()
+            with patch.object(setup, 'docker', side_effect=fake_docker), \
+                 patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
+                 patch('sys.stdout', output):
+                code = setup.main()
+            self.assertEqual(code, 0)
+            self.assertIn('docker volume rm custom-stack-temporal-data', output.getvalue())
+            self.assertNotIn('custom-stack-temporal-data-backup', output.getvalue())
+            self.assertNotIn('quivr-temporal-data', output.getvalue())
+            self.assertFalse(any(args[:2] == ['volume', 'rm'] for args in calls))

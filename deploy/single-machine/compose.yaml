@@ -60,32 +60,50 @@
       "restart": "unless-stopped"
     },
     "temporal": {
-      "image": "temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d",
-      "command": [
-        "server",
-        "start-dev",
-        "--ip",
-        "0.0.0.0",
-        "--headless",
-        "--db-filename",
-        "/home/temporal/temporal.db"
-      ],
-      "volumes": [
-        "temporal-data:/home/temporal"
-      ],
+      "image": "temporalio/auto-setup:1.29.7@sha256:f14912b699cf73015ad5c4fc18d522d4b014db90e794039214dfb7c022c2644f",
+      "environment": {
+        "DB": "postgres12",
+        "DB_PORT": "5432",
+        "DBNAME": "temporal",
+        "VISIBILITY_DBNAME": "temporal_visibility",
+        "NUM_HISTORY_SHARDS": "4",
+        "SQL_MAX_CONNS": "20",
+        "SQL_MAX_IDLE_CONNS": "20",
+        "SQL_VIS_MAX_CONNS": "10",
+        "SQL_VIS_MAX_IDLE_CONNS": "10",
+        "DEFAULT_NAMESPACE": "default",
+        "DEFAULT_NAMESPACE_RETENTION": "72h",
+        "SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES": "true",
+        "SKIP_DB_CREATE": "false",
+        "SKIP_SCHEMA_SETUP": "false",
+        "POSTGRES_SEEDS": "postgres",
+        "POSTGRES_USER": "quivr",
+        "POSTGRES_PWD": "${QUIVR_DB_PASSWORD:?}",
+        "BIND_ON_IP": "0.0.0.0",
+        "TEMPORAL_BROADCAST_ADDRESS": "127.0.0.1",
+        "TEMPORAL_ADDRESS": "127.0.0.1:7233"
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "1073741824",
+            "cpus": "1"
+          }
+        }
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      },
       "healthcheck": {
         "test": [
-          "CMD",
-          "temporal",
-          "operator",
-          "cluster",
-          "health",
-          "--address",
-          "127.0.0.1:7233"
+          "CMD-SHELL",
+          "temporal operator namespace describe --address 127.0.0.1:7233 --namespace \"$${DEFAULT_NAMESPACE:-default}\""
         ],
         "interval": "2s",
         "timeout": "5s",
-        "retries": 60,
+        "retries": 90,
         "start_period": "10s"
       },
       "logging": {
@@ -444,9 +462,6 @@
   "volumes": {
     "postgres-data": {
       "name": "quivr-postgres-data"
-    },
-    "temporal-data": {
-      "name": "quivr-temporal-data"
     },
     "seaweed-data": {
       "name": "quivr-seaweed-data"

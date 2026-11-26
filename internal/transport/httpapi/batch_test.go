@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/contracts"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
@@ -97,7 +99,7 @@ func (*acceptancePort) Publish(context.Context, content.Work, content.Publicatio
 	return errors.New("not used")
 }
 
-func newAPI(t *testing.T, port *acceptancePort) http.Handler {
+func newAPI(t *testing.T, port *acceptancePort, options ...httpapi.Option) http.Handler {
 	t.Helper()
 	keys := map[string]corpus.Scope{
 		adminKey:  {Organization: "org_a", Actions: []string{"content:read", "content:write"}, Corpora: []string{"*"}},
@@ -105,7 +107,7 @@ func newAPI(t *testing.T, port *acceptancePort) http.Handler {
 		scopedKey: {Organization: "org_a", Actions: []string{"content:read", "content:write"}, Corpora: []string{"corpus_other"}},
 	}
 	contents := content.Service{Submissions: port, Receipts: port, RecordStore: port, Versions: port, Materialization: port, BlobSource: verifiedBlobs{}}
-	handler, err := httpapi.New(nil, contents, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"))
+	handler, err := httpapi.New(nil, contents, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,5 +576,56 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 				t.Fatalf("batch entry %v differs from single submission %v", e, single)
 			}
 		})
+	}
+}
+
+func TestBatchKeepsReceiptsWhenRefusalAuditFails(t *testing.T) {
+	var logs bytes.Buffer
+	logger, err := logging.New(&logs, logging.Options{Level: "warn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	handler := newAPI(t, &acceptancePort{}, httpapi.WithAudit(&auditSink{fail: true}))
+	first := inline("first", "first", "Example")
+	denied := inline("denied", "denied", "Example")
+	last := inline("last", "last", "Example")
+	for _, entry := range []map[string]any{first, last} {
+		entry["source"].(map[string]any)["corpus_id"] = "corpus_other"
+	}
+	status, body := postJSON(t, handler, "/v0/records/batch", scopedKey, map[string]any{"items": []any{first, denied, last}})
+	if status != 200 {
+		t.Fatalf("batch audit failure discarded the response: status=%d body=%v", status, body)
+	}
+	conforms(t, "BatchResult", body)
+	items := entries(t, body)
+	if len(items) != 3 {
+		t.Fatalf("want three entry outcomes, got %v", items)
+	}
+	for index, id := range map[int]string{0: "receipt_first", 2: "receipt_last"} {
+		if receipt, ok := items[index]["receipt"].(map[string]any); !ok || receipt["receipt_id"] != id {
+			t.Fatalf("entry %d: want receipt %s, got %v", index, id, items[index])
+		}
+	}
+	failure := entryError(t, items[1])
+	if failure["code"] != "storage_unavailable" || failure["retryable"] != true {
+		t.Fatalf("want a retryable audit failure for the denied entry, got %v", failure)
+	}
+	var finding struct {
+		Message     string `json:"msg"`
+		RequestID   string `json:"request_id"`
+		EntryIndex  int    `json:"entry_index"`
+		RefusalCode string `json:"refusal_code"`
+		Error       string `json:"error"`
+	}
+	if err := json.NewDecoder(&logs).Decode(&finding); err != nil {
+		t.Fatalf("missing audit failure warning: %v", err)
+	}
+	if finding.Message != "batch refusal audit write failed" || finding.RequestID == "" ||
+		finding.RequestID != failure["request_id"] || finding.EntryIndex != 1 ||
+		finding.RefusalCode != "not_found" || finding.Error != "[REDACTED]" {
+		t.Fatalf("audit failure warning=%+v, response error=%v", finding, failure)
 	}
 }

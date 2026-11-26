@@ -560,7 +560,8 @@ func (s QuarantineStore) republishAttempt(ctx context.Context, org, id string, i
 		return err
 	}
 	for _, part := range p.Parts {
-		if _, err = tx.Exec(ctx, "INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", org, item.VersionID, part.Key, part.Role, content.StableID("blob", org, part.Blob.SHA256)); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO version_parts(organization,version_id,part_key,role,blob_id,pack_offset,pack_length)
+VALUES($1,$2,$3,$4,$5,$6,$7)`, org, item.VersionID, part.Key, part.Role, content.StableID("blob", org, part.Blob.SHA256), part.Pack.Offset, part.Pack.Length); err != nil {
 			return err
 		}
 	}

@@ -4,6 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
+import base64
 import http.server, json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
 from unittest import mock
 
@@ -30,6 +31,98 @@ class Isolation(unittest.TestCase):
             self.assertNotEqual(a.state[key], b.state[key], key)
             self.assertGreaterEqual(len(a.state[key]), 32, key)
         self.assertNotEqual(a.state['api_port'], b.state['api_port'])
+
+    def test_generated_configs_bind_credentials_without_storing_them(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, [])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')):
+            stack.config()
+        for name, token_name in (('config.json', 'admin'), ('worker.json', 'admin'),
+                                 ('short-retention.json', 'admin'), ('keyless.json', 'keyless'),
+                                 ('keyless-worker.json', 'keyless')):
+            with self.subTest(config=name):
+                path = stack.directory / name
+                raw = path.read_text()
+                for key in ('password', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'admin', 'keyless'):
+                    self.assertNotIn(stack.state[key], raw)
+                self.assertNotIn(local.CAPTURE_SECRET, raw)
+                bindings = stack.engine_environment(name)
+                keys = pathlib.Path(bindings['QUIVR_API_KEYS_FILE'])
+                self.assertEqual(stat.S_IMODE(keys.stat().st_mode), 0o600)
+                self.assertIn(stack.state[token_name], json.loads(keys.read_text()))
+                expected = {
+                    'DATABASE_URL': f"postgres://quivr:{stack.state['password']}@127.0.0.1:43001/quivr?sslmode=disable",
+                    'QUIVR_CURSOR_KEY': stack.state['cursor_key'],
+                    'S3_ACCESS_KEY': stack.state['s3_access'],
+                    'S3_SECRET_KEY': stack.state['s3_secret'],
+                }
+                if token_name == 'admin':
+                    expected['QUIVR_CREDENTIAL_KEY'] = stack.state['credential_key']
+                else:
+                    self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+                destinations = json.loads(raw)['destinations']
+                for suffix in ('a', 'b', 'k'):
+                    key = destinations[f'local-receiver-org-{suffix}']['secret_env']
+                    expected[key] = 'whsec_' + base64.b64encode(f'local-test-signing-secret-org-{suffix}!'.encode()).decode()
+                expected[destinations[local.CAPTURE_DESTINATION]['secret_env']] = local.CAPTURE_SECRET
+                guide_secret = 'whsec_' + base64.b64encode(b'local-test-signing-secret-guides').decode()
+                for destination in destinations.values():
+                    self.assertNotIn('secret', destination)
+                    expected.setdefault(destination['secret_env'], guide_secret)
+                for variable, value in expected.items():
+                    self.assertEqual(pathlib.Path(bindings[variable + '_FILE']).read_text(), value, variable)
+
+    def test_keyless_environment_discards_credentials_before_files_exist(self):
+        stack = local.Stack(self.names[0])
+        for name in ('keyless.json', 'keyless-worker.json'):
+            with self.subTest(config=name), mock.patch.dict(os.environ, {
+                    'QUIVR_CREDENTIAL_KEY': 'fixture-inline-key',
+                    'QUIVR_CREDENTIAL_KEY_FILE': '/fixture/credential-key'}):
+                bindings = stack.engine_environment(name)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY', bindings)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+
+    def test_migrate_launch_can_sign_calls_to_the_local_archive_plugin(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, ['object-storage-archive'])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')), \
+                mock.patch.object(local, 'run') as launch:
+            stack.migrate()
+        self.assertEqual(launch.call_args.args[0][-1], 'migrate')
+        env = launch.call_args.kwargs['env']
+        self.assertEqual(env['QUIVR_CONFIG'], str(stack.directory / 'config.json'))
+        self.assertIn(stack.state['password'], pathlib.Path(env['DATABASE_URL_FILE']).read_text())
+        archive, = local.connector_plugin.first_party(stack)
+        ring = json.loads(env['QUIVR_ENGINE_PLUGIN_KEYS'])['connector.object_storage_archive']
+        self.assertEqual(ring, local.connector_plugin.signing_ring(stack, archive))
+
+    def test_first_party_build_and_launch_filter_engine_secret_bindings(self):
+        stack = local.Stack(self.names[0])
+        plugins = local.connector_plugin
+        plugins.select_first_party(stack, ['object-storage-archive'])
+        archive, = plugins.first_party(stack)
+        engine_secrets = {
+            'QUIVR_ENGINE_PLUGIN_KEYS_FILE': '/fixture/engine-keys',
+            'QUIVR_ENGINE_PLUGIN_KEYS': 'fixture-engine-rings',
+            'DATABASE_URL_FILE': '/fixture/database-url',
+            'QUIVR_API_KEYS_FILE': '/fixture/api-keys',
+        }
+        with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True), \
+                mock.patch.object(plugins.ports, 'allocate', return_value=41001), \
+                mock.patch.object(plugins.go_bin_cache, 'ensure_many', return_value={'quivr-object-storage-archive': pathlib.Path('/bin/true')}) as build, \
+                mock.patch.object(plugins.subprocess, 'Popen', return_value=mock.Mock(pid=12345)) as launch, \
+                mock.patch.object(plugins, 'healthy_port', return_value=True):
+            plugins.start_first_party(stack)
+
+        build_env = build.call_args.args[0][0]['env']
+        launch_env = launch.call_args.kwargs['env']
+        for env in (build_env, launch_env):
+            self.assertTrue(engine_secrets.keys().isdisjoint(env))
+            self.assertEqual(env['PATH'], '/fixture/bin')
+        self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', build_env)
+        self.assertEqual(json.loads(launch_env['QUIVR_PLUGIN_SIGNING_KEYS']), plugins.signing_ring(stack, archive))
 
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])
@@ -142,6 +235,19 @@ while True: signal.pause()
             with self.assertRaisesRegex(RuntimeError, r'after 1 bounded attempt\(s\) \(exited: none\)'):
                 stack.start_dependencies()
         self.assertEqual(len(json.loads((stack.directory / 'readiness.json').read_text())['dependency_start_retries']), 2)  # no crash: not retried
+        # Outage restart of an individual dependency uses the same bounded crash-retry and --wait path.
+        targeted = []
+        def compose_targeted(*args, **kwargs):
+            targeted.append(args)
+            if args[0] == 'up' and sum(1 for item in targeted if item[0] == 'up') == 1:
+                raise local.subprocess.CalledProcessError(1, 'compose')
+            return mock.Mock(stdout='seaweed\n')
+        with mock.patch.object(stack, 'compose', side_effect=compose_targeted):
+            stack.start_dependencies('seaweed', wait_timeout=90)
+        self.assertEqual([args for args in targeted if args[0] == 'up'], [
+            ('up', '-d', '--wait', '--wait-timeout', '90', 'seaweed'),
+            ('up', '-d', '--wait', '--wait-timeout', '90', 'seaweed'),
+        ])
 
     def test_migrate_refuses_a_stopped_project_with_guidance(self):
         stack = local.Stack(self.names[0])
@@ -392,6 +498,215 @@ class Finish(unittest.TestCase):
         self.assertEqual(stack.calls, ['capture'])
         self.assertEqual(report['kept_project'], stack.name)
         self.assertIn('kept for inspection', md.lower())
+
+
+class DevProfile(unittest.TestCase):
+    """Fast dev profile skips TEI/model and optional sidecars without affecting verify (OB-620)."""
+
+    def setUp(self):
+        self.name = 'quivr-test-' + uuid.uuid4().hex[:10]
+
+    def tearDown(self):
+        shutil.rmtree(local.ROOT / '.scratch' / self.name, ignore_errors=True)
+
+    def test_fast_profile_skips_tei_and_optional_sidecars_in_config_and_up(self):
+        stack = local.Stack(self.name)
+        stack.state.update(dev_profile='fast', push_plugin=False, fixture_plugin=False)
+        stack.save()
+        local.normalizer_plugin.select(stack, 'none')
+        local.subscription_plugin.select(stack, False, 'off', template=False)
+        local.connector_plugin.select(stack, False)
+        local.connector_plugin.select_first_party(stack, ['core-retrieve'])
+
+        self.assertEqual(stack.dev_profile, 'fast')
+        self.assertFalse(stack.uses_tei())
+        self.assertTrue(stack.uses_fast_ingestion())
+        self.assertFalse(stack.use_push_plugin())
+        self.assertFalse(stack.use_fixture_plugin())
+        self.assertFalse(stack.needs_fake_graph())
+
+        ports_map = {
+            ('port', 'postgres', '5432'): '127.0.0.1:15432\n',
+            ('port', 'weaviate', '8080'): '127.0.0.1:18080\n',
+            ('port', 'temporal', '7233'): '127.0.0.1:17233\n',
+            ('port', 'seaweed', '8333'): '127.0.0.1:18333\n',
+        }
+        compose_calls = []
+        def fake_compose(*args, **kwargs):
+            compose_calls.append(args)
+            if args in ports_map:
+                return mock.Mock(stdout=ports_map[args])
+            raise AssertionError(f'unexpected compose call in fast mode: {args}')
+
+        with mock.patch.object(stack, 'compose', side_effect=fake_compose):
+            stack.config()
+
+        cfg = json.loads((stack.directory / 'config.json').read_text())
+        self.assertEqual(cfg['tei_url'], '')
+        self.assertEqual(cfg['ingestion'], {'default': 'example.hash_embedder'})
+        self.assertIsNone(cfg['plugin'])
+        manifests = [p['manifest'] for p in cfg['plugins']]
+        self.assertEqual(len(manifests), 2)
+        self.assertTrue(any(m.endswith('/plugins/core-retrieve/quivr-plugin.yaml') for m in manifests))
+        hash_pin = next(p for p in cfg['plugins'] if p['manifest'].endswith('/sdks/go/examples/hash-embedder/quivr-plugin.yaml'))
+        self.assertEqual(hash_pin['spaces'], {'example.hash_embedder.small': 'served'})
+        self.assertFalse((stack.directory / 'tokenizer-provenance.json').exists())
+
+        # start_dependencies stops and removes tei (in case an existing full stack switched to fast)
+        # before starting only core services, and scopes exited-service retry checks to CORE_SERVICES.
+        with mock.patch.object(stack, 'compose') as compose:
+            stack.start_dependencies()
+        self.assertEqual(compose.call_args_list, [
+            mock.call('rm', '-s', '-f', 'tei'),
+            mock.call('up', '-d', '--wait', '--wait-timeout', '180', *local.CORE_SERVICES),
+        ])
+        ps_calls = []
+        def fail_up(*args, **kwargs):
+            if args[0] == 'up':
+                raise local.subprocess.CalledProcessError(1, 'compose')
+            if args[0] == 'ps':
+                ps_calls.append(args)
+                return mock.Mock(stdout='')
+            return mock.Mock(stdout='')
+        with mock.patch.object(stack, 'compose', side_effect=fail_up):
+            with self.assertRaisesRegex(RuntimeError, r'after 1 bounded attempt\(s\) \(exited: none\)'):
+                stack.start_dependencies()
+        self.assertEqual(ps_calls, [('ps', '--all', '--status', 'exited', '--format', '{{.Service}}', *local.CORE_SERVICES)])
+
+        # up() skips prepare_tokenizer/prepare_embeddings, fixture/push start, and double migrate.
+        with mock.patch.object(stack, 'check_disk'), \
+                mock.patch.object(stack, 'stop_processes'), \
+                mock.patch.object(local, 'prepare_tokenizer') as tok, \
+                mock.patch.object(local, 'prepare_embeddings') as emb, \
+                mock.patch.object(stack, 'build_quivr') as build_quivr, \
+                mock.patch.object(stack, 'start_dependencies') as deps, \
+                mock.patch.object(local.normalizer_plugin, 'prepare'), \
+                mock.patch.object(local.normalizer_plugin, 'start'), \
+                mock.patch.object(local.subscription_plugin, 'prepare'), \
+                mock.patch.object(local.subscription_plugin, 'start'), \
+                mock.patch.object(local.push_plugin, 'start') as push_start, \
+                mock.patch.object(local.push_plugin, 'stop') as push_stop, \
+                mock.patch.object(local.connector_plugin, 'start_first_party'), \
+                mock.patch.object(local.ingestion_plugin, 'start_fast') as start_fast, \
+                mock.patch.object(local.fixture_plugin, 'prepare') as fix_prep, \
+                mock.patch.object(local.fixture_plugin, 'start') as fix_start, \
+                mock.patch.object(local.fixture_plugin, 'stop') as fix_stop, \
+                mock.patch.object(stack, 'migrate') as migrate, \
+                mock.patch.object(stack, 'start_processes'):
+            stack.up()
+
+        tok.assert_not_called()
+        emb.assert_not_called()
+        build_quivr.assert_called_once()
+        deps.assert_called_once()
+        migrate.assert_called_once()
+        push_start.assert_not_called()
+        push_stop.assert_called_once_with(stack)
+        fix_prep.assert_not_called()
+        fix_start.assert_not_called()
+        fix_stop.assert_called_once_with(stack)
+        start_fast.assert_called_once_with(stack)
+
+    def test_fast_profile_defaults_and_opt_in_overrides(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(local.dev_profile_from_environment(), 'full')
+            self.assertEqual(local.connector_plugin.from_environment(fast=True), ['core-retrieve'])
+            self.assertEqual(local.normalizer_plugin.from_environment(default='none'), 'none')
+            self.assertFalse(local.subscription_plugin.from_environment(default='off'))
+
+        with mock.patch.dict(os.environ, {'QUIVR_DEV_PROFILE': 'fast', 'QUIVR_RSS': 'on', 'QUIVR_NORMALIZER': 'pdf-text', 'QUIVR_ALERTS': 'on'}, clear=True):
+            self.assertEqual(local.dev_profile_from_environment(), 'fast')
+            self.assertEqual(local.connector_plugin.from_environment(fast=True), ['rss', 'core-retrieve'])
+            self.assertEqual(local.normalizer_plugin.from_environment(default='none'), 'pdf-text')
+            self.assertTrue(local.subscription_plugin.from_environment(default='off'))
+
+        with mock.patch.dict(os.environ, {'QUIVR_CORE_INGEST': 'on'}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'QUIVR_CORE_INGEST=on requires TEI'):
+                local.connector_plugin.from_environment(fast=True)
+
+        with mock.patch.dict(os.environ, {'QUIVR_CORE_INGEST': 'onn'}, clear=True):
+            with self.assertRaisesRegex(ValueError, "QUIVR_CORE_INGEST is on or off, not 'onn'"):
+                local.connector_plugin.from_environment(fast=True)
+
+        with mock.patch.dict(os.environ, {'QUIVR_DEV_PROFILE': 'turbo'}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'QUIVR_DEV_PROFILE'):
+                local.dev_profile_from_environment()
+
+    def test_stop_fast_refuses_to_signal_an_unrelated_reused_pid(self):
+        stack = local.Stack(self.name)
+        stack.state['fast_ingestion_pid'] = os.getpid()
+        stack.state['fast_ingestion_binary'] = str(local.ROOT / '.scratch' / 'bin' / 'hash-embedder')
+        stack.save()
+        stderr = __import__('io').StringIO()
+        with mock.patch.object(local.ingestion_plugin.os, 'killpg') as killpg, \
+                mock.patch('sys.stderr', stderr):
+            local.ingestion_plugin.stop_fast(stack)
+        killpg.assert_not_called()
+        self.assertIn(str(os.getpid()), stderr.getvalue())
+        self.assertNotIn('fast_ingestion_pid', json.loads(stack.statefile.read_text()))
+
+    def test_start_first_party_persists_each_pid_before_starting_the_next_plugin(self):
+        stack = local.Stack(self.name)
+        local.connector_plugin.select_first_party(stack, ['rss', 'core-retrieve'])
+        calls = 0
+        def fake_popen(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return mock.Mock(pid=424242)
+            raise OSError('spawn failed')
+        binaries = {'quivr-rss': pathlib.Path('/bin/true'), 'quivr-core-retrieve': pathlib.Path('/bin/true')}
+        with mock.patch.object(local.connector_plugin, 'stop_first_party'), \
+                mock.patch.object(local.connector_plugin.ports, 'allocate', side_effect=[41001, 41002]), \
+                mock.patch.object(local.connector_plugin.go_bin_cache, 'ensure_many', return_value=binaries), \
+                mock.patch.object(local.connector_plugin.subprocess, 'Popen', side_effect=fake_popen):
+            with self.assertRaisesRegex(OSError, 'spawn failed'):
+                local.connector_plugin.start_first_party(stack)
+        saved = json.loads(stack.statefile.read_text())
+        self.assertEqual(saved.get('rss_plugin_pid'), 424242)
+
+    def test_verify_ignores_fast_dev_profile_and_retains_full_stack(self):
+        created = []
+        real_stack = local.Stack
+        def capture_stack(name, *args, **kwargs):
+            s = real_stack(self.name, *args, **kwargs)
+            created.append(s)
+            return s
+
+        with mock.patch.dict(os.environ, {'QUIVR_DEV_PROFILE': 'fast'}, clear=False), \
+                mock.patch.object(real_stack, 'up') as up, \
+                mock.patch.object(local, 'Stack', side_effect=capture_stack), \
+                mock.patch.object(local, 'verify') as run_verify, \
+                mock.patch.object(local, 'finish'):
+            local.run_stack('verify', part='core')
+
+        up.assert_called_once()
+        run_verify.assert_called_once()
+        [stack] = created
+        self.assertTrue(stack.verifying)
+        self.assertEqual(stack.dev_profile, 'full')
+        self.assertTrue(stack.uses_tei())
+        self.assertFalse(stack.uses_fast_ingestion())
+        self.assertTrue(stack.use_push_plugin())
+        self.assertTrue(stack.use_fixture_plugin())
+        self.assertTrue(stack.state['alerts_plugin'])
+        self.assertTrue(stack.state['subscription_template'])
+        self.assertEqual(stack.state['normalizer'], 'template')
+        self.assertEqual(stack.state['first_party'], [r['id'] for r in local.connector_plugin.FIRST_PARTY])
+
+    def test_main_rejects_profile_on_verify_and_skips_tokenizer_requirements_for_fast_dev(self):
+        with mock.patch.object(sys, 'argv', ['local.py', 'verify', '--profile', 'fast']), \
+                mock.patch('sys.stderr', new_callable=__import__('io').StringIO):
+            with self.assertRaises(SystemExit) as caught:
+                local.main()
+            self.assertEqual(caught.exception.code, 2)
+
+        with mock.patch.object(sys, 'argv', ['local.py', 'dev', '--profile', 'fast']), \
+                mock.patch.object(local, 'requirements') as reqs, \
+                mock.patch.object(local, 'run_stack') as run_stack:
+            local.main()
+        reqs.assert_not_called()
+        run_stack.assert_called_once_with('dev', profile='fast')
 
 
 if __name__ == '__main__':
