@@ -85,8 +85,10 @@ func insertPublicationVersion(ctx context.Context, tx pgx.Tx, w content.Work, p 
 		processing, code = "blocked", q.Code
 	}
 	keys, roles, blobs := make([]string, len(p.Parts)), make([]string, len(p.Parts)), make([]string, len(p.Parts))
+	offsets, lengths := make([]*int64, len(p.Parts)), make([]*int64, len(p.Parts))
 	for i, part := range p.Parts {
 		keys[i], roles[i], blobs[i] = part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256)
+		offsets[i], lengths[i] = part.Pack.Offset, part.Pack.Length
 	}
 	var created bool
 	err = tx.QueryRow(ctx, `WITH version AS (
@@ -94,10 +96,10 @@ func insertPublicationVersion(ctx context.Context, tx pgx.Tx, w content.Work, p 
  VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16,clock_timestamp(),CASE WHEN $13 THEN clock_timestamp() END,CASE WHEN $13 THEN 'normalization' END)
  ON CONFLICT(organization,id) DO NOTHING RETURNING id
 ), parts AS (
- INSERT INTO version_parts(organization,version_id,part_key,role,blob_id)
- SELECT $1,v.id,p.part_key,p.role,p.blob_id FROM version v
- CROSS JOIN unnest($17::text[],$18::text[],$19::text[]) p(part_key,role,blob_id)
-) SELECT EXISTS(SELECT 1 FROM version)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, p.Normalized.SHA256), content.StableID("blob", w.Organization, p.Manifest.SHA256), provenance, extensionsJSON, p.Quarantine != nil, processing, code, quarantine, keys, roles, blobs).Scan(&created)
+ INSERT INTO version_parts(organization,version_id,part_key,role,blob_id,pack_offset,pack_length)
+ SELECT $1,v.id,p.part_key,p.role,p.blob_id,p.pack_offset,p.pack_length FROM version v
+ CROSS JOIN unnest($17::text[],$18::text[],$19::text[],$20::bigint[],$21::bigint[]) p(part_key,role,blob_id,pack_offset,pack_length)
+) SELECT EXISTS(SELECT 1 FROM version)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, p.Normalized.SHA256), content.StableID("blob", w.Organization, p.Manifest.SHA256), provenance, extensionsJSON, p.Quarantine != nil, processing, code, quarantine, keys, roles, blobs, offsets, lengths).Scan(&created)
 	return created, err
 }
 

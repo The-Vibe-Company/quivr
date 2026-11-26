@@ -76,7 +76,7 @@ func TestSavedQueryVectorsAreFrozenAndReplayDoesNotEncode(t *testing.T) {
 	}
 }
 
-func adapterPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
+func adapterPool(t testing.TB, ctx context.Context) *pgxpool.Pool {
 	t.Helper()
 	path := os.Getenv("QUIVR_ADAPTER_CONFIG")
 	if path == "" {

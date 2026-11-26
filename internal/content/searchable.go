@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -321,11 +322,13 @@ type HydrationRechecker interface {
 type Located struct {
 	Hydrated
 	Blob    Blob
+	Pack    PackRange
 	Sources []LocatedSource
 }
 type LocatedSource struct {
 	Range SourceRange
 	Blob  Blob
+	Pack  PackRange
 }
 
 func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (Version, error) {
@@ -773,6 +776,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		source           LocatedSource
 	}
 	byBlob := map[blobCacheKey][]request{}
+	seenBlob := map[string]Blob{}
 	regionOnly := map[int]bool{}
 	for i, l := range located {
 		if len(l.Sources) == 0 && l.Blob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0 {
@@ -781,9 +785,13 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		sources := l.Sources
 		if len(sources) == 0 {
-			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob}}
+			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob, Pack: l.Pack}}
 		}
 		for k, source := range sources {
+			if prev, ok := seenBlob[source.Blob.Key]; ok && prev != source.Blob {
+				return nil, ErrArtifactCorrupt
+			}
+			seenBlob[source.Blob.Key] = source.Blob
 			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256}
 			byBlob[key] = append(byBlob[key], request{i, k, source})
 		}
@@ -798,6 +806,33 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			n = 1
 		}
 		slices[i] = make([]SourceExcerpt, n)
+	}
+	sliceBlob := func(blob string, requests []request) ([]SourceExcerpt, error) {
+		parts := map[[2]int64]*blobSlicer{}
+		cuts := make([]SourceExcerpt, len(requests))
+		for idx, req := range requests {
+			bounds, err := req.source.Pack.bounds(int64(len(blob)))
+			if err != nil {
+				return nil, err
+			}
+			slicer, ok := parts[bounds]
+			if !ok {
+				partText := blob[bounds[0]:bounds[1]]
+				if !ValidText(partText) {
+					return nil, ErrArtifactCorrupt
+				}
+				s := newBlobSlicer(partText)
+				slicer = &s
+				parts[bounds] = slicer
+			}
+			r := req.source.Range
+			cut, valid := slicer.slice(r.Start, r.End)
+			if !valid {
+				return nil, ErrArtifactCorrupt
+			}
+			cuts[idx] = SourceExcerpt{SourceRange: r, Text: cut}
+		}
+		return cuts, nil
 	}
 	type miss struct {
 		key      blobCacheKey
@@ -814,14 +849,12 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 	}
 	for key, requests := range byBlob {
 		if text, ok := cached[key]; ok {
-			slicer := newBlobSlicer(text)
-			for _, req := range requests {
-				r := req.source.Range
-				cut, valid := slicer.slice(r.Start, r.End)
-				if !valid {
-					return nil, errors.New("invalid canonical excerpt")
-				}
-				slices[req.candidate][req.index] = SourceExcerpt{SourceRange: r, Text: cut}
+			cuts, err := sliceBlob(text, requests)
+			if err != nil {
+				return nil, err
+			}
+			for idx, req := range requests {
+				slices[req.candidate][req.index] = cuts[idx]
 			}
 			continue
 		}
@@ -837,6 +870,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			slots <- struct{}{}
 			go func(item miss) {
 				defer func() { <-slots; wg.Done() }()
+				// Verify the whole shared object once through Read before slicing Parts.
 				data, err := s.Blobs.Read(ctx, item.requests[0].source.Blob)
 				if err != nil {
 					mu.Lock()
@@ -850,20 +884,14 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 				if s.BlobCache != nil && item.key.cacheable() && Hash(data) == item.key.sha256 {
 					s.BlobCache.put(item.key, text)
 				}
-				slicer := newBlobSlicer(text)
-				cuts := make([]SourceExcerpt, len(item.requests))
-				for idx, req := range item.requests {
-					r := req.source.Range
-					cut, valid := slicer.slice(r.Start, r.End)
-					if !valid {
-						mu.Lock()
-						if failure == nil {
-							failure = errors.New("invalid canonical excerpt")
-						}
-						mu.Unlock()
-						return
+				cuts, err := sliceBlob(text, item.requests)
+				if err != nil {
+					mu.Lock()
+					if failure == nil {
+						failure = err
 					}
-					cuts[idx] = SourceExcerpt{SourceRange: r, Text: cut}
+					mu.Unlock()
+					return
 				}
 				mu.Lock()
 				for idx, req := range item.requests {
@@ -891,7 +919,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		text := strings.Join(texts, located[i].Segment.Derivation.SourceSeparator)
 		if Hash([]byte(text)) != located[i].TextSHA256 {
-			return nil, errors.New("canonical excerpt mismatch")
+			return nil, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = text
 		l := located[i]
@@ -901,6 +929,22 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 	}
 	return out, nil
+}
+
+// bounds returns a half-open byte interval. Check the length with subtraction
+// first so corrupt BIGINT offsets cannot overflow during addition.
+func (p PackRange) bounds(size int64) ([2]int64, error) {
+	if p.Offset == nil && p.Length == nil {
+		return [2]int64{0, size}, nil
+	}
+	if p.Offset == nil || p.Length == nil {
+		return [2]int64{}, ErrArtifactCorrupt
+	}
+	offset, length := *p.Offset, *p.Length
+	if offset < 0 || offset > size || length <= 0 || length > size-offset {
+		return [2]int64{}, ErrArtifactCorrupt
+	}
+	return [2]int64{offset, offset + length}, nil
 }
 
 func SegmentID(org, segmentation string, p Segment) string {

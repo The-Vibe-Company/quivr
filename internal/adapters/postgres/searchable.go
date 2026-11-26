@@ -508,11 +508,13 @@ var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='
   'end',sr.end_offset,
   'key',CASE WHEN sr.part_key=c.part_key THEN b.object_key ELSE sb.object_key END,
   'sha256',CASE WHEN sr.part_key=c.part_key THEN b.sha256 ELSE sb.sha256 END,
-  'size',CASE WHEN sr.part_key=c.part_key THEN b.byte_length ELSE sb.byte_length END
+  'size',CASE WHEN sr.part_key=c.part_key THEN b.byte_length ELSE sb.byte_length END,
+  'pack_offset',CASE WHEN sr.part_key=c.part_key THEN p.pack_offset ELSE sp.pack_offset END,
+  'pack_length',CASE WHEN sr.part_key=c.part_key THEN p.pack_length ELSE sp.pack_length END
  ) ORDER BY sr.ordinality),'[]'::jsonb)
  FROM jsonb_array_elements(c.derivation->'source_ranges') WITH ORDINALITY AS item(value,ordinality)
  CROSS JOIN LATERAL (SELECT item.value->>'part_key' AS part_key,(item.value->>'start')::integer AS start_offset,(item.value->>'end')::integer AS end_offset,item.ordinality) sr
- LEFT JOIN LATERAL (SELECT vp.organization,vp.version_id,vp.part_key,vp.blob_id FROM version_parts vp
+ LEFT JOIN LATERAL (SELECT vp.organization,vp.version_id,vp.part_key,vp.blob_id,vp.pack_offset,vp.pack_length FROM version_parts vp
   WHERE sr.part_key<>c.part_key AND (vp.organization,vp.version_id,vp.part_key)>=(c.organization,sg.version_id,sr.part_key)
   ORDER BY vp.organization,vp.version_id,vp.part_key LIMIT 1) sp ON (sp.organization,sp.version_id,sp.part_key)=(c.organization,sg.version_id,sr.part_key)
  LEFT JOIN LATERAL (SELECT cb.organization,cb.blob_id,cb.object_key,cb.sha256,cb.byte_length FROM content_blobs cb
@@ -521,11 +523,11 @@ var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='
  WHERE sr.part_key=c.part_key OR sb.blob_id IS NOT NULL
 ) END`
 
-var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),coalesce(e.id,''),coalesce(e.space_id,''),
+var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),p.pack_offset,p.pack_length,coalesce(e.id,''),coalesce(e.space_id,''),
  jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator','region',c.derivation->'region'),
  ` + hydrateSourcesSQL + `
 ` + hydrationCandidatesSQL + `
-LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id FROM version_parts p
+LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id,p.pack_offset,p.pack_length FROM version_parts p
  WHERE c.derivation->'region' IS NULL AND (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
  ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
 LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
@@ -549,12 +551,14 @@ func hydrationArgs(scope corpus.Scope, cs []content.Candidate) []any {
 }
 
 type hydratedSourceRow struct {
-	PartKey string `json:"part_key"`
-	Start   int    `json:"start"`
-	End     int    `json:"end"`
-	Key     string `json:"key"`
-	SHA256  string `json:"sha256"`
-	Size    int64  `json:"size"`
+	PartKey    string `json:"part_key"`
+	Start      int    `json:"start"`
+	End        int    `json:"end"`
+	Key        string `json:"key"`
+	SHA256     string `json:"sha256"`
+	Size       int64  `json:"size"`
+	PackOffset *int64 `json:"pack_offset"`
+	PackLength *int64 `json:"pack_length"`
 }
 
 func decodeHydratedSources(expected int, raw []byte) ([]content.LocatedSource, error) {
@@ -576,6 +580,7 @@ func decodeHydratedSources(expected int, raw []byte) ([]content.LocatedSource, e
 		sources[i] = content.LocatedSource{
 			Range: content.SourceRange{PartKey: row.PartKey, Start: row.Start, End: row.End},
 			Blob:  content.Blob{Key: row.Key, SHA256: row.SHA256, Size: row.Size},
+			Pack:  content.PackRange{Offset: row.PackOffset, Length: row.PackLength},
 		}
 	}
 	return sources, nil
@@ -627,7 +632,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		var derivation, sourcesRaw []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {

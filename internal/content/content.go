@@ -229,6 +229,13 @@ type PartBlob struct {
 	Key  string
 	Role string
 	Blob Blob
+	Pack PackRange
+}
+
+// PackRange addresses a text Part by bytes in the Version's normalized text
+// object. Both fields are nil for a legacy standalone Part object.
+type PackRange struct {
+	Offset, Length *int64
 }
 
 // Publication carries the external immutable objects that one atomic canonical
@@ -297,6 +304,7 @@ type RecordCatalog interface {
 }
 type Blobs interface {
 	Put(context.Context, string, []byte) (Blob, error)
+	// Read returns immutable bytes verified against the Blob's size and SHA-256.
 	Read(context.Context, Blob) ([]byte, error)
 }
 type Service struct {
@@ -800,6 +808,10 @@ func ManifestFor(c Command) Manifest {
 // NormalizedText is the source-faithful concatenation of text Parts used as the
 // canonical Version text pointer. It does not replace per-Part coordinates.
 func NormalizedText(m Manifest) string {
+	return normalizedText(m, nil)
+}
+
+func normalizedText(m Manifest, addPart func(Part, int64, int64)) string {
 	var b strings.Builder
 	written := false
 	for _, p := range m.Parts {
@@ -808,6 +820,9 @@ func NormalizedText(m Manifest) string {
 		}
 		if written {
 			b.WriteByte('\n')
+		}
+		if addPart != nil {
+			addPart(p, int64(b.Len()), int64(len(p.Content.Text)))
 		}
 		b.WriteString(p.Content.Text)
 		written = true
@@ -913,13 +928,20 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 }
 
 // objects stores the immutable objects a publication of manifest references:
-// its normalized text, the Manifest and each text Part.
+// its Manifest and the normalized text object shared by its text Parts.
+// Blob Parts remain references to their independently verified source objects.
 func (s Service) objects(ctx context.Context, org string, manifest Manifest) (Publication, error) {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return Publication{}, err
 	}
-	normalized, err := s.Blobs.Put(ctx, org, []byte(NormalizedText(manifest)))
+	var publication Publication
+	text := normalizedText(manifest, func(part Part, offset, length int64) {
+		publication.Parts = append(publication.Parts, PartBlob{
+			Key: part.Key, Role: part.Role, Pack: PackRange{Offset: &offset, Length: &length},
+		})
+	})
+	normalized, err := s.Blobs.Put(ctx, org, []byte(text))
 	if err != nil {
 		return Publication{}, errors.New("canonical text publication unavailable")
 	}
@@ -927,16 +949,9 @@ func (s Service) objects(ctx context.Context, org string, manifest Manifest) (Pu
 	if err != nil {
 		return Publication{}, errors.New("canonical manifest publication unavailable")
 	}
-	publication := Publication{Normalized: normalized, Manifest: manifestBlob}
-	for _, part := range manifest.Parts {
-		if part.Content.Kind != "text" {
-			continue
-		}
-		blob, err := s.Blobs.Put(ctx, org, []byte(part.Content.Text))
-		if err != nil {
-			return Publication{}, errors.New("canonical part publication unavailable")
-		}
-		publication.Parts = append(publication.Parts, PartBlob{Key: part.Key, Role: part.Role, Blob: blob})
+	publication.Normalized, publication.Manifest = normalized, manifestBlob
+	for i := range publication.Parts {
+		publication.Parts[i].Blob = normalized
 	}
 	return publication, nil
 }
