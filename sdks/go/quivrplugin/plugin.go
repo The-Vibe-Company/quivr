@@ -336,27 +336,99 @@ func (p *Plugin) withManifestDigest(next http.Handler) http.Handler {
 // signing key ring from the environment so health-check errors and panics never
 // leak them into HTTP responses or logs.
 func (p *Plugin) healthRedactor() Credential {
-	var values []any
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		seen[s] = true
+		if b, err := json.Marshal(s); err == nil {
+			if escaped := strings.Trim(string(b), `"`); escaped != "" && escaped != s {
+				seen[escaped] = true
+			}
+		}
+	}
 	if ring := os.Getenv(EnvSigningKeys); ring != "" {
-		values = append(values, ring)
-		var parsed any
-		if json.Unmarshal([]byte(ring), &parsed) == nil {
-			values = append(values, parsed)
+		add(ring)
+		for _, tok := range extractJSONStringValues(ring) {
+			if tok.key == "secret" || len(tok.value) >= minSecretLength {
+				add(tok.value)
+			}
 		}
 	}
+	// Declared manifest secrets have no minimum length, so redact every non-empty value.
 	for _, s := range p.m.Secrets {
-		if v := os.Getenv(s.Name); v != "" {
-			values = append(values, v)
+		add(os.Getenv(s.Name))
+	}
+	if len(seen) == 0 {
+		return Credential{}
+	}
+	secrets := make([]string, 0, len(seen))
+	for s := range seen {
+		secrets = append(secrets, s)
+	}
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	return Credential{secrets: secrets}
+}
+
+type jsonStringValue struct {
+	key   string
+	value string
+}
+
+// extractJSONStringValues scans string literal values even in malformed JSON
+// or objects with duplicate keys so omitted signing secrets are still redacted.
+func extractJSONStringValues(raw string) []jsonStringValue {
+	var out []jsonStringValue
+	lastKey := ""
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '"' {
+			continue
 		}
+		start := i
+		i++
+		closed := false
+		for i < len(raw) {
+			if raw[i] == '\\' {
+				i += 2
+				continue
+			}
+			if raw[i] == '"' {
+				closed = true
+				break
+			}
+			i++
+		}
+		var val string
+		if closed {
+			lit := raw[start : i+1]
+			if json.Unmarshal([]byte(lit), &val) != nil {
+				val = raw[start+1 : i]
+			}
+		} else {
+			val = raw[start+1:]
+		}
+		j := i + 1
+		for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\r' || raw[j] == '\n') {
+			j++
+		}
+		if closed && j < len(raw) && raw[j] == ':' {
+			lastKey = val
+			continue
+		}
+		if val != "" {
+			out = append(out, jsonStringValue{key: lastKey, value: val})
+		}
+		lastKey = ""
 	}
-	if len(values) == 0 {
-		return Credential{}
+	return out
+}
+
+func sanitizeHealthCode(code string, redact Credential) string {
+	if !healthErrorCodePattern.MatchString(code) || redact.Redact(code) != code {
+		return "unhealthy"
 	}
-	raw, err := json.Marshal(values)
-	if err != nil {
-		return Credential{}
-	}
-	return newCredential(raw)
+	return code
 }
 
 func (p *Plugin) serveHealth(w http.ResponseWriter, r *http.Request) {
@@ -387,9 +459,7 @@ func (p *Plugin) healthErrorEnvelope(log *slog.Logger, err error, redact Credent
 	var connErr *Error
 	if errors.As(err, &connErr) {
 		_, env := connErr.envelope()
-		if !healthErrorCodePattern.MatchString(env.Code) {
-			env.Code = "unhealthy"
-		}
+		env.Code = sanitizeHealthCode(env.Code, redact)
 		env.Message = truncate(redact.Redact(env.Message))
 		env.Retryable = true
 		if env.Class != ClassTransient {
@@ -403,27 +473,21 @@ func (p *Plugin) healthErrorEnvelope(log *slog.Logger, err error, redact Credent
 	}
 	var ingestErr *IngestError
 	if errors.As(err, &ingestErr) {
-		code := ingestErr.Code
-		if !healthErrorCodePattern.MatchString(code) {
-			code = "unhealthy"
-		}
-		msg := ingestErr.Message
+		code := sanitizeHealthCode(ingestErr.Code, redact)
+		msg := redact.Redact(ingestErr.Message)
 		if msg == "" {
 			msg = code
 		}
-		return envelope{Code: code, Message: truncate(redact.Redact(msg)), Retryable: true}
+		return envelope{Code: code, Message: truncate(msg), Retryable: true}
 	}
 	var searchErr *SearchError
 	if errors.As(err, &searchErr) {
-		code := searchErr.Code
-		if !healthErrorCodePattern.MatchString(code) {
-			code = "unhealthy"
-		}
-		msg := searchErr.Message
+		code := sanitizeHealthCode(searchErr.Code, redact)
+		msg := redact.Redact(searchErr.Message)
 		if msg == "" {
 			msg = code
 		}
-		return envelope{Code: code, Message: truncate(redact.Redact(msg)), Retryable: true}
+		return envelope{Code: code, Message: truncate(msg), Retryable: true}
 	}
 	log.Error("health check failed", "error", err.Error())
 	return envelope{

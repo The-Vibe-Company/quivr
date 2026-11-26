@@ -546,32 +546,56 @@ func TestWithHealthCheck(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rawManifest = append(rawManifest, []byte("\nsecrets:\n  - name: TEST_HEALTH_SECRET\n    description: backend token\n")...)
+		rawManifest = append(rawManifest, []byte("\nsecrets:\n  - name: TEST_HEALTH_SECRET\n    description: backend token\n  - name: TEST_SHORT_SECRET\n    description: short token\n")...)
 		manifestPath := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
 		if err := os.WriteFile(manifestPath, rawManifest, 0600); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("TEST_HEALTH_SECRET", secret)
+		const shortSecret = "k9z"
+		const codeSecret = "tok_code_secret"
+		t.Setenv("TEST_HEALTH_SECRET", codeSecret)
+		t.Setenv("TEST_SHORT_SECRET", shortSecret)
+		// Malformed signing ring with duplicate "secret" keys and a syntax error.
+		t.Setenv(EnvSigningKeys, `{malformed, "secret": "dup_first_ring_secret", "secret": "dup_second_ring_secret"`)
 
 		for _, tc := range []struct {
 			name      string
 			fn        func(context.Context) error
+			forbid    []string
+			wantCode  string
 			expectLog bool
 		}{
 			{
-				name:      "unclassified error",
-				fn:        func(context.Context) error { return errors.New("dial tcp 10.0.0.1:5432: " + secret) },
+				name:      "unclassified error scrubs declared, short, and malformed ring secrets",
+				fn:        func(context.Context) error { return errors.New("dial: " + codeSecret + " " + shortSecret + " dup_first_ring_secret dup_second_ring_secret") },
+				forbid:    []string{codeSecret, shortSecret, "dup_first_ring_secret", "dup_second_ring_secret"},
+				wantCode:  "unhealthy",
 				expectLog: true,
 			},
 			{
-				name:      "panic",
-				fn:        func(context.Context) error { panic("boom " + secret) },
+				name:      "panic scrubs declared, short, and malformed ring secrets",
+				fn:        func(context.Context) error { panic("boom " + codeSecret + " " + shortSecret + " dup_first_ring_secret") },
+				forbid:    []string{codeSecret, shortSecret, "dup_first_ring_secret"},
+				wantCode:  "unhealthy",
 				expectLog: true,
 			},
 			{
-				name:      "classified error",
-				fn:        func(context.Context) error { return RetryableError("warming_up", "using " + secret) },
-				expectLog: false,
+				name:     "classified ingest error scrubs secret in code and message",
+				fn:       func(context.Context) error { return RetryableError(codeSecret, "using "+shortSecret+" dup_first_ring_secret") },
+				forbid:   []string{codeSecret, shortSecret, "dup_first_ring_secret"},
+				wantCode: "unhealthy",
+			},
+			{
+				name:     "classified connector error scrubs secret in code and message",
+				fn:       func(context.Context) error { return TransientError("err_"+shortSecret, "using "+codeSecret) },
+				forbid:   []string{codeSecret, shortSecret},
+				wantCode: "unhealthy",
+			},
+			{
+				name:     "classified search error scrubs secret in code and message",
+				fn:       func(context.Context) error { return &SearchError{Code: codeSecret, Message: "using " + shortSecret} },
+				forbid:   []string{codeSecret, shortSecret},
+				wantCode: "unhealthy",
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -590,8 +614,21 @@ func TestWithHealthCheck(t *testing.T) {
 				if rec.Code != http.StatusServiceUnavailable {
 					t.Fatalf("HTTP %d %s", rec.Code, rec.Body.String())
 				}
-				if strings.Contains(rec.Body.String(), "super-secret") || strings.Contains(logs.String(), "super-secret") {
-					t.Fatalf("secret leaked in health response or logs:\nbody=%s\nlogs=%s", rec.Body.String(), logs.String())
+				raw := rec.Body.Bytes()
+				if err := validate("plugins/v0/error.schema.json", raw); err != nil {
+					t.Fatalf("health error envelope failed schema: %v: %s", err, raw)
+				}
+				var out map[string]any
+				if err := json.Unmarshal(raw, &out); err != nil {
+					t.Fatal(err)
+				}
+				if out["code"] != tc.wantCode || out["retryable"] != true {
+					t.Fatalf("unexpected envelope: %s", raw)
+				}
+				for _, forbidden := range tc.forbid {
+					if strings.Contains(string(raw), forbidden) || strings.Contains(logs.String(), forbidden) {
+						t.Fatalf("secret %q leaked in health response or logs:\nbody=%s\nlogs=%s", forbidden, raw, logs.String())
+					}
 				}
 				if tc.expectLog && !strings.Contains(logs.String(), Redacted) {
 					t.Fatalf("expected redacted marker in logs, got %q", logs.String())
