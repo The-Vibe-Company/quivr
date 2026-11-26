@@ -447,7 +447,7 @@ type server struct {
 	plan   spacePlan
 	// hydrated caches the segments hydrated earlier in the search.
 	hydrated map[string]content.Hydrated
-	// vectors caches query encodings by space, routed generations and text.
+	// vectors caches query encodings when no pin-aware encoder is configured.
 	vectors map[string][]float32
 	// keywordCandidates avoids querying the same fallback partition for every
 	// healthy space. Keys include the full effective lexical request.
@@ -681,9 +681,15 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 // pinned ingestion plugin for its own.
 func (sv *server) encode(ctx context.Context, space, text string, routes []Route) ([]float32, error) {
 	generations := queryGenerations(routes)
-	key := queryVectorKey(space, generations, text)
-	if v, ok := sv.vectors[key]; ok {
-		return v, nil
+	// The serving registration can change between candidate rounds. Let
+	// encodeQuery resolve it before consulting the shared cache.
+	_, pinAware := sv.s.Spaces.(pinnedQueryEncoder)
+	var key string
+	if !pinAware {
+		key = queryVectorKey(space, generations, text)
+		if v, ok := sv.vectors[key]; ok {
+			return v, nil
+		}
 	}
 	started := time.Now()
 	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
@@ -694,7 +700,9 @@ func (sv *server) encode(ctx context.Context, space, text string, routes []Route
 		}
 		return nil, err
 	}
-	sv.vectors[key] = vector
+	if !pinAware {
+		sv.vectors[key] = vector
+	}
 	return vector, nil
 }
 

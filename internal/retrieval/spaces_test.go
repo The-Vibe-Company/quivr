@@ -191,7 +191,7 @@ func TestServingReusesQueryVectorsWithinAuthorizedRoutes(t *testing.T) {
 		"plugin": pluginGeneration("gen-first", true, "example.small@1", "example.large@1"),
 	}
 	projection := &fakeProjection{}
-	encoder := &cacheablePluginEncoder{}
+	encoder := &cacheablePluginEncoder{pin: "first"}
 	ranker := &scriptedRanker{answer: passthrough}
 	s := retrieval.Service{Routing: routing, Projection: projection, Spaces: encoder, Ranker: ranker,
 		Registry: spaceRegistry{routing: routing}, QueryVectors: retrieval.NewQueryVectorCache()}
@@ -225,8 +225,43 @@ func TestServingReusesQueryVectorsWithinAuthorizedRoutes(t *testing.T) {
 	search(4, 5)
 }
 
-type cacheablePluginEncoder struct{ pluginEncoder }
+type cacheablePluginEncoder struct {
+	pluginEncoder
+	pin string
+}
 
 func (e *cacheablePluginEncoder) ResolveQueryEncoder(context.Context, string) (retrieval.QueryEncoder, string) {
-	return e, "test-pin"
+	return e, e.pin
+}
+
+func TestServingResolvesQueryEncoderInEachCandidateRound(t *testing.T) {
+	routing := spaceRouting{
+		"plugin": pluginGeneration("gen", true, "example.small@1"),
+	}
+	projection := &fakeProjection{}
+	encoder := &cacheablePluginEncoder{pin: "first"}
+	ranker := &scriptedRanker{answer: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+		if q.Round == 2 {
+			encoder.pin = "second"
+		}
+		if q.Round <= 2 {
+			return answer(map[string]any{"requests": []any{map[string]any{
+				"primitive": "near_vector", "space": "example.small@1", "query_text": q.Query.Text, "k": 10,
+			}}})
+		}
+		return answer(map[string]any{"ranking": map[string]any{"hits": []any{}}})
+	}}
+	s := retrieval.Service{Routing: routing, Projection: projection, Spaces: encoder, Ranker: ranker,
+		Registry: spaceRegistry{routing: routing}, QueryVectors: retrieval.NewQueryVectorCache()}
+
+	request := retrieval.Request{Query: "alpha", Mode: "semantic", CorpusIDs: []string{"plugin"}}
+	if _, err := s.Search(t.Context(), searchScope, request); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(projection.searched); got != 2 {
+		t.Fatalf("projection searches = %d, want one per candidate round", got)
+	}
+	if got := len(encoder.encoded); got != 2 {
+		t.Fatalf("encoder calls = %d, want one per serving pin", got)
+	}
 }
