@@ -103,6 +103,24 @@ class Infrastructure(unittest.TestCase):
             railway_cli.main()
         self.assertEqual({row['service'] for row in json.loads(output.getvalue())['observations']}, {'api'})
 
+    def test_external_index_version_is_checked_against_the_operator_pin(self):
+        spec = infra.resolve()['weaviate']
+        spec['image'] = 'registry.example:5000/weaviate:1.39.14@sha256:' + 'a' * 64
+        settings = {**spec['environment'], **infra.VECTOR_HOST_AUTH,
+                    **spec['deploy']['resources']['limits'], 'image': spec['image'], 'ready': 'true'}
+        for live_version, status in (('1.39.10', 'drift'), (None, 'unknown'), ('1.39.14', 'match')):
+            with self.subTest(live_version=live_version):
+                # The remote report can claim a match against its own inputs.
+                # Only its observed values can attest the operator declaration.
+                rows = [{'service': 'weaviate', 'scope': 'vector_host', 'setting': key, 'observed': value}
+                        for key, value in {**settings, 'version': live_version}.items()]
+                uuid = '12345678-1234-1234-1234-123456789abc'
+                rows.append({'service': 'weaviate', 'scope': 'vector_host', 'setting': 'mounted_uuid',
+                             'expected': uuid, 'observed': uuid})
+                response = json.dumps({'status': 'match', 'observations': rows})
+                with patch.object(infra.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, response, '')):
+                    self.assertEqual(infra.external_vector_report(spec, 'index.example.invalid')['status'], status)
+
     def test_railway_cap_preflight_reports_limits_and_refuses_before_any_write(self):
         # Owns provider-cap admission at the CLI boundary: a later oversized
         # service must not leave earlier variables or sources partly applied.
