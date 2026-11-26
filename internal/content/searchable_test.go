@@ -2,6 +2,8 @@ package content_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -525,4 +527,165 @@ func BenchmarkHydratePackedSegments(b *testing.B) {
 			b.Fatalf("warm benchmark triggered %d blob reads", blobs.reads.Load()-readsAfterWarm)
 		}
 	})
+}
+
+func TestHydrateCoalescesLegacyMultiPartManifestAndCancelsOnContext(t *testing.T) {
+	manifest := content.Manifest{
+		Kind: "manifest",
+		Parts: []content.Part{
+			{Key: "p1", Role: "body", Content: content.Text{Kind: "text", Text: "één 🌌"}},
+			{Key: "p2", Role: "body", Content: content.Text{Kind: "text", Text: "second paragraph"}},
+			{Key: "p3", Role: "body", Content: content.Text{Kind: "text", Text: "第二段"}},
+		},
+	}
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestBlob := content.Blob{
+		Key:    "org/sha256/manifest-1",
+		SHA256: content.Hash(manifestBytes),
+		Size:   int64(len(manifestBytes)),
+	}
+	ranges := []content.SourceRange{
+		{PartKey: "p1", Start: 0, End: len([]rune("één 🌌"))},
+		{PartKey: "p2", Start: 0, End: len([]rune("second paragraph"))},
+		{PartKey: "p3", Start: 0, End: len([]rune("第二段"))},
+	}
+	wantText := "één 🌌\n\nsecond paragraph\n\n第二段"
+	located := func(segID string, blob content.Blob, srcRanges []content.SourceRange) content.Located {
+		return content.Located{
+			Hydrated: content.Hydrated{
+				RecordID:   "rec-1",
+				VersionID:  "ver-1",
+				TextSHA256: content.Hash([]byte(wantText)),
+				Segment: content.Segment{
+					ID:      segID,
+					PartKey: "p1",
+					Start:   0,
+					End:     len([]rune("één 🌌")),
+					Derivation: content.SegmentDerivation{
+						SourceRanges:    srcRanges,
+						SourceSeparator: "\n\n",
+					},
+				},
+			},
+			ManifestBlob: blob,
+		}
+	}
+
+	blobs := &fixtureBlobStore{data: map[string][]byte{manifestBlob.Key: manifestBytes}}
+	repo := &fixtureHydrationRepo{
+		located: map[string]content.Located{
+			"seg-1": located("seg-1", manifestBlob, ranges),
+			"seg-2": located("seg-2", manifestBlob, ranges),
+		},
+		withdrawn: map[string]bool{},
+		deniedOrg: map[string]bool{},
+	}
+	scope := corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
+	svc := content.Service{Baseline: repo, Blobs: blobs, BlobCache: content.NewHydrationBlobCache(1 << 20)}
+
+	got, err := svc.Hydrate(context.Background(), scope, []content.Candidate{
+		{SegmentID: "seg-1", GenerationID: "g1"},
+		{SegmentID: "seg-2", GenerationID: "g1"},
+	})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("manifest hydrate = %+v, %v", got, err)
+	}
+	if got[0].Segment.Text != wantText || len(got[0].Segment.SourceExcerpts) != 3 || got[0].Segment.SourceExcerpts[2].Text != "第二段" {
+		t.Fatalf("hydrated segment = %+v; want %q with 3 source excerpts", got[0].Segment, wantText)
+	}
+	if blobs.reads.Load() != 1 {
+		t.Fatalf("cold manifest hydration made %d blob reads across 2 segments, want 1", blobs.reads.Load())
+	}
+	if _, err := svc.Hydrate(context.Background(), scope, []content.Candidate{{SegmentID: "seg-1", GenerationID: "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if blobs.reads.Load() != 1 {
+		t.Fatalf("warm manifest hydration made %d blob reads, want 1 (cached)", blobs.reads.Load())
+	}
+
+	for _, tc := range []struct {
+		name  string
+		raw   []byte
+		range_ []content.SourceRange
+	}{
+		{name: "invalid json", raw: []byte("{not-json"), range_: ranges},
+		{name: "missing part", raw: manifestBytes, range_: append(append([]content.SourceRange{}, ranges...), content.SourceRange{PartKey: "missing", Start: 0, End: 1})},
+		{name: "out of bounds", raw: manifestBytes, range_: []content.SourceRange{{PartKey: "p1", Start: 0, End: 999}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			badBlob := content.Blob{Key: "org/sha256/" + tc.name, SHA256: content.Hash(tc.raw), Size: int64(len(tc.raw))}
+			badBlobs := &fixtureBlobStore{data: map[string][]byte{badBlob.Key: tc.raw}}
+			badRepo := &fixtureHydrationRepo{
+				located:   map[string]content.Located{"seg-bad": located("seg-bad", badBlob, tc.range_)},
+				withdrawn: map[string]bool{},
+				deniedOrg: map[string]bool{},
+			}
+			badSvc := content.Service{Baseline: badRepo, Blobs: badBlobs}
+			if _, err := badSvc.Hydrate(context.Background(), scope, []content.Candidate{{SegmentID: "seg-bad", GenerationID: "g1"}}); !errors.Is(err, content.ErrArtifactCorrupt) {
+				t.Fatalf("%s: err = %v; want ErrArtifactCorrupt", tc.name, err)
+			}
+		})
+	}
+
+	t.Run("canceled context stops launching reads", func(t *testing.T) {
+		const totalBlobs = 70
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var started atomic.Int64
+		allSlotsFilled := make(chan struct{})
+		blockingBlobs := blockingBlobReader{
+			read: func(rctx context.Context, _ content.Blob) ([]byte, error) {
+				if started.Add(1) == 64 {
+					close(allSlotsFilled)
+				}
+				<-rctx.Done()
+				return nil, rctx.Err()
+			},
+		}
+		manyRepo := &fixtureHydrationRepo{
+			located:   make(map[string]content.Located, totalBlobs),
+			withdrawn: map[string]bool{},
+			deniedOrg: map[string]bool{},
+		}
+		candidates := make([]content.Candidate, totalBlobs)
+		for i := range totalBlobs {
+			segID := fmt.Sprintf("seg-cancel-%d", i)
+			candidates[i] = content.Candidate{SegmentID: segID, GenerationID: "g1"}
+			b := content.Blob{Key: fmt.Sprintf("org/sha256/cancel-%d", i), SHA256: fmt.Sprintf("sha-%d", i), Size: 4}
+			manyRepo.located[segID] = content.Located{
+				Hydrated: content.Hydrated{
+					RecordID:   fmt.Sprintf("rec-%d", i),
+					VersionID:  fmt.Sprintf("ver-%d", i),
+					TextSHA256: content.Hash([]byte("text")),
+					Segment:    content.Segment{ID: segID, PartKey: "p1", Start: 0, End: 4},
+				},
+				Blob: b,
+			}
+		}
+
+		go func() {
+			<-allSlotsFilled
+			cancel()
+		}()
+		cancelSvc := content.Service{Baseline: manyRepo, Blobs: blockingBlobs}
+		if _, err := cancelSvc.Hydrate(ctx, scope, candidates); !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled hydrate err = %v; want context.Canceled", err)
+		}
+		if got := started.Load(); got != 64 {
+			t.Fatalf("canceled hydrate launched %d/%d blob reads, want 64 (queued reads stopped)", got, totalBlobs)
+		}
+	})
+}
+
+type blockingBlobReader struct {
+	content.Blobs
+	read func(context.Context, content.Blob) ([]byte, error)
+}
+
+func (b blockingBlobReader) Read(ctx context.Context, blob content.Blob) ([]byte, error) {
+	return b.read(ctx, blob)
 }

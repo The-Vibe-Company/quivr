@@ -450,9 +450,10 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 // Resolve routing overlays once per distinct requested generation, rather than
 // repeating their control-table probes for every hit and embedding lookup.
 func hydrationLookupsSQL(response bool) string {
-	segmentFields, generationFields := "", ""
+	segmentFields, versionFields, generationFields := "", "", ""
 	if response {
 		segmentFields = ",sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,sg.derivation"
+		versionFields = ",v.manifest_blob_id"
 		generationFields = ",g.spaces,g.space_id"
 	}
 	return `WITH candidates AS MATERIALIZED (
@@ -463,12 +464,12 @@ func hydrationLookupsSQL(response bool) string {
  JOIN ` + effectiveGenerationsSQL + ` g ON g.id=requested.generation_id
 ), located AS MATERIALIZED (
  SELECT c.*,sg.version_id,sg.segmentation_id` + segmentFields + `,
- v.record_id,v.slot,v.baseline_ready,v.quarantined,r.corpus_id,r.current_version_id,r.withdrawn
+ v.record_id,v.slot,v.baseline_ready,v.quarantined` + versionFields + `,r.corpus_id,r.current_version_id,r.withdrawn
 FROM candidates c JOIN generations g ON g.id=c.generation_id
 JOIN LATERAL (SELECT sg.organization,sg.id,sg.version_id,sg.segmentation_id` + segmentFields + `
  FROM segments sg WHERE (sg.organization,sg.id)>=(c.organization,c.segment_id)
  ORDER BY sg.organization,sg.id LIMIT 1) sg ON (sg.organization,sg.id)=(c.organization,c.segment_id)
-JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.slot,v.baseline_ready,v.quarantined FROM record_versions v
+JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.slot,v.baseline_ready,v.quarantined` + versionFields + ` FROM record_versions v
  WHERE (v.organization,v.id)>=(c.organization,sg.version_id)
  ORDER BY v.organization,v.id LIMIT 1) v ON (v.organization,v.id)=(c.organization,sg.version_id)
 JOIN LATERAL (SELECT r.organization,r.id,r.corpus_id,r.current_version_id,r.withdrawn FROM records r
@@ -509,9 +510,10 @@ WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + 
 
 // hydrateSourcesSQL resolves packed segment source_ranges in the same round-trip
 // as hydrateSQL, only for eligible authorized candidates whose derivation carries
-// a source_ranges array. Ranges on the segment's primary part reuse the already
-// joined blob; other parts use bounded composite-key seeks.
-var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN (
+// a source_ranges array and is not coalesced into a single legacy Manifest read.
+// Ranges on the segment's primary part reuse the already joined blob; other
+// parts use bounded composite-key seeks.
+var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' AND (p.pack_offset IS NOT NULL OR jsonb_array_length(CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN c.derivation->'source_ranges' ELSE '[]'::jsonb END)<=1 OR mb.blob_id IS NULL) THEN (
  SELECT coalesce(jsonb_agg(jsonb_build_object(
   'part_key',sr.part_key,
   'start',sr.start_offset,
@@ -533,7 +535,7 @@ var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='
  WHERE (sr.part_key=c.part_key AND b.blob_id IS NOT NULL) OR sb.blob_id IS NOT NULL
 ) END`
 
-var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),p.pack_offset,p.pack_length,coalesce(e.id,''),coalesce(e.space_id,''),
+var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),p.pack_offset,p.pack_length,coalesce(mb.object_key,''),coalesce(mb.sha256,''),coalesce(mb.byte_length,0),coalesce(e.id,''),coalesce(e.space_id,''),
  jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator','region',c.derivation->'region'),
  ` + hydrateSourcesSQL + `
 ` + hydrationCandidatesSQL + `
@@ -543,6 +545,9 @@ LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id,p.pac
 LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
  WHERE c.derivation->'region' IS NULL AND p.blob_id IS NOT NULL AND (b.organization,b.blob_id)>=(c.organization,p.blob_id)
  ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
+LEFT JOIN LATERAL (SELECT mb.organization,mb.blob_id,mb.object_key,mb.sha256,mb.byte_length FROM content_blobs mb
+ WHERE c.derivation->'region' IS NULL AND p.pack_offset IS NULL AND jsonb_typeof(c.derivation->'source_ranges')='array' AND jsonb_array_length(CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN c.derivation->'source_ranges' ELSE '[]'::jsonb END)>1 AND c.manifest_blob_id IS NOT NULL AND (mb.organization,mb.blob_id)>=(c.organization,c.manifest_blob_id)
+ ORDER BY mb.organization,mb.blob_id LIMIT 1) mb ON (mb.organization,mb.blob_id)=(c.organization,c.manifest_blob_id)
 LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec WHERE ec.generation_id=g.id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g", "v") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
   AND ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true
 ` + hydrationFenceSQL
@@ -644,7 +649,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		var derivation, sourcesRaw []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &l.ManifestBlob.Key, &l.ManifestBlob.SHA256, &l.ManifestBlob.Size, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {
@@ -653,8 +658,10 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		if !scope.Contains(corpusID) {
 			continue
 		}
-		if l.Sources, err = decodeHydratedSources(len(h.Segment.Derivation.SourceRanges), sourcesRaw); err != nil {
-			return nil, err
+		if l.ManifestBlob.Key == "" {
+			if l.Sources, err = decodeHydratedSources(len(h.Segment.Derivation.SourceRanges), sourcesRaw); err != nil {
+				return nil, err
+			}
 		}
 		h.GenerationID = cs[n-1].GenerationID
 		h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}

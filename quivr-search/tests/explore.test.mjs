@@ -258,3 +258,64 @@ test("one field is counted alone, once, fast when asked, and says how its counts
   for (const params of [{ field: "metadata.unknown" }, { field: "metadata.language", accuracy: "approximate" }])
     await assert.rejects(ask(params), (error) => error.status === 422, JSON.stringify(params));
 });
+
+test("Explorer page forwards abort signal and stops follow-up hydration when client leaves", async () => {
+  const controller = new AbortController();
+  const seen = [];
+  const explorer = createExplorer({
+    upstream: async (path, _method, _body, _timeout, signal) => {
+      seen.push({ path, signal });
+      if (path === "/v0/search") {
+        return {
+          status: 200,
+          data: {
+            items: Array.from({ length: 12 }, (_, i) => ({
+              record_id: `rec-${i}`,
+              version_id: `ver-${i}`,
+              rank: i + 1,
+            })),
+          },
+        };
+      }
+      if (path.startsWith("/v0/records/")) {
+        controller.abort();
+        return { status: 200, data: { source: { corpus_id: "c1" } } };
+      }
+      return { status: 200, data: { name: "Example corpus" } };
+    },
+    picked: async () => ["c1"],
+    demo: () => "c1",
+    history: { note() {}, of: () => [] },
+  });
+  await assert.rejects(
+    explorer.page(new URLSearchParams({ q: "harbour" }), controller.signal),
+    (error) => error.name === "AbortError",
+  );
+  assert.equal(seen[0].path, "/v0/search");
+  assert.equal(seen[0].signal, controller.signal);
+  // Aborting during the first record read prevents all remaining workers and queued records from starting.
+  assert.equal(seen.filter((s) => s.path.startsWith("/v0/records/")).length, 1);
+});
+
+test("Explorer facets propagates abort signal across multiple corpora without passing array indices", async () => {
+  const controller = new AbortController();
+  const seenSignals = [];
+  const explorer = createExplorer({
+    upstream: async (path, _method, body, _timeout, signal) => {
+      seenSignals.push({ path, signal });
+      if (path === "/v0/facets") {
+        return {
+          status: 200,
+          data: { items: body.fields.map((f) => ({ field: f.field, buckets: [] })) },
+        };
+      }
+      return { status: 200, data: { name: path, effective_retrieval: { fields: [] } } };
+    },
+    picked: async () => ["c1", "c2"],
+    demo: () => "c1",
+  });
+  await explorer.facets(new URLSearchParams({ field: "metadata.language" }), controller.signal);
+  const corpusCalls = seenSignals.filter((s) => s.path.startsWith("/v0/corpora/"));
+  assert.equal(corpusCalls.length, 2);
+  assert.ok(corpusCalls.every((c) => c.signal === controller.signal));
+});

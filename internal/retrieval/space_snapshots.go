@@ -20,8 +20,10 @@ type SpaceDescriptions interface {
 // SpaceSnapshots serves coverage asynchronously. One refresh per process may
 // count at a time; requests use the previous snapshot, with its age, or explicit
 // unknown counts until the first refresh completes. Metadata and owner presence
-// are always read from the current generation. TTL controls refresh attempts,
-// not how long a snapshot remains useful during a slow refresh or outage.
+// are always read from the current generation. TTL controls refresh attempts
+// after a healthy refresh, not how long a snapshot remains useful during a slow
+// refresh or outage; repeated refresh failures back off exponentially up to
+// 15 minutes and reset on recovery.
 type SpaceSnapshots struct {
 	registry SpaceDescriptions
 	parent   context.Context
@@ -31,10 +33,13 @@ type SpaceSnapshots struct {
 	entries  map[string]*spaceSnapshot
 }
 
+const maxCoverageFailureBackoff = 15 * time.Minute
+
 type spaceSnapshot struct {
 	spaces         map[string]content.SpaceCoverage
 	total          int64
 	observed, next time.Time
+	failures       int
 }
 
 func NewSpaceSnapshots(parent context.Context, registry SpaceDescriptions, ttl time.Duration) *SpaceSnapshots {
@@ -92,8 +97,14 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.busy = false
+	if err != nil {
+		entry.failures++
+		entry.next = time.Now().Add(coverageFailureBackoff(c.ttl, entry.failures))
+		return
+	}
+	entry.failures = 0
 	entry.next = time.Now().Add(c.ttl)
-	if err != nil || snapshotKey(org, corpusID, g) != key || c.entries[key] != entry {
+	if snapshotKey(org, corpusID, g) != key || c.entries[key] != entry {
 		return
 	}
 	entry.spaces = make(map[string]content.SpaceCoverage, len(spaces))
@@ -101,6 +112,21 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 		entry.spaces[sp.ID] = sp
 	}
 	entry.total, entry.observed = total, observed
+}
+
+func coverageFailureBackoff(base time.Duration, failures int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	capDelay := maxCoverageFailureBackoff
+	delay := min(base, capDelay)
+	for range max(0, failures-1) {
+		if delay >= capDelay/2 {
+			return capDelay
+		}
+		delay *= 2
+	}
+	return delay
 }
 
 func snapshotKey(org, corpusID string, g content.Generation) string {

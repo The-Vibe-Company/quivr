@@ -268,11 +268,17 @@ func TestVersionTextPackMaterializationAndHydration(t *testing.T) {
 	for i, c := range cases {
 		assertJoined(got[i], c)
 	}
-	got = check([]content.Candidate{first.joined, first.single, legacy.joined}, 1+packParts)
+	// Packed multi-part + single-part share one normalized text blob; a legacy
+	// multi-part segment coalesces to one Manifest read; a legacy single-part
+	// segment still reads its standalone Part blob directly.
+	got = check([]content.Candidate{first.joined, first.single, legacy.joined, legacy.single}, 3)
 	assertJoined(got[0], first)
 	assertJoined(got[2], legacy)
 	if got[1].VersionID != first.version.ID || got[1].Segment.Text != first.excerpts[0] {
 		t.Fatalf("single-Part candidate hydrated %+v, want %q from %s", got[1], first.excerpts[0], first.version.ID)
+	}
+	if got[3].VersionID != legacy.version.ID || got[3].Segment.Text != legacy.excerpts[0] {
+		t.Fatalf("legacy single-Part candidate hydrated %+v, want %q from %s", got[3], legacy.excerpts[0], legacy.version.ID)
 	}
 
 	assertCorrupt := func(t *testing.T) {

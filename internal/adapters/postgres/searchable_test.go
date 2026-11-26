@@ -463,7 +463,15 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 		partBlobs = append(partBlobs, content.PartBlob{Key: p.Key, Role: p.Role, Blob: blob})
 		ranges = append(ranges, content.SourceRange{PartKey: p.Key, Start: 0, End: len([]rune(p.Content.Text))})
 	}
-	if err = store.Publish(ctx, pw, content.Publication{Normalized: partBlobs[0].Blob, Manifest: content.Blob{Key: "fixture/manifest-packed", SHA256: "manifest-packed", Size: 2}, Parts: partBlobs}); err != nil {
+	manifestJSON, err := json.Marshal(packedCmd.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestBlob, err := store.objects.Put(ctx, org, manifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Publish(ctx, pw, content.Publication{Normalized: partBlobs[0].Blob, Manifest: manifestBlob, Parts: partBlobs}); err != nil {
 		t.Fatal(err)
 	}
 	pv := content.Version{ID: pw.VersionID, RecordID: pw.RecordID, Manifest: *packedCmd.Manifest}
