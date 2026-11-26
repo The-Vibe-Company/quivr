@@ -306,8 +306,8 @@ func (p *Plugin) contributions() []string {
 	return names
 }
 
-// ListenAddr returns QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default 127.0.0.1:8080).
-func ListenAddr() string {
+// listenAddr returns QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default 127.0.0.1:8080).
+func listenAddr() string {
 	host, port := os.Getenv(EnvHost), os.Getenv(EnvPort)
 	if host == "" {
 		host = "127.0.0.1"
@@ -318,17 +318,19 @@ func ListenAddr() string {
 	return net.JoinHostPort(host, port)
 }
 
-// Serve listens on ListenAddr() until SIGINT or SIGTERM.
+// Serve listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default
+// 127.0.0.1:8080) until SIGINT or SIGTERM.
 func (p *Plugin) Serve() error {
 	return p.ServeReady(nil)
 }
 
-// ServeReady listens on ListenAddr() until SIGINT or SIGTERM, calling onReady
-// with the bound address once the listener is open.
+// ServeReady listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default
+// 127.0.0.1:8080) until SIGINT or SIGTERM, calling onReady with the bound
+// address once the listener is open.
 func (p *Plugin) ServeReady(onReady func(addr string)) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return p.serveAddr(ctx, ListenAddr(), onReady)
+	return p.serveAddr(ctx, listenAddr(), onReady)
 }
 
 // ServeAddr listens on addr until ctx ends.
@@ -340,6 +342,9 @@ func (p *Plugin) serveAddr(ctx context.Context, addr string, onReady func(addr s
 	handler, err := p.Handler()
 	if err != nil {
 		return err
+	}
+	if addr == "" {
+		addr = ":http"
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
