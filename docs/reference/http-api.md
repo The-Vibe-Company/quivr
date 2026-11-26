@@ -91,6 +91,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
 | [`GET /v0/admin/audit`](#get-v0adminaudit) | `listAuditEvents` | `audit:read` |
+| [`GET /v0/admin/audit/export`](#get-v0adminauditexport) | `exportAuditEvents` | `audit:read` |
 | [`GET /v0/admin/plugins`](#get-v0adminplugins) | `listPluginRegistrations` | `plugins:admin` |
 | [`POST /v0/admin/plugins`](#post-v0adminplugins) | `registerPlugin` | `plugins:admin` |
 | [`GET /v0/admin/plugins/{registration_id}`](#get-v0adminpluginsregistration_id) | `getPluginRegistration` | `plugins:admin` |
@@ -206,7 +207,7 @@ Count of one Corpus's authorized Records. Time-bounded counts are exact within a
 
 Operation `ingestBatch`. Requires `content:write`.
 
-Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 
 **Request body** (required): `application/json` [`BatchRequest`](#batchrequest)
 
@@ -1533,7 +1534,7 @@ Connector kinds enabled in this deployment, with the JSON Schemas that validate 
 
 Operation `listAuditEvents`. Requires `audit:read`.
 
-List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 
 **Parameters**
 
@@ -1542,6 +1543,7 @@ List immutable sensitive-action entries for the API key's organization, newest f
 | `since` | query | string (date-time) |  | Inclusive RFC3339 timestamp. |
 | `until` | query | string (date-time) |  | Exclusive RFC3339 timestamp. |
 | `actor` | query | string |  | Exact API key identifier; no substring matching. |
+| `actor_id` | query | string |  | Exact opaque actor identifier. Pattern `^[0-9a-f]{32}$`. |
 | `action` | query | string |  | Exact audit action name; no substring matching. |
 | `target_type` | query | string |  | Exact target type; no substring matching. |
 | `target_id` | query | string |  | Exact target identifier; no substring matching. |
@@ -1553,6 +1555,33 @@ List immutable sensitive-action entries for the API key's organization, newest f
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`AuditEventPage`](#auditeventpage) | An organization-scoped page of audit entries. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 invalid API key, 403 without audit:read or with restricted Corpus scope, 422 invalid_cursor, 422 invalid_schema or invalid_limit, 503 storage_unavailable. |
+
+#### `GET /v0/admin/audit/export`
+
+Operation `exportAuditEvents`. Requires `audit:read`.
+
+Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `since` | query | string (date-time) |  | Inclusive RFC3339 timestamp. |
+| `until` | query | string (date-time) |  | Exclusive RFC3339 timestamp. |
+| `actor` | query | string |  | Exact API key identifier; no substring matching. |
+| `actor_id` | query | string |  | Exact opaque actor identifier. Pattern `^[0-9a-f]{32}$`. |
+| `action` | query | string |  | Exact audit action name; no substring matching. |
+| `target_type` | query | string |  | Exact target type; no substring matching. |
+| `target_id` | query | string |  | Exact target identifier; no substring matching. |
+| `limit` | query | integer |  | Default `50`. Minimum `1`. Maximum `200`. |
+| `page_cursor` | query | string |  |  |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`AuditEventPage`](#auditeventpage)<br><br>Header `Content-Disposition`: string. Attachment filename for the exported page. | An organization-scoped page of audit entries for download. |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 invalid API key, 403 without audit:read or with restricted Corpus scope, 422 invalid_cursor, 422 invalid_schema or invalid_limit, 503 storage_unavailable. |
 
 #### `GET /v0/admin/plugins`
@@ -2054,7 +2083,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
+| `200` | `application/json` [`SearchResponse`](#searchresponse)<br><br>Header `Server-Timing`: string. Time spent in each search phase, in milliseconds (routing, coverage, plugin, encode, index, hydrate).<br><br>Header `X-Correlation-ID`: string. The caller's valid X-Correlation-ID, or the request ID when none was sent; carried into logs, audit events and traces. | Successful response |
 | `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 model_unavailable (the query encoding model could not answer) or search_unavailable (another search dependency is unavailable), 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
 
 #### `GET /v0/search/profiles`
@@ -2138,7 +2167,10 @@ properties:
 | --- | --- | --- | --- |
 | `id` | string | yes | Decimal audit identifier, represented as text to preserve bigint precision. Pattern `^[1-9][0-9]*$`. |
 | `time` | string (date-time) | yes |  |
-| `actor` | string | yes | SHA-256-derived API key identifier; empty for unauthenticated attempts. |
+| `actor` | string | yes | Legacy field for the API key identifier; empty when no API key is authenticated. |
+| `actor_id` | string |  | Opaque actor identifier. Omitted when no actor could be authenticated. |
+| `api_key_id` | string |  | SHA-256-derived identifier of the authenticated API key. |
+| `correlation_id` | string |  | Request correlation identifier from X-Request-ID. |
 | `action` | string | yes |  |
 | `target_type` | string | yes |  |
 | `target_id` | string | yes | Target identifier; empty if refusal occurred before the target could be resolved. |
@@ -2147,6 +2179,7 @@ properties:
 | `request_id` | string | yes |  |
 | `detail` | object | yes |  |
 | `detail.status` | integer | yes | Minimum `100`. Maximum `599`. |
+| `detail.route` | string |  | Registered HTTP route template or unmatched. |
 | `detail.error_code` | string |  |  |
 | `detail.plan_id` | string |  |  |
 | `detail.credential_version` | integer |  | Minimum `1`. |
@@ -2161,7 +2194,10 @@ required: [id, time, actor, action, target_type, target_id, organization, outcom
 properties:
   id: {type: string, pattern: '^[1-9][0-9]*$', description: 'Decimal audit identifier, represented as text to preserve bigint precision.'}
   time: {type: string, format: date-time}
-  actor: {type: string, description: SHA-256-derived API key identifier; empty for unauthenticated attempts.}
+  actor: {type: string, description: Legacy field for the API key identifier; empty when no API key is authenticated.}
+  actor_id: {type: string, description: Opaque actor identifier. Omitted when no actor could be authenticated.}
+  api_key_id: {type: string, description: SHA-256-derived identifier of the authenticated API key.}
+  correlation_id: {type: string, description: Request correlation identifier from X-Request-ID.}
   action: {type: string}
   target_type: {type: string}
   target_id: {type: string, description: Target identifier; empty if refusal occurred before the target could be resolved.}
@@ -2174,6 +2210,7 @@ properties:
     required: [status]
     properties:
       status: {type: integer, minimum: 100, maximum: 599}
+      route: {type: string, description: Registered HTTP route template or unmatched.}
       error_code: {type: string}
       plan_id: {type: string}
       credential_version: {type: integer, minimum: 1}
@@ -11145,6 +11182,7 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `source_excerpts[].end` | integer | yes | Minimum `0`. |
 | `source_excerpts[].coordinate_system` | string | yes | One of `unicode_codepoint`. |
 | `availability` | [`Availability`](#availability) | yes |  |
+| `region` | [`ImageRegion`](#imageregion) |  |  |
 | `explanation` | string |  | Why the retrieval plugin ranked this hit here, when it says so. Minimum length `1`. Maximum length `1024`. |
 
 Further rules (conditional requirements or combinations) are in the full schema below.
@@ -11220,6 +11258,8 @@ properties:
         - coordinate_system
   availability:
     $ref: '#/components/schemas/Availability'
+  region:
+    $ref: '#/components/schemas/ImageRegion'
   explanation:
     type: string
     minLength: 1
@@ -11246,6 +11286,70 @@ else:
   not:
     required:
       - vector_space_id
+```
+
+</details>
+
+### `ImageRegion`
+
+Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `coordinate_system` | string | yes | One of `normalized_bbox`. |
+| `x` | number | yes | Minimum `0`. Maximum `1`. |
+| `y` | number | yes | Minimum `0`. Maximum `1`. |
+| `width` | number | yes | Maximum `1`. Greater than `0`. |
+| `height` | number | yes | Maximum `1`. Greater than `0`. |
+| `image_width` | integer |  | Minimum `1`. |
+| `image_height` | integer |  | Minimum `1`. |
+| `label` | string |  | Pattern `^[^\x00]*$`. Minimum length `1`. Maximum length `128`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  coordinate_system:
+    type: string
+    enum:
+      - normalized_bbox
+  x:
+    type: number
+    minimum: 0
+    maximum: 1
+  y:
+    type: number
+    minimum: 0
+    maximum: 1
+  width:
+    type: number
+    exclusiveMinimum: 0
+    maximum: 1
+  height:
+    type: number
+    exclusiveMinimum: 0
+    maximum: 1
+  image_width:
+    type: integer
+    minimum: 1
+  image_height:
+    type: integer
+    minimum: 1
+  label:
+    type: string
+    minLength: 1
+    maxLength: 128
+    pattern: ^[^\x00]*$
+required:
+  - coordinate_system
+  - x
+  - y
+  - width
+  - height
+description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 ```
 
 </details>

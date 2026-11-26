@@ -45,6 +45,7 @@ type API struct {
 	RoutingOperations *adminrouting.Service
 	Queues            workqueue.Reader
 	Audit             audit.Store
+	auditReads        bool
 	draining          func() bool
 	processWork       context.Context
 	router            *routing.Mux
@@ -258,6 +259,7 @@ type cursor struct {
 }
 
 func scopeDigest(s corpus.Scope) string {
+	s.ActorID = "" // Audit attribution does not change permissions or pagination.
 	s.Actions = append([]string{}, s.Actions...)
 	s.Corpora = append([]string{}, s.Corpora...)
 	sort.Strings(s.Actions)

@@ -1,0 +1,21 @@
+id: example.vision
+version: 0.1.0
+description: Normative multimodal ingestion plugin with a Cross-modal Vector Space.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.20.0 <0.21.0"
+contributions:
+  ingestion:
+    spaces:
+      example.vision.image:
+        version: "1"
+        model: example/vision-4
+        dimensions: 4
+        metric: cosine
+        indexes: [image]
+        query_modalities: [text]
+    timeout_ms: 10000
+    query_timeout_ms: 500
+    limits:
+      max_segments: 16
+      max_response_bytes: 65536

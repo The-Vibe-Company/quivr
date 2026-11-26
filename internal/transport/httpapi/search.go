@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -101,6 +102,26 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	for i, h := range result.Hits {
 		hit := transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.AnchorText(), Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)}
+		if h.Segment.Derivation.Region != nil {
+			r := h.Segment.Derivation.Region
+			region := transport.ImageRegion{
+				CoordinateSystem: transport.ImageRegionCoordinateSystem(r.CoordinateSystem),
+				X:                float32(r.X),
+				Y:                float32(r.Y),
+				Width:            float32(r.Width),
+				Height:           float32(r.Height),
+				Label:            optionalString(r.Label),
+			}
+			if r.ImageWidth > 0 {
+				w := r.ImageWidth
+				region.ImageWidth = &w
+			}
+			if r.ImageHeight > 0 {
+				ht := r.ImageHeight
+				region.ImageHeight = &ht
+			}
+			hit.Region = &region
+		}
 		if len(h.Segment.SourceExcerpts) > 0 {
 			hit.PassageText = optionalString(h.Segment.Text)
 			excerpts := []struct {
@@ -125,6 +146,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	if u := result.Usage; u != nil {
 		response.Usage = usageToTransport(*u)
+		w.Header().Set("Server-Timing", serverTiming(u.Phases))
 	}
 	send(w, 200, response)
 }
@@ -132,6 +154,11 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 // usageToTransport is what a search spent, with each phase in whole
 // milliseconds, rounded down.
 func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
+	// A search that ranked nothing spent no round, and the contract requires
+	// at least one: its phases reach the Server-Timing header only.
+	if u.Rounds == 0 {
+		return nil
+	}
 	ph := u.Phases
 	profiles := make([]transport.SearchProfileUsage, 0, len(u.Profiles))
 	for _, p := range u.Profiles {
@@ -144,6 +171,20 @@ func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
 		out.Profiles = &profiles
 	}
 	return out
+}
+
+// serverTiming renders the phases as a Server-Timing header value, each metric
+// in milliseconds with microsecond precision.
+func serverTiming(p retrieval.Phases) string {
+	metrics := []struct {
+		name string
+		d    time.Duration
+	}{{"routing", p.Routing}, {"coverage", p.Coverage}, {"plugin", p.PluginRounds}, {"encode", p.QueryEncoding}, {"index", p.IndexQuery}, {"hydrate", p.Hydration}}
+	parts := make([]string, len(metrics))
+	for i, m := range metrics {
+		parts[i] = m.name + ";dur=" + strconv.FormatFloat(float64(m.d.Microseconds())/1000, 'f', -1, 64)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // searchProfiles lists the search profiles this deployment answers.

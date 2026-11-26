@@ -622,3 +622,8 @@
     transition: none;
   }
 }
+
+.search-phases { width: 100%; border-collapse: collapse; }
+.search-phases th, .search-phases td { padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.search-phases th[scope="row"], .search-phases thead th:first-child { text-align: left; font-weight: 500; }
+.search-phases meter { width: 100%; min-width: 80px; }

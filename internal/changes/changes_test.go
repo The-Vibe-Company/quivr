@@ -75,3 +75,26 @@ func TestResumeStateSurvivesServiceReadsAndV1RemainsNumeric(t *testing.T) {
 		t.Fatalf("v1 resume=%+v err=%v", legacy, err)
 	}
 }
+
+func TestChangeCursorsSurviveAddingActorID(t *testing.T) {
+	service := Service{Journal: &resumeJournal{}, Key: []byte("cursor-key")}
+	original := testScope()
+	withActor := original
+	withActor.ActorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+
+	for _, tc := range []struct {
+		name string
+		want Resume
+	}{
+		{"numeric", Resume{Position: 7}},
+		{"snapshot", Resume{Position: 7, StartID: "start-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cursor := service.CursorResume(original, "corpus", tc.want)
+			got, err := service.Start(t.Context(), withActor, "corpus", cursor)
+			if err != nil || got != tc.want {
+				t.Fatalf("resume after adding actor_id: got %+v, error %v, want %+v", got, err, tc.want)
+			}
+		})
+	}
+}

@@ -45,3 +45,22 @@ func TestSearchUsageNamesEachPhase(t *testing.T) {
 	}
 
 }
+
+// Server-Timing names each phase with the vocabulary of the HTTP header, in
+// milliseconds with microsecond precision.
+func TestServerTimingNamesEachPhase(t *testing.T) {
+	us := func(n int) time.Duration { return time.Duration(n) * time.Microsecond }
+	got := serverTiming(retrieval.Phases{Routing: us(1500), Coverage: us(2), PluginRounds: us(3000), QueryEncoding: us(4250), IndexQuery: us(0), Hydration: us(6001)})
+	want := "routing;dur=1.5, coverage;dur=0.002, plugin;dur=3, encode;dur=4.25, index;dur=0, hydrate;dur=6.001"
+	if got != want {
+		t.Fatalf("Server-Timing %q; want %q", got, want)
+	}
+}
+
+// A search that ranked nothing spent no round: the contract's usage needs at
+// least one, so the body omits it.
+func TestSearchUsageIsOmittedWithoutARound(t *testing.T) {
+	if got := usageToTransport(retrieval.Usage{Elapsed: time.Millisecond, Phases: retrieval.Phases{Routing: time.Millisecond}}); got != nil {
+		t.Fatalf("usage %+v; want none", got)
+	}
+}

@@ -201,6 +201,8 @@ type Service struct {
 	Registry SpaceRegistry
 	// Coverage, when set, keeps the Registry's answers for a short time.
 	Coverage *CoverageCache
+	// QueryVectors is shared by searches using these encoders.
+	QueryVectors *QueryVectorCache
 	// MinRerankBudget is the minimum remaining deadline budget required to run
 	// deep reranking before degrading gracefully to default hybrid results.
 	// Zero selects DefaultMinRerankBudget.
@@ -368,6 +370,8 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		m := s.Ranker.Manifest()
 		out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
+		elapsed := time.Since(started)
+		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}, OverObjective: elapsed > m.Contributions.Retrieval.Profiles[q.Profile].Objective()}
 		return out, nil
 	}
 	return s.rank(ctx, parentCtx, scope, q, routes, out, started)

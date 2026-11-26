@@ -1,0 +1,24 @@
+{
+  "segments": [
+    {
+      "part_key": "image",
+      "start": 0,
+      "end": 0,
+      "region": {
+        "coordinate_system": "normalized_bbox",
+        "x": 0.75,
+        "y": 0.0,
+        "width": 0.5,
+        "height": 1.0
+      },
+      "vectors": {
+        "example.vision.image": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ]
+      }
+    }
+  ]
+}
