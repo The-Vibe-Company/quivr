@@ -92,7 +92,7 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.ingestion.spaces.<name>.model` | string | yes | The model that produces the vectors, for people and reports. 1 to 256 characters. |
 | `contributions.ingestion.spaces.<name>.dimensions` | integer | yes | 1 to 4096. |
 | `contributions.ingestion.spaces.<name>.metric` | `cosine`, `dot`, `l2` | yes | The distance the index uses for this space. |
-| `contributions.ingestion.spaces.<name>.indexes` | array of `text` | yes | Modalities of the content this space embeds. Plugin API 0.6 knows only text. |
+| `contributions.ingestion.spaces.<name>.indexes` | array of `text`, `image` | yes | Modalities of the content this space embeds. Plugin API 0.6 knows text; Plugin API 0.20 adds image. |
 | `contributions.ingestion.spaces.<name>.query_modalities` | array of `text` | yes | Modalities of the queries embed_query encodes into this space. Plugin API 0.6 knows only text. |
 | `contributions.ingestion.spaces.<name>.description` | string | no | 1 to 1024 characters. |
 | `contributions.ingestion.spaces.<name>.input_price` | object | no | Since Plugin API 0.9: what embedding text in this space costs, for the estimate a backfill shows before it starts. Absent, the cost of a backfill is unknown. |

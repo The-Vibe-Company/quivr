@@ -564,6 +564,21 @@ func (e FieldMappingType) Valid() bool {
 	}
 }
 
+// Defines values for ImageRegionCoordinateSystem.
+const (
+	NormalizedBbox ImageRegionCoordinateSystem = "normalized_bbox"
+)
+
+// Valid indicates whether the value is a known member of the ImageRegionCoordinateSystem enum.
+func (e ImageRegionCoordinateSystem) Valid() bool {
+	switch e {
+	case NormalizedBbox:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManifestContentKind.
 const (
 	Manifest ManifestContentKind = "manifest"
@@ -968,12 +983,18 @@ func (e SavedQueryDefinitionTemporalPolicy) Valid() bool {
 
 // Defines values for SearchDegradationReason.
 const (
-	VectorsUnavailable SearchDegradationReason = "vectors_unavailable"
+	RerankerBudgetExceeded SearchDegradationReason = "reranker_budget_exceeded"
+	RerankerUnavailable    SearchDegradationReason = "reranker_unavailable"
+	VectorsUnavailable     SearchDegradationReason = "vectors_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the SearchDegradationReason enum.
 func (e SearchDegradationReason) Valid() bool {
 	switch e {
+	case RerankerBudgetExceeded:
+		return true
+	case RerankerUnavailable:
+		return true
 	case VectorsUnavailable:
 		return true
 	default:
@@ -1525,13 +1546,25 @@ type AdminDocumentPage struct {
 type AuditEvent struct {
 	Action string `json:"action"`
 
-	// Actor SHA-256-derived API key identifier; empty for unauthenticated attempts.
-	Actor  string `json:"actor"`
-	Detail struct {
+	// Actor Legacy field for the API key identifier; empty when no API key is authenticated.
+	Actor string `json:"actor"`
+
+	// ActorId Opaque actor identifier. Omitted when no actor could be authenticated.
+	ActorId *string `json:"actor_id,omitempty"`
+
+	// ApiKeyId SHA-256-derived identifier of the authenticated API key.
+	ApiKeyId *string `json:"api_key_id,omitempty"`
+
+	// CorrelationId Request correlation identifier from X-Request-ID.
+	CorrelationId *string `json:"correlation_id,omitempty"`
+	Detail        struct {
 		CredentialVersion *int    `json:"credential_version,omitempty"`
 		ErrorCode         *string `json:"error_code,omitempty"`
 		PlanId            *string `json:"plan_id,omitempty"`
-		Status            int     `json:"status"`
+
+		// Route Registered HTTP route template or unmatched.
+		Route  *string `json:"route,omitempty"`
+		Status int     `json:"status"`
 	} `json:"detail"`
 
 	// Id Decimal audit identifier, represented as text to preserve bigint precision.
@@ -2401,6 +2434,21 @@ type FieldMappingRoles string
 // FieldMappingType defines model for FieldMapping.Type.
 type FieldMappingType string
 
+// ImageRegion Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
+type ImageRegion struct {
+	CoordinateSystem ImageRegionCoordinateSystem `json:"coordinate_system"`
+	Height           float32                     `json:"height"`
+	ImageHeight      *int                        `json:"image_height,omitempty"`
+	ImageWidth       *int                        `json:"image_width,omitempty"`
+	Label            *string                     `json:"label,omitempty"`
+	Width            float32                     `json:"width"`
+	X                float32                     `json:"x"`
+	Y                float32                     `json:"y"`
+}
+
+// ImageRegionCoordinateSystem defines model for ImageRegion.CoordinateSystem.
+type ImageRegionCoordinateSystem string
+
 // IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. When the normalizer fails, the Version is quarantined with a Diagnostic on the Version read (or, on an optional text/* route, published through the built-in text path with provenance.normalization.fallback). Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written only by its normalizer output, published on the Version; a submission writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
 type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
@@ -3152,11 +3200,11 @@ type ScheduleChange struct {
 type SearchDegradation struct {
 	CorpusIds []string `json:"corpus_ids"`
 
-	// Reason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+	// Reason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 	Reason SearchDegradationReason `json:"reason"`
 }
 
-// SearchDegradationReason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+// SearchDegradationReason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 type SearchDegradationReason string
 
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
@@ -3202,9 +3250,12 @@ type SearchHit struct {
 	ProjectionGenerationId string  `json:"projection_generation_id"`
 	Rank                   int     `json:"rank"`
 	RecordId               string  `json:"record_id"`
-	SegmentId              string  `json:"segment_id"`
-	SegmentationId         string  `json:"segmentation_id"`
-	SourceExcerpts         *[]struct {
+
+	// Region Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
+	Region         *ImageRegion `json:"region,omitempty"`
+	SegmentId      string       `json:"segment_id"`
+	SegmentationId string       `json:"segmentation_id"`
+	SourceExcerpts *[]struct {
 		CoordinateSystem SearchHitSourceExcerptsCoordinateSystem `json:"coordinate_system"`
 		End              int                                     `json:"end"`
 		PartKey          string                                  `json:"part_key"`
@@ -3230,7 +3281,7 @@ type SearchPhases struct {
 
 // SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
-	// Degraded Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+	// Degraded Omitted when fully served. Reports authorized, non-excluded Corpora whose search degraded, for example hybrid searches using keywords when vectors are unavailable, or deep searches falling back to default results when reranking budget is tight or the reranker is unavailable. Present even when no documents match.
 	Degraded *[]SearchDegradation `json:"degraded,omitempty"`
 	Name     string               `json:"name"`
 	Version  string               `json:"version"`
@@ -3801,6 +3852,35 @@ type ListAuditEventsParams struct {
 
 	// Actor Exact API key identifier; no substring matching.
 	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// Action Exact audit action name; no substring matching.
+	Action *string `form:"action,omitempty" json:"action,omitempty"`
+
+	// TargetType Exact target type; no substring matching.
+	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
+
+	// TargetId Exact target identifier; no substring matching.
+	TargetId   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+}
+
+// ExportAuditEventsParams defines parameters for ExportAuditEvents.
+type ExportAuditEventsParams struct {
+	// Since Inclusive RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until Exclusive RFC3339 timestamp.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// Actor Exact API key identifier; no substring matching.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// ActorId Exact opaque actor identifier.
+	ActorId *string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
 
 	// Action Exact audit action name; no substring matching.
 	Action *string `form:"action,omitempty" json:"action,omitempty"`
@@ -4638,8 +4718,13 @@ type ClientInterface interface {
 
 	// ListAuditEvents performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 	//
-	// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+	// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 	ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportAuditEvents performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+	//
+	// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+	ExportAuditEvents(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestBackfillWithBody performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
 	// with any type of body and a specified content type.
@@ -5194,13 +5279,13 @@ type ClientInterface interface {
 	// IngestBatchWithBody performs a POST /v0/records/batch (the `IngestBatch` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	IngestBatchWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// IngestBatch performs a POST /v0/records/batch (the `IngestBatch` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	IngestBatch(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CountRecords performs a GET /v0/records/count (the `CountRecords` operationId) request.
@@ -5291,13 +5376,13 @@ type ClientInterface interface {
 	// SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -5451,9 +5536,24 @@ func (c *Client) ListActivePlugins(ctx context.Context, reqEditors ...RequestEdi
 
 // ListAuditEvents performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 //
-// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 func (c *Client) ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAuditEventsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportAuditEvents performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+//
+// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+func (c *Client) ExportAuditEvents(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportAuditEventsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6977,7 +7077,7 @@ func (c *Client) IngestRecord(ctx context.Context, body IngestRecordJSONRequestB
 // IngestBatchWithBody performs a POST /v0/records/batch (the `IngestBatch` operationId) request,
 // with any type of body and a specified content type.
 //
-// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 func (c *Client) IngestBatchWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIngestBatchRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -6993,7 +7093,7 @@ func (c *Client) IngestBatchWithBody(ctx context.Context, contentType string, bo
 // IngestBatch performs a POST /v0/records/batch (the `IngestBatch` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 func (c *Client) IngestBatch(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIngestBatchRequest(c.Server, body)
 	if err != nil {
@@ -7244,7 +7344,7 @@ func (c *Client) GetSavedQueryVersion(ctx context.Context, savedQueryId string, 
 // SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -7260,7 +7360,7 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
 	if err != nil {
@@ -7718,6 +7818,168 @@ func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*h
 		if params.Actor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor", *params.Actor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Action != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "action", *params.Action, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.TargetType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "target_type", *params.TargetType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.TargetId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "target_id", *params.TargetId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PageCursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page_cursor", *params.PageCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportAuditEventsRequest constructs an http.Request for the ExportAuditEvents method
+func NewExportAuditEventsRequest(server string, params *ExportAuditEventsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/audit/export")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "since", *params.Since, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Until != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "until", *params.Until, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Actor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor", *params.Actor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -12539,10 +12801,17 @@ type ClientWithResponsesInterface interface {
 
 	// ListAuditEventsWithResponse performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 	//
-	// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+	// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error)
+
+	// ExportAuditEventsWithResponse performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+	//
+	// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ExportAuditEventsWithResponse(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*ExportAuditEventsResponse, error)
 
 	// RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
 	// with any type of body and a specified content type.
@@ -13235,7 +13504,7 @@ type ClientWithResponsesInterface interface {
 	// IngestBatchWithBodyWithResponse performs a POST /v0/records/batch (the `IngestBatch` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	IngestBatchWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*IngestBatchResponse, error)
@@ -13243,7 +13512,7 @@ type ClientWithResponsesInterface interface {
 	// IngestBatchWithResponse performs a POST /v0/records/batch (the `IngestBatch` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	IngestBatchWithResponse(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*IngestBatchResponse, error)
 
 	// CountRecordsWithResponse performs a GET /v0/records/count (the `CountRecords` operationId) request.
@@ -13354,7 +13623,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
@@ -13362,7 +13631,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
 
 	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -13619,6 +13888,61 @@ func (r ListAuditEventsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListAuditEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ExportAuditEventsResponse200Headers the declared response headers of an HTTP 200 response for ExportAuditEvents
+type ExportAuditEventsResponse200Headers struct {
+	ContentDisposition *string
+}
+
+type ExportAuditEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AuditEventPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ExportAuditEventsResponse200Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ExportAuditEventsResponse) GetJSON200() *AuditEventPage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ExportAuditEventsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportAuditEventsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportAuditEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportAuditEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportAuditEventsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -17590,6 +17914,12 @@ func (r GetSavedQueryVersionResponse) ContentType() string {
 	return ""
 }
 
+// SearchRecordsResponse200Headers the declared response headers of an HTTP 200 response for SearchRecords
+type SearchRecordsResponse200Headers struct {
+	ServerTiming   *string
+	XCorrelationID *string
+}
+
 // SearchRecordsResponseDefaultHeaders the declared response headers of an HTTP default response for SearchRecords
 type SearchRecordsResponseDefaultHeaders struct {
 	RetryAfter *int
@@ -17602,6 +17932,8 @@ type SearchRecordsResponse struct {
 	JSON200 *SearchResponse
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *SearchRecordsResponse200Headers
 	// HeadersDefault the parsed response headers for an HTTP default response
 	HeadersDefault *SearchRecordsResponseDefaultHeaders
 }
@@ -18380,7 +18712,7 @@ func (c *ClientWithResponses) ListActivePluginsWithResponse(ctx context.Context,
 
 // ListAuditEventsWithResponse performs a GET /v0/admin/audit (the `ListAuditEvents` operationId) request.
 //
-// List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+// List immutable audit entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error) {
@@ -18389,6 +18721,19 @@ func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, p
 		return nil, err
 	}
 	return ParseListAuditEventsResponse(rsp)
+}
+
+// ExportAuditEventsWithResponse performs a GET /v0/admin/audit/export (the `ExportAuditEvents` operationId) request.
+//
+// Download an organization-scoped JSON page of audit entries, newest first. Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit with each export cursor to download subsequent pages. Export requests are audited.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ExportAuditEventsWithResponse(ctx context.Context, params *ExportAuditEventsParams, reqEditors ...RequestEditorFn) (*ExportAuditEventsResponse, error) {
+	rsp, err := c.ExportAuditEvents(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportAuditEventsResponse(rsp)
 }
 
 // RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
@@ -19658,7 +20003,7 @@ func (c *ClientWithResponses) IngestRecordWithResponse(ctx context.Context, body
 // IngestBatchWithBodyWithResponse performs a POST /v0/records/batch (the `IngestBatch` operationId) request,
 // with any type of body and a specified content type.
 //
-// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) IngestBatchWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*IngestBatchResponse, error) {
@@ -19672,7 +20017,7 @@ func (c *ClientWithResponses) IngestBatchWithBodyWithResponse(ctx context.Contex
 // IngestBatchWithResponse performs a POST /v0/records/batch (the `IngestBatch` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
+// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries still return their receipts or errors. Retry the affected entry using its original key. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 func (c *ClientWithResponses) IngestBatchWithResponse(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*IngestBatchResponse, error) {
 	rsp, err := c.IngestBatch(ctx, body, reqEditors...)
 	if err != nil {
@@ -19879,7 +20224,7 @@ func (c *ClientWithResponses) GetSavedQueryVersionWithResponse(ctx context.Conte
 // SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
@@ -19893,7 +20238,7 @@ func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Cont
 // SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
 	rsp, err := c.SearchRecords(ctx, body, reqEditors...)
 	if err != nil {
@@ -20264,6 +20609,52 @@ func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse,
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseExportAuditEventsResponse parses an HTTP response from a ExportAuditEventsWithResponse call
+func ParseExportAuditEventsResponse(rsp *http.Response) (*ExportAuditEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportAuditEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AuditEventPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ExportAuditEventsResponse200Headers
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		response.Headers200 = &headers
 	}
 
 	return response, nil
@@ -23125,6 +23516,23 @@ func ParseSearchRecordsResponse(rsp *http.Response) (*SearchRecordsResponse, err
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers SearchRecordsResponse200Headers
+		if values := rsp.Header.Values("Server-Timing"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Server-Timing", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ServerTiming = &value
+		}
+		if values := rsp.Header.Values("X-Correlation-ID"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "X-Correlation-ID", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.XCorrelationID = &value
+		}
+		response.Headers200 = &headers
 	case true:
 		var headers SearchRecordsResponseDefaultHeaders
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {

@@ -6,6 +6,7 @@ sys.path.insert(0,str(ROOT))
 from prepare_tokenizer import prepare as prepare_tokenizer, requirements
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
+import go_bin_cache
 import local_secrets
 import gotest
 import guides
@@ -69,6 +70,19 @@ PORT_KEYS=['api_port','probe_port','worker_probe_port','short_api_port','short_p
 # DISK_LIMIT, which leaves room for what the run itself writes.
 DISK_LIMIT=85
 
+# Dev profiles for `make dev`: `full` runs the complete stack with TEI and optional sidecars;
+# `fast` (`make dev-fast` / `QUIVR_DEV_PROFILE=fast`) skips TEI/model download and non-essential
+# sidecars, wiring cached hash-embedder + core-retrieve for core/search/API work.
+DEV_PROFILES=('full','fast')
+CORE_SERVICES=('postgres','temporal','seaweed','weaviate')
+
+def dev_profile_from_environment(override=None):
+    """Resolve the dev profile from CLI override or QUIVR_DEV_PROFILE (default: full)."""
+    value=(override if override is not None else os.environ.get('QUIVR_DEV_PROFILE') or 'full').strip().lower()
+    if value not in DEV_PROFILES:
+        raise ValueError(f"QUIVR_DEV_PROFILE must be one of {', '.join(DEV_PROFILES)}, not {value!r}")
+    return value
+
 def docker_disk():
     """(Docker data root, percent used) of the disk holding Docker volumes, or None when it is not on
     this host (Docker Desktop keeps it in a VM). Computed like Weaviate: reserved blocks count as free."""
@@ -109,6 +123,22 @@ class Stack:
         s3file=self.directory/'s3.json';s3file.write_text(json.dumps(identities));s3file.chmod(0o644)
     def save(self):
         self.statefile.write_text(json.dumps(self.state));self.statefile.chmod(0o600)
+    @property
+    def dev_profile(self):
+        return 'full' if self.verifying else self.state.get('dev_profile','full')
+    def uses_tei(self):
+        return self.dev_profile!='fast'
+    def uses_fast_ingestion(self):
+        return self.dev_profile=='fast'
+    def use_push_plugin(self):
+        return True if self.verifying else bool(self.state.get('push_plugin',True))
+    def use_fixture_plugin(self):
+        return True if self.verifying else bool(self.state.get('fixture_plugin',True))
+    def needs_fake_graph(self):
+        return self.verifying or any(row['id']=='m365-mail' for row in connector_plugin.first_party(self))
+    def build_quivr(self):
+        cached=go_bin_cache.ensure('quivr',self.source,'./cmd/quivr',go=GO)
+        return go_bin_cache.materialize(cached,self.directory/'quivr')
     def compose(self,*args,**kwargs):
         files=['-f',str(self.source/'deploy/compose/compose.yaml')]+(['-f',str(self.source/'deploy/compose/compose.macos.yaml')] if MACOS else [])
         declaration=self.source/'deploy/infrastructure.json'
@@ -125,13 +155,18 @@ class Stack:
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
-        if MACOS:tei=self.compose('port','tei','80',capture_output=True,text=True).stdout.strip()
+        if self.uses_tei():
+            if MACOS:tei=self.compose('port','tei','80',capture_output=True,text=True).stdout.strip()
+            else:
+                tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
+                tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
+            # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
+            tei_url='http://'+tei
+            s['tei_url']=tei_url;self.save()
         else:
-            tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
-            tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
-        # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
-        s['tei_url']='http://'+tei;self.save()
-        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
+            tei_url=''
+            s.pop('tei_url',None);self.save()
+        cfg=dict(tei_url=tei_url,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
             # api and worker follow a plugin activation within this delay (THE-781).
             plugin_plan_poll='200ms',
             # Verification exercises snapshots promptly; dev keeps deployment pacing.
@@ -188,14 +223,18 @@ class Stack:
             # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
             # verification the sample connector plugin (scripts/connector_plugin.py). The shared fake plugin
             # supplies the scripted connector and notification-mechanics evaluator.
-            plugins=push_plugin.pins(self)+subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),
+            plugins=(push_plugin.pins(self) if self.use_push_plugin() else [])+subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self)+ingestion_plugin.fast_pins(self)+(fixture_plugin.pins(self) if self.use_fixture_plugin() else []),
             # Counts reach the stats reads within 200 ms; query text is recorded so top queries can be read back.
             observability=OBSERVABILITY_OVERRIDES)
-        # The keyless variant exercises missing credential deposits and providers.
+        if self.uses_fast_ingestion():
+            cfg['ingestion']={'default':'example.hash_embedder'}
+        # Keyless variant (THE-691): same stack without credential_key, its own Organization
+        # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
         keyless={**cfg, 's3':dict(cfg['s3']), 'destinations':{k:dict(v) for k,v in cfg['destinations'].items()}}
         keyless.pop('credential_key')
-        keyless.update(log_directory=str(keyless_logs),plugins=push_plugin.pins(self)+subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
+        keyless.update(log_directory=str(keyless_logs),plugins=(push_plugin.pins(self) if self.use_push_plugin() else [])+subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+ingestion_plugin.fast_pins(self)+(fixture_plugin.pins(self) if self.use_fixture_plugin() else []),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
         # Conformance can build a pre-secret-bindings binary at an older revision.
         if (self.source/'internal/app/secret_config.go').is_file():
             local_secrets.split_config(self.directory, cfg)
@@ -203,7 +242,8 @@ class Stack:
         elif os.environ.get('WEAVIATE_API_KEY'):
             cfg['weaviate_api_key'] = keyless['weaviate_api_key'] = os.environ['WEAVIATE_API_KEY']
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
-        (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
+        if self.uses_tei():
+            (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         worker=self.directory/'worker.json';worker.write_text(json.dumps({**cfg,'probe_listen':f"127.0.0.1:{s['worker_probe_port']}",'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
@@ -291,7 +331,8 @@ class Stack:
             from fake_api import Fake
             self.fake_graph=Fake('graph', self.state['graph_port'])
     def start_processes(self,keyless=False):
-        self.start_fake_graph()
+        if self.needs_fake_graph():
+            self.start_fake_graph()
         for command,config in [('api','keyless.json' if keyless else 'config.json'),('worker','keyless-worker.json' if keyless else 'worker.json')]:self.spawn(command,config)
         for key in ['probe_port','worker_probe_port']:self.await_ready(key)
     def owns_process(self,pid):
@@ -358,21 +399,43 @@ class Stack:
     def up(self):
         self.check_disk()
         self.stop_processes()
-        prepare_tokenizer()
-        (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
-        run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'],cwd=self.source)
+        if self.uses_tei():
+            prepare_tokenizer()
+            (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
+        self.build_quivr()
         self.start_dependencies()
-        normalizer_plugin.prepare(self);subscription_plugin.prepare(self);fixture_plugin.prepare(self)
-        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);push_plugin.start(self);connector_plugin.start_first_party(self);fixture_plugin.start(self);self.start_processes()
-    def start_dependencies(self,attempts=2):
+        normalizer_plugin.prepare(self);subscription_plugin.prepare(self)
+        if self.use_fixture_plugin():
+            fixture_plugin.prepare(self)
+        self.migrate()
+        if self.verifying:
+            self.migrate()
+        normalizer_plugin.start(self);subscription_plugin.start(self)
+        if self.use_push_plugin():
+            push_plugin.start(self)
+        else:
+            push_plugin.stop(self)
+        connector_plugin.start_first_party(self)
+        ingestion_plugin.start_fast(self)
+        if self.use_fixture_plugin():
+            fixture_plugin.start(self)
+        else:
+            fixture_plugin.stop(self)
+        self.start_processes()
+    def start_dependencies(self,*services,attempts=2,wait_timeout=180):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
         more bounded attempt; every retry is recorded in readiness.json, never hidden."""
+        if not services and not self.uses_tei():
+            # Switching an existing full stack to fast stops and removes any TEI container so it
+            # neither consumes resources nor shows up as exited during retry checks.
+            self.compose('rm','-s','-f','tei')
+            services=CORE_SERVICES
         for attempt in range(1,attempts+1):
             try:
-                self.compose('up','-d','--wait','--wait-timeout','180');return
+                self.compose('up','-d','--wait','--wait-timeout',str(wait_timeout),*services);return
             except subprocess.CalledProcessError as error:
-                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',capture_output=True,text=True).stdout.split()
+                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',*services,capture_output=True,text=True).stdout.split()
                 self.readiness.setdefault('dependency_start_retries',[]).append({'attempt':attempt,'exited':crashed})
                 self.save_readiness()
                 # Only a crashed dependency is retried; a healthcheck timeout fails at once.
@@ -417,7 +480,7 @@ class Stack:
                 try: os.kill(pid,signal.SIGKILL)
                 except ProcessLookupError: pass
             s['pids']=[];self.save()
-            self.compose('start',dependency)
+            self.start_dependencies(dependency, wait_timeout=90)
             self.config()
             self.start_processes()
             replay=call('POST','/v0/records',command);assert replay['receipt_id']==rid
@@ -494,7 +557,8 @@ class Stack:
                 with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/metrics",timeout=2) as r:(self.directory/f'metrics-{name}.txt').write_bytes(r.read())
             except OSError:pass
         with (self.directory/'services.json').open('w') as out:self.compose('ps','--all','--format','json',stdout=out)
-        for service in ['postgres','temporal','seaweed','weaviate','tei']:
+        services=['postgres','temporal','seaweed','weaviate','tei'] if self.uses_tei() else list(CORE_SERVICES)
+        for service in services:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
     def down(self,reset=False):
         """Stop this project's processes and containers. reset also deletes its volumes and the
@@ -502,7 +566,7 @@ class Stack:
         started again (make dev initializes a fresh schema)."""
         if hasattr(self,"fake_x"): self.fake_x.close()
         if hasattr(self,"fake_graph"): self.fake_graph.close()
-        normalizer_plugin.stop(self);subscription_plugin.stop(self);push_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);fixture_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);push_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);ingestion_plugin.stop_fast(self);fixture_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)
             self.save()
@@ -769,7 +833,12 @@ def finish(stack,steps,status,start):
         if kept:print(f'Kept for inspection (QUIVR_KEEP_ON_FAILURE=1). Remove it with: QUIVR_PROJECT={stack.name} make reset')
         for sig,handler in previous.items():signal.signal(sig,handler)
 
-def run_stack(command,part=None):
+def describe_dev_profile(stack):
+    if stack.dev_profile=='fast':
+        return 'Dev profile: fast (hash-embedder + core-retrieve; TEI/model and optional sidecars skipped; run `make dev` for full stack)'
+    return 'Dev profile: full (TEI/E5 + all sidecars; run `make dev-fast` or `QUIVR_DEV_PROFILE=fast make dev` for a lightweight loop)'
+
+def run_stack(command,part=None,profile=None):
     """dev, down, reset, migrate, or verify one part on its own isolated stack."""
     verification=command=='verify'
     # QUIVR_PROJECT selects an existing project for down/reset/migrate, e.g. a kept verification run.
@@ -782,15 +851,22 @@ def run_stack(command,part=None):
     steps=verify_report.Steps(echo=print if verification else None);stack.steps=steps;start=time.monotonic();status='failed'
     try:
         if command in ['dev','verify']:
+            dev_profile='full' if verification else dev_profile_from_environment(profile)
+            fast=dev_profile=='fast'
+            stack.state['dev_profile']=dev_profile
+            stack.state['push_plugin']=not fast
+            stack.state['fixture_plugin']=not fast
+            stack.save()
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.
-            normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
-            subscription_plugin.select(stack,verification or subscription_plugin.from_environment(),subscription_plugin.described_mode(verification))
+            normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment(default='none' if fast else 'pdf-text'))
+            alerts_enabled=True if verification else subscription_plugin.from_environment(default='off' if fast else 'on')
+            subscription_plugin.select(stack,alerts_enabled,subscription_plugin.described_mode(verification),template=not fast)
             connector_plugin.select(stack,verification)
             # First-party connector plugins: always in verification, QUIVR_<ID>=on|off in make dev.
-            connector_plugin.select_first_party(stack,[r['id'] for r in connector_plugin.FIRST_PARTY] if verification else connector_plugin.from_environment())
+            connector_plugin.select_first_party(stack,[r['id'] for r in connector_plugin.FIRST_PARTY] if verification else connector_plugin.from_environment(fast=fast))
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps,part)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — use it from this shell: eval \"$(make -s env)\"\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — use it from this shell: eval \"$(make -s env)\"\n{describe_dev_profile(stack)}\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
         elif command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(command=='reset')
         status='passed'
@@ -814,13 +890,17 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('command',choices=['dev','verify','down','reset','migrate','env'])
     parser.add_argument('--part',default='',help='verify only these parts, comma-separated (default: every part, then the demo)')
+    parser.add_argument('--profile',choices=DEV_PROFILES,default=None,help='dev profile: full (default) or fast (skip TEI/model and optional sidecars)')
     args=parser.parse_args()
     if args.command=='env':return environment()
+    if args.profile is not None and args.command!='dev':
+        parser.error('--profile is only supported with `dev`')
     # Fail before building or pulling anything on a host the stack does not run on (THE-808).
     try:
-        if args.command in ('dev','verify'):requirements()
-    except RuntimeError as error:sys.exit(str(error))
-    if args.command!='verify':return run_stack(args.command)
+        dev_profile=dev_profile_from_environment(args.profile) if args.command=='dev' else 'full'
+        if args.command=='verify' or (args.command=='dev' and dev_profile!='fast'):requirements()
+    except (RuntimeError,ValueError) as error:sys.exit(str(error))
+    if args.command!='verify':return run_stack(args.command,profile=args.profile)
     if MACOS:sys.exit('make verify runs on Linux x86_64 only, as in CI; on macOS, make dev and make check work.')
     default=list(parts())+[DEMO]
     known=default+list(extra_parts())

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,12 +17,15 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
-	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 func WithAudit(store audit.Store) Option { return func(a *API) { a.Audit = store } }
+
+// WithReadAudit enables auditing read and search attempts.
+func WithReadAudit(enabled bool) Option { return func(a *API) { a.auditReads = enabled } }
+
 func apiKeyID(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:16])
@@ -29,8 +33,7 @@ func apiKeyID(token string) string {
 
 type auditedRoute struct{ action, target, parameter string }
 
-// Only commands are enrolled; reads, searches, push delivery and ingestion do
-// not create audit events. Add new sensitive routes here when introduced.
+// Sensitive commands commit their audit events in the same transaction.
 var auditedRoutes = map[string]auditedRoute{
 	"PATCH /v0/corpora/{corpus_id}":                               {"corpus.rename", "corpus", "corpus_id"},
 	"POST /v0/corpora/{corpus_id}/archive":                        {"corpus.archive", "corpus", "corpus_id"},
@@ -53,6 +56,8 @@ var auditedRoutes = map[string]auditedRoute{
 	"DELETE /v0/connectors/{connector_id}/tokens/{token_id}":      {"token.revoke", "connector_token", "token_id"},
 	"POST /v0/records/withdrawals":                                {"record.withdraw", "record", ""},
 	"POST /v0/saved-queries/{saved_query_id}/delete":              {"saved_query.delete", "saved_query", "saved_query_id"},
+	"POST /v0/subscriptions/{subscription_id}/disable":            {"subscription.disable", "subscription", "subscription_id"},
+	"POST /v0/subscriptions/{subscription_id}/enable":             {"subscription.enable", "subscription", "subscription_id"},
 	"POST /v0/subscriptions/{subscription_id}/delete":             {"subscription.delete", "subscription", "subscription_id"},
 	"POST /v0/operations/{operation_id}/cancel":                   {"operation.cancel", "operation", "operation_id"},
 	"POST /v0/operations/{operation_id}/rerun":                    {"operation.rerun", "operation", "operation_id"},
@@ -60,27 +65,15 @@ var auditedRoutes = map[string]auditedRoute{
 	"POST /v0/operations/{operation_id}/resume":                   {"operation.resume", "operation", "operation_id"},
 	"POST /v0/admin/backfills":                                    {"operation.backfill", "operation", ""},
 	"POST /v0/admin/quarantine/reprocess":                         {"operation.reprocess", "operation", ""},
+	"POST " + evaluatorMigrationsPath:                             {"evaluation.migrate", "evaluator_migration", ""},
 	"POST /v0/admin/subscriptions/evaluation-retirements":         {"evaluation.retire", "evaluation_retirement", ""},
 	"POST /v0/admin/spaces/{vector_space_id}/promote":             {"vector_space.promote", "vector_space", "vector_space_id"},
 }
 
-func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
-	route, sensitive := auditedRoutes[r.Method+" "+r.Pattern]
-	if !sensitive || a.Audit == nil {
-		a.servePushAudited(w, r)
-		return
-	}
-	// Unknown keys have no authenticated actor or organization. Refuse them
-	// before database admission; the access log preserves the bounded refusal.
-	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	scope, known := a.Keys[token]
-	if !bearer || !known {
-		a.servePushAudited(w, r)
-		return
-	}
+func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request, route auditedRoute, event audit.Event) {
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
-	event := audit.Event{Action: route.action, TargetType: route.target, Actor: apiKeyID(token), Organization: scope.Organization, RequestID: logging.RequestID(ctx)}
+	event.Action, event.TargetType = route.action, route.target
 	pattern, parts := strings.Split(r.Pattern, "/"), strings.Split(r.URL.Path, "/")
 	for i, p := range pattern {
 		if p == "{"+route.parameter+"}" && i < len(parts) {
@@ -150,8 +143,13 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 				event.TargetType = "connector_token"
 				event.TargetID = boundedAuditID(result.Token.ID)
 			}
-			if buffered.status == 200 && (route.action == "operation.backfill" || route.action == "operation.reprocess" || (route.action == "evaluation.retire" && result.DryRun)) {
-				return audit.ErrReadOnly
+			if buffered.status == 200 && (route.action == "operation.backfill" || route.action == "operation.reprocess" || ((route.action == "evaluation.retire" || route.action == "evaluation.migrate") && result.DryRun)) {
+				if !a.auditReads {
+					return audit.ErrReadOnly
+				}
+				event.Action = "http.estimate"
+				event.TargetType, event.TargetID = "http_route", ""
+				return nil
 			}
 			if event.TargetID == "" {
 				ids := map[string]string{"corpus": result.CorpusID, "connector": result.ConnectorID, "plugin_registration": result.RegistrationID, "record": result.RecordID, "operation": result.OperationID, "pipeline_plan": result.PlanID, "evaluation_retirement": result.RetirementID}
@@ -195,6 +193,9 @@ func (b *auditBodyReplay) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func boundedAuditID(s string) string {
+	if !utf8.ValidString(s) || strings.ContainsRune(s, 0) {
+		return ""
+	}
 	if len(s) > 512 {
 		s = s[:512]
 		for !utf8.ValidString(s) {
@@ -237,9 +238,22 @@ type auditCursor struct {
 }
 
 func (a *API) ListAuditEvents(ctx context.Context, in transport.ListAuditEventsRequestObject) (transport.ListAuditEventsResponseObject, error) {
-	return transport.ListAuditEventsResponseFunc(func(w http.ResponseWriter) { a.listAudit(w, in.HTTPRequest, requestScope(ctx)) }), nil
+	return transport.ListAuditEventsResponseFunc(func(w http.ResponseWriter) {
+		a.listAudit(w, in.HTTPRequest, requestScope(ctx), false)
+	}), nil
 }
-func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+
+func (a *API) ExportAuditEvents(ctx context.Context, in transport.ExportAuditEventsRequestObject) (transport.ExportAuditEventsResponseObject, error) {
+	return transport.ExportAuditEventsResponseFunc(func(w http.ResponseWriter) {
+		a.listAudit(w, in.HTTPRequest, requestScope(ctx), true)
+	}), nil
+}
+
+func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Scope, export bool) {
+	cursorKind := "audit-page"
+	if export {
+		cursorKind = "audit-export-page"
+	}
 	if err := scope.Require(corpus.ActionAuditRead); err != nil {
 		writeError(w, err, nil)
 		return
@@ -248,12 +262,20 @@ func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 		writeError(w, publicerr.NotFound, nil)
 		return
 	}
-	q := r.URL.Query()
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, publicerr.InvalidSchema, nil)
+		return
+	}
 	limit, ok := pageLimit(w, q, 50, 200)
 	if !ok {
 		return
 	}
-	f := audit.Filter{Actor: q.Get("actor"), Action: q.Get("action"), TargetType: q.Get("target_type"), TargetID: q.Get("target_id"), Limit: limit + 1}
+	f := audit.Filter{ActorID: q.Get("actor_id"), Actor: q.Get("actor"), Action: q.Get("action"), TargetType: q.Get("target_type"), TargetID: q.Get("target_id"), Limit: limit + 1}
+	if q.Has("actor_id") && (len(q["actor_id"]) != 1 || !audit.ValidActorID(f.ActorID)) {
+		writeError(w, publicerr.WithField(publicerr.InvalidSchema, "/actor_id"), nil)
+		return
+	}
 	for name, dest := range map[string]*time.Time{"since": &f.Since, "until": &f.Until} {
 		if q.Has(name) {
 			t, err := time.Parse(time.RFC3339Nano, q.Get(name))
@@ -274,7 +296,7 @@ func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 	scopeID := scopeDigest(scope)
 	if q.Has("page_cursor") {
 		var c auditCursor
-		if a.decodePage("audit-page", q.Get("page_cursor"), &c) != nil || c.After <= 0 || c.Scope != scopeID || c.Filter != filterID {
+		if a.decodePage(cursorKind, q.Get("page_cursor"), &c) != nil || c.After <= 0 || c.Scope != scopeID || c.Filter != filterID {
 			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
@@ -288,15 +310,14 @@ func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = a.encodePage("audit-page", auditCursor{items[len(items)-1].ID, scopeID, filterID})
-	}
-	if items == nil {
-		items = []audit.Event{}
+		next = a.encodePage(cursorKind, auditCursor{items[len(items)-1].ID, scopeID, filterID})
 	}
 	// IDs are decimal strings so JavaScript clients preserve bigint precision.
 	out := transport.AuditEventPage{Items: make([]transport.AuditEvent, 0, len(items)), NextPageCursor: optionalString(next)}
 	for _, e := range items {
-		row := transport.AuditEvent{Id: strconv.FormatInt(e.ID, 10), Time: e.Time, Actor: e.Actor, Action: e.Action, TargetType: e.TargetType, TargetId: e.TargetID, Organization: e.Organization, Outcome: transport.AuditEventOutcome(e.Outcome), RequestId: e.RequestID}
+		row := transport.AuditEvent{Id: strconv.FormatInt(e.ID, 10), Time: e.Time, Actor: e.Actor, ActorId: optionalString(e.ActorID), ApiKeyId: optionalString(e.Actor),
+			CorrelationId: optionalString(e.RequestID), Action: e.Action, TargetType: e.TargetType, TargetId: e.TargetID, Organization: e.Organization, Outcome: transport.AuditEventOutcome(e.Outcome), RequestId: e.RequestID}
+		row.Detail.Route = optionalString(e.Detail.Route)
 		row.Detail.Status = e.Detail.Status
 		if e.Detail.CredentialVersion != 0 {
 			version := e.Detail.CredentialVersion
@@ -305,6 +326,10 @@ func (a *API) listAudit(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 		row.Detail.ErrorCode = optionalString(e.Detail.ErrorCode)
 		row.Detail.PlanId = optionalString(e.Detail.PlanID)
 		out.Items = append(out.Items, row)
+	}
+	if export {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Disposition", `attachment; filename="audit-events.json"`)
 	}
 	send(w, 200, out)
 }

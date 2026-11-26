@@ -21,6 +21,7 @@ and worker healthy, then switches the pin to pdf-text. Every oracle is a
 process exit status or a public HTTP read.
 """
 import ci_dependencies
+import go_bin_cache
 import plugin_environment
 import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request
 import ports
@@ -36,9 +37,9 @@ PLUGINS = {'pdf-text': ('pdf_text', ['application/pdf'], {}),
 CHOICES = [*PLUGINS, 'none']
 
 
-def from_environment():
-    """The selection of `make dev`: QUIVR_NORMALIZER, default pdf-text."""
-    return os.environ.get('QUIVR_NORMALIZER') or 'pdf-text'
+def from_environment(default='pdf-text'):
+    """The selection of `make dev`: QUIVR_NORMALIZER, default pdf-text (or none in fast dev)."""
+    return os.environ.get('QUIVR_NORMALIZER') or default
 
 
 def select(stack, name):
@@ -299,8 +300,7 @@ def failures(stack):
     quarantined Version before and after activating its fixed release, then restore the stack's pin."""
     directory = stack.directory / 'faulty-plugin'
     directory.mkdir(exist_ok=True)
-    binary = directory / 'quivr-fake-plugin'
-    subprocess.run([os.environ.get('GO', 'go'), 'test', '-c', '-o', str(binary), './tests/plugin-contract'], cwd=ROOT, check=True)
+    binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=os.environ.get('GO', 'go'), mode='test')
     manifest_path = directory / 'quivr-plugin.yaml'
     manifest_path.write_text(FAULTY_MANIFEST)
     port = stack_port()

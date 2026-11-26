@@ -154,7 +154,7 @@ CASE WHEN i IN (10007,20007,20008) THEN $2 ELSE $3 END,
 	if _, err := pool.Exec(ctx, "ANALYZE change_events"); err != nil {
 		t.Fatal(err)
 	}
-	trace := &changeReadTrace{}
+	trace := &lastReadTrace{}
 	cfgPool := pool.Config().Copy()
 	cfgPool.ConnConfig.Tracer = trace
 	traced, err := pgxpool.NewWithConfig(ctx, cfgPool)
@@ -170,15 +170,15 @@ CASE WHEN i IN (10007,20007,20008) THEN $2 ELSE $3 END,
 	}
 }
 
-// The calling pool executes only ReadChanges; fixture and EXPLAIN statements
-// use the untraced pool so the proof always analyzes the real adapter query.
-type changeReadTrace struct{ query pgx.TraceQueryStartData }
+// Fixture and EXPLAIN statements use an untraced pool so the plan tests
+// capture the query the adapter actually sent.
+type lastReadTrace struct{ query pgx.TraceQueryStartData }
 
-func (r *changeReadTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+func (r *lastReadTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
 	r.query = d
 	return ctx
 }
-func (*changeReadTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func (*lastReadTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 func assertChangeReadPlan(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query pgx.TraceQueryStartData, maxRows float64) {
 	t.Helper()
@@ -186,14 +186,14 @@ func assertChangeReadPlan(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+query.SQL, query.Args...).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	var plans []struct{ Plan changeReadPlan }
+	var plans []struct{ Plan readPlanNode }
 	if err := json.Unmarshal(raw, &plans); err != nil || len(plans) != 1 {
 		t.Fatalf("decode change read plan: %s, err=%v", raw, err)
 	}
 	t.Logf("change read EXPLAIN: %s", raw)
 	found := false
-	var visit func(changeReadPlan, bool)
-	visit = func(p changeReadPlan, limited bool) {
+	var visit func(readPlanNode, bool)
+	visit = func(p readPlanNode, limited bool) {
 		limited = limited || p.NodeType == "Limit"
 		if p.Relation == "change_events" && strings.Contains(p.Condition, "corpus_id") {
 			found = true
@@ -213,12 +213,12 @@ func assertChangeReadPlan(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	}
 }
 
-type changeReadPlan struct {
-	NodeType  string           `json:"Node Type"`
-	Relation  string           `json:"Relation Name"`
-	Index     string           `json:"Index Name"`
-	Condition string           `json:"Index Cond"`
-	Rows      float64          `json:"Actual Rows"`
-	Removed   float64          `json:"Rows Removed by Filter"`
-	Plans     []changeReadPlan `json:"Plans"`
+type readPlanNode struct {
+	NodeType  string         `json:"Node Type"`
+	Relation  string         `json:"Relation Name"`
+	Index     string         `json:"Index Name"`
+	Condition string         `json:"Index Cond"`
+	Rows      float64        `json:"Actual Rows"`
+	Removed   float64        `json:"Rows Removed by Filter"`
+	Plans     []readPlanNode `json:"Plans"`
 }

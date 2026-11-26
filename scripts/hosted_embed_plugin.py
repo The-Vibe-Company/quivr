@@ -12,6 +12,7 @@ import time
 import urllib.request
 
 from fake_api import Fake
+import go_bin_cache
 import ingestion_plugin
 import ports
 
@@ -38,10 +39,8 @@ def signing():
 
 
 def build(directory):
-    directory.mkdir(parents=True, exist_ok=True)
-    binary = directory.resolve() / 'hosted-embed'
-    subprocess.run([os.environ.get('GO', 'go'), 'build', '-o', str(binary), '.'], cwd=PLUGIN, check=True)
-    return binary
+    cached = go_bin_cache.ensure('quivr-hosted-embed', PLUGIN, '.', go=os.environ.get('GO', 'go'))
+    return go_bin_cache.materialize(cached, directory.resolve() / 'hosted-embed')
 
 
 def check_committed_manifest(binary):

@@ -176,7 +176,7 @@ python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 grep -q "^CERTIFIED" "$work/newsml-g2-contract.log" || { cat "$work/newsml-g2-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/newsml-g2: $work/newsml-g2-contract-report.json"
 # Exercise normalizer output through the real ingestion segmentation recipe.
-(cd "$root/plugins/core-ingest" && QUIVR_NEWSML_TEST_PYTHON="$work/venv/bin/python" "$GO" test -count=1 -run '^TestNewsMLMessagesFitIngestion$' .)
+(cd "$root/plugins/core-ingest" && QUIVR_NEWSML_TEST_PYTHON="$work/venv/bin/python" "$GO" test -count=1 -run '^TestNewsMLMessagesFitIngestion$' ./plugin)
 
 # The first-party alerts plugin plugins/alerts: unit tests (grammar, matching,
 # evidence, described alerts against the fake System One server), a replayed

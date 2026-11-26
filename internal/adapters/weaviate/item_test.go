@@ -1,16 +1,19 @@
 package weaviate_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -366,59 +369,214 @@ func (b *searchRequestBudget) RoundTrip(r *http.Request) (*http.Response, error)
 	return b.next.RoundTrip(r)
 }
 
-// Owns bounded recovery when individually valid passages exceed a response's
-// byte budget. The transport models GraphQL limits, not passage selection.
+// Owns bounded recovery when individually valid passages exceed the text
+// response budget. Every passage belongs to the same item, so text is needed.
 func TestItemPassageResponseBudget(t *testing.T) {
-	transport := &largePassageHTTP{text: strings.Repeat("harbour ", 1<<17)}
-	store := weaviate.New("http://index.invalid")
-	store.Client.Transport = transport
-	g := content.Generation{ID: "generation", Collection: "PassageBudget", ItemKeywordsProjected: true, Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}}}}
-	hits, err := store.Search(context.Background(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10})
-	if err != nil || len(hits) == 0 || hits[0].SegmentID != "passage-000" {
-		t.Fatalf("bounded large-passage search: %+v %v", hits, err)
+	text := strings.Repeat("harbour ", 1<<17)
+	rows := func(count int, withText bool) []itemSearchRow {
+		out := make([]itemSearchRow, count)
+		for i := range out {
+			out[i] = itemSearchRow{Segment: fmt.Sprintf("passage-%03d", i), Version: "version"}
+			if withText {
+				out[i].Text = text
+				if i == 0 {
+					out[i].Text = strings.Repeat("other ", 1<<17)
+				}
+			}
+		}
+		return out
+	}
+	textReads := 0
+	transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+		switch {
+		case strings.Contains(query, "bm25:"):
+			return itemSearchResponse([]itemSearchRow{{Version: "version", Score: "1"}}), nil
+		case !strings.Contains(query, "passageText"):
+			return itemSearchResponse(rows(17, false)), nil
+		default:
+			textReads++
+			if textReads > 1 {
+				return nil, errors.New("recovery needs only the metadata already read")
+			}
+			return itemSearchResponse(rows(17, true)), nil
+		}
+	})
+	hits, err := runItemSearch(t.Context(), transport, retrieval.Request{Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10})
+	if err != nil || len(hits) != 1 || hits[0].SegmentID != "passage-000" || textReads != 1 {
+		t.Fatalf("large-passage search: %+v, %v, %d text reads", hits, err, textReads)
 	}
 }
 
-type largePassageHTTP struct {
-	requests int
-	text     string
+func TestItemSearchOverlapsQueriesWithinRequestDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+		defer cancel()
+		var mu sync.Mutex
+		started := map[string]bool{}
+		allStarted := make(chan struct{})
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			var leg string
+			switch {
+			case strings.Contains(query, "nearVector:"):
+				leg = "dense"
+			case strings.Contains(query, "_folded^"):
+				leg = "analyzed"
+			case strings.Contains(query, "bm25:"):
+				leg = "raw"
+			default:
+				return itemSearchResponse(nil), nil
+			}
+			mu.Lock()
+			started[leg] = true
+			if len(started) == 3 {
+				close(allStarted)
+			}
+			mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-allStarted:
+			}
+			// Advance the virtual clock past the shared client's 4 s timeout.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+			if leg == "dense" {
+				distance := 0.1
+				return itemSearchResponse([]itemSearchRow{{Segment: "best", Version: "version", Distance: &distance}}), nil
+			}
+			return itemSearchResponse(nil), nil
+		})
+		hits, err := runItemSearch(ctx, transport, retrieval.Request{Query: "harbour", Mode: "hybrid", Vector: []float32{1}, GroupBy: "record", K: 3})
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != "best" {
+			t.Fatalf("hybrid search with a slow index: %+v, %v (started %v)", hits, err, started)
+		}
+	})
 }
 
-func (h *largePassageHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
-	if strings.HasPrefix(r.URL.Path, "/v1/schema/") {
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+func TestItemSearchFetchesTextOnlyForPassageSelection(t *testing.T) {
+	for _, mode := range []struct {
+		group, fusion string
+		wantText      []string
+		wantHits      map[string]bool
+	}{
+		{"", retrieval.FusionRelativeScore, nil, map[string]bool{"a-dense": true, "b-dense": true, "a-sparse": true, "b-sparse": true, "single": true}},
+		{"record", retrieval.FusionRelativeScore, []string{"a-sparse", "b-sparse"}, map[string]bool{"b-dense": true, "b-sparse": true, "single": true}},
+		{"record", retrieval.FusionRanked, []string{"a-dense", "b-dense", "a-sparse", "b-sparse"}, map[string]bool{"b-dense": true, "b-sparse": true, "single": true}},
+	} {
+		t.Run(mode.group+"/"+mode.fusion, func(t *testing.T) {
+			textReads := 0
+			passages := []itemSearchRow{
+				{Segment: "a-dense", Version: "dense", Text: "harbour boat"},
+				{Segment: "a-sparse", Version: "sparse", Text: "harbour"},
+				{Segment: "b-dense", Version: "dense", Text: "harbour"},
+				{Segment: "b-sparse", Version: "sparse", Text: "harbour boat"},
+				{Segment: "single", Version: "single", Text: "other"},
+			}
+			transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+				switch {
+				case strings.Contains(query, "nearVector:"):
+					distance := 0.1
+					return itemSearchResponse([]itemSearchRow{{Segment: "b-dense", Version: "dense", Distance: &distance}}), nil
+				case strings.Contains(query, "bm25:"):
+					return itemSearchResponse([]itemSearchRow{{Version: "dense", Score: "2"}, {Version: "sparse", Score: "2"}, {Version: "single", Score: "1"}}), nil
+				case strings.Contains(query, "passageText"):
+					textReads++
+					var rows []itemSearchRow
+					for _, row := range passages {
+						if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+							rows = append(rows, row)
+						}
+					}
+					if len(rows) != len(mode.wantText) {
+						return nil, fmt.Errorf("projected text for %v, want %v", rows, mode.wantText)
+					}
+					for _, id := range mode.wantText {
+						if !strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(id)) {
+							return nil, fmt.Errorf("missing text for %s", id)
+						}
+					}
+					return itemSearchResponse(rows), nil
+				default:
+					rows := append([]itemSearchRow(nil), passages...)
+					for i := range rows {
+						rows[i].Text = ""
+					}
+					return itemSearchResponse(rows), nil
+				}
+			})
+			hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+				Query: "harbour boat", Mode: "hybrid", Vector: []float32{1}, GroupBy: mode.group, K: 10,
+				Hybrid: &retrieval.HybridOptions{Alpha: 0.5, Fusion: mode.fusion},
+			})
+			wantReads := 0
+			if len(mode.wantText) > 0 {
+				wantReads = 1
+			}
+			if err != nil || len(hits) != len(mode.wantHits) || textReads != wantReads {
+				t.Fatalf("item search: %+v, %v, %d text reads (want %d)", hits, err, textReads, wantReads)
+			}
+			for _, hit := range hits {
+				if !mode.wantHits[hit.SegmentID] {
+					t.Fatalf("unexpected passage %s in %+v", hit.SegmentID, hits)
+				}
+			}
+		})
 	}
-	if r.URL.Path != "/v1/graphql" {
+}
+
+type itemSearchRow struct {
+	Segment  string
+	Version  string
+	Text     string
+	Score    string
+	Distance *float64
+}
+
+func itemSearchResponse(rows []itemSearchRow) []byte {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		value := map[string]any{"segmentId": row.Segment, "generationId": "generation", "versionId": row.Version}
+		if row.Text != "" {
+			value["passageText"] = row.Text
+		}
+		if row.Score != "" || row.Distance != nil {
+			value["_additional"] = map[string]any{"score": row.Score, "distance": row.Distance}
+		}
+		out = append(out, value)
+	}
+	body, _ := json.Marshal(map[string]any{"data": map[string]any{"Get": map[string]any{"ItemSearch": out}}})
+	return body
+}
+
+type itemSearchTransport func(context.Context, string) ([]byte, error)
+
+func (h itemSearchTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	body := []byte(`{}`)
+	if r.URL.Path == "/v1/graphql" {
+		var req struct{ Query string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return nil, err
+		}
+		var err error
+		body, err = h(r.Context(), req.Query)
+		if err != nil {
+			return nil, err
+		}
+	} else if !strings.HasPrefix(r.URL.Path, "/v1/schema/") {
 		return nil, errors.New("unexpected projection endpoint")
 	}
-	h.requests++
-	if h.requests > 3 {
-		return nil, errors.New("large-passage dependency budget exhausted")
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+}
+
+func runItemSearch(ctx context.Context, transport http.RoundTripper, q retrieval.Request) ([]content.Candidate, error) {
+	store := weaviate.New("http://index.invalid")
+	store.Client.Transport = transport
+	g := content.Generation{
+		ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+		Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}},
 	}
-	var request struct{ Query string }
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return nil, err
-	}
-	match := regexp.MustCompile(`limit:(\d+)`).FindStringSubmatch(request.Query)
-	if len(match) != 2 {
-		return nil, errors.New("missing GraphQL limit")
-	}
-	limit, _ := strconv.Atoi(match[1])
-	count := limit
-	if strings.Contains(request.Query, "passageText") {
-		count = min(limit, 17)
-	}
-	rows := make([]map[string]any, 0, count)
-	for i := 0; i < count; i++ {
-		row := map[string]any{"segmentId": fmt.Sprintf("passage-%03d", i), "generationId": "generation", "versionId": fmt.Sprintf("version-%03d", i), "_additional": map[string]any{"score": "1"}}
-		if strings.Contains(request.Query, "passageText") {
-			row["passageText"] = h.text
-		}
-		rows = append(rows, row)
-	}
-	body, err := json.Marshal(map[string]any{"data": map[string]any{"Get": map[string]any{"PassageBudget": rows}}})
-	if err != nil {
-		return nil, err
-	}
-	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
+	return store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, q)
 }

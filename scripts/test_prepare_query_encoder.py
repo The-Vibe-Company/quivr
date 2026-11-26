@@ -171,19 +171,106 @@ class QueryEncoderAssetsTest(unittest.TestCase):
                     text_encoder.load_model(root / 'model', lock_path=lock)
             self.assertEqual(constructed, [])
 
+    def test_asset_repository_and_revision_override_download_origin_without_changing_identity(self):
+        payload = b'onnx graph\n'
+
+        class Response:
+            def __init__(self):
+                self.remaining = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read1(self, _size):
+                chunk, self.remaining = self.remaining, b''
+                return chunk
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            lock_data = {
+                'model': 'google/embeddinggemma-2',
+                'model_revision': '914f7f89142e33e7',
+                'source_revision': '914f7f89142e33e77833254d9c9b90c3cef7303b',
+                'dimensions': 768,
+                'backend': 'onnx',
+                'precision': 'int8',
+                'model_file': 'onnx/model_quantized.onnx',
+                'asset_repository': 'onnx-community/embeddinggemma-2-ONNX',
+                'asset_revision': 'daa72c51243991dfcaf9f9137d2c573d8f7790c0',
+                'files': {'onnx/model_quantized.onnx': {
+                    'sha256': hashlib.sha256(payload).hexdigest(), 'size': len(payload)}},
+            }
+            lock = root / 'model-lock.json'
+            lock.write_text(json.dumps(lock_data))
+            with patch.object(prepare_query_encoder.urllib.request, 'urlopen',
+                              return_value=Response()) as download:
+                result = prepare_query_encoder.prepare(
+                    root / 'model', lock_path=lock,
+                    mirror_base_url='https://mirror.example/hf/',
+                )
+            self.assertEqual(
+                download.call_args.args[0],
+                'https://mirror.example/hf/onnx-community/embeddinggemma-2-ONNX/resolve/'
+                'daa72c51243991dfcaf9f9137d2c573d8f7790c0/onnx/model_quantized.onnx?download=true',
+            )
+            self.assertEqual(result['model'], 'google/embeddinggemma-2')
+            self.assertEqual(result['source_revision'], '914f7f89142e33e77833254d9c9b90c3cef7303b')
+
+            for bad_patch in (
+                {'backend': 'tensorrt'},
+                {'model_file': 'onnx/missing.onnx'},
+                {'model_file': 'config.json'},
+                {'asset_repository': '../escape'},
+                {'asset_revision': 'bad/rev'},
+            ):
+                with self.subTest(bad_patch=bad_patch):
+                    bad_lock = root / 'bad-lock.json'
+                    bad_files = {**lock_data['files'], 'config.json': {
+                        'sha256': hashlib.sha256(b'{}').hexdigest(), 'size': 2}}
+                    bad_lock.write_text(json.dumps({**lock_data, 'files': bad_files, **bad_patch}))
+                    with self.assertRaises(RuntimeError):
+                        prepare_query_encoder.verify_model(root / 'model', lock_path=bad_lock)
+
     def test_checked_in_lock_has_external_revision_hashes_and_sizes(self):
         lock = json.loads(prepare_query_encoder.LOCK_PATH.read_text())
         self.assertEqual(lock['model'], 'google/embeddinggemma-2')
         self.assertEqual(lock['source_revision'],
                          '914f7f89142e33e77833254d9c9b90c3cef7303b')
-        self.assertEqual(lock['files']['model.safetensors'], {
-            'sha256': '197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79',
-            'size': 1488915288,
+        self.assertEqual(lock['backend'], 'onnx')
+        self.assertEqual(lock['precision'], 'int8')
+        self.assertEqual(lock['model_file'], 'onnx/model_quantized.onnx')
+        self.assertEqual(lock['asset_repository'], 'onnx-community/embeddinggemma-2-ONNX')
+        self.assertEqual(lock['asset_revision'],
+                         'daa72c51243991dfcaf9f9137d2c573d8f7790c0')
+        self.assertEqual(lock['files']['onnx/model_quantized.onnx'], {
+            'sha256': 'd06edd601f851c633a2519304cbeb8dc6170d7ceb61b436625c17fb9b6e74953',
+            'size': 495165,
+        })
+        self.assertEqual(lock['files']['onnx/model_quantized.onnx_data'], {
+            'sha256': '278a7ff1248c3618e4bd11a607fc54f7bdc7778854230f3956d3f86bd9db4f3b',
+            'size': 313724928,
         })
         self.assertEqual(lock['files']['tokenizer.json'], {
             'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4',
             'size': 32170510,
         })
+
+        pytorch_lock = json.loads(
+            (prepare_query_encoder.LOCK_PATH.parent / 'model-lock-pytorch.json').read_text()
+        )
+        self.assertEqual(pytorch_lock['backend'], 'pytorch')
+        self.assertEqual(pytorch_lock['precision'], 'float32')
+        for key in ('model', 'model_revision', 'source_revision', 'dimensions'):
+            self.assertEqual(pytorch_lock[key], lock[key])
+        self.assertEqual(pytorch_lock['files']['model.safetensors'], {
+            'sha256': '197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79',
+            'size': 1488915288,
+        })
+        self.assertEqual(pytorch_lock['files']['tokenizer.json'],
+                         lock['files']['tokenizer.json'])
 
 
 if __name__ == '__main__':

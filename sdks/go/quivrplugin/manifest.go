@@ -30,6 +30,11 @@ type Manifest struct {
 		Schema        json.RawMessage `json:"schema"`
 		ExecutionKeys []string        `json:"execution_keys,omitempty"`
 	} `json:"configuration,omitempty"`
+	Secrets []struct {
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		Required    *bool  `json:"required,omitempty"`
+	} `json:"secrets,omitempty"`
 
 	// Connector is the decoded connector Contribution, with defaults; nil
 	// when the manifest declares none.
@@ -289,6 +294,13 @@ func loadManifest(path string) (*loadedManifest, error) {
 		}
 		if in.Paging && !features.speaks("ingestion_pages") {
 			return nil, fmt.Errorf("ingestion pages require Plugin API %s", FeatureSince["ingestion_pages"])
+		}
+		for spaceID, space := range in.Spaces {
+			for _, idx := range space.Indexes {
+				if idx == "image" && !features.speaks("multimodal_ingestion") {
+					return nil, fmt.Errorf("vector space %q indexes image content, which requires Plugin API %s", spaceID, FeatureSince["multimodal_ingestion"])
+				}
+			}
 		}
 		if in.TimeoutMS == 0 {
 			in.TimeoutMS = 30000

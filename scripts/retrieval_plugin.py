@@ -6,6 +6,7 @@ configuration and processes are restored afterwards, even on failure.
 """
 import json, os, pathlib, subprocess, time
 
+import go_bin_cache
 import plugin_environment
 import ports
 from ingestion_plugin import healthy, stop_plugin
@@ -35,10 +36,8 @@ def verify(stack):
     """Pin three retrieval providers, exercise routing, then restore the stack's pins."""
     directory = stack.directory / 'retrieval-plugin'
     directory.mkdir(exist_ok=True)
-    binary = directory / 'fusion-retriever'
-    subprocess.run([GO, 'build', '-o', str(binary), './examples/fusion-retriever'], cwd=ROOT / 'sdks' / 'go', check=True)
-    fake_binary = directory / 'quivr-fake-plugin'
-    subprocess.run([GO, 'test', '-c', '-o', str(fake_binary), './tests/plugin-contract'], cwd=ROOT, check=True)
+    binary = go_bin_cache.ensure('fusion-retriever', stack.source / 'sdks' / 'go', './examples/fusion-retriever', go=GO)
+    fake_binary = go_bin_cache.ensure('plugin-contract-test', stack.source, './tests/plugin-contract', go=GO, mode='test')
     port = ports.allocate()
     env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
     with (directory / 'plugin.log').open('a') as log:

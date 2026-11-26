@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/secretinput"
 )
@@ -90,6 +91,9 @@ func (cfg Config) validateAccessKeys() error {
 		return badConfig(configMissing, "keys", "keys must contain at least one scoped API key")
 	}
 	for token, scope := range cfg.Keys {
+		if scope.ActorID != "" && !audit.ValidActorID(scope.ActorID) {
+			return badConfig(configInvalid, "keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
+		}
 		if len(token) < 32 || invalidBearerToken(token) || scope.Organization == "" || len(scope.Actions) == 0 || len(scope.Corpora) == 0 {
 			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
 		}

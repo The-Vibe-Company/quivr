@@ -49,6 +49,10 @@ func (s *auditSink) Record(ctx context.Context, e *audit.Event, command func(con
 		}
 		return err
 	}
+	return s.Append(ctx, e)
+}
+
+func (s *auditSink) Append(_ context.Context, e *audit.Event) error {
 	if s.fail {
 		return errors.New("audit unavailable")
 	}
@@ -94,7 +98,8 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 	slog.SetDefault(logger)
 	defer slog.SetDefault(previous)
 	token := "fixture-audit-bearer-secret"
-	keys := map[string]corpus.Scope{token: {Organization: "org_a", Actions: []string{"corpora:write", "corpora:read"}, Corpora: []string{"*"}}}
+	const actorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+	keys := map[string]corpus.Scope{token: {ActorID: actorID, Organization: "org_a", Actions: []string{"corpora:write", "corpora:read"}, Corpora: []string{"*"}}}
 	estimateStore := backfillStore{estimates: map[string][]byte{}}
 	connectorRegistry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("fixture-audit-credential-key-0123456789")
@@ -116,7 +121,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		t.Fatalf("create status=%d events=%+v body=%s", w.Code, sink.events, w.Body.String())
 	}
 	e := sink.events[0]
-	if e.Outcome != "accepted" || e.Actor == "" || e.Actor == token || e.Organization != "org_a" || e.TargetID != "corpus_created" || e.RequestID != w.Header().Get("X-Request-ID") {
+	if e.Outcome != "accepted" || e.Actor == "" || e.Actor == token || e.Actor == actorID || e.ActorID != actorID || e.Organization != "org_a" || e.TargetID != "corpus_created" || e.RequestID != w.Header().Get("X-Request-ID") {
 		t.Fatalf("accepted event %+v", e)
 	}
 	// These are actual contract addresses, including aliases and parameter IDs.
@@ -138,6 +143,8 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		{"DELETE", "/v0/connectors/connector_a/tokens/token_a", "token.revoke", "connector_token", "token_a"},
 		{"POST", "/v0/records/withdrawals", "record.withdraw", "record", ""},
 		{"POST", "/v0/saved-queries/query_a/delete", "saved_query.delete", "saved_query", "query_a"},
+		{"POST", "/v0/subscriptions/subscription_a/disable", "subscription.disable", "subscription", "subscription_a"},
+		{"POST", "/v0/subscriptions/subscription_a/enable", "subscription.enable", "subscription", "subscription_a"},
 		{"POST", "/v0/subscriptions/subscription_a/delete", "subscription.delete", "subscription", "subscription_a"},
 		{"POST", "/v0/operations/operation_a/cancel", "operation.cancel", "operation", "operation_a"},
 		{"POST", "/v0/operations/operation_a/rerun", "operation.rerun", "operation", "operation_a"},
@@ -145,6 +152,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		{"POST", "/v0/operations/operation_a/resume", "operation.resume", "operation", "operation_a"},
 		{"POST", "/v0/admin/backfills", "operation.backfill", "operation", ""},
 		{"POST", "/v0/admin/quarantine/reprocess", "operation.reprocess", "operation", ""},
+		{"POST", "/v0/admin/subscriptions/evaluator-migrations", "evaluation.migrate", "evaluator_migration", ""},
 		{"POST", "/v0/admin/subscriptions/evaluation-retirements", "evaluation.retire", "evaluation_retirement", ""},
 		{"POST", "/v0/admin/spaces/space_a/promote", "vector_space.promote", "vector_space", "space_a"},
 	} {
@@ -157,18 +165,6 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		if w.Code < 400 || e.Action != tc.action || e.TargetType != tc.target || e.TargetID != tc.id || e.Outcome != "refused" || e.Detail.Status != w.Code {
 			t.Fatalf("%s %s: status=%d event=%+v", tc.method, tc.path, w.Code, e)
 		}
-	}
-	before := len(sink.events)
-	request("GET", "/v0/corpora", token, "")
-	request("POST", "/v0/search", token, `{}`)
-	request("GET", "/v0/admin/audit", token, "")
-	if len(sink.events) != before {
-		t.Fatal("read or search audited")
-	}
-	logs.Reset()
-	w = request("POST", "/v0/corpora", "unknown-key-secret", `{}`)
-	if w.Code != 401 || len(sink.events) != before || !strings.Contains(logs.String(), `"error_code":"invalid_api_key"`) || strings.Contains(logs.String(), `"event":"quivr.audit"`) {
-		t.Fatalf("anonymous admission status=%d events=%d log=%s", w.Code, len(sink.events), logs.String())
 	}
 	// Successful estimates do not enter the audit, but the subsequent
 	// confirmation remains usable and produces the operation target.
@@ -190,7 +186,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 	}
 	// Retirement uses 200 for both an estimate and a real command. Only the
 	// successful real command is audited, with its resolved retirement ID.
-	before = len(sink.events)
+	before := len(sink.events)
 	w = request("POST", "/v0/admin/subscriptions/evaluation-retirements", token, `{"key":"retire","plugin_id":"alert-rules","version":"1.0.0","reason":"Retire old build","dry_run":true}`)
 	if w.Code != 200 || len(sink.events) != before {
 		t.Fatalf("retirement estimate status=%d events=%d", w.Code, len(sink.events))
@@ -272,7 +268,8 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 }
 
 func TestAuditReadAuthorizationAndFilterBoundPaging(t *testing.T) {
-	sink := &auditSink{page: []audit.Event{{ID: 9007199254740993, Organization: "org_a", Action: "plugin.activate", Time: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)}, {ID: 2}}}
+	const actorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+	sink := &auditSink{page: []audit.Event{{ID: 9007199254740993, ActorID: actorID, Actor: "key-a", RequestID: "request-a", Organization: "org_a", Action: "plugin.activate", Time: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)}, {ID: 2}}}
 	keys := map[string]corpus.Scope{
 		"reader": {Organization: "org_a", Actions: []string{"audit:read"}, Corpora: []string{"*"}},
 		"other":  {Organization: "org_b", Actions: []string{"audit:read"}, Corpora: []string{"*"}},
@@ -298,30 +295,50 @@ func TestAuditReadAuthorizationAndFilterBoundPaging(t *testing.T) {
 	if w := get("unknown", ""); w.Code != 401 {
 		t.Fatalf("unknown status=%d", w.Code)
 	}
-	query := "?limit=1&actor=actor-a&action=plugin.activate&target_type=plugin_registration&target_id=reg-a&since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z"
+	query := "?limit=1&actor_id=" + actorID + "&actor=key-a&action=plugin.activate&target_type=plugin_registration&target_id=reg-a&since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z"
 	w := get("reader", query)
-	if w.Code != 200 || sink.org != "org_a" || sink.filter.Actor != "actor-a" || sink.filter.Action != "plugin.activate" || sink.filter.TargetType != "plugin_registration" || sink.filter.TargetID != "reg-a" || sink.filter.Since.IsZero() || sink.filter.Until.IsZero() || sink.filter.Limit != 2 {
+	if w.Code != 200 || sink.org != "org_a" || sink.filter.Actor != "key-a" || sink.filter.ActorID != actorID || sink.filter.Action != "plugin.activate" || sink.filter.TargetType != "plugin_registration" || sink.filter.TargetID != "reg-a" || sink.filter.Since.IsZero() || sink.filter.Until.IsZero() || sink.filter.Limit != 2 {
 		t.Fatalf("filter transport status=%d org=%s filter=%+v body=%s", w.Code, sink.org, sink.filter, w.Body.String())
 	}
 	var page struct {
 		Items []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ActorID       string `json:"actor_id"`
+			APIKeyID      string `json:"api_key_id"`
+			CorrelationID string `json:"correlation_id"`
 		}
 		Cursor string `json:"next_page_cursor"`
 	}
-	if err = json.Unmarshal(w.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ID != "9007199254740993" || page.Cursor == "" {
+	if err = json.Unmarshal(w.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ID != "9007199254740993" || page.Items[0].ActorID != actorID || page.Items[0].APIKeyID != "key-a" || page.Items[0].CorrelationID != "request-a" || page.Cursor == "" {
 		t.Fatalf("page %+v %v", page, err)
 	}
 	if w := get("reader", query+"&page_cursor="+page.Cursor); w.Code != 200 || sink.filter.After != 9007199254740993 {
 		t.Fatalf("resume status=%d after=%d", w.Code, sink.filter.After)
 	}
-	for _, tc := range []struct{ key, query string }{{"other", query + "&page_cursor=" + page.Cursor}, {"reader", "?page_cursor=" + page.Cursor}, {"reader", query + "&page_cursor=tampered"}, {"reader", "?limit=0"}, {"reader", "?since=bad"}, {"reader", "?since=2026-02-01T00:00:00Z&until=2026-01-01T00:00:00Z"}} {
+	for _, tc := range []struct{ key, query string }{{"other", query + "&page_cursor=" + page.Cursor}, {"reader", "?page_cursor=" + page.Cursor},
+		{"reader", strings.Replace(query, actorID, strings.Repeat("0", 32), 1) + "&page_cursor=" + page.Cursor},
+		{"reader", "?actor_id=user%40example.test"}, {"reader", "?actor_id=%GG"}, {"reader", query + "&page_cursor=tampered"}, {"reader", "?limit=0"}, {"reader", "?since=bad"}, {"reader", "?since=2026-02-01T00:00:00Z&until=2026-01-01T00:00:00Z"}} {
 		if w := get(tc.key, tc.query); w.Code != 422 {
 			t.Fatalf("invalid filter/cursor %s %s status=%d body=%s", tc.key, tc.query, w.Code, w.Body.String())
 		}
 	}
-	if len(sink.events) != 0 {
-		t.Fatal("audit reads were audited")
+	if len(sink.events) != 3 {
+		t.Fatalf("audit list should record only authorization refusals with Level 2 disabled: %+v", sink.events)
+	}
+	if w := get("reader", "/export"+query+"&page_cursor="+page.Cursor); w.Code != 422 {
+		t.Fatalf("export accepted a list cursor: %d %s", w.Code, w.Body)
+	}
+	if w := get("reader", "/export"+query); w.Code != 200 || sink.filter.ActorID != actorID ||
+		w.Header().Get("Content-Disposition") != `attachment; filename="audit-events.json"` {
+		t.Fatalf("export status=%d headers=%v filter=%+v body=%s", w.Code, w.Header(), sink.filter, w.Body)
+	}
+	if e := sink.events[len(sink.events)-1]; e.Action != "audit.export" || e.Outcome != "accepted" || e.Organization != "org_a" {
+		t.Fatalf("export audit event: %+v", e)
+	}
+	sink.fail = true
+	if w := get("reader", "/export"+query); w.Code != 503 || w.Header().Get("Content-Disposition") != "" ||
+		strings.Contains(w.Body.String(), "9007199254740993") || !json.Valid(w.Body.Bytes()) {
+		t.Fatalf("export leaked data after audit failure: %d %v %s", w.Code, w.Header(), w.Body)
 	}
 }
 
@@ -356,5 +373,130 @@ func TestAuditReplayRestoresRequestAndDiscardsFailedResponse(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != 202 || store.calls != 2 || len(store.sources) != 2 || store.sources[0] != store.sources[1] || len(sink.events) != 1 || sink.events[0].Outcome != "accepted" || sink.events[0].Detail.ErrorCode != "" || strings.Contains(response.Body.String(), "storage_unavailable") || !json.Valid(response.Body.Bytes()) {
 		t.Fatalf("replayed HTTP command: status=%d calls=%d sources=%+v audit=%+v body=%s", response.Code, store.calls, store.sources, sink.events, response.Body.String())
+	}
+}
+
+func TestAuditAccessLevels(t *testing.T) {
+	const actorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+	const private = "private-query-address@example.test"
+	scope := corpus.Scope{Organization: "org_a", ActorID: actorID, Corpora: []string{"corpus_a"},
+		Actions: []string{"corpora:read", "content:read", "content:write", "search:query"}}
+	keys := map[string]corpus.Scope{"first-key": scope, "rotated-key": scope}
+	search := &rebuildingSearch{}
+	service := retrieval.Service{Ranker: search, Routing: search, Projection: search, Registry: search}
+	for _, reads := range []bool{false, true} {
+		sink := &auditSink{}
+		handler, err := httpapi.New(knownCorpora{}, content.Service{}, service, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink), httpapi.WithReadAudit(reads))
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyIDs := make(map[string]string)
+		for _, tc := range []struct {
+			method, path, key, body string
+			status                  int
+			action                  string
+			level2                  bool
+		}{
+			{"GET", "/v0/corpora", "", "", 401, "auth.refused", false},
+			{"POST", "/v0/corpora", "unrecognized-key", "{}", 401, "auth.refused", false},
+			{"GET", "/v0/admin/audit", "first-key", "", 403, "permission.refused", false},
+			{"GET", "/v0/corpora/" + private, "first-key", "", 404, "resource.unavailable", false},
+			{"POST", "/v0/records/batch", "first-key", `{"items":[{"idempotency_key":"entry","source":{"corpus_id":"corpus_other","namespace":"test","record_key":"key"},"content":{"kind":"text","text":"example"}}]}`, 200, "resource.unavailable", false},
+			{"GET", "/v0/corpora", "rotated-key", "", 200, "http.read", true},
+			{"POST", "/v0/search", "rotated-key", `{"query":"` + private + `","corpus_ids":["corpus_a"],"mode":"lexical"}`, 200, "http.search", true},
+		} {
+			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.key != "" {
+				r.Header.Set("Authorization", "Bearer "+tc.key)
+			}
+			r.Header.Set("X-Request-ID", "correlation-fixture")
+			r.Header.Set("Content-Type", "application/json")
+			before := len(sink.events)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("reads=%v %s %s: got %d want %d: %s", reads, tc.method, tc.path, w.Code, tc.status, w.Body)
+			}
+			if tc.level2 && !reads {
+				if len(sink.events) != before {
+					t.Fatalf("unexpected Level 2 event: %+v", sink.events[before:])
+				}
+				continue
+			}
+			if len(sink.events) != before+1 {
+				t.Fatalf("%s %s: wanted one event, got %+v", tc.method, tc.path, sink.events[before:])
+			}
+			e := sink.events[before]
+			if e.Action != tc.action || e.RequestID != "correlation-fixture" || e.Detail.Route == "" {
+				t.Fatalf("unexpected audit event: %+v", e)
+			}
+			if tc.status == 401 {
+				if e.ActorID != "" || e.Actor != "" || e.Organization != "" {
+					t.Fatalf("unauthenticated request acquired an identity: %+v", e)
+				}
+			} else if e.ActorID != actorID || e.Actor == "" || e.Actor == actorID || e.Organization != scope.Organization {
+				t.Fatalf("configured identity missing: %+v", e)
+			}
+			if e.Actor != "" {
+				keyIDs[tc.key] = e.Actor
+			}
+			if tc.path == "/v0/records/batch" && (e.Detail.Status != 404 || e.Outcome != "refused") {
+				t.Fatalf("batch entry refusal lost: %+v", e)
+			}
+		}
+		encoded, err := json.Marshal(sink.events)
+		if err != nil || bytes.Contains(encoded, []byte(private)) || bytes.Contains(encoded, []byte("unrecognized-key")) {
+			t.Fatalf("audit carries a raw credential, query or URL parameter: %s (%v)", encoded, err)
+		}
+		if reads && (keyIDs["first-key"] == "" || keyIDs["rotated-key"] == "" || keyIDs["first-key"] == keyIDs["rotated-key"]) {
+			t.Fatalf("actor should have distinct API key IDs across rotation: %v", keyIDs)
+		}
+	}
+}
+
+type auditEvaluatorMoves struct {
+	from monitoring.SubscriptionVersion
+}
+
+func (m auditEvaluatorMoves) PinningSubscriptions(context.Context, string, string, string, []string, string, int) ([]monitoring.Subscription, error) {
+	return []monitoring.Subscription{{ID: m.from.SubscriptionID, Current: m.from}}, nil
+}
+
+func (auditEvaluatorMoves) MoveEvaluator(_ context.Context, _ string, from monitoring.SubscriptionVersion, _ monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
+	from.VersionID = "version_after"
+	return from, nil
+}
+
+type auditEvaluator struct{ monitoring.EvaluationPort }
+
+func (auditEvaluator) Validate(map[string]any, map[string]any) error { return nil }
+
+func TestAuditEvaluatorMigrationIdentifiesVersionTransition(t *testing.T) {
+	sink := &auditSink{}
+	from := monitoring.SubscriptionVersion{SubscriptionID: "subscription_a", VersionID: "version_before",
+		SavedQueryID: "query_a", SavedQueryVersionID: "query_version_a",
+		Evaluator: monitoring.Evaluator{PluginID: "alert-rules", Version: "1.0.0"}}
+	service := monitoring.Service{
+		Moves:      auditEvaluatorMoves{from},
+		Store:      &definitions{versions: map[string]any{"query_a/query_version_a": monitoring.SavedQueryVersion{}}},
+		Evaluators: monitoring.Evaluators{"alert-rules@1.1.0": auditEvaluator{}},
+	}
+	keys := map[string]corpus.Scope{
+		"operator": {Organization: "org_a", Actions: []string{"plugins:admin"}, Corpora: []string{"*"}},
+	}
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey,
+		httpapi.WithAudit(sink), httpapi.WithMonitoring(service))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body := postRaw(t, handler, "/v0/admin/subscriptions/evaluator-migrations", "operator",
+		[]byte(`{"plugin_id":"alert-rules","from_version":"1.0.0","dry_run":false}`))
+	moved, _ := body["moved"].([]any)
+	if status != 200 || len(moved) != 1 || len(sink.events) != 1 {
+		t.Fatalf("evaluator migration returned %d, body=%v, events=%+v", status, body, sink.events)
+	}
+	if event := sink.events[0]; event.Action != "evaluation.migrate" || event.Outcome != "accepted" ||
+		event.TargetType != "evaluator_migration" || event.TargetID != "alert-rules@1.0.0->1.1.0" {
+		t.Fatalf("missing migration target: %+v", event)
 	}
 }

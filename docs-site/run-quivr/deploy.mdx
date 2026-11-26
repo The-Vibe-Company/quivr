@@ -26,7 +26,7 @@ For an image-only evaluation installation, follow [Run Quivr on one machine](/ru
 
 ## Choose shared dependency settings
 
-Compose and Railway resolve PostgreSQL, Weaviate and autoscaler settings from the
+Compose and Railway resolve PostgreSQL, Temporal, Weaviate and autoscaler settings from the
 [shared infrastructure declaration](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md).
 The `small` profile is the conservative starting point. The opt-in `large` profile gives
 PostgreSQL, Weaviate, API and live/bulk workers 32,000,000,000 bytes and 32 vCPUs on a
@@ -42,7 +42,7 @@ report the filesystem minimum and do not resize volumes or verify shared filesys
 
 For local development, `make dev` reads `QUIVR_INFRASTRUCTURE_PROFILE` and
 `QUIVR_INFRASTRUCTURE_OVERRIDES` and writes an ignored Compose overlay, including on
-macOS. Compose manages PostgreSQL and Weaviate; API and worker processes stay native
+macOS. Compose manages PostgreSQL, Temporal and Weaviate; API and worker processes stay native
 host processes. For example:
 
 ```sh
@@ -67,7 +67,7 @@ maintenance and verify readiness before continuing.
 
 The [deployment settings guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/infrastructure.md)
 covers Railway `preview`, `apply`, `initialize-monitoring` and `check`, including the
-`match`, `drift` and `unknown` exit statuses. Small Railway defaults to PostgreSQL and
+`match`, `drift` and `unknown` exit statuses. Small Railway defaults to PostgreSQL, Temporal and
 Weaviate; large also applies limits to API, live worker and bulk worker. Without an
 explicit `--service`, an existing uniquely named autoscaler is included automatically;
 it is never created or replica-reset. Apply stages settings and resource limits without
@@ -79,6 +79,39 @@ selection changes no replica count. For large, redeploy Weaviate and each change
 worker-bulk and, if present, autoscaler with the explicit commands in the shared guide; existing
 replica counts remain unchanged. Then initialize monitoring and check active values;
 startup command-line settings take precedence over existing `ALTER SYSTEM` values after restart.
+
+## Use DBA-managed PostgreSQL
+
+Point `database_url` at the writable primary of a dedicated PostgreSQL 17 database.
+Use the same non-superuser login for `quivr migrate`, `quivr api` and `quivr worker`.
+Manage the login, its credential, network access and the following grants in your
+database provisioning code. In this example, the DBA has already created the
+`quivr` database and `quivr_engine` login. Apply the schema and language grants
+while connected to `quivr`.
+
+```sql
+GRANT CONNECT ON DATABASE quivr TO quivr_engine;
+GRANT USAGE, CREATE ON SCHEMA public TO quivr_engine;
+GRANT USAGE ON LANGUAGE plpgsql TO quivr_engine;
+ALTER ROLE quivr_engine IN DATABASE quivr SET search_path = public;
+```
+
+Keep Quivr's objects in `public`. The login must own the objects it creates so
+future migrations and background index maintenance can modify them. For an
+existing database, have the DBA verify ownership of the Quivr objects before
+switching the login. Stock PostgreSQL includes `plpgsql` by default. If the DBA
+removed it from the database template, provision it with `CREATE EXTENSION IF NOT EXISTS plpgsql`
+before applying its language grant.
+
+Startup checks the writable session, schema access and migration ledger reads.
+Migrations also check schema creation, language privileges and ledger inserts.
+A `postgres_prerequisite` startup diagnostic gives the provisioning change to
+make. Run `quivr migrate` with the ordinary Quivr login after provisioning, then
+start the API and worker.
+
+Quivr's ingestion and search rollups work with stock PostgreSQL settings. The
+DBA can enable [`pg_stat_statements`](https://www.postgresql.org/docs/17/pgstatstatements.html)
+separately for SQL performance analysis.
 
 ## The configuration file
 
@@ -119,6 +152,8 @@ Put the configuration in `config.json`, readable by UID/GID `10001`, the image's
 On a Linux host, `sudo chown 10001:10001 config.json` and `sudo chmod 600 config.json` give that user sole access. Create the network with `docker network create quivr` if it does not exist, then attach your services to it.
 
 Mount the runtime JSON through `QUIVR_CONFIG`. Supply credentials through environment or mounted files as specified in the [secret bindings](/reference/configuration#secret-bindings). Leave `log_directory` unset to keep logs on the process output stream. The root filesystem can be read-only; `/tmp` is the declared writable temporary directory. A configured file-log directory needs its own writable mount.
+
+Each API and worker process caches successful plugin discovery checks for 30 seconds by default. Set `QUIVR_PLUGIN_DISCOVERY_TTL` on both processes to a Go duration such as `10s`, or set it to `0` to check discovery on every call. Invalid or unset values use the default. Transport failures, manifest digest mismatches, and Contribution responses with HTTP 401, 404, or 5xx invalidate the cached check.
 
 Plugins negotiating Plugin API `0.14.0` require [signed engine requests](/reference/plugin-protocol#signed-engine-requests). Older manifest ranges keep working unsigned, with an engine startup warning. Provision a separate key ring for each plugin using that reference's format. Put the complete plugin-id-to-ring map in `QUIVR_ENGINE_PLUGIN_KEYS` for both API and worker; give each plugin only its own ring in `QUIVR_PLUGIN_SIGNING_KEYS`. These are dedicated environment secrets, separate from the JSON configuration and cosign image signatures.
 

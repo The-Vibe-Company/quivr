@@ -39,6 +39,15 @@ MAX_WAITING = 4
 MAX_HANDLERS = 8
 WARMUP_TEXT = 'task: search result | query: readiness'
 HEADER_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000
+BACKEND_AUTO = 'auto'
+BACKEND_ONNX = 'onnx'
+BACKEND_PYTORCH = 'pytorch'
+SUPPORTED_BACKENDS = (BACKEND_AUTO, BACKEND_ONNX, BACKEND_PYTORCH)
+DEFAULT_ONNX_MODEL_FILE = 'onnx/model_quantized.onnx'
+MAX_SEQUENCE_LENGTH = 2048
+MULTIMODAL_FEATURE_DIM = 512
+ONNX_MATMUL_NBITS_ACCURACY_LEVEL = 4
+_MULTIMODAL_INPUTS = ('image_features', 'video_features', 'audio_features')
 
 
 class RequestFailure(Exception):
@@ -52,7 +61,8 @@ def _default_lock_path():
     return RUNTIME_LOCK_PATH if RUNTIME_LOCK_PATH.exists() else REPOSITORY_LOCK_PATH
 
 
-def _metadata(lock, *, threads=None, torch_version=None):
+def _metadata(lock, *, threads=None, backend=None, precision=None,
+              onnxruntime_version=None, torch_version=None):
     if (lock.get('model') != MODEL or lock.get('model_revision') != MODEL_REVISION
             or lock.get('source_revision') != SOURCE_REVISION
             or lock.get('dimensions') != DIMENSIONS):
@@ -65,13 +75,24 @@ def _metadata(lock, *, threads=None, torch_version=None):
         'dimensions': DIMENSIONS,
     }
     if threads is not None:
-        metadata.update({
-            'threads': threads,
-            'torch_version': torch_version or 'unknown',
-            'sentence_transformers_version': _distribution_version('sentence-transformers'),
-            'transformers_version': _distribution_version('transformers'),
-            'pillow_version': _distribution_version('pillow'),
-        })
+        metadata['threads'] = threads
+        if backend is not None:
+            metadata['backend'] = backend
+        if precision is not None:
+            metadata['precision'] = precision
+        if backend == BACKEND_ONNX:
+            metadata.update({
+                'onnxruntime_version': onnxruntime_version or 'unknown',
+                'tokenizers_version': _distribution_version('tokenizers'),
+                'numpy_version': _distribution_version('numpy'),
+            })
+        else:
+            metadata.update({
+                'torch_version': torch_version or 'unknown',
+                'sentence_transformers_version': _distribution_version('sentence-transformers'),
+                'transformers_version': _distribution_version('transformers'),
+                'pillow_version': _distribution_version('pillow'),
+            })
     return metadata
 
 
@@ -88,15 +109,250 @@ def _bounded_threads(threads):
     return threads
 
 
-def load_model(model_dir=DEFAULT_MODEL_DIR, *, threads=DEFAULT_THREADS, lock_path=None):
-    """Verify assets, load the CPU text model, and warm it before readiness."""
-    threads = _bounded_threads(threads)
-    os.environ['HF_HUB_OFFLINE'] = '1'
-    os.environ['TRANSFORMERS_OFFLINE'] = '1'
-    lock = verify_model(model_dir, lock_path=lock_path or _default_lock_path())
-    identity = _metadata(lock)
+def _resolve_backend(lock, backend=None):
+    """Select onnx or pytorch from explicit config, env override, or lock contents."""
+    raw = backend if backend is not None else os.environ.get('QUIVR_QUERY_ENCODER_BACKEND', BACKEND_AUTO)
+    if not isinstance(raw, str):
+        raise ValueError('query encoder backend must be auto, onnx or pytorch')
+    selected = raw.strip().lower() or BACKEND_AUTO
+    if selected not in SUPPORTED_BACKENDS:
+        raise ValueError('query encoder backend must be auto, onnx or pytorch')
+    files = lock.get('files', {})
+    has_onnx = bool(lock.get('model_file') and str(lock['model_file']).endswith('.onnx')) or any(
+        name.endswith('.onnx') for name in files
+    )
+    has_pytorch = 'model.safetensors' in files
+    if selected == BACKEND_AUTO:
+        lock_backend = lock.get('backend')
+        if lock_backend in (BACKEND_ONNX, BACKEND_PYTORCH):
+            selected = lock_backend
+        else:
+            selected = BACKEND_ONNX if has_onnx else BACKEND_PYTORCH
+    if selected == BACKEND_ONNX and not has_onnx:
+        raise RuntimeError('onnx backend requires a locked ONNX model asset')
+    if selected == BACKEND_PYTORCH and not has_pytorch:
+        raise RuntimeError('pytorch backend requires a locked PyTorch model asset')
+    return selected
 
-    # Imports happen only after the complete asset tree has passed its lock.
+
+def _onnx_model_file(lock):
+    model_file = lock.get('model_file')
+    if model_file:
+        return model_file
+    if DEFAULT_ONNX_MODEL_FILE in lock.get('files', {}):
+        return DEFAULT_ONNX_MODEL_FILE
+    candidates = sorted(name for name in lock.get('files', {}) if name.endswith('.onnx'))
+    if len(candidates) != 1:
+        raise RuntimeError('unable to identify a single ONNX model file in lock')
+    return candidates[0]
+
+
+def _patch_matmul_nbits_accuracy_level(raw, accuracy_level=ONNX_MATMUL_NBITS_ACCURACY_LEVEL):
+    """Set MatMulNBits accuracy_level in an ONNX ModelProto without extra dependencies.
+
+    ONNX Runtime CPU executes MatMulNBits with accuracy_level=4 using its fast
+    MLAS INT8 GEMM kernels (AVX-512 VNNI / AVX2) instead of slow FP32 weight
+    dequantization, while keeping the on-disk verified model file untouched on
+    read-only container filesystems.
+    """
+    if type(accuracy_level) is not int or not 0 <= accuracy_level <= 4:
+        raise ValueError('accuracy_level must be an integer from 0 to 4')
+
+    def read_varint(buf, pos):
+        value = 0
+        shift = 0
+        while True:
+            byte = buf[pos]
+            pos += 1
+            value |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                return value, pos
+            shift += 7
+            if shift > 63:
+                raise ValueError('invalid protobuf varint')
+
+    def encode_varint(value):
+        out = bytearray()
+        while True:
+            byte = value & 0x7F
+            value >>= 7
+            if value:
+                out.append(byte | 0x80)
+            else:
+                out.append(byte)
+                return bytes(out)
+
+    def encode_bytes_field(field_no, data):
+        return encode_varint((field_no << 3) | 2) + encode_varint(len(data)) + data
+
+    def encode_varint_field(field_no, value):
+        return encode_varint((field_no << 3) | 0) + encode_varint(value)
+
+    def iter_fields(buf):
+        pos = 0
+        end = len(buf)
+        while pos < end:
+            start = pos
+            tag, pos = read_varint(buf, pos)
+            field_no = tag >> 3
+            wire_type = tag & 7
+            if wire_type == 0:
+                value, pos = read_varint(buf, pos)
+            elif wire_type == 1:
+                if pos + 8 > end:
+                    raise ValueError('truncated protobuf fixed64')
+                value, pos = buf[pos:pos + 8], pos + 8
+            elif wire_type == 2:
+                length, pos = read_varint(buf, pos)
+                if pos + length > end:
+                    raise ValueError('truncated protobuf length-delimited field')
+                value, pos = buf[pos:pos + length], pos + length
+            elif wire_type == 5:
+                if pos + 4 > end:
+                    raise ValueError('truncated protobuf fixed32')
+                value, pos = buf[pos:pos + 4], pos + 4
+            else:
+                raise ValueError(f'unsupported protobuf wire type: {wire_type}')
+            yield field_no, wire_type, value, buf[start:pos]
+
+    def attr_name(attr_bytes):
+        for field_no, wire_type, value, _ in iter_fields(attr_bytes):
+            if field_no == 1 and wire_type == 2:
+                return value
+        return b''
+
+    # AttributeProto: name(1)='accuracy_level', i(3)=accuracy_level, type(20)=INT(2).
+    acc_attr = (
+        encode_bytes_field(1, b'accuracy_level')
+        + encode_varint_field(3, accuracy_level)
+        + encode_varint_field(20, 2)
+    )
+
+    def patch_node(node_bytes):
+        fields = list(iter_fields(node_bytes))
+        if not any(field_no == 4 and wire_type == 2 and value == b'MatMulNBits'
+                   for field_no, wire_type, value, _ in fields):
+            return node_bytes
+        out = bytearray()
+        for field_no, wire_type, value, raw_field in fields:
+            if field_no == 5 and wire_type == 2 and attr_name(value) == b'accuracy_level':
+                continue
+            out.extend(raw_field)
+        out.extend(encode_bytes_field(5, acc_attr))
+        return bytes(out)
+
+    def patch_graph(graph_bytes):
+        out = bytearray()
+        for field_no, wire_type, value, raw_field in iter_fields(graph_bytes):
+            if field_no == 1 and wire_type == 2:
+                out.extend(encode_bytes_field(1, patch_node(value)))
+            else:
+                out.extend(raw_field)
+        return bytes(out)
+
+    out = bytearray()
+    for field_no, wire_type, value, raw_field in iter_fields(raw):
+        if field_no == 7 and wire_type == 2:
+            out.extend(encode_bytes_field(7, patch_graph(value)))
+        else:
+            out.extend(raw_field)
+    return bytes(out)
+
+
+class OnnxTextEncoder:
+    """Offline CPU text encoder backed by ONNX Runtime and HuggingFace tokenizers."""
+
+    def __init__(self, session, tokenizer, np_module, *, max_length=MAX_SEQUENCE_LENGTH):
+        self._session = session
+        self._tokenizer = tokenizer
+        self._np = np_module
+        self._input_names = {item.name for item in session.get_inputs()}
+        self._output_names = [item.name for item in session.get_outputs()]
+        self._has_sentence_embedding = 'sentence_embedding' in self._output_names
+        if not self._has_sentence_embedding and 'last_hidden_state' not in self._output_names:
+            raise RuntimeError('ONNX graph must expose sentence_embedding or last_hidden_state')
+        pad_id = tokenizer.token_to_id('<pad>')
+        tokenizer.enable_padding(pad_id=0 if pad_id is None else pad_id, pad_token='<pad>')
+        tokenizer.enable_truncation(max_length=max_length)
+        self._empty_features = np_module.zeros((0, MULTIMODAL_FEATURE_DIM), dtype=np_module.float32)
+        self._empty_features.flags.writeable = False
+
+    def encode(self, texts, *, prompt='', batch_size=32, show_progress_bar=False,
+               convert_to_numpy=True, normalize_embeddings=True):
+        del show_progress_bar
+        np = self._np
+        if isinstance(texts, str):
+            texts = [texts]
+        if prompt:
+            texts = [prompt + text for text in texts]
+        if not texts:
+            return np.zeros((0, DIMENSIONS), dtype=np.float32)
+        chunks = []
+        step = max(1, int(batch_size))
+        for start in range(0, len(texts), step):
+            batch = texts[start:start + step]
+            encoded = self._tokenizer.encode_batch(batch)
+            input_ids = np.asarray([item.ids for item in encoded], dtype=np.int64)
+            attention_mask = np.asarray([item.attention_mask for item in encoded], dtype=np.int64)
+            feeds = {'input_ids': input_ids, 'attention_mask': attention_mask}
+            for name in _MULTIMODAL_INPUTS:
+                if name in self._input_names:
+                    feeds[name] = self._empty_features
+            if self._has_sentence_embedding:
+                vectors = self._session.run(['sentence_embedding'], feeds)[0]
+            else:
+                hidden = self._session.run(['last_hidden_state'], feeds)[0]
+                mask = attention_mask[:, :, None].astype(np.float32)
+                denom = np.maximum(mask.sum(axis=1), 1e-12)
+                vectors = (hidden * mask).sum(axis=1) / denom
+            vectors = np.asarray(vectors, dtype=np.float32)
+            if normalize_embeddings:
+                norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+                vectors = vectors / np.maximum(norms, 1e-12)
+            chunks.append(vectors)
+        result = chunks[0] if len(chunks) == 1 else np.concatenate(chunks, axis=0)
+        return result if convert_to_numpy else result.tolist()
+
+
+def _load_onnx_model(model_dir, lock, threads):
+    import numpy as np
+    import onnxruntime as ort
+    from tokenizers import Tokenizer
+
+    model_root = pathlib.Path(model_dir)
+    model_path = model_root / pathlib.PurePosixPath(_onnx_model_file(lock))
+    tokenizer_path = model_root / 'tokenizer.json'
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = threads
+    options.inter_op_num_threads = 1
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.add_session_config_entry(
+        'session.model_external_initializers_file_folder_path',
+        str(model_path.parent),
+    )
+    model_bytes = _patch_matmul_nbits_accuracy_level(
+        model_path.read_bytes(),
+        accuracy_level=ONNX_MATMUL_NBITS_ACCURACY_LEVEL,
+    )
+    session = ort.InferenceSession(
+        model_bytes,
+        sess_options=options,
+        providers=['CPUExecutionProvider'],
+    )
+    tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    model = OnnxTextEncoder(session, tokenizer, np)
+    return model, {
+        'threads': threads,
+        'backend': BACKEND_ONNX,
+        'precision': lock.get('precision', 'int8'),
+        'onnxruntime_version': str(ort.__version__),
+        'tokenizers_version': _distribution_version('tokenizers'),
+        'numpy_version': _distribution_version('numpy'),
+    }
+
+
+def _load_pytorch_model(model_dir, lock, threads):
     import torch
     from sentence_transformers import SentenceTransformer
 
@@ -109,15 +365,34 @@ def load_model(model_dir=DEFAULT_MODEL_DIR, *, threads=DEFAULT_THREADS, lock_pat
         config_kwargs={'vision_config': None, 'audio_config': None},
         model_kwargs={'torch_dtype': torch.float32},
     )
-    warm_vectors = encode_batch(model, [WARMUP_TEXT])
-    response_vectors(warm_vectors, 1)
-    identity.update({
+    return model, {
         'threads': threads,
+        'backend': BACKEND_PYTORCH,
+        'precision': lock.get('precision', 'float32'),
         'torch_version': str(torch.__version__),
         'sentence_transformers_version': _distribution_version('sentence-transformers'),
         'transformers_version': _distribution_version('transformers'),
         'pillow_version': _distribution_version('pillow'),
-    })
+    }
+
+
+def load_model(model_dir=DEFAULT_MODEL_DIR, *, threads=DEFAULT_THREADS, lock_path=None, backend=None):
+    """Verify assets, load the CPU text model, and warm it before readiness."""
+    threads = _bounded_threads(threads)
+    os.environ['HF_HUB_OFFLINE'] = '1'
+    os.environ['TRANSFORMERS_OFFLINE'] = '1'
+    lock = verify_model(model_dir, lock_path=lock_path or _default_lock_path())
+    identity = _metadata(lock)
+    selected_backend = _resolve_backend(lock, backend=backend)
+
+    # Runtime imports happen only after the complete asset tree has passed its lock.
+    if selected_backend == BACKEND_ONNX:
+        model, runtime_metadata = _load_onnx_model(model_dir, lock, threads)
+    else:
+        model, runtime_metadata = _load_pytorch_model(model_dir, lock, threads)
+    warm_vectors = encode_batch(model, [WARMUP_TEXT])
+    response_vectors(warm_vectors, 1)
+    identity.update(runtime_metadata)
     return model, identity
 
 
@@ -450,6 +725,9 @@ def _parser():
     parser.add_argument('--model-dir', type=pathlib.Path, default=DEFAULT_MODEL_DIR)
     parser.add_argument('--port', type=int, default=DEFAULT_PORT)
     parser.add_argument('--threads', type=int, default=DEFAULT_THREADS)
+    parser.add_argument('--backend', choices=SUPPORTED_BACKENDS,
+                        default=os.environ.get('QUIVR_QUERY_ENCODER_BACKEND', BACKEND_AUTO))
+    parser.add_argument('--lock-path', type=pathlib.Path, default=None)
     return parser
 
 
@@ -458,7 +736,8 @@ def main(argv=None):
     if not 1 <= args.port <= 65535:
         raise SystemExit('port must be from 1 to 65535')
     try:
-        model, metadata = load_model(args.model_dir, threads=args.threads)
+        model, metadata = load_model(args.model_dir, threads=args.threads,
+                                     lock_path=args.lock_path, backend=args.backend)
         server = create_server(model, port=args.port, metadata=metadata)
     except Exception:
         # Startup diagnostics stay generic: asset and dependency details belong

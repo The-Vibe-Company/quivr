@@ -18,6 +18,11 @@ func LogFailure(err error) {
 		slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic(config.code), "field", logging.Diagnostic(config.field), "problem", logging.Diagnostic(config.problem))
 		return
 	}
+	var prerequisite *postgres.PrerequisiteError
+	if errors.As(err, &prerequisite) {
+		slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic("postgres_prerequisite"), "problem", logging.Diagnostic(prerequisite.Error()))
+		return
+	}
 	code := "process_failed"
 	var storage *storageError
 	if errors.As(err, &storage) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -38,6 +39,8 @@ const (
 	CodeLexicalTextTooLarge    = "lexical_text_too_large"
 	CodeProvenanceTooLarge     = "provenance_too_large"
 	CodeInvalidProvenance      = "invalid_provenance"
+	CodeInvalidRegion          = "invalid_region"
+	CodeMultimodalUnsupported  = "multimodal_ingestion_unsupported"
 )
 
 // Bounds of one segment of a segment_and_embed answer.
@@ -91,6 +94,30 @@ type IngestionPart struct {
 	Text string `json:"text"`
 }
 
+// IngestionBlobPart is one verified Blob Part passed by reference to a
+// multimodal ingestion plugin (Plugin API 0.20).
+type IngestionBlobPart struct {
+	Key       string              `json:"key"`
+	Role      string              `json:"role"`
+	BlobID    string              `json:"blob_id"`
+	MediaType string              `json:"media_type"`
+	SizeBytes int64               `json:"size_bytes"`
+	SHA256    string              `json:"sha256"`
+	Reference NormalizerReference `json:"reference"`
+}
+
+// ImageRegion is normalized bounding-box provenance for an image segment.
+type ImageRegion struct {
+	CoordinateSystem string  `json:"coordinate_system"`
+	X                float64 `json:"x"`
+	Y                float64 `json:"y"`
+	Width            float64 `json:"width"`
+	Height           float64 `json:"height"`
+	ImageWidth       int     `json:"image_width,omitempty"`
+	ImageHeight      int     `json:"image_height,omitempty"`
+	Label            string  `json:"label,omitempty"`
+}
+
 // SourceRange identifies one non-empty Unicode code point slice of a request
 // Part. Ranges in one segment are listed in the request's reading order.
 type SourceRange struct {
@@ -102,9 +129,10 @@ type SourceRange struct {
 // IngestionRequestView is what output validation needs from a
 // segment_and_embed request: the Parts and the requested spaces.
 type IngestionRequestView struct {
-	Parts  []IngestionPart       `json:"parts"`
-	Spaces []string              `json:"spaces"`
-	Page   *IngestionPageRequest `json:"page,omitempty"`
+	Parts     []IngestionPart       `json:"parts"`
+	BlobParts []IngestionBlobPart   `json:"blob_parts,omitempty"`
+	Spaces    []string              `json:"spaces"`
+	Page      *IngestionPageRequest `json:"page,omitempty"`
 }
 
 // IngestionPageRequest bounds one call without bounding the item's coverage.
@@ -121,7 +149,7 @@ func ViewIngestionRequest(request []byte) (IngestionRequestView, error) {
 }
 
 // IngestionSegment is one decoded segment of a valid answer. Offsets are
-// Unicode code points in the Part text.
+// Unicode code points in the Part text, or [0, 0) with Region for a Blob Part.
 type IngestionSegment struct {
 	PartKey         string               `json:"part_key"`
 	Start           int                  `json:"start"`
@@ -130,6 +158,7 @@ type IngestionSegment struct {
 	SourceSeparator string               `json:"source_separator,omitempty"`
 	Vectors         map[string][]float64 `json:"vectors"`
 	LexicalText     string               `json:"lexical_text,omitempty"`
+	Region          *ImageRegion         `json:"region,omitempty"`
 	Provenance      json.RawMessage      `json:"provenance,omitempty"`
 }
 
@@ -170,8 +199,9 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			Message: fmt.Sprintf("%d segments; the manifest declares at most %d (limits.max_segments)", len(answer.Segments), limit)})
 	}
 	parts := map[string]int{}
+	blobParts := map[string]bool{}
 	hasTitle := false
-	keys := make([]string, 0, len(request.Parts))
+	keys := make([]string, 0, len(request.Parts)+len(request.BlobParts))
 	for i, p := range request.Parts {
 		parts[p.Key] = utf8.RuneCountInString(p.Text)
 		partOrder[p.Key] = i
@@ -180,10 +210,14 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			hasTitle = true
 		}
 	}
+	for _, bp := range request.BlobParts {
+		blobParts[bp.Key] = true
+		keys = append(keys, bp.Key)
+	}
 	seen := map[string]int{}
 	for i, s := range answer.Segments {
 		path := fmt.Sprintf("/segments/%d", i)
-		rangesPresent, separatorPresent := sourceFieldsPresent(wire.Segments, i)
+		rangesPresent, separatorPresent, regionPresent := sourceFieldsPresent(wire.Segments, i)
 		if (rangesPresent || separatorPresent) && !manifestSpeaks(m, FeatureMultiPartSegments) {
 			field := "source_ranges"
 			if !rangesPresent {
@@ -192,17 +226,46 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			issues = append(issues, Issue{Code: CodeMultiPartUnsupported, Path: path + "/" + field,
 				Message: fmt.Sprintf("%s requires Plugin API %s or later", field, FeatureSince(FeatureMultiPartSegments))})
 		}
+		if regionPresent && !manifestSpeaks(m, FeatureMultimodalIngestion) {
+			issues = append(issues, Issue{Code: CodeMultimodalUnsupported, Path: path + "/region",
+				Message: fmt.Sprintf("region requires Plugin API %s or later", FeatureSince(FeatureMultimodalIngestion))})
+		}
 		length, known := parts[s.PartKey]
+		isBlob := blobParts[s.PartKey]
 		switch {
-		case !known:
+		case !known && !isBlob:
 			issues = append(issues, Issue{Code: CodeUnknownPartKey, Path: path + "/part_key",
 				Message: fmt.Sprintf("Part key %q is not a Part of the request (Parts: %v)", s.PartKey, keys)})
+		case isBlob:
+			if !manifestSpeaks(m, FeatureMultimodalIngestion) {
+				issues = append(issues, Issue{Code: CodeMultimodalUnsupported, Path: path + "/part_key",
+					Message: fmt.Sprintf("Blob Part segments require Plugin API %s or later", FeatureSince(FeatureMultimodalIngestion))})
+			}
+			if s.Start != 0 || s.End != 0 {
+				issues = append(issues, Issue{Code: CodeOffsetOutOfRange, Path: path,
+					Message: fmt.Sprintf("Blob Part %q segment offsets must be [0, 0), got [%d, %d)", s.PartKey, s.Start, s.End)})
+			}
+			if s.Region == nil {
+				issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/region",
+					Message: fmt.Sprintf("Blob Part %q segment requires region provenance", s.PartKey)})
+			}
+			if len(s.SourceRanges) > 0 || s.SourceSeparator != "" {
+				issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/source_ranges",
+					Message: "Blob Part segments may not carry text source_ranges or source_separator"})
+			}
 		case s.Start > s.End || s.End > length:
 			issues = append(issues, Issue{Code: CodeOffsetOutOfRange, Path: path,
 				Message: fmt.Sprintf("offsets [%d, %d) are outside Part %q, which has %d code points; start <= end <= length", s.Start, s.End, s.PartKey, length)})
 		case s.Start == s.End && !hasTitle:
 			issues = append(issues, Issue{Code: CodeEmptySegment, Path: path,
 				Message: fmt.Sprintf("segment [%d, %d) of Part %q is empty; an empty segment stands for the title alone, so it needs a Part with the role title", s.Start, s.End, s.PartKey)})
+		}
+		if known && s.Region != nil {
+			issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/region",
+				Message: fmt.Sprintf("region applies only to Blob Parts, not text Part %q", s.PartKey)})
+		}
+		if s.Region != nil {
+			issues = append(issues, regionIssues(path+"/region", s.Region)...)
 		}
 		if len(s.SourceRanges) > MaxSourceRanges {
 			issues = append(issues, Issue{Code: CodeTooManySourceRanges, Path: path + "/source_ranges",
@@ -215,7 +278,7 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			issues = append(issues, Issue{Code: CodeInvalidSourceSeparator, Path: path + "/source_separator",
 				Message: fmt.Sprintf("the source separator has %d code points; at most %d are allowed", n, MaxSourceSeparatorRunes)})
 		}
-		if len(s.SourceRanges) > 0 {
+		if len(s.SourceRanges) > 0 && !isBlob {
 			issues = append(issues, sourceRangeIssues(path+"/source_ranges", s, parts, partOrder)...)
 		}
 		identity := sourceSegmentIdentity(s)
@@ -288,17 +351,54 @@ func ingestionPageIssues(answer IngestionAnswer, request IngestionRequestView, m
 	return nil
 }
 
-// sourceFieldsPresent reports whether an answer explicitly carries either of
-// the additive multi-Part fields. The decoded string cannot distinguish an
-// omitted separator from an explicitly empty separator, so inspect the wire
+// sourceFieldsPresent reports whether an answer explicitly carries additive
+// multi-Part or multimodal region fields. The decoded string cannot distinguish
+// an omitted separator from an explicitly empty separator, so inspect the wire
 // object for API admission checks.
-func sourceFieldsPresent(segments []map[string]json.RawMessage, index int) (rangesPresent, separatorPresent bool) {
+func sourceFieldsPresent(segments []map[string]json.RawMessage, index int) (rangesPresent, separatorPresent, regionPresent bool) {
 	if index < 0 || index >= len(segments) {
-		return false, false
+		return false, false, false
 	}
 	_, rangesPresent = segments[index]["source_ranges"]
 	_, separatorPresent = segments[index]["source_separator"]
-	return rangesPresent, separatorPresent
+	_, regionPresent = segments[index]["region"]
+	return rangesPresent, separatorPresent, regionPresent
+}
+
+func regionIssues(path string, r *ImageRegion) []Issue {
+	var issues []Issue
+	if r.CoordinateSystem != "normalized_bbox" {
+		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/coordinate_system",
+			Message: fmt.Sprintf("unsupported region coordinate_system %q; expected normalized_bbox", r.CoordinateSystem)})
+	}
+	for _, f := range []struct {
+		name string
+		val  float64
+	}{{"x", r.X}, {"y", r.Y}, {"width", r.Width}, {"height", r.Height}} {
+		if math.IsNaN(f.val) || math.IsInf(f.val, 0) {
+			issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/" + f.name,
+				Message: fmt.Sprintf("region %s must be finite", f.name)})
+		}
+	}
+	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
+		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path,
+			Message: "region coordinates must satisfy 0 <= x,y <= 1 and 0 < width,height <= 1"})
+	} else if r.X+r.Width > 1 || r.Y+r.Height > 1 {
+		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path,
+			Message: fmt.Sprintf("region extends outside the normalized [0, 1] image frame (x+width=%g, y+height=%g)", r.X+r.Width, r.Y+r.Height)})
+	}
+	if r.Label != "" && (strings.ContainsRune(r.Label, 0) || !utf8.ValidString(r.Label) || utf8.RuneCountInString(r.Label) > 128) {
+		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path + "/label",
+			Message: "region label must be valid UTF-8 without NUL and at most 128 code points"})
+	}
+	return issues
+}
+
+func canonicalFloat(v float64) string {
+	if v == 0 {
+		v = 0
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 func manifestSpeaks(m *Manifest, feature Feature) bool {
@@ -314,6 +414,13 @@ func manifestSpeaks(m *Manifest, feature Feature) bool {
 }
 
 func sourceSegmentIdentity(s IngestionSegment) string {
+	if s.Region != nil {
+		return fmt.Sprintf("%s\x00region\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
+			s.PartKey, s.Region.CoordinateSystem,
+			canonicalFloat(s.Region.X), canonicalFloat(s.Region.Y),
+			canonicalFloat(s.Region.Width), canonicalFloat(s.Region.Height),
+			s.Region.Label)
+	}
 	if len(s.SourceRanges) == 0 {
 		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
 	}

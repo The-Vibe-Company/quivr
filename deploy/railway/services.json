@@ -9,8 +9,13 @@
     }
   },
   "temporal": {
-    "dockerfile": "temporal",
-    "volume": "/data"
+    "variables": {
+      "POSTGRES_USER": "quivr",
+      "POSTGRES_SEEDS": "postgres.railway.internal",
+      "BIND_ON_IP": "::",
+      "TEMPORAL_BROADCAST_ADDRESS": "127.0.0.1",
+      "TEMPORAL_ADDRESS": "127.0.0.1:7233"
+    }
   },
   "seaweed": {
     "dockerfile": "seaweed",
@@ -37,6 +42,7 @@
     "healthcheck": "/readyz",
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "api",
       "QUIVR_ROLE": "api"
     }
   },
@@ -47,6 +53,7 @@
     "replicas": 1,
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "worker",
       "QUIVR_ROLE": "worker",
       "QUIVR_WORKER_QUEUES": "live"
     }
@@ -58,6 +65,7 @@
     "replicas": 1,
     "variables": {
       "PORT": "8081",
+      "QUIVR_IMAGE_ROLE": "worker",
       "QUIVR_ROLE": "worker",
       "QUIVR_WORKER_QUEUES": "bulk"
     }

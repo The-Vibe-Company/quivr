@@ -28,6 +28,7 @@ const ActionConnectorPush = "connector:push"
 
 type Scope struct {
 	Organization string   `json:"organization"`
+	ActorID      string   `json:"actor_id,omitempty"`
 	Actions      []string `json:"actions"`
 	Corpora      []string `json:"corpora"`
 }

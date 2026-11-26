@@ -120,7 +120,7 @@ def verify(stack):
         assert deletion['terminated_workflows'] >= 1, deletion
         assert deletion['deleted_vector_objects'] >= 1, deletion
         assert deletion['deleted_blob_objects_at_least'] >= 1, deletion
-        assert len(deletion['deleted_volumes']) == 4, deletion
+        assert len(deletion['deleted_volumes']) == 3, deletion
         subprocess.run(['docker', 'volume', 'inspect', survivor], capture_output=True, check=True)
     finally:
         subprocess.run(['docker', 'volume', 'rm', survivor], capture_output=True, check=True)

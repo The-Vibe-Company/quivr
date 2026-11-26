@@ -30,6 +30,7 @@ import local_secrets
 import plugin_environment
 import base64, hashlib, hmac, json, os, pathlib, signal, subprocess, time, urllib.request
 
+import go_bin_cache
 import ports
 from prepare_tokenizer import prepare as prepare_tokenizer
 
@@ -88,11 +89,27 @@ def variable(row):
     return 'QUIVR_' + row['id'].upper().replace('-', '_')
 
 
-def from_environment():
-    """The ids of the first-party plugins `make dev` pins: each QUIVR_<ID>, default on."""
+def from_environment(fast=False):
+    """The ids of the first-party plugins `make dev` pins: each QUIVR_<ID>.
+
+    In the full profile every plugin defaults to on. In the fast dev profile
+    ``core-ingest`` is replaced by the lightweight offline hash-embedder and
+    optional connectors default to off (each can still be opted in explicitly
+    with ``QUIVR_<ID>=on``); ``core-retrieve`` stays on by default.
+    """
     enabled = []
     for row in FIRST_PARTY:
-        value = (os.environ.get(variable(row)) or 'on').lower()
+        raw = os.environ.get(variable(row))
+        if fast and row['id'] == 'core-ingest':
+            if raw:
+                value = raw.lower()
+                if value not in ('on', 'off'):
+                    raise ValueError(f'{variable(row)} is on or off, not {value!r}')
+                if value == 'on':
+                    raise ValueError('QUIVR_CORE_INGEST=on requires TEI; run `make dev` (full profile) instead of fast')
+            continue
+        default = ('on' if row['id'] == 'core-retrieve' else 'off') if fast else 'on'
+        value = (raw or default).lower()
         if value not in ('on', 'off'):
             raise ValueError(f'{variable(row)} is on or off, not {value!r}')
         if value == 'on':
@@ -147,15 +164,21 @@ def healthy_port(port):
 
 
 def start_first_party(stack, only=None):
-    """Build each pinned first-party plugin (or only the named ones), run it and wait for its health."""
+    """Build (cached in .scratch/bin) each pinned first-party plugin, run it and wait for its health."""
     stop_first_party(stack, only)
-    for row in first_party(stack):
-        if only is not None and row['id'] not in only:
-            continue
-        directory, binary = stack.source / 'plugins' / row['id'], stack.directory / f"quivr-{row['id']}"
+    rows = [row for row in first_party(stack) if only is None or row['id'] in only]
+    if not rows:
+        return
+    binaries = go_bin_cache.ensure_many([
+        {'name': f"quivr-{row['id']}", 'cwd': stack.source / 'plugins' / row['id'], 'package': '.', 'go': GO}
+        for row in rows
+    ])
+    started = []
+    for row in rows:
+        directory = stack.source / 'plugins' / row['id']
+        binary = binaries[f"quivr-{row['id']}"]
         log = stack.directory / f"{row['id']}-plugin.log"
         inherited = plugin_environment.inherited()
-        subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, env=inherited, check=True)
         port = first_party_port(stack, row)
         env = {**inherited, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         if row.get('signing_id'):
@@ -164,10 +187,19 @@ def start_first_party(stack, only=None):
             p = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=out, stderr=out, start_new_session=True)
         stack.state[f"{row['id']}_plugin_pid"] = p.pid
         stack.save()
-        deadline = time.monotonic() + 30
-        while not healthy_port(port):
+        started.append((row['id'], p, port, log))
+    deadline = time.monotonic() + 30
+    pending = list(started)
+    while pending:
+        still = []
+        for plugin_id, p, port, log in pending:
+            if healthy_port(port):
+                continue
             if p.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError(f"{row['id']} connector plugin not healthy; inspect {log}")
+                raise RuntimeError(f"{plugin_id} connector plugin not healthy; inspect {log}")
+            still.append((plugin_id, p, port, log))
+        pending = still
+        if pending:
             time.sleep(.05)
 
 
@@ -203,7 +235,7 @@ def pins(stack):
 
 
 def binary(stack):
-    return stack.directory / 'static-source'
+    return go_bin_cache.ensure('static-source', stack.source / 'sdks' / 'go', './examples/static-source', go=GO)
 
 
 def healthy(stack):
@@ -215,13 +247,12 @@ def healthy(stack):
 
 
 def start(stack):
-    """Build the sample once per stack, run it and wait for its health."""
+    """Build (cached in .scratch/bin) the sample, run it and wait for its health."""
     stop(stack)
-    if not binary(stack).exists():
-        subprocess.run([GO, 'build', '-o', str(binary(stack)), './examples/static-source'], cwd=ROOT / 'sdks' / 'go', check=True)
+    executable = binary(stack)
     env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['connector_plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(MANIFEST)}
     with (stack.directory / 'connector-plugin.log').open('a') as log:
-        p = subprocess.Popen([str(binary(stack))], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
+        p = subprocess.Popen([str(executable)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
     stack.state['connector_plugin_pid'] = p.pid
     stack.save()
     deadline = time.monotonic() + 30

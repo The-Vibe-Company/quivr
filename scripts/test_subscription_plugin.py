@@ -45,6 +45,21 @@ class Selection(unittest.TestCase):
         ports = {pin['endpoint'] for pin in sp.pins(self.stack)}
         self.assertEqual(len(ports), 2, 'each plugin needs its own port')
 
+    def test_subscription_template_false_omits_template_from_running_and_prepare(self):
+        sp.select(self.stack, False, 'off', template=False)
+        with mock.patch.object(sp.subprocess, 'run') as run:
+            sp.prepare(self.stack)
+        run.assert_not_called()
+        self.assertFalse(sp.manifest(self.stack).exists())
+        self.assertEqual(sp.running(self.stack), [])
+        self.assertEqual(self.manifests(), [])
+
+        # Even when a prior full-dev run already scaffolded the template, template=False omits it.
+        sp.directory(self.stack).mkdir(parents=True)
+        sp.manifest(self.stack).write_text('id: alert-rules\n')
+        self.assertEqual(sp.running(self.stack), [])
+        self.assertEqual(self.manifests(), [])
+
 
 
 class Described(unittest.TestCase):
