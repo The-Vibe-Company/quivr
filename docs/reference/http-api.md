@@ -2075,7 +2075,7 @@ The most frequent search queries of the key's Organization over the window, norm
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Ordinary hybrid searches use keywords for Corpora whose served vectors are unavailable, reporting their ids in retrieval_profile.degraded. Other Corpora keep their hybrid ranking. Explicit semantic requests remain 422 unsupported_search when vector search cannot run. Unknown coverage alone does not disable a routed space. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process bounds active searches across callers with an adaptive concurrency limiter and short bounded wait queue. When saturated it returns retryable 503 search_unavailable with Retry-After before storage or plugin work. When a deep search has insufficient remaining deadline budget for reranking, or the reranker hits its deadline or fails, it degrades gracefully to default results for the requested mode and reports the reason in retrieval_profile.degraded. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -10794,7 +10794,7 @@ Resolved retrieval profile identity. Name is the requested short or full name (d
 | --- | --- | --- | --- |
 | `name` | string | yes | Minimum length `1`. |
 | `version` | string | yes | Minimum length `1`. |
-| `degraded` | array of [`SearchDegradation`](#searchdegradation) |  | Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match. At least `1` items. At most `16` items. |
+| `degraded` | array of [`SearchDegradation`](#searchdegradation) |  | Omitted when fully served. Reports authorized, non-excluded Corpora whose search degraded, for example hybrid searches using keywords when vectors are unavailable, or deep searches falling back to default results when reranking budget is tight or the reranker is unavailable. Present even when no documents match. At least `1` items. At most `16` items. |
 
 <details>
 <summary>Full schema</summary>
@@ -10815,7 +10815,7 @@ properties:
     maxItems: 16
     items:
       $ref: '#/components/schemas/SearchDegradation'
-    description: Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+    description: Omitted when fully served. Reports authorized, non-excluded Corpora whose search degraded, for example hybrid searches using keywords when vectors are unavailable, or deep searches falling back to default results when reranking budget is tight or the reranker is unavailable. Present even when no documents match.
 required:
   - name
   - version
@@ -10828,7 +10828,7 @@ description: Resolved retrieval profile identity. Name is the requested short or
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `reason` | string | yes | No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes. One of `vectors_unavailable`. |
+| `reason` | string | yes | Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned. One of `vectors_unavailable`, `reranker_budget_exceeded`, `reranker_unavailable`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 
 <details>
@@ -10840,8 +10840,8 @@ additionalProperties: false
 properties:
   reason:
     type: string
-    enum: [vectors_unavailable]
-    description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+    enum: [vectors_unavailable, reranker_budget_exceeded, reranker_unavailable]
+    description: Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
   corpus_ids:
     type: array
     minItems: 1

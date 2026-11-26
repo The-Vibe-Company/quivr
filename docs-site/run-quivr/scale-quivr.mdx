@@ -12,7 +12,7 @@ This page explains the capacity model and operating lessons for Kubernetes, virt
 
 The API serves requests; live workers collect feeds, process pushes and evaluate alerts; bulk workers run imports, rebuilds, backfills and quarantine reprocessing. API and worker commands use the same binary. Select worker lanes with `worker.queues`, and use separate processes to reserve live activity slots.
 
-Replicas keep no durable local work: PostgreSQL and Temporal hold claims, progress and retries. Replicas share the database, workflow namespace, storage and active plugin plan. An API process admits at most 64 concurrent searches; a search's time budget comes from its profile, commonly 2 seconds. More API replicas increase admission, but cannot make a slow provider or index faster.
+Replicas keep no durable local work: PostgreSQL and Temporal hold claims, progress and retries. Replicas share the database, workflow namespace, storage and active plugin plan. An API process bounds concurrent searches with an adaptive concurrency limiter (starting at 64, adjusting with latency and overload) and a short bounded wait queue; a search's time budget comes from its profile, commonly 2 seconds. More API replicas increase admission, but cannot make a slow provider or index faster.
 
 ### Slots and replicas
 

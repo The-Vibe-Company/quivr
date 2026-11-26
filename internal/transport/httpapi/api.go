@@ -51,7 +51,7 @@ type API struct {
 	router            *routing.Mux
 	routes            http.Handler
 	loadMetrics       *telemetry.LoadMetrics
-	searches          chan struct{}
+	searchAdmission   *SearchAdmission
 	facets            chan struct{}
 	pushProxyCIDRs    []string
 	Content           content.Service
@@ -101,7 +101,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
+	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
@@ -121,7 +121,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	}
 	a.router = mux
 	a.loadMetrics.RegisterRoutes(mux.Templates()...)
-	a.loadMetrics.BindSearch(a.searches)
+	a.loadMetrics.BindSearchAdmission(a.searchAdmission.Stats)
 	return http.HandlerFunc(a.serveAccess), nil
 }
 

@@ -983,12 +983,18 @@ func (e SavedQueryDefinitionTemporalPolicy) Valid() bool {
 
 // Defines values for SearchDegradationReason.
 const (
-	VectorsUnavailable SearchDegradationReason = "vectors_unavailable"
+	RerankerBudgetExceeded SearchDegradationReason = "reranker_budget_exceeded"
+	RerankerUnavailable    SearchDegradationReason = "reranker_unavailable"
+	VectorsUnavailable     SearchDegradationReason = "vectors_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the SearchDegradationReason enum.
 func (e SearchDegradationReason) Valid() bool {
 	switch e {
+	case RerankerBudgetExceeded:
+		return true
+	case RerankerUnavailable:
+		return true
 	case VectorsUnavailable:
 		return true
 	default:
@@ -3194,11 +3200,11 @@ type ScheduleChange struct {
 type SearchDegradation struct {
 	CorpusIds []string `json:"corpus_ids"`
 
-	// Reason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+	// Reason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 	Reason SearchDegradationReason `json:"reason"`
 }
 
-// SearchDegradationReason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
+// SearchDegradationReason Why the search returned degraded results. vectors_unavailable means no usable served vector route or current coverage confirms no vectors; keywords remain available (stale and unknown counts do not disable current routes). reranker_budget_exceeded means remaining deadline budget was too tight for deep reranking, or the reranker call hit its deadline, so default results were returned. reranker_unavailable means the reranker returned an error or was unavailable so default results were returned.
 type SearchDegradationReason string
 
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
@@ -3275,7 +3281,7 @@ type SearchPhases struct {
 
 // SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
-	// Degraded Omitted when fully served. Ordinary hybrid searches report the authorized, non-excluded Corpora whose vector half is unavailable and whose results use keywords. Present even when no documents match.
+	// Degraded Omitted when fully served. Reports authorized, non-excluded Corpora whose search degraded, for example hybrid searches using keywords when vectors are unavailable, or deep searches falling back to default results when reranking budget is tight or the reranker is unavailable. Present even when no documents match.
 	Degraded *[]SearchDegradation `json:"degraded,omitempty"`
 	Name     string               `json:"name"`
 	Version  string               `json:"version"`

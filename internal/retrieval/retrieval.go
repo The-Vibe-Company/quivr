@@ -24,6 +24,17 @@ const ProfileVersion = "balanced.e5-token-windows.v1"
 // plugin declares it beside its own.
 const DefaultProfile = plugins.DefaultProfile
 
+// Degradation reasons reported in Result.Degraded and the HTTP contract.
+const (
+	DegradationVectorsUnavailable     = "vectors_unavailable"
+	DegradationRerankerBudgetExceeded = "reranker_budget_exceeded"
+	DegradationRerankerUnavailable    = "reranker_unavailable"
+)
+
+// DefaultMinRerankBudget is the minimum remaining deadline budget required to
+// invoke external deep reranking before degrading gracefully to default results.
+const DefaultMinRerankBudget = 250 * time.Millisecond
+
 // MaxLimit is the largest page a search may request.
 const MaxLimit = 50
 
@@ -192,9 +203,20 @@ type Service struct {
 	Coverage *CoverageCache
 	// QueryVectors is shared by searches using these encoders.
 	QueryVectors *QueryVectorCache
-	Routing      Routing
-	Projection   Projection
-	Content      content.Service
+	// MinRerankBudget is the minimum remaining deadline budget required to run
+	// deep reranking before degrading gracefully to default hybrid results.
+	// Zero selects DefaultMinRerankBudget.
+	MinRerankBudget time.Duration
+	Routing         Routing
+	Projection      Projection
+	Content         content.Service
+}
+
+func (s Service) minRerankBudget() time.Duration {
+	if s.MinRerankBudget > 0 {
+		return s.MinRerankBudget
+	}
+	return DefaultMinRerankBudget
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
@@ -250,6 +272,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	out.Profile = q.Profile
 	// Hold the concrete plugin for the entire search, including its budgets.
 	s.Ranker, q.Profile = ranker, local
+	parentCtx := ctx
 	// The whole search, authorization and routing included, runs under the
 	// profile's hard bound.
 	ctx, cancel := context.WithTimeout(ctx, s.Ranker.Manifest().Contributions.Retrieval.Profiles[q.Profile].Deadline())
@@ -351,7 +374,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}, OverObjective: elapsed > m.Contributions.Retrieval.Profiles[q.Profile].Objective()}
 		return out, nil
 	}
-	return s.rank(ctx, scope, q, routes, out, started)
+	return s.rank(ctx, parentCtx, scope, q, routes, out, started)
 }
 
 // normalizeQuery prepares a query: valid text of at most MaxQueryCodepoints,
