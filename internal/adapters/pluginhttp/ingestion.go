@@ -97,6 +97,19 @@ func (i Ingestor) Owns(key string) bool {
 	return ok
 }
 
+// ResolveQueryEncoder identifies the same serving pin that will encode a
+// cache miss, including its effective settings after a serving replacement.
+func (i Ingestor) ResolveQueryEncoder(_ context.Context, space string) (retrieval.QueryEncoder, string) {
+	i = i.serving()
+	if !i.Owns(space) {
+		return nil, ""
+	}
+	i.Live = nil
+	p := i.Pin
+	return i, content.StableID("query_encoder", p.Registration, p.Generation(), p.Manifest.ID, p.Manifest.Version,
+		p.ManifestDigest, p.Endpoint, string(p.Configuration))
+}
+
 // refused is content.ErrIngestionRefused for the reason message states, which
 // a Version quarantined for it shows with the plugin's name and version.
 func (i Ingestor) refused(format string, args ...any) error {

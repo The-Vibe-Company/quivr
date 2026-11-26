@@ -85,6 +85,14 @@ func (l LiveIngestor) EncodeQuery(ctx context.Context, org, space, query string)
 	return (Ingestor{Pin: pin, Live: l.Live}).EncodeQuery(ctx, org, space, query)
 }
 
+func (l LiveIngestor) ResolveQueryEncoder(ctx context.Context, space string) (retrieval.QueryEncoder, string) {
+	pin, err := l.queryOwner(ctx, space)
+	if err != nil || pin == nil {
+		return nil, ""
+	}
+	return (Ingestor{Pin: pin, Live: l.Live}).ResolveQueryEncoder(ctx, space)
+}
+
 // LiveRetriever routes deployment profile names in one snapshot of the active
 // Pipeline Plan. The returned Retriever remains pinned for the whole search.
 type LiveRetriever struct {
