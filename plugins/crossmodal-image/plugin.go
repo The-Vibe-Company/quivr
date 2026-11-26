@@ -9,18 +9,22 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
-const maxSegments = 256
+const (
+	maxSegments        = 256
+	maxImageBytesLimit = int64(10 << 20)
+)
 
 type pluginConfig struct {
-	Backend          string `json:"backend"`
-	BaseURL          string `json:"base_url"`
-	Auth             string `json:"auth"`
-	Model            string `json:"model"`
-	RegionMode       string `json:"region_mode"`
-	GridRows         int    `json:"grid_rows"`
-	GridCols         int    `json:"grid_cols"`
-	MaxImageBytes    int64  `json:"max_image_bytes"`
-	RequestTimeoutMS int    `json:"request_timeout_ms"`
+	Backend               string `json:"backend"`
+	BaseURL               string `json:"base_url"`
+	Auth                  string `json:"auth"`
+	Model                 string `json:"model"`
+	RegionMode            string `json:"region_mode"`
+	GridRows              int    `json:"grid_rows"`
+	GridCols              int    `json:"grid_cols"`
+	MaxImageBytes         int64  `json:"max_image_bytes"`
+	RequestTimeoutMS      int    `json:"request_timeout_ms"`
+	QueryRequestTimeoutMS int    `json:"query_request_timeout_ms"`
 }
 
 func (c pluginConfig) resolvedModel() string {
@@ -35,13 +39,14 @@ func (c pluginConfig) resolvedModel() string {
 
 func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	cfg := pluginConfig{
-		Backend:          "builtin",
-		Auth:             "none",
-		RegionMode:       "full",
-		GridRows:         2,
-		GridCols:         2,
-		MaxImageBytes:    25 << 20,
-		RequestTimeoutMS: 3000,
+		Backend:               "builtin",
+		Auth:                  "none",
+		RegionMode:            "full",
+		GridRows:              2,
+		GridCols:              2,
+		MaxImageBytes:         maxImageBytesLimit,
+		RequestTimeoutMS:      15000,
+		QueryRequestTimeoutMS: 4000,
 	}
 	if len(raw) > 0 && string(raw) != "{}" {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -63,11 +68,14 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	if cfg.GridRows < 1 || cfg.GridRows > 4 || cfg.GridCols < 1 || cfg.GridCols > 4 {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "grid_rows and grid_cols must be in 1..4")
 	}
-	if cfg.MaxImageBytes < 1024 || cfg.MaxImageBytes > 25<<20 {
+	if cfg.MaxImageBytes < 1024 || cfg.MaxImageBytes > maxImageBytesLimit {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "max_image_bytes out of bounds")
 	}
-	if cfg.RequestTimeoutMS < 500 || cfg.RequestTimeoutMS > 5000 {
-		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "request_timeout_ms must be in 500..5000")
+	if cfg.RequestTimeoutMS < 500 || cfg.RequestTimeoutMS > 30000 {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "request_timeout_ms must be in 500..30000")
+	}
+	if cfg.QueryRequestTimeoutMS < 500 || cfg.QueryRequestTimeoutMS > 8000 {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "query_request_timeout_ms must be in 500..8000")
 	}
 	return cfg, nil
 }

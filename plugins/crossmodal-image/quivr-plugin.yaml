@@ -34,7 +34,10 @@ contributions:
         indexes: [image]
         query_modalities: [text]
         description: Shared 512-dimensional cross-modal vector space computed by an external HTTP cross-modal embedding endpoint.
-    timeout_ms: 60000
+    # 120s total ingestion budget covers sequential region uploads in grid mode
+    # (up to 10 MiB images, request_timeout_ms <= 30s per call); 10s query budget
+    # covers fail-fast text queries (query_request_timeout_ms <= 8s).
+    timeout_ms: 120000
     query_timeout_ms: 10000
     limits:
       max_segments: 256
@@ -90,14 +93,21 @@ configuration:
       max_image_bytes:
         type: integer
         minimum: 1024
-        maximum: 26214400
-        default: 26214400
+        maximum: 10485760
+        default: 10485760
+        description: Maximum raw image size in bytes (up to 10 MiB so base64 HTTP region uploads complete well within request_timeout_ms).
       request_timeout_ms:
         type: integer
         minimum: 500
-        maximum: 5000
-        default: 3000
-        description: Per-request HTTP timeout in milliseconds (default 3000, max 5000). Each HTTP call also inherits the remaining invocation deadline (query_timeout_ms 10000ms for fail-fast text queries; timeout_ms 60000ms shared across sequential region calls in grid mode).
+        maximum: 30000
+        default: 15000
+        description: Per-attempt HTTP timeout in milliseconds for image-region embedding calls (default 15000, max 30000), bounded by the remaining 120000ms ingestion timeout_ms across sequential grid regions.
+      query_request_timeout_ms:
+        type: integer
+        minimum: 500
+        maximum: 8000
+        default: 4000
+        description: HTTP timeout in milliseconds for fail-fast single-attempt text query embeddings (default 4000, max 8000, strictly within query_timeout_ms 10000ms).
 secrets:
   - name: CROSSMODAL_API_KEY
     required: false

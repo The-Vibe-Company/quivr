@@ -63,12 +63,13 @@ func newEncoderForSpace(cfg pluginConfig, spaceID string) (crossModalEncoder, st
 			return nil, "", quivrplugin.RetryableIngestError("missing_secret", "CROSSMODAL_API_KEY must be set when auth is bearer or api-key")
 		}
 		return &httpEncoder{
-			baseURL: cfg.BaseURL,
-			auth:    cfg.Auth,
-			apiKey:  apiKey,
-			model:   httpModelID,
+			baseURL:       cfg.BaseURL,
+			auth:          cfg.Auth,
+			apiKey:        apiKey,
+			model:         httpModelID,
+			regionTimeout: time.Duration(cfg.RequestTimeoutMS) * time.Millisecond,
+			queryTimeout:  time.Duration(cfg.QueryRequestTimeoutMS) * time.Millisecond,
 			client: &http.Client{
-				Timeout: time.Duration(cfg.RequestTimeoutMS) * time.Millisecond,
 				CheckRedirect: func(*http.Request, []*http.Request) error {
 					return http.ErrUseLastResponse
 				},
@@ -532,11 +533,13 @@ func normalizeVector(vec []float64) []float32 {
 // httpEncoder delegates image-region and text-query embedding to an external
 // cross-modal embedding HTTP service.
 type httpEncoder struct {
-	baseURL string
-	auth    string
-	apiKey  string
-	model   string
-	client  *http.Client
+	baseURL       string
+	auth          string
+	apiKey        string
+	model         string
+	regionTimeout time.Duration
+	queryTimeout  time.Duration
+	client        *http.Client
 }
 
 func (e *httpEncoder) embedRegion(ctx context.Context, decoded decodedImage, rawBytes []byte, pr plannedRegion) ([]float32, error) {
@@ -561,22 +564,22 @@ func (e *httpEncoder) embedRegion(ctx context.Context, decoded decodedImage, raw
 			"data_uri": dataURI,
 			"region":   pr.region,
 		},
-	}, 3)
+	}, e.regionTimeout, 3)
 }
 
 func (e *httpEncoder) embedQuery(ctx context.Context, text string) ([]float32, error) {
-	// Fail fast on the interactive query path (single attempt) so a slow or
-	// failing backend never burns the full query_timeout_ms budget in retries.
+	// Fail fast on the interactive query path (single attempt) with its own
+	// query timeout strictly below query_timeout_ms.
 	return e.call(ctx, map[string]any{
 		"model": e.model,
 		"input": map[string]any{
 			"modality": "text",
 			"text":     text,
 		},
-	}, 1)
+	}, e.queryTimeout, 1)
 }
 
-func (e *httpEncoder) call(ctx context.Context, body map[string]any, maxAttempts int) ([]float32, error) {
+func (e *httpEncoder) call(ctx context.Context, body map[string]any, timeout time.Duration, maxAttempts int) ([]float32, error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -599,8 +602,13 @@ func (e *httpEncoder) call(ctx context.Context, body map[string]any, maxAttempts
 			case <-timer.C:
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL, bytes.NewReader(raw))
+		attemptCtx, cancel := ctx, func() {}
+		if timeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, e.baseURL, bytes.NewReader(raw))
 		if err != nil {
+			cancel()
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid embedding backend URL")
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -612,6 +620,7 @@ func (e *httpEncoder) call(ctx context.Context, body map[string]any, maxAttempts
 		}
 		resp, err := e.client.Do(req)
 		if err != nil {
+			cancel()
 			if ctx.Err() != nil {
 				return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
 			}
@@ -620,6 +629,7 @@ func (e *httpEncoder) call(ctx context.Context, body map[string]any, maxAttempts
 		}
 		respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		resp.Body.Close()
+		cancel()
 		if readErr != nil {
 			if ctx.Err() != nil {
 				return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
