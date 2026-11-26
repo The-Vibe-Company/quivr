@@ -115,8 +115,8 @@ class RailwayIsolation(unittest.TestCase):
                             del removing[identifier]
                     if args[0] == 'ssh':
                         command = args[-1]
-                        if 'vector_inventory(' in command:
-                            return '0'
+                        if 'print(json.dumps(vector_inventory(WeaviateClient.from_config(c))))' in command:
+                            return '{"objects":0,"inactive_tenants":0}'
                         if 'weaviate_url' in command and 'json.dumps' in command:
                             return json.dumps(None if failure == 'unknown-index' else
                                 'https://index.example.invalid' if failure == 'external-index' else
@@ -341,7 +341,7 @@ class WeaviateTransport(unittest.TestCase):
                 return self.responses[path]
 
         active_and_archived = FakeClient({
-            '/v1/objects?limit=1': {'objects': []},
+            '/v1/objects?limit=1': {'objects': [{'id': 'shared-1'}], 'totalResults': 2},
             '/v1/schema': {'classes': [
                 {'class': 'QuivrTextV4', 'multiTenancyConfig': {'enabled': False}},
                 {'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}},
@@ -355,7 +355,7 @@ class WeaviateTransport(unittest.TestCase):
                 'totalResults': 3,
             },
         })
-        self.assertEqual(vector_inventory(active_and_archived), 4)
+        self.assertEqual(vector_inventory(active_and_archived), {'objects': 5, 'inactive_tenants': 1})
         self.assertNotIn('/v1/objects?class=QuivrTextV5&tenant=org%2Fc2%2Fg1&limit=1', active_and_archived.paths)
 
         empty_multi_tenant = FakeClient({
@@ -363,19 +363,19 @@ class WeaviateTransport(unittest.TestCase):
             '/v1/schema': {'classes': [{'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}}]},
             '/v1/schema/QuivrTextV5/tenants': [],
         })
-        self.assertEqual(vector_inventory(empty_multi_tenant), 0)
+        self.assertEqual(vector_inventory(empty_multi_tenant), {'objects': 0, 'inactive_tenants': 0})
 
         for bad_schema in ({}, {'classes': 'invalid'}):
             with self.assertRaisesRegex(RuntimeError, 'Weaviate schema'):
                 vector_inventory(FakeClient({'/v1/objects?limit=1': {'objects': []}, '/v1/schema': bad_schema}))
 
-        bad_tenants = FakeClient({
-            '/v1/objects?limit=1': {'objects': []},
-            '/v1/schema': {'classes': [{'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}}]},
-            '/v1/schema/QuivrTextV5/tenants': {'not': 'a list'},
-        })
-        with self.assertRaisesRegex(RuntimeError, 'Weaviate tenants'):
-            vector_inventory(bad_tenants)
+        for bad_tenants in (None, {'not': 'a list'}):
+            with self.assertRaisesRegex(RuntimeError, 'Weaviate tenants'):
+                vector_inventory(FakeClient({
+                    '/v1/objects?limit=1': {'objects': []},
+                    '/v1/schema': {'classes': [{'class': 'QuivrTextV5', 'multiTenancyConfig': {'enabled': True}}]},
+                    '/v1/schema/QuivrTextV5/tenants': bad_tenants,
+                }))
 
 
 class RailwayAuthScope(unittest.TestCase):
@@ -481,9 +481,15 @@ class ComposeProcessScope(unittest.TestCase):
                      patch.object(compose_reset.sys, 'version_info', (3, 12, 0)), \
                      patch('deploy.reset_storage.inventory', return_value={'objects_at_least': 0, 'truncated': False}), \
                      patch.object(compose_reset.WeaviateClient, 'from_config') as client:
-                    client.return_value.request_json.side_effect = lambda path: (
-                        {'classes': []} if path == '/v1/schema' else {'objects': []}
-                    )
+                    seen_paths = []
+                    def fake_weaviate(path):
+                        seen_paths.append(path)
+                        if path == '/v1/schema':
+                            return {'classes': []}
+                        if path == '/v1/objects?limit=1':
+                            return {'objects': []}
+                        raise AssertionError(f'unexpected Weaviate path: {path}')
+                    client.return_value.request_json.side_effect = fake_weaviate
                     resetter = compose_reset.ComposeReset({'deployment': 'legacy', 'project': 'legacy-stack'})
                     resetter.adapter.run = docker
                     if foreign_attachment:
@@ -492,10 +498,15 @@ class ComposeProcessScope(unittest.TestCase):
                     else:
                         preview = resetter.preview()
                         self.assertEqual(preview['legacy_volumes'], {'temporal': 'legacy-stack_temporal-data'})
+                        self.assertIn('/v1/schema', seen_paths)
+                        self.assertIn('/v1/objects?limit=1', seen_paths)
+                        seen_paths.clear()
                         sys.path.insert(0, str(ROOT / 'scripts'))
                         import local as local_module
                         with patch.object(local_module, 'Stack', StubStack):
                             result = resetter.reset()
+                        self.assertIn('/v1/schema', seen_paths)
+                        self.assertIn('/v1/objects?limit=1', seen_paths)
                         self.assertEqual(removed, ['legacy-stack_temporal-data'])
                         self.assertIn('legacy-stack_temporal-data', result['deleted_volumes'])
                         checkpoint = json.loads((project_dir / 'reset-state.json').read_text())

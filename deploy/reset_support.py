@@ -47,6 +47,7 @@ def vector_objects(value):
 def vector_inventory(client):
     """Count indexed Weaviate objects across shared and multi-tenant collections."""
     total = vector_objects(client.request_json('/v1/objects?limit=1'))
+    inactive_tenants = 0
     schema = client.request_json('/v1/schema')
     if not isinstance(schema, dict) or 'classes' not in schema:
         raise RuntimeError('unexpected Weaviate schema response')
@@ -66,8 +67,6 @@ def vector_inventory(client):
             raise RuntimeError('unexpected Weaviate class name')
         encoded_class = quote(name, safe='')
         tenants = client.request_json(f'/v1/schema/{encoded_class}/tenants')
-        if tenants is None:
-            tenants = []
         if not isinstance(tenants, list):
             raise RuntimeError('unexpected Weaviate tenants response')
         for tenant in tenants:
@@ -78,14 +77,14 @@ def vector_inventory(client):
                 raise RuntimeError('unexpected Weaviate tenant entry')
             if (status or 'ACTIVE').upper() not in ('ACTIVE', 'HOT'):
                 # Inactive or offloaded tenants cannot be queried via /v1/objects
-                # without activating them; count each as non-empty so reset never
-                # mistakes an archived tenant for an empty index.
-                total += 1
+                # without activating them; track them separately rather than
+                # misreporting them as an object count.
+                inactive_tenants += 1
                 continue
             encoded_tenant = quote(tenant['name'], safe='')
             total += vector_objects(client.request_json(
                 f'/v1/objects?class={encoded_class}&tenant={encoded_tenant}&limit=1'))
-    return total
+    return {'objects': total, 'inactive_tenants': inactive_tenants}
 
 
 class ResetTimeout(RuntimeError):

@@ -67,7 +67,7 @@ def verify(stack):
     from deploy.reset_support import vector_inventory, wait_until
     index_client = WeaviateClient.from_config(local_secrets.read_dependencies(stack.directory / 'config.json'))
     def indexed():
-        return vector_inventory(index_client)
+        return vector_inventory(index_client)['objects']
     wait_until(indexed, lambda count: count > 0, seconds=30)
     # The command owns this proof: no direct down(True) can bypass its guards.
     source = stack.directory / 'lifecycle-sources.json'
