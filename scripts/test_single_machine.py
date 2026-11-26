@@ -115,5 +115,6 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             combined = json.loads((directory / 'compose.yaml').read_text())
             self.assertEqual(combined['services']['api']['ports'], ['127.0.0.1:${QUIVR_API_PORT:-8080}:8080'])
+            self.assertEqual(combined['services']['api']['environment']['QUIVR_ADMIN_LISTEN'], 'off')
             self.assertNotIn('QUIVR_ADMIN_URL', combined['services']['demo']['environment'])
             self.assertNotIn('QUIVR_ADMIN_KEY', combined['services']['demo']['environment'])

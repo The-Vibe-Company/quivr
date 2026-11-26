@@ -1712,9 +1712,10 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
 test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", async (t) => {
   const functionalSeen = [];
   const adminSeen = [];
+  let allowFunctionalAdmin = false;
   const functional = http.createServer((req, res) => {
     functionalSeen.push({ url: req.url, auth: req.headers.authorization });
-    if (req.url.startsWith("/v0/admin")) {
+    if (!allowFunctionalAdmin && req.url.startsWith("/v0/admin")) {
       res.writeHead(404, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ code: "not_found", message: "not found", retryable: false }));
     }
@@ -1750,11 +1751,18 @@ test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", asyn
   assert.ok(adminSeen.some((entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-admin-key"));
   assert.ok(!functionalSeen.some((entry) => entry.url.startsWith("/v0/admin")));
   // Explicit empty strings (such as cleared Railway variables) fall back to combined mode cleanly.
+  allowFunctionalAdmin = true;
   const combinedBase = await startDemo(t, functional.address().port, {
     QUIVR_ADMIN_URL: "",
     QUIVR_ADMIN_KEY: "",
   });
-  assert.equal((await fetch(combinedBase + "/healthz")).status, 204);
+  const combinedResponse = await fetch(combinedBase + "/demo/admin/plugins");
+  assert.equal(combinedResponse.status, 200);
+  assert.ok(
+    functionalSeen.some(
+      (entry) => entry.url === "/v0/admin/active-plugins" && entry.auth === "Bearer fixture-server-key",
+    ),
+  );
   // Setting only one of QUIVR_ADMIN_URL or QUIVR_ADMIN_KEY must refuse startup.
   for (const partial of [
     { QUIVR_ADMIN_URL: `http://127.0.0.1:${admin.address().port}`, QUIVR_ADMIN_KEY: "" },
@@ -1774,7 +1782,13 @@ test("admin routes use QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY when separated", asyn
     });
     const stderr = [];
     child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
-    const [code] = await once(child, "exit");
+    const [code] = await Promise.race([
+      once(child, "close"),
+      delay(5000, undefined, { ref: false }).then(() => {
+        child.kill();
+        throw new Error("partial admin configuration did not stop the server");
+      }),
+    ]);
     assert.notEqual(code, 0);
     assert.match(stderr.join(""), /QUIVR_ADMIN_URL and QUIVR_ADMIN_KEY/);
   }
