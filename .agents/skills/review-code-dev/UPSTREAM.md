@@ -2,7 +2,7 @@
 
 Source: https://github.com/alibaba/open-code-review/blob/v1.14.4/skills/open-code-review-delegate/SKILL.md
 Release: v1.14.4
-Commit: f921d6a0de3b71befce15d8edf589cd3609968fa
+Commit: d4f568f71d3a9d5c5ec972791b1509e40cd31ad1
 Author: Alibaba / open-code-review contributors
 License: Apache-2.0 (see LICENSE)
 
