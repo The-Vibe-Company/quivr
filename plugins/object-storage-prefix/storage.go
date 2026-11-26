@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	errObjectMissing = errors.New("object missing")
-	errObjectChanged = errors.New("object changed")
+	errObjectMissing  = errors.New("object missing")
+	errObjectChanged  = errors.New("object changed")
+	errObjectTooLarge = errors.New("object too large")
 )
 
 type objectMeta struct {
@@ -237,7 +238,7 @@ func (s *storage) get(ctx context.Context, key, etag string, maxBytes int64) ([]
 		return nil, "", quivrplugin.TransientError("storage_unavailable", "object download did not complete")
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, "", quivrplugin.SourceError("object_too_large", "object exceeds max_object_bytes")
+		return nil, "", errObjectTooLarge
 	}
 	return data, aws.ToString(p.ContentType), nil
 }

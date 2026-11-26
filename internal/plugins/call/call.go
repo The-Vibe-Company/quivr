@@ -124,7 +124,7 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 		}
 	}
 	invoke = devhost.WithResponseCheck(invoke, func(status int, header http.Header) error {
-		if status == http.StatusUnauthorized || status == http.StatusNotFound || status >= 500 && status <= 599 {
+		if (status >= 300 && status <= 399) || status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound || status == http.StatusMethodNotAllowed || (status >= 500 && status <= 599) {
 			invalidate()
 		}
 		for _, digest := range header.Values("X-Quivr-Manifest-Digest") {

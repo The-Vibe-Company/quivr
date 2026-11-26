@@ -301,6 +301,10 @@ func Run(command string, args ...string) error {
 		return invalidConfig("telemetry", "invalid telemetry settings", err)
 	}
 
+	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
+	if err != nil {
+		return err
+	}
 	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
 	graceExpired := false
 	defer func() {
@@ -416,10 +420,6 @@ func Run(command string, args ...string) error {
 		pinnedAttempts = cfg.PinnedPluginAttempts
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
-		return err
-	}
-	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
-	if err != nil {
 		return err
 	}
 	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {

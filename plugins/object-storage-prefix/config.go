@@ -240,7 +240,10 @@ func (c prefixConfig) identity(key string, ordinal int64) (string, string, error
 	if !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 		return "", "", quivrplugin.SourceError("invalid_object_key", "object key must be valid UTF-8 without NUL")
 	}
-	recordKey := strings.TrimPrefix(strings.TrimPrefix(key, c.Prefix), "/")
+	recordKey := strings.TrimPrefix(key, c.Prefix)
+	if c.Prefix != "" && !strings.HasSuffix(c.Prefix, "/") {
+		recordKey = strings.TrimPrefix(recordKey, "/")
+	}
 	if recordKey == "" {
 		recordKey = key
 	}

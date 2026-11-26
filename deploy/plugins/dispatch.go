@@ -27,7 +27,14 @@ func MainFunc(fn func()) Entry {
 func HostedEmbed(args []string) {
 	var command []string
 	if exe, err := os.Executable(); err == nil {
-		command = []string{exe, "hosted-embed"}
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		if normalize(filepath.Base(exe)) == "hosted-embed" {
+			command = []string{exe}
+		} else {
+			command = []string{exe, "hosted-embed"}
+		}
 	}
 	if err := hostedembed.Run(args, command); err != nil {
 		fmt.Fprintln(os.Stderr, err)

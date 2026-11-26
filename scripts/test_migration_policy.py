@@ -64,6 +64,42 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(sql=sql):
                 self.assertEqual(not p.expand_risks(sql), allowed)
 
+    def test_expand_drops_only_proven_foreign_keys_with_restrict(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            def git(*args):
+                subprocess.run(['git', *args], cwd=root, check=True, capture_output=True)
+            git('init', '-q', '-b', 'main')
+            git('config', 'user.email', 'test@example.invalid')
+            git('config', 'user.name', 'test')
+            (root / 'migrations').mkdir()
+            baseline = root / 'migrations/20261001T0000Z_fkeys.sql'
+            baseline.write_text('''CREATE TABLE parents(id int PRIMARY KEY);
+CREATE TABLE children(
+    id int PRIMARY KEY,
+    parent_id int NOT NULL,
+    code text UNIQUE,
+    FOREIGN KEY(parent_id) REFERENCES parents(id)
+);''')
+            (root / p.INVENTORY).write_text(json.dumps({baseline.name: {
+                'sha256': hashlib.sha256(baseline.read_bytes()).hexdigest(),
+                'classification': 'additive', 'risks': []}}))
+            git('add', '.')
+            git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'base')
+            candidate = root / 'migrations/20261002T0000Z_drop_fk.sql'
+            cases = [
+                ('ALTER TABLE public.children DROP CONSTRAINT IF EXISTS children_parent_id_fkey;', True),
+                ('ALTER TABLE public.children DROP CONSTRAINT children_parent_id_fkey CASCADE;', False),
+                ('ALTER TABLE public.children DROP CONSTRAINT children_pkey;', False),
+                ('ALTER TABLE public.children DROP CONSTRAINT children_code_key;', False),
+                ('ALTER TABLE public.children DROP CONSTRAINT unknown_fkey;', False),
+            ]
+            for sql, allowed in cases:
+                with self.subTest(sql=sql):
+                    candidate.write_text(sql)
+                    errors = p.check(root, 'main', {baseline.name})
+                    self.assertEqual(not errors, allowed, errors)
+
     def test_expand_drops_only_proven_nonunique_performance_indexes(self):
         # The guard's public repository boundary must resolve earlier index
         # declarations, rather than trusting a name or accepting every DROP.

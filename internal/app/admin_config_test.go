@@ -50,9 +50,9 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 		t.Fatalf("shared probe/admin listener: separated=%t shareProbe=%t err=%v", separated, shareProbe, err)
 	}
 
-	// Environment override QUIVR_ADMIN_LISTEN overrides file config, and "off" clears
-	// both admin_listen and admin_keys so combined mode starts cleanly.
-	t.Setenv("QUIVR_ADMIN_LISTEN", "127.0.0.1:8085")
+	// Environment override QUIVR_ADMIN_LISTEN overrides file config (trimming whitespace),
+	// and "off" clears both admin_listen and admin_keys so combined mode starts cleanly.
+	t.Setenv("QUIVR_ADMIN_LISTEN", " 127.0.0.1:8085 ")
 	overridden := dedicated
 	if _, err := overridden.configureProcess("api"); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestAdminListenerConfigValidationAndRedaction(t *testing.T) {
 	if overridden.AdminListen != "127.0.0.1:8085" {
 		t.Fatalf("QUIVR_ADMIN_LISTEN override: got %q", overridden.AdminListen)
 	}
-	t.Setenv("QUIVR_ADMIN_LISTEN", "off")
+	t.Setenv("QUIVR_ADMIN_LISTEN", " off ")
 	disabled := dedicated
 	if _, err := disabled.configureProcess("api"); err != nil {
 		t.Fatal(err)

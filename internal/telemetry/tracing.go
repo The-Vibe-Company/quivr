@@ -191,6 +191,10 @@ type tracedTransport struct {
 	name string
 }
 
+func (t tracedTransport) Unwrap() http.RoundTripper {
+	return t.base
+}
+
 func (t tracedTransport) CloseIdleConnections() {
 	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()

@@ -212,6 +212,20 @@ func TestSplitListenersIsolateAdminSurfaceAndCredentials(t *testing.T) {
 		})
 	}
 
+	// 3b. Auth (401) and permission (403) refusals on the admin listener must be audited.
+	var authRefused, permRefused int
+	for _, ev := range audits.events {
+		if ev.Action == "auth.refused" && ev.Outcome == "refused" {
+			authRefused++
+		}
+		if ev.Action == "permission.refused" && ev.Outcome == "refused" {
+			permRefused++
+		}
+	}
+	if authRefused < 2 || permRefused < 1 {
+		t.Fatalf("expected audited refusals on admin listener (auth>=2, perm>=1), got auth=%d perm=%d events=%+v", authRefused, permRefused, audits.events)
+	}
+
 	// 4. Sensitive admin commands on the admin listener execute and record accepted audit events.
 	audits.events = nil
 	dryReq := httptest.NewRequest("POST", "/v0/admin/backfills", strings.NewReader(`{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`))

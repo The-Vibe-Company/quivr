@@ -108,6 +108,8 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 			return nil, fmt.Errorf("%w: profile cycle", ErrPluginInvalid)
 		}
 	}
+	origQuery := q.Query
+	origNamespaces := q.SourceNamespaces
 	q.Profile, q.Limit = local, c.Profile.Limit
 	if c.Profile.Query != "" {
 		q.Query = c.Profile.Query
@@ -137,12 +139,15 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	defer cancel()
 	inner := sv.s
 	inner.Ranker = ranker
-	result, err := inner.rankProfile(innerCtx, innerCtx, sv.scope, q, sv.routes, Result{Hits: []Hit{}, Profile: full}, time.Now(), sv.chain, sv.frames, false)
+	result, err := inner.rankProfile(innerCtx, innerCtx, sv.scope, q, sv.routes, Result{Hits: []Hit{}, Profile: full}, time.Now(), sv.chain, sv.frames, nil, false)
 	if err != nil {
 		return nil, err
 	}
 	defaultRanker, defaultLocal, hasDefault := sv.s.resolveProfile(DefaultProfile)
+	sameQuery := c.Profile.Query == "" || c.Profile.Query == origQuery
+	sameNamespaces := c.Filter == nil || len(c.Filter.SourceNamespaces) == 0 || slices.Equal(c.Filter.SourceNamespaces, origNamespaces)
 	if hasDefault && len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) &&
+		sameQuery && sameNamespaces &&
 		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal && sv.fallback == nil {
 		saved := result
 		saved.Hits = slices.Clone(result.Hits)

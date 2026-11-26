@@ -230,8 +230,8 @@ type cacheablePluginEncoder struct {
 	pin string
 }
 
-func (e *cacheablePluginEncoder) ResolveQueryEncoder(context.Context, string) (retrieval.QueryEncoder, string) {
-	return e, e.pin
+func (e *cacheablePluginEncoder) ResolveQueryEncoder(context.Context, string) (retrieval.QueryEncoder, string, error) {
+	return e, e.pin, nil
 }
 
 func TestServingResolvesQueryEncoderInEachCandidateRound(t *testing.T) {

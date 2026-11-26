@@ -90,10 +90,16 @@ func (l LiveIngestor) EncodeQuery(ctx context.Context, org, space, query string)
 	return (Ingestor{Pin: pin, Live: l.Live}).EncodeQuery(ctx, org, space, query)
 }
 
-func (l LiveIngestor) ResolveQueryEncoder(ctx context.Context, space string) (retrieval.QueryEncoder, string) {
+func (l LiveIngestor) ResolveQueryEncoder(ctx context.Context, space string) (retrieval.QueryEncoder, string, error) {
+	if ctx.Err() != nil {
+		return nil, "", ctx.Err()
+	}
 	pin, err := l.queryOwner(ctx, space)
-	if err != nil || pin == nil {
-		return nil, ""
+	if err != nil {
+		return nil, "", err
+	}
+	if pin == nil {
+		return nil, "", nil
 	}
 	return (Ingestor{Pin: pin, Live: l.Live}).ResolveQueryEncoder(ctx, space)
 }

@@ -64,6 +64,8 @@ type Usage struct {
 	// OverObjective reports a search that took longer than its profile's
 	// latency objective, max_latency_ms.
 	OverObjective bool
+	// Objective is the resolved profile's declared latency objective.
+	Objective time.Duration
 	// Phases is the time the search spent in each of its phases.
 	Phases   Phases
 	Profiles []ProfileUsage
@@ -162,17 +164,20 @@ func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Requ
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
 			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
 			defer cancel()
-			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, defRanker, defLocal, DegradationRerankerBudgetExceeded)
+			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
 	}
-	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil, canFallback)
+	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil, nil, canFallback)
 }
 
-func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, defRanker Ranker, defLocal, reason string) (Result, error) {
+func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, timing *Phases, defRanker Ranker, defLocal, reason string) (Result, error) {
 	fb := s
 	fb.Ranker = defRanker
 	q.Profile = defLocal
-	res, err := fb.rankProfile(ctx, ctx, scope, q, routes, out, started, &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}, nil, false)
+	if chain == nil {
+		chain = &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}
+	}
+	res, err := fb.rankProfile(ctx, ctx, scope, q, routes, out, started, chain, nil, timing, false)
 	if err != nil {
 		return res, err
 	}
@@ -185,7 +190,7 @@ func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Reque
 	out.ProfileVersion = fallback.ProfileVersion
 	out.Hits = append([]Hit{}, fallback.Hits[:min(len(fallback.Hits), q.Limit)]...)
 	out.Degraded = appendDegradation(chain.degradations(), reason, routes)
-	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Phases: *timing}
+	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), Phases: *timing}
 	for _, f := range chain.profiles {
 		out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
 	}
@@ -193,10 +198,13 @@ func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Reque
 	return out
 }
 
-func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend, canFallback bool) (Result, error) {
+func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend, carriedTiming *Phases, canFallback bool) (Result, error) {
 	m := s.Ranker.Manifest()
 	profile := m.Contributions.Retrieval.Profiles[q.Profile]
-	timing := &Phases{Routing: time.Since(started)}
+	timing := carriedTiming
+	if timing == nil {
+		timing = &Phases{Routing: time.Since(started)}
+	}
 	out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
 	spend := &profileSpend{max: profile.MaxCostCents, usage: ProfileUsage{Profile: m.ID + "/" + q.Profile, PluginVersion: m.Version}}
 	chain.profiles = append(chain.profiles, spend)
@@ -308,7 +316,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 					slog.WarnContext(ctx, "deep search degraded to default after reranker failure", "component", "search", "profile", out.Profile, "reason", reason)
 					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
 					defer cancel()
-					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, defRanker, defLocal, reason)
+					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, timing, defRanker, defLocal, reason)
 				}
 			}
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
@@ -334,7 +342,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			for _, h := range answer.Ranking.Hits {
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Phases: *timing}
+			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), Phases: *timing}
 			for _, f := range chain.profiles {
 				out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
 			}
@@ -791,10 +799,13 @@ func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]fl
 // Looking them up separately would allow a plan change to cache a vector under
 // the previous pin.
 type pinnedQueryEncoder interface {
-	ResolveQueryEncoder(context.Context, string) (QueryEncoder, string)
+	ResolveQueryEncoder(context.Context, string) (QueryEncoder, string, error)
 }
 
 func (s Service) encodeQuery(ctx context.Context, org, space, generations, text string) ([]float32, error) {
+	if ctx.Err() != nil {
+		return nil, ErrUnavailable
+	}
 	switch {
 	case s.Embedder != nil && space == s.Embedder.Space().ID:
 		// The legacy space ID identifies the engine's pinned model and template.
@@ -809,14 +820,18 @@ func (s Service) encodeQuery(ctx context.Context, org, space, generations, text 
 		// Pinned work must pass the plugin invocation's per-work rollback guard.
 		_, pinnedWork := plugins.WorkOf(ctx)
 		if resolver, ok := s.Spaces.(pinnedQueryEncoder); ok && s.QueryVectors != nil && !pinnedWork {
-			if encoder, pin := resolver.ResolveQueryEncoder(ctx, space); encoder != nil {
+			encoder, pin, err := resolver.ResolveQueryEncoder(ctx, space)
+			if err != nil {
+				return nil, ErrUnavailable
+			}
+			if encoder != nil {
 				return s.QueryVectors.encode(ctx, queryVectorKey("plugin", org, space, generations, pin, text), func(ctx context.Context) ([]float32, error) {
 					return encodePluginQuery(ctx, encoder, org, space, text)
 				})
 			}
+			return nil, ErrUnsupported
 		}
-		// Preserve the ordinary path for encoders without a stable identity
-		// and for owner lookup failures.
+		// Preserve the ordinary path for encoders without a stable identity.
 		if s.Spaces.Owns(space) {
 			return encodePluginQuery(ctx, s.Spaces, org, space, text)
 		}

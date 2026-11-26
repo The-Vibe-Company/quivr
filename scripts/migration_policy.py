@@ -54,6 +54,56 @@ def index_name(parts):
     return ('public', names[0]) if len(names) == 1 else names
 
 
+def _pg_default_fkey_name(table, cols):
+    raw = f'{table}_{"_".join(cols)}_fkey'
+    return raw[:63]
+
+
+def foreign_key_history(sql, known):
+    """Keep only proven foreign-key constraints declared by earlier migrations."""
+    known = set(known)
+    try:
+        for raw in parse_sql(sql):
+            stmt = raw.stmt()
+            kind = stmt['@']
+            if kind == 'CreateStmt':
+                rel = stmt['relation']
+                schema = rel.get('schemaname') or 'public'
+                table = rel['relname']
+                for el in stmt.get('tableElts') or ():
+                    if el['@'] == 'Constraint' and el['contype']['name'] == 'CONSTR_FOREIGN':
+                        cols = [a['sval'] for a in (el.get('fk_attrs') or ())]
+                        name = el.get('conname') or _pg_default_fkey_name(table, cols)
+                        known.add((schema, table, name))
+                    elif el['@'] == 'ColumnDef':
+                        col = el['colname']
+                        for c in el.get('constraints') or ():
+                            if c['contype']['name'] == 'CONSTR_FOREIGN':
+                                name = c.get('conname') or _pg_default_fkey_name(table, [col])
+                                known.add((schema, table, name))
+            elif kind == 'AlterTableStmt' and stmt['objtype']['name'] == 'OBJECT_TABLE':
+                rel = stmt['relation']
+                schema = rel.get('schemaname') or 'public'
+                table = rel['relname']
+                for cmd in stmt['cmds']:
+                    op = cmd['subtype']['name']
+                    if op == 'AT_DropConstraint':
+                        known.discard((schema, table, cmd.get('name')))
+                    elif op == 'AT_AddConstraint':
+                        c = cmd.get('def_') or {}
+                        if c.get('contype', {}).get('name') == 'CONSTR_FOREIGN':
+                            cols = [a['sval'] for a in (c.get('fk_attrs') or ())]
+                            name = c.get('conname') or _pg_default_fkey_name(table, cols)
+                            known.add((schema, table, name))
+            elif kind == 'DropStmt' and stmt['removeType']['name'] == 'OBJECT_TABLE':
+                for parts in stmt['objects']:
+                    t = index_name(parts)
+                    known = {k for k in known if (k[0], k[1]) != t}
+    except Error:
+        known.clear()
+    return known
+
+
 def index_history(sql, known):
     """Keep only explicit, unconditional nonunique index declarations.
 
@@ -74,7 +124,7 @@ def index_history(sql, known):
                 known.difference_update(index_name(parts) for parts in stmt['objects'])
             elif kind == 'AlterTableStmt':
                 if (stmt['objtype']['name'] != 'OBJECT_TABLE'
-                        or any(cmd['subtype']['name'] not in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull') for cmd in stmt['cmds'])
+                        or any(cmd['subtype']['name'] not in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull', 'AT_DropConstraint') for cmd in stmt['cmds'])
                         or any(node.get('@') == 'FuncCall' for node in nodes(stmt))):
                     known.clear()
             elif kind == 'VacuumStmt' and not stmt['is_vacuumcmd'] and stmt.get('rels'):
@@ -88,10 +138,11 @@ def index_history(sql, known):
     return known
 
 
-def expand_risks(sql, nonunique_indexes=frozenset()):
+def expand_risks(sql, nonunique_indexes=frozenset(), foreign_keys=frozenset()):
     """Fail closed for statements outside the small additive subset."""
     created = set()
     nonunique_indexes = set(nonunique_indexes)
+    foreign_keys = set(foreign_keys)
     risks = []
     for raw in parse_sql(sql):
         stmt = raw.stmt()
@@ -133,10 +184,20 @@ def expand_risks(sql, nonunique_indexes=frozenset()):
             if stmt['idxname'] and not any(stmt.get(flag) for flag in ('unique', 'primary', 'isconstraint', 'if_not_exists')):
                 nonunique_indexes.add(name)
         elif kind == 'AlterTableStmt':
+            rel = stmt['relation']
+            schema = rel.get('schemaname') or 'public'
+            table = rel['relname']
             for cmd in stmt['cmds']:
                 operation = cmd['subtype']['name']
                 if operation == 'AT_DropNotNull':
                     # Relaxing a constraint preserves existing rows and writes.
+                    continue
+                if (operation == 'AT_DropConstraint'
+                        and stmt['objtype']['name'] == 'OBJECT_TABLE'
+                        and cmd.get('behavior', {}).get('name', 'DROP_RESTRICT') == 'DROP_RESTRICT'
+                        and (schema, table, cmd.get('name')) in foreign_keys):
+                    # Relaxing a proven foreign-key constraint preserves existing rows and writers.
+                    foreign_keys.discard((schema, table, cmd.get('name')))
                     continue
                 if operation == 'AT_SetRelOptions' and stmt['objtype']['name'] == 'OBJECT_TABLE':
                     continue
@@ -165,7 +226,7 @@ def expand_risks(sql, nonunique_indexes=frozenset()):
     return sorted(set(risks))
 
 
-def policy_errors(sql, previous, nonunique_indexes=frozenset()):
+def policy_errors(sql, previous, nonunique_indexes=frozenset(), foreign_keys=frozenset()):
     errors = []
     # Match the runtime's physical LF/CRLF first line, including in files
     # read from disk: universal newline translation must not broaden the tag.
@@ -198,7 +259,7 @@ def policy_errors(sql, previous, nonunique_indexes=frozenset()):
             if len(expands) != 1 or expands[0] not in previous:
                 errors.append('contract needs exactly one -- quivr:expand <migration.sql> naming an additive expansion already in the base version')
         else:
-            errors.extend('requires a separate contract release: '+risk for risk in expand_risks(sql, nonunique_indexes))
+            errors.extend('requires a separate contract release: '+risk for risk in expand_risks(sql, nonunique_indexes, foreign_keys))
             if any(EXPANSION.fullmatch(line) for line in lines):
                 errors.append('expand reference is only valid on a contract migration')
     except Error as error:
@@ -221,30 +282,37 @@ def check(root, base, previous):
         found.append(name+': merged migration is missing; merge main or restore it')
     expansions = set()
     base_indexes = set()
+    base_fkeys = set()
     for name in sorted(previous):
         old = subprocess.run(['git', 'show', f'{base}:migrations/{name}'], cwd=root, capture_output=True, check=True)
         sql = old.stdout.decode('utf-8')
         try:
-            if sql.split('\n')[0].removesuffix('\r') != CONTRACT and not expand_risks(sql, base_indexes):
+            if sql.split('\n')[0].removesuffix('\r') != CONTRACT and not expand_risks(sql, base_indexes, base_fkeys):
                 expansions.add(name)
         except Error:
             pass
-        base_indexes = set() if sql.split('\n')[0].removesuffix('\r') == CONTRACT else index_history(sql, base_indexes)
+        is_contract = sql.split('\n')[0].removesuffix('\r') == CONTRACT
+        base_indexes = set() if is_contract else index_history(sql, base_indexes)
+        base_fkeys = set() if is_contract else foreign_key_history(sql, base_fkeys)
     known_indexes = set()
+    known_fkeys = set()
     for path in sorted((root / 'migrations').glob('*.sql')):
         sql = path.read_bytes().decode('utf-8')
         if path.name in inventory:
             known_indexes = index_history(sql, known_indexes)
+            known_fkeys = foreign_key_history(sql, known_fkeys)
             continue
         if path.name.endswith(('_down.sql', '.down.sql')):
             found.append(path.name+': down migrations are forbidden; roll back the application')
             continue
-        found.extend(path.name+': '+error for error in policy_errors(sql, expansions, known_indexes))
+        found.extend(path.name+': '+error for error in policy_errors(sql, expansions, known_indexes, known_fkeys))
         # Merged post-policy migrations are frozen too.
         if path.name in previous:
             old = subprocess.run(['git', 'show', f'{base}:migrations/{path.name}'], cwd=root, capture_output=True, check=True)
             if old.stdout != path.read_bytes():
                 found.append(path.name+': merged migration is frozen')
-        # Optional contracts cannot prove an index exists in an expansion.
-        known_indexes = set() if sql.split('\n')[0].removesuffix('\r') == CONTRACT else index_history(sql, known_indexes)
+        # Optional contracts cannot prove an index or constraint exists in an expansion.
+        is_contract = sql.split('\n')[0].removesuffix('\r') == CONTRACT
+        known_indexes = set() if is_contract else index_history(sql, known_indexes)
+        known_fkeys = set() if is_contract else foreign_key_history(sql, known_fkeys)
     return found

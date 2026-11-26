@@ -25,7 +25,7 @@ func CheckPrerequisites(ctx context.Context, pool *pgxpool.Pool, forMigration bo
 	var writable, schemaExists, schemaUsage, schemaFirst, schemaCreate, plpgsql, ledgerReadable bool
 	var ledgerWritable bool
 	err := pool.QueryRow(ctx, `SELECT
-		NOT pg_catalog.current_setting('transaction_read_only')::boolean,
+		NOT pg_catalog.current_setting('transaction_read_only')::boolean AND NOT pg_catalog.pg_is_in_recovery(),
 		n.oid IS NOT NULL,
 		COALESCE(pg_catalog.has_schema_privilege(n.oid, 'USAGE'), false),
 		pg_catalog.current_schema() IS NOT DISTINCT FROM 'public',

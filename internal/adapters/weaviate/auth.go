@@ -20,6 +20,10 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(clone)
 }
 
+func (t authTransport) Unwrap() http.RoundTripper {
+	return t.base
+}
+
 func (t authTransport) CloseIdleConnections() {
 	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()

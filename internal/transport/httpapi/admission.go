@@ -168,11 +168,19 @@ type AdmissionLease struct {
 // Release records search completion feedback and returns the concurrency slot.
 // It is idempotent so a deferred fallback release after a panic is safe.
 func (lease *AdmissionLease) Release(overload, clientCanceled bool) {
+	lease.ReleaseWithTarget(overload, clientCanceled, 0)
+}
+
+// ReleaseWithTarget records search completion feedback against an optional
+// profile latency objective and returns the concurrency slot. When skipObserve
+// is true (client cancellation, non-overload validation/auth errors, or empty
+// short-circuits), the slot is returned without updating RTT or AIMD state.
+func (lease *AdmissionLease) ReleaseWithTarget(overload, skipObserve bool, targetLatency time.Duration) {
 	if lease == nil || !lease.done.CompareAndSwap(false, true) {
 		return
 	}
 	rtt := max(0, lease.limiter.now().Sub(lease.started))
-	lease.limiter.release(rtt, overload, clientCanceled)
+	lease.limiter.release(rtt, overload, skipObserve, targetLatency)
 }
 
 // Stats returns a consistent snapshot of the limiter's current state.
@@ -232,7 +240,7 @@ func (l *SearchAdmission) Acquire(ctx context.Context) (*AdmissionLease, int, bo
 	select {
 	case <-w.ch:
 		if ctx.Err() != nil {
-			l.release(0, false, true)
+			l.release(0, false, true, 0)
 			return nil, l.retryAfter(), false
 		}
 		return &AdmissionLease{limiter: l, started: l.now()}, 0, true
@@ -270,35 +278,43 @@ func (l *SearchAdmission) abortWaiter(ctx context.Context, w *searchWaiter, ctxD
 	return nil, retry, false
 }
 
-func (l *SearchAdmission) release(rtt time.Duration, overload, clientCanceled bool) {
+func (l *SearchAdmission) release(rtt time.Duration, overload, skipObserve bool, targetOverride time.Duration) {
 	l.mu.Lock()
 	peak := l.inFlight
 	l.inFlight--
-	if !clientCanceled {
-		l.observeLocked(rtt, peak, overload)
+	if !skipObserve {
+		l.observeLocked(rtt, peak, overload, targetOverride)
 	}
 	l.dispatchLocked()
 	l.mu.Unlock()
 }
 
-func (l *SearchAdmission) observeLocked(rtt time.Duration, peak int, overload bool) {
+func (l *SearchAdmission) observeLocked(rtt time.Duration, peak int, overload bool, targetOverride time.Duration) {
 	now := l.now()
-	if l.smoothedRTT == 0 {
-		l.smoothedRTT = rtt
-	} else {
-		l.smoothedRTT = (3*l.smoothedRTT + rtt) / 4
+	target := l.targetLatency
+	baselineEligible := true
+	if targetOverride > l.targetLatency {
+		target = targetOverride
+		baselineEligible = false
 	}
-	if !overload && rtt > 0 {
-		if l.minRTT == 0 || rtt < l.minRTT {
-			l.minRTT = rtt
-			l.minRTTAt = now
-		} else if now.Sub(l.minRTTAt) >= defaultSearchMinRTTDecay {
-			l.minRTT = (l.minRTT + rtt) / 2
-			l.minRTTAt = now
+	if baselineEligible {
+		if l.smoothedRTT == 0 {
+			l.smoothedRTT = rtt
+		} else {
+			l.smoothedRTT = (3*l.smoothedRTT + rtt) / 4
+		}
+		if !overload && rtt > 0 {
+			if l.minRTT == 0 || rtt < l.minRTT {
+				l.minRTT = rtt
+				l.minRTTAt = now
+			} else if now.Sub(l.minRTTAt) >= defaultSearchMinRTTDecay {
+				l.minRTT = (l.minRTT + rtt) / 2
+				l.minRTTAt = now
+			}
 		}
 	}
-	congested := overload || rtt > l.targetLatency
-	if !congested && l.minRTT > 0 {
+	congested := overload || rtt > target
+	if !congested && baselineEligible && l.minRTT > 0 && rtt >= target/2 {
 		baseline := max(l.minRTT, defaultSearchMinRTTFloor)
 		if float64(rtt) > float64(baseline)*l.gradientRatio {
 			congested = true

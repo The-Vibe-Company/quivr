@@ -3,7 +3,6 @@ package content
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -455,10 +454,11 @@ type blobCacheKey struct {
 	organization string
 	key          string
 	sha256       string
+	size         int64
 }
 
 func (k blobCacheKey) cacheable() bool {
-	return k.organization != "" && k.key != "" && k.sha256 != ""
+	return k.organization != "" && k.key != "" && k.sha256 != "" && k.size >= 0
 }
 
 type blobCacheEntry struct {
@@ -792,7 +792,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 				return nil, ErrArtifactCorrupt
 			}
 			seenBlob[source.Blob.Key] = source.Blob
-			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256}
+			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256, size: source.Blob.Size}
 			byBlob[key] = append(byBlob[key], request{i, k, source})
 		}
 	}
@@ -881,9 +881,6 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 					return
 				}
 				text := string(data)
-				if s.BlobCache != nil && item.key.cacheable() && Hash(data) == item.key.sha256 {
-					s.BlobCache.put(item.key, text)
-				}
 				cuts, err := sliceBlob(text, item.requests)
 				if err != nil {
 					mu.Lock()
@@ -892,6 +889,9 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 					}
 					mu.Unlock()
 					return
+				}
+				if s.BlobCache != nil && item.key.cacheable() && int64(len(data)) == item.key.size && Hash(data) == item.key.sha256 {
+					s.BlobCache.put(item.key, text)
 				}
 				mu.Lock()
 				for idx, req := range item.requests {
@@ -908,7 +908,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 	out := map[int]string{}
 	for i := range regionOnly {
 		if Hash(nil) != located[i].TextSHA256 {
-			return nil, errors.New("canonical excerpt mismatch")
+			return nil, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = ""
 	}

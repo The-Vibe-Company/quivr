@@ -87,7 +87,7 @@ func (p IngestBlobPart) ReadBlob(ctx context.Context, maxBytes int64) ([]byte, e
 	var reader io.ReadCloser
 	if p.Reference.Kind == "file" {
 		u, err := url.Parse(p.Reference.URL)
-		if err != nil || (u.Host != "" && u.Host != "localhost") {
+		if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") {
 			return nil, TerminalIngestError("invalid_input", "invalid local blob reference")
 		}
 		f, err := os.Open(u.Path)
@@ -95,7 +95,11 @@ func (p IngestBlobPart) ReadBlob(ctx context.Context, maxBytes int64) ([]byte, e
 			return nil, RetryableIngestError("input_unavailable", "cannot read blob part")
 		}
 		reader = f
-	} else {
+	} else if p.Reference.Kind == "signed_url" {
+		u, err := url.Parse(p.Reference.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, TerminalIngestError("invalid_input", "invalid blob reference")
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Reference.URL, nil)
 		if err != nil {
 			return nil, TerminalIngestError("invalid_input", "invalid blob reference")
