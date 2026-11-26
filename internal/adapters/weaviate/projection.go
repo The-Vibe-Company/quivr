@@ -3,11 +3,13 @@ package weaviate
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -432,16 +434,20 @@ type projectionObject struct {
 	Vectors    map[string][]float32 `json:"vectors,omitempty"`
 }
 
+const embeddingRevision = "embeddingRevision"
+
 type projectionRow struct {
 	SegmentID  string `json:"segmentId"`
+	Revision   int64  `json:"embeddingRevision"`
 	Additional struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		Created int64  `json:"creationTimeUnix,string"`
 	} `json:"_additional"`
 }
 
 // projectionRows lists identities without fetching text or vectors.
-func (s *Store) projectionRows(ctx context.Context, collection, where string, limit int, fields string) ([]projectionRow, error) {
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d){%s _additional{id}}}}", collection, where, limit, fields)
+func (s *Store) projectionRows(ctx context.Context, collection, where string, limit int, order, fields string) ([]projectionRow, error) {
+	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, order, fields)
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`
@@ -451,8 +457,8 @@ func (s *Store) projectionRows(ctx context.Context, collection, where string, li
 	if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
 		return nil, err
 	}
-	rows, ok := response.Data.Get[collection]
-	if len(response.Errors) > 0 || !ok {
+	rows := response.Data.Get[collection]
+	if len(response.Errors) > 0 || rows == nil {
 		return nil, errors.New("projection query failed")
 	}
 	for _, row := range rows {
@@ -538,7 +544,7 @@ func (s *Store) publishAnchors(ctx context.Context, collection string, objects [
 	for i, object := range objects {
 		ids[i] = object.ID
 	}
-	rows, err := s.projectionRows(ctx, collection, containsAny("id", ids), len(ids), "")
+	rows, err := s.projectionRows(ctx, collection, containsAny("id", ids), len(ids), "", "_additional{id}")
 	if err != nil {
 		return err
 	}
@@ -919,6 +925,13 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], p)
 	}
 
+	if len(order) == 0 {
+		return nil
+	}
+	revisionSchema := map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
+	if err := s.ensureProperties(ctx, g.Collection, []map[string]any{revisionSchema}); err != nil {
+		return err
+	}
 	for segments := range slices.Chunk(order, projectionBatch) {
 		if err := s.publishEmbeddingBatch(ctx, g, org, segments, bySegment); err != nil {
 			return err
@@ -953,23 +966,42 @@ func (s *Store) embeddingObject(g content.Generation, org, segment string, vecto
 	}, nil
 }
 
+const (
+	// The common case is an anchor and one enriched object per segment.
+	embeddingInventoryLimit  = 3 * projectionBatch
+	embeddingInventoryFields = "segmentId " + embeddingRevision + " _additional{id creationTimeUnix}"
+	embeddingRevisionOrder   = ",sort:[{path:[\"" + embeddingRevision + "\"],order:desc}]"
+)
+
+func (s *Store) embeddingRows(ctx context.Context, collection, where, order string) ([]projectionRow, error) {
+	rows, err := s.projectionRows(ctx, collection, where, embeddingInventoryLimit, order, embeddingInventoryFields)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.SegmentID == "" || row.Revision < 0 {
+			return nil, errors.New("invalid embedding inventory")
+		}
+	}
+	return rows, nil
+}
+
 func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
-	// One inventory serves both retry detection and cleanup. Fetch full
-	// properties only for anchors whose enriched object still needs writing.
-	const inventoryLimit = 3 * projectionBatch
 	scope := and(equal("organization", org), equal("generationId", g.ID))
-	rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)), inventoryLimit, "segmentId")
+	inventory := func(segments []string) ([]projectionRow, error) {
+		return s.embeddingRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)), "")
+	}
+	rows, err := inventory(segments)
 	if err != nil {
 		return err
 	}
-	full := len(rows) >= inventoryLimit
-	bySegmentID := make(map[string][]string, len(segments))
+	full := len(rows) >= embeddingInventoryLimit
+	rowsBySegment := make(map[string][]projectionRow, len(segments))
 	for _, row := range rows {
-		bySegmentID[row.SegmentID] = append(bySegmentID[row.SegmentID], row.Additional.ID)
+		rowsBySegment[row.SegmentID] = append(rowsBySegment[row.SegmentID], row)
 	}
 
-	var stale []string
-	var overflow []string
+	var replacements []string
 	pending := make([]projectionObject, 0, len(segments))
 	var existing []projectionObject
 	for _, segment := range segments {
@@ -977,51 +1009,70 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		if err != nil {
 			return err
 		}
-		if full {
-			overflow = append(overflow, object.ID)
-		}
 		anchorID := objectID(org, g.ID, segment)
-		ids := bySegmentID[segment]
-		found := slices.Contains(ids, object.ID)
-		if full && !found {
-			// The bounded inventory may have omitted this identity.
+		rows := rowsBySegment[segment]
+		if full {
+			// Read the highest revisions for each segment independently when
+			// the bounded inventory could have omitted them.
+			rows, err = s.embeddingRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), embeddingRevisionOrder)
+			if err != nil {
+				return err
+			}
+		}
+		var revision int64
+		var found, replacing bool
+		for _, row := range rows {
+			switch row.Additional.ID {
+			case anchorID:
+				continue
+			case object.ID:
+				found = true
+			default:
+				replacing = true
+				revision = max(revision, row.Revision)
+			}
+		}
+		if replacing {
+			replacements = append(replacements, segment)
+		}
+		if len(rows) >= embeddingInventoryLimit && !found {
+			// An older object with the requested ID may be beyond the page.
 			if _, found, err = s.object(ctx, g.Collection, object.ID); err != nil {
 				return err
 			}
 		}
 		if found {
 			existing = append(existing, object)
-		} else {
-			anchor, projected, err := s.object(ctx, g.Collection, anchorID)
-			if err != nil {
-				return err
-			}
-			if !projected {
-				return retrieval.ErrProjectionMissing
-			}
-			for _, key := range lexicalProperties {
-				// A legacy anchor may have no value to copy.
-				if value, ok := anchor.Properties[key]; ok {
-					object.Properties[key] = value
-				}
-			}
-			if g.ItemKeywordsProjected {
-				object.Properties[itemKind] = "vector"
-			}
-			for key, value := range anchor.Properties {
-				if strings.HasPrefix(key, "m_") {
-					object.Properties[key] = value
-				}
-			}
-			pending = append(pending, object)
+			continue
 		}
-		if !full {
-			for _, id := range ids {
-				if id != object.ID && id != anchorID {
-					stale = append(stale, id)
-				}
+		anchor, projected, err := s.object(ctx, g.Collection, anchorID)
+		if err != nil {
+			return err
+		}
+		if !projected {
+			return retrieval.ErrProjectionMissing
+		}
+		for _, key := range lexicalProperties {
+			// A legacy anchor may have no value to copy.
+			if value, ok := anchor.Properties[key]; ok {
+				object.Properties[key] = value
 			}
 		}
+		if g.ItemKeywordsProjected {
+			object.Properties[itemKind] = "vector"
+		}
+		for key, value := range anchor.Properties {
+			if strings.HasPrefix(key, "m_") {
+				object.Properties[key] = value
+			}
+		}
+		if replacing {
+			if revision >= math.MaxInt32 {
+				return errors.New("embedding revision exhausted")
+			}
+			object.Properties[embeddingRevision] = revision + 1
+		}
+		pending = append(pending, object)
 	}
 	if err := s.insertBatch(ctx, pending); err != nil {
 		return err
@@ -1032,19 +1083,60 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 			return err
 		}
 	}
-	for i, keep := range overflow {
-		if err := s.removeStaleEnrichedOverflow(ctx, g, org, segments[i], keep); err != nil {
-			return err
-		}
+	if len(replacements) == 0 {
+		return nil
 	}
-	return s.removeStaleEnriched(ctx, g.Collection, stale)
+
+	// Read the replacements together after the write. Concurrent publishers
+	// can see different sets, so each may only delete objects that lose to a
+	// higher-ranked object. This prevents writers from deleting both replacements.
+	rows, err = inventory(replacements)
+	if err != nil {
+		return err
+	}
+	if len(rows) >= embeddingInventoryLimit {
+		for _, segment := range replacements {
+			if err := s.removeStaleEnrichedOverflow(ctx, g, org, scope, segment); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return s.removeStaleEnriched(ctx, g, org, rows)
 }
 
-// removeStaleEnriched deletes only observed identities. A filter excluding the
-// kept ID could match a concurrent insert before Weaviate indexes its ID.
-func (s *Store) removeStaleEnriched(ctx context.Context, collection string, ids []string) error {
-	for _, id := range ids {
-		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+// Embedding revisions order successive replacements. Creation time orders
+// older objects without a revision and IDs break ties between concurrent writes.
+func compareEmbeddings(a, b projectionRow) int {
+	if n := cmp.Compare(a.Revision, b.Revision); n != 0 {
+		return n
+	}
+	if a.Revision == 0 {
+		if n := cmp.Compare(a.Additional.Created, b.Additional.Created); n != 0 {
+			return n
+		}
+	}
+	return cmp.Compare(a.Additional.ID, b.Additional.ID)
+}
+
+func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org string, rows []projectionRow) error {
+	winners := make(map[string]projectionRow)
+	for _, row := range rows {
+		if row.Additional.ID == objectID(org, g.ID, row.SegmentID) {
+			continue
+		}
+		if winner, ok := winners[row.SegmentID]; !ok || compareEmbeddings(row, winner) > 0 {
+			winners[row.SegmentID] = row
+		}
+	}
+	for _, row := range rows {
+		id := row.Additional.ID
+		if id == objectID(org, g.ID, row.SegmentID) || id == winners[row.SegmentID].Additional.ID {
+			continue
+		}
+		// Delete observed identities. A filter excluding the winner's ID could
+		// match a concurrent insert before Weaviate indexes its ID.
+		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
 			return err
 		}
 	}
@@ -1052,26 +1144,17 @@ func (s *Store) removeStaleEnriched(ctx context.Context, collection string, ids 
 }
 
 // An interrupted series of replacements can exceed the shared inventory.
-// Drain each segment in bounded pages before declaring cleanup complete.
-func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org, segment, keep string) error {
-	const limit = 100
-	anchor := objectID(org, g.ID, segment)
-	where := and(equal("organization", org), equal("generationId", g.ID), equal("segmentId", segment))
+func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org, scope, segment string) error {
+	where := and(scope, equal("segmentId", segment))
 	for {
-		rows, err := s.projectionRows(ctx, g.Collection, where, limit, "")
+		rows, err := s.embeddingRows(ctx, g.Collection, where, "")
 		if err != nil {
 			return err
 		}
-		var stale []string
-		for _, row := range rows {
-			if id := row.Additional.ID; id != keep && id != anchor {
-				stale = append(stale, id)
-			}
-		}
-		if err := s.removeStaleEnriched(ctx, g.Collection, stale); err != nil {
+		if err := s.removeStaleEnriched(ctx, g, org, rows); err != nil {
 			return err
 		}
-		if len(rows) < limit {
+		if len(rows) < embeddingInventoryLimit {
 			return nil
 		}
 	}

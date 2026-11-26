@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -25,6 +27,8 @@ type batchProjectionHTTP struct {
 	lists     int
 	removeID  string
 	fault     string
+	nullAt    int
+	nullGet   bool
 }
 
 var batchInventory = regexp.MustCompile(`path:\["(id|segmentId)"\],operator:ContainsAny,valueText:(\[[^]]*\])`)
@@ -96,8 +100,22 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 			results = results[:len(results)-1]
 		}
 		return reply(200, results)
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/objects/"):
+		id := r.URL.Path[strings.LastIndexByte(r.URL.Path, '/')+1:]
+		if _, ok := h.objects[id]; !ok {
+			return reply(404, nil)
+		}
+		delete(h.objects, id)
+		return reply(204, nil)
 	case r.Method == "POST" && r.URL.Path == "/v1/graphql":
 		h.lists++
+		if h.lists == h.nullAt {
+			var get any
+			if !h.nullGet {
+				get = map[string]any{"BatchObjects": nil}
+			}
+			return reply(200, map[string]any{"data": map[string]any{"Get": get}})
+		}
 		var body struct {
 			Query string `json:"query"`
 		}
@@ -118,9 +136,10 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 		}
 		rows := make([]any, 0)
 		for id, object := range h.objects {
-			segment, _ := object["properties"].(map[string]any)["segmentId"].(string)
+			props := object["properties"].(map[string]any)
+			segment, _ := props["segmentId"].(string)
 			if filter[1] == "id" && selected[id] || filter[1] == "segmentId" && selected[segment] {
-				rows = append(rows, map[string]any{"segmentId": segment, "_additional": map[string]any{"id": id}})
+				rows = append(rows, map[string]any{"segmentId": segment, "embeddingRevision": props["embeddingRevision"], "_additional": map[string]any{"id": id}})
 			}
 		}
 		return reply(200, map[string]any{"data": map[string]any{"Get": map[string]any{"BatchObjects": rows}}})
@@ -255,6 +274,166 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					t.Fatalf("verified retry rewrote objects: %v", h.batches)
 				}
 			})
+		}
+	}
+}
+
+func TestProjectionRejectsNullInventory(t *testing.T) {
+	for _, nullGet := range []bool{true, false} {
+		t.Run(fmt.Sprintf("nullGet=%t", nullGet), func(t *testing.T) {
+			ctx := context.Background()
+			h := &batchProjectionHTTP{objects: map[string]map[string]any{}}
+			s := weaviate.New("http://projection.invalid")
+			s.Client = &http.Client{Transport: h}
+			g := content.Generation{ID: "generation", Collection: "BatchObjects", SpaceID: "space"}
+			seg := content.Segmentation{ID: "segmentation", VersionID: "version", Segments: []content.Segment{{ID: "segment", PartKey: "body", Text: "example"}}}
+			publish := func() error {
+				return s.Publish(ctx, g, "organization", "corpus", "feed", content.Version{ID: "version"}, seg)
+			}
+			if err := publish(); err != nil {
+				t.Fatal(err)
+			}
+			h.nullGet, h.nullAt = nullGet, h.lists+1
+			if err := publish(); err == nil || len(h.submitted) != 1 {
+				t.Fatalf("null anchor inventory: err=%v, writes=%d, want error and no replay write", err, len(h.submitted))
+			}
+
+			attach := func(value float32) error {
+				return s.PublishEmbeddings(ctx, g, "organization", []content.EmbeddingData{batchEmbedding(t, "segment", value)})
+			}
+			if err := attach(1); err != nil {
+				t.Fatal(err)
+			}
+			h.nullAt = h.lists + 2 // After the replacement write.
+			if err := attach(2); err == nil || len(h.objects) != 3 {
+				t.Fatalf("null cleanup inventory: err=%v, objects=%d, want error and both embeddings", err, len(h.objects))
+			}
+			if err := attach(2); err != nil || len(h.objects) != 2 {
+				t.Fatalf("cleanup retry: err=%v, objects=%d, want anchor and replacement", err, len(h.objects))
+			}
+		})
+	}
+}
+
+func batchEmbedding(t *testing.T, segment string, value float32) content.EmbeddingData {
+	t.Helper()
+	vector := []float32{value}
+	raw, err := content.VectorBytes(vector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content.EmbeddingData{Artifact: content.Embedding{
+		Organization: "organization", SpaceID: "space", SegmentID: segment,
+		Payload: content.Blob{SHA256: content.Hash(raw)},
+	}, Vector: vector}
+}
+
+// Hold each batch until both writers have finished preflight, then commit
+// both batches before acknowledging either write.
+type overlappingBatches struct {
+	mu        sync.Mutex
+	next      http.RoundTripper
+	arrived   int
+	committed int
+	ready     chan struct{}
+	both      chan struct{}
+}
+
+func (h *overlappingBatches) RoundTrip(r *http.Request) (*http.Response, error) {
+	write := r.Method == http.MethodPost && r.URL.Path == "/v1/batch/objects"
+	if write {
+		h.mu.Lock()
+		h.arrived++
+		if h.arrived == 2 {
+			close(h.ready)
+		}
+		h.mu.Unlock()
+		select {
+		case <-h.ready:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+	}
+
+	h.mu.Lock()
+	res, err := h.next.RoundTrip(r)
+	if write {
+		h.committed++
+		if h.committed == 2 {
+			close(h.both)
+		}
+	}
+	h.mu.Unlock()
+	if write && err == nil {
+		select {
+		case <-h.both:
+		case <-r.Context().Done():
+			res.Body.Close()
+			return nil, r.Context().Err()
+		}
+	}
+	return res, err
+}
+
+func TestConcurrentEmbeddingReplacementsConverge(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h := &batchProjectionHTTP{objects: map[string]map[string]any{}}
+	store := weaviate.New("http://projection.invalid")
+	store.Client = &http.Client{Transport: h}
+	g := content.Generation{ID: "generation", Collection: "BatchObjects", SpaceID: "space"}
+	seg := content.Segmentation{ID: "segmentation", VersionID: "version"}
+	var inputs [3][]content.EmbeddingData
+	for _, id := range []string{"first", "second", "third"} {
+		seg.Segments = append(seg.Segments, content.Segment{ID: id, PartKey: "body", Text: "example"})
+		for i := range inputs {
+			inputs[i] = append(inputs[i], batchEmbedding(t, id, float32(i+1)))
+		}
+	}
+	if err := store.Publish(ctx, g, "organization", "corpus", "feed", content.Version{ID: "version"}, seg); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PublishEmbeddings(ctx, g, "organization", inputs[0]); err != nil {
+		t.Fatal(err)
+	}
+	before := make(map[string]bool)
+	for id, object := range h.objects {
+		before[id] = object["vectors"] == nil
+	}
+	lists := h.lists
+	gate := &overlappingBatches{next: h, ready: make(chan struct{}), both: make(chan struct{})}
+	done := make(chan error, 2)
+	for i := 1; i < len(inputs); i++ {
+		worker := weaviate.New("http://projection.invalid")
+		worker.Client = &http.Client{Transport: gate}
+		go func() { done <- worker.PublishEmbeddings(ctx, g, "organization", inputs[i]) }()
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}
+	if h.lists-lists != 4 {
+		t.Errorf("two replacement batches used %d listings, want two batched listings each", h.lists-lists)
+	}
+	survivors := make(map[string]int)
+	for id, object := range h.objects {
+		segment := object["properties"].(map[string]any)["segmentId"].(string)
+		if anchor, old := before[id]; old && !anchor {
+			t.Errorf("original embedding %s for %s survived", id, segment)
+		}
+		if object["vectors"] != nil {
+			survivors[segment]++
+		}
+	}
+	for id, anchor := range before {
+		if anchor && h.objects[id] == nil {
+			t.Errorf("lexical anchor %s was deleted", id)
+		}
+	}
+	for _, segment := range seg.Segments {
+		if survivors[segment.ID] != 1 {
+			t.Errorf("segment %s has %d surviving embeddings, want one", segment.ID, survivors[segment.ID])
 		}
 	}
 }
