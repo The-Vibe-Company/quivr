@@ -20,8 +20,10 @@ type SpaceDescriptions interface {
 // SpaceSnapshots serves coverage asynchronously. One refresh per process may
 // count at a time; requests use the previous snapshot, with its age, or explicit
 // unknown counts until the first refresh completes. Metadata and owner presence
-// are always read from the current generation. TTL controls refresh attempts,
-// not how long a snapshot remains useful during a slow refresh or outage.
+// are always read from the current generation. TTL controls refresh attempts
+// after a healthy refresh, not how long a snapshot remains useful during a slow
+// refresh or outage; repeated refresh failures back off exponentially up to
+// 15 minutes and reset on recovery.
 type SpaceSnapshots struct {
 	registry SpaceDescriptions
 	parent   context.Context
@@ -116,8 +118,8 @@ func coverageFailureBackoff(base time.Duration, failures int) time.Duration {
 	if base <= 0 {
 		return 0
 	}
-	capDelay := max(base, maxCoverageFailureBackoff)
-	delay := base
+	capDelay := maxCoverageFailureBackoff
+	delay := min(base, capDelay)
 	for range max(0, failures-1) {
 		if delay >= capDelay/2 {
 			return capDelay

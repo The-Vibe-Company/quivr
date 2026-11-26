@@ -676,13 +676,17 @@ async function handle(req, res) {
         res.on("close", () => {
           if (!res.writableEnded) left.abort();
         });
+        if (res.destroyed) left.abort();
         await send(res, 200, await explorer.page(url.searchParams, left.signal));
         return;
       }
       if (path === "/demo/explore/facets" && req.method === "GET") {
         // A browser that leaves stops the engine's counts: it admits few at once.
         const left = new AbortController();
-        res.on("close", () => left.abort());
+        res.on("close", () => {
+          if (!res.writableEnded) left.abort();
+        });
+        if (res.destroyed) left.abort();
         await send(res, 200, await explorer.facets(url.searchParams, left.signal));
         return;
       }

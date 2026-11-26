@@ -513,7 +513,7 @@ WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + 
 // a source_ranges array and is not coalesced into a single legacy Manifest read.
 // Ranges on the segment's primary part reuse the already joined blob; other
 // parts use bounded composite-key seeks.
-var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' AND (p.pack_offset IS NOT NULL OR jsonb_array_length(c.derivation->'source_ranges')<=1 OR mb.blob_id IS NULL) THEN (
+var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' AND (p.pack_offset IS NOT NULL OR jsonb_array_length(CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN c.derivation->'source_ranges' ELSE '[]'::jsonb END)<=1 OR mb.blob_id IS NULL) THEN (
  SELECT coalesce(jsonb_agg(jsonb_build_object(
   'part_key',sr.part_key,
   'start',sr.start_offset,
@@ -546,7 +546,7 @@ LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_
  WHERE c.derivation->'region' IS NULL AND p.blob_id IS NOT NULL AND (b.organization,b.blob_id)>=(c.organization,p.blob_id)
  ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
 LEFT JOIN LATERAL (SELECT mb.organization,mb.blob_id,mb.object_key,mb.sha256,mb.byte_length FROM content_blobs mb
- WHERE c.derivation->'region' IS NULL AND p.pack_offset IS NULL AND jsonb_typeof(c.derivation->'source_ranges')='array' AND jsonb_array_length(c.derivation->'source_ranges')>1 AND c.manifest_blob_id IS NOT NULL AND (mb.organization,mb.blob_id)>=(c.organization,c.manifest_blob_id)
+ WHERE c.derivation->'region' IS NULL AND p.pack_offset IS NULL AND jsonb_typeof(c.derivation->'source_ranges')='array' AND jsonb_array_length(CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='array' THEN c.derivation->'source_ranges' ELSE '[]'::jsonb END)>1 AND c.manifest_blob_id IS NOT NULL AND (mb.organization,mb.blob_id)>=(c.organization,c.manifest_blob_id)
  ORDER BY mb.organization,mb.blob_id LIMIT 1) mb ON (mb.organization,mb.blob_id)=(c.organization,c.manifest_blob_id)
 LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec WHERE ec.generation_id=g.id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g", "v") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
   AND ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true

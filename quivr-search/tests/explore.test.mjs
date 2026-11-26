@@ -279,7 +279,6 @@ test("Explorer page forwards abort signal and stops follow-up hydration when cli
       }
       if (path.startsWith("/v0/records/")) {
         controller.abort();
-        signal?.throwIfAborted();
         return { status: 200, data: { source: { corpus_id: "c1" } } };
       }
       return { status: 200, data: { name: "Example corpus" } };
@@ -294,6 +293,29 @@ test("Explorer page forwards abort signal and stops follow-up hydration when cli
   );
   assert.equal(seen[0].path, "/v0/search");
   assert.equal(seen[0].signal, controller.signal);
-  // Aborting on the first record fetch prevents the remaining queue from running.
-  assert.ok(seen.filter((s) => s.path.startsWith("/v0/records/")).length <= 6);
+  // Aborting during the first record read prevents all remaining workers and queued records from starting.
+  assert.equal(seen.filter((s) => s.path.startsWith("/v0/records/")).length, 1);
+});
+
+test("Explorer facets propagates abort signal across multiple corpora without passing array indices", async () => {
+  const controller = new AbortController();
+  const seenSignals = [];
+  const explorer = createExplorer({
+    upstream: async (path, _method, body, _timeout, signal) => {
+      seenSignals.push({ path, signal });
+      if (path === "/v0/facets") {
+        return {
+          status: 200,
+          data: { items: body.fields.map((f) => ({ field: f.field, buckets: [] })) },
+        };
+      }
+      return { status: 200, data: { name: path, effective_retrieval: { fields: [] } } };
+    },
+    picked: async () => ["c1", "c2"],
+    demo: () => "c1",
+  });
+  await explorer.facets(new URLSearchParams({ field: "metadata.language" }), controller.signal);
+  const corpusCalls = seenSignals.filter((s) => s.path.startsWith("/v0/corpora/"));
+  assert.equal(corpusCalls.length, 2);
+  assert.ok(corpusCalls.every((c) => c.signal === controller.signal));
 });

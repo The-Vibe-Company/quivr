@@ -631,15 +631,61 @@ func TestHydrateCoalescesLegacyMultiPartManifestAndCancelsOnContext(t *testing.T
 	}
 
 	t.Run("canceled context stops launching reads", func(t *testing.T) {
+		const totalBlobs = 70
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		cancelBlobs := &fixtureBlobStore{data: map[string][]byte{manifestBlob.Key: manifestBytes}}
-		cancelSvc := content.Service{Baseline: repo, Blobs: cancelBlobs}
-		if _, err := cancelSvc.Hydrate(ctx, scope, []content.Candidate{{SegmentID: "seg-1", GenerationID: "g1"}}); !errors.Is(err, context.Canceled) {
+		defer cancel()
+
+		var started atomic.Int64
+		allSlotsFilled := make(chan struct{})
+		blockingBlobs := blockingBlobReader{
+			read: func(rctx context.Context, _ content.Blob) ([]byte, error) {
+				if started.Add(1) == 64 {
+					close(allSlotsFilled)
+				}
+				<-rctx.Done()
+				return nil, rctx.Err()
+			},
+		}
+		manyRepo := &fixtureHydrationRepo{
+			located:   make(map[string]content.Located, totalBlobs),
+			withdrawn: map[string]bool{},
+			deniedOrg: map[string]bool{},
+		}
+		candidates := make([]content.Candidate, totalBlobs)
+		for i := range totalBlobs {
+			segID := fmt.Sprintf("seg-cancel-%d", i)
+			candidates[i] = content.Candidate{SegmentID: segID, GenerationID: "g1"}
+			b := content.Blob{Key: fmt.Sprintf("org/sha256/cancel-%d", i), SHA256: fmt.Sprintf("sha-%d", i), Size: 4}
+			manyRepo.located[segID] = content.Located{
+				Hydrated: content.Hydrated{
+					RecordID:   fmt.Sprintf("rec-%d", i),
+					VersionID:  fmt.Sprintf("ver-%d", i),
+					TextSHA256: content.Hash([]byte("text")),
+					Segment:    content.Segment{ID: segID, PartKey: "p1", Start: 0, End: 4},
+				},
+				Blob: b,
+			}
+		}
+
+		go func() {
+			<-allSlotsFilled
+			cancel()
+		}()
+		cancelSvc := content.Service{Baseline: manyRepo, Blobs: blockingBlobs}
+		if _, err := cancelSvc.Hydrate(ctx, scope, candidates); !errors.Is(err, context.Canceled) {
 			t.Fatalf("canceled hydrate err = %v; want context.Canceled", err)
 		}
-		if cancelBlobs.reads.Load() != 0 {
-			t.Fatalf("canceled hydrate launched %d blob reads, want 0", cancelBlobs.reads.Load())
+		if got := started.Load(); got != 64 {
+			t.Fatalf("canceled hydrate launched %d/%d blob reads, want 64 (queued reads stopped)", got, totalBlobs)
 		}
 	})
+}
+
+type blockingBlobReader struct {
+	content.Blobs
+	read func(context.Context, content.Blob) ([]byte, error)
+}
+
+func (b blockingBlobReader) Read(ctx context.Context, blob content.Blob) ([]byte, error) {
+	return b.read(ctx, blob)
 }

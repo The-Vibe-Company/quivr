@@ -606,7 +606,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       const predicates = predicatesOf(params.get("metadata"));
       const accuracy = params.get("accuracy") || "exact";
       if (!["exact", "fast"].includes(accuracy)) throw failure(422, "Cette précision de comptage n’est pas valide.");
-      const infos = await Promise.all(ids.map(corpus));
+      const infos = await Promise.all(ids.map((id) => corpus(id, signal)));
       let fields = [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])];
       const field = params.get("field");
       if (field) {

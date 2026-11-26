@@ -187,5 +187,8 @@ func TestSpaceSnapshotsBackOffAfterRepeatedFailures(t *testing.T) {
 		if got := coverageFailureBackoff(10*time.Second, 20); got != maxCoverageFailureBackoff {
 			t.Fatalf("capped backoff = %s, want %s", got, maxCoverageFailureBackoff)
 		}
+		if got := coverageFailureBackoff(30*time.Minute, 1); got != maxCoverageFailureBackoff {
+			t.Fatalf("large ttl backoff = %s, want %s", got, maxCoverageFailureBackoff)
+		}
 	})
 }
