@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -30,21 +31,35 @@ const (
 	EnvManifest = "QUIVR_PLUGIN_MANIFEST"
 )
 
+// ManifestDigestHeader carries the sha256 digest of the plugin's manifest bytes
+// on every /v0/* response for zero-RTT manifest pin verification.
+const ManifestDigestHeader = "X-Quivr-Manifest-Digest"
+
+// Default server timeouts for ServeAddr.
+const (
+	DefaultShutdownTimeout = 30 * time.Second
+	DefaultIdleTimeout     = 120 * time.Second
+)
+
 // maxRequestBytes bounds a request body the SDK reads.
 const maxRequestBytes = 16 << 20
 
+var healthErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
 // Plugin serves one quivr-plugin.yaml.
 type Plugin struct {
-	m          *loadedManifest
-	kinds      map[string]*kind
-	routes     map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error)
-	logger     *slog.Logger
-	configSch  *jsonschema.Schema
-	spool      spool
-	ingester   Ingester
-	retriever  Retriever
-	normalizer Normalizer
-	subscriber Subscriber
+	m               *loadedManifest
+	kinds           map[string]*kind
+	routes          map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error)
+	logger          *slog.Logger
+	healthCheck     func(context.Context) error
+	shutdownTimeout time.Duration
+	configSch       *jsonschema.Schema
+	spool           spool
+	ingester        Ingester
+	retriever       Retriever
+	normalizer      Normalizer
+	subscriber      Subscriber
 }
 
 type kind struct {
@@ -63,6 +78,24 @@ type Option func(*Plugin)
 // wrap it with credential redaction.
 func WithLogger(l *slog.Logger) Option { return func(p *Plugin) { p.logger = l } }
 
+// WithHealthCheck registers a readiness check invoked by GET /v0/health.
+// Returning an error (or panicking) answers HTTP 503 with a retryable Plugin
+// Protocol error envelope, matching the Python SDK's @plugin.health_check.
+func WithHealthCheck(fn func(context.Context) error) Option {
+	return func(p *Plugin) { p.healthCheck = fn }
+}
+
+// WithShutdownTimeout sets how long ServeAddr waits for in-flight requests to
+// finish after its context is canceled (default 30s). Non-positive durations
+// are ignored.
+func WithShutdownTimeout(d time.Duration) Option {
+	return func(p *Plugin) {
+		if d > 0 {
+			p.shutdownTimeout = d
+		}
+	}
+}
+
 // New loads the manifest at path. An empty path uses QUIVR_PLUGIN_MANIFEST,
 // then quivr-plugin.yaml in the working directory.
 func New(path string, opts ...Option) (*Plugin, error) {
@@ -76,7 +109,13 @@ func New(path string, opts ...Option) (*Plugin, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plugin{m: m, kinds: map[string]*kind{}, routes: map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error){}, logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	p := &Plugin{
+		m:               m,
+		kinds:           map[string]*kind{},
+		routes:          map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error){},
+		logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		shutdownTimeout: DefaultShutdownTimeout,
+	}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -239,9 +278,7 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v0/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("GET /v0/health", p.serveHealth)
 	mux.HandleFunc("GET /v0/discovery", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{
 			"plugin_api":      p.m.pluginAPI,
@@ -279,10 +316,92 @@ func (p *Plugin) Handler() (http.Handler, error) {
 }
 
 func (p *Plugin) protocolHandler(mux http.Handler) http.Handler {
+	h := mux
 	if resolveAPIFeatures(p.m.pluginAPI).speaks("signed_calls") {
-		return continueTrace(p.authenticate(mux))
+		h = p.authenticate(h)
 	}
-	return continueTrace(mux)
+	return continueTrace(p.withManifestDigest(h))
+}
+
+func (p *Plugin) withManifestDigest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v0/") {
+			w.Header().Set(ManifestDigestHeader, p.m.digest)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (p *Plugin) serveHealth(w http.ResponseWriter, r *http.Request) {
+	if p.healthCheck == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			p.logger.Error("health check panicked", "panic", fmt.Sprint(v))
+			writeJSON(w, http.StatusServiceUnavailable, envelope{
+				Code:      "unhealthy",
+				Message:   "the health check panicked; see the plugin log",
+				Retryable: true,
+			})
+		}
+	}()
+	if err := p.healthCheck(r.Context()); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, p.healthErrorEnvelope(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (p *Plugin) healthErrorEnvelope(err error) envelope {
+	var connErr *Error
+	if errors.As(err, &connErr) {
+		_, env := connErr.envelope()
+		if !healthErrorCodePattern.MatchString(env.Code) {
+			env.Code = "unhealthy"
+		}
+		env.Message = truncate(env.Message)
+		env.Retryable = true
+		if env.Class != ClassTransient {
+			if env.RetryAfterSeconds > 0 {
+				env.Class = ClassTransient
+			} else {
+				env.Class = ""
+			}
+		}
+		return env
+	}
+	var ingestErr *IngestError
+	if errors.As(err, &ingestErr) {
+		code := ingestErr.Code
+		if !healthErrorCodePattern.MatchString(code) {
+			code = "unhealthy"
+		}
+		msg := ingestErr.Message
+		if msg == "" {
+			msg = code
+		}
+		return envelope{Code: code, Message: truncate(msg), Retryable: true}
+	}
+	var searchErr *SearchError
+	if errors.As(err, &searchErr) {
+		code := searchErr.Code
+		if !healthErrorCodePattern.MatchString(code) {
+			code = "unhealthy"
+		}
+		msg := searchErr.Message
+		if msg == "" {
+			msg = code
+		}
+		return envelope{Code: code, Message: truncate(msg), Retryable: true}
+	}
+	p.logger.Error("health check failed", "error", err.Error())
+	return envelope{
+		Code:      "unhealthy",
+		Message:   "the health check failed; see the plugin log",
+		Retryable: true,
+	}
 }
 
 // contributions lists the declared Contributions for discovery.
@@ -321,22 +440,48 @@ func (p *Plugin) Serve() error {
 	return p.ServeAddr(ctx, net.JoinHostPort(host, port))
 }
 
+func (p *Plugin) newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       DefaultIdleTimeout,
+	}
+}
+
 // ServeAddr listens on addr until ctx ends.
 func (p *Plugin) ServeAddr(ctx context.Context, addr string) error {
 	handler, err := p.Handler()
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	if addr == "" {
+		addr = ":http"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return p.serveListener(ctx, ln, handler)
+}
+
+func (p *Plugin) serveListener(ctx context.Context, ln net.Listener, handler http.Handler) error {
+	server := p.newHTTPServer(ln.Addr().String(), handler)
 	errs := make(chan error, 1)
-	go func() { errs <- server.ListenAndServe() }()
+	go func() { errs <- server.Serve(ln) }()
 	select {
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		timeout := p.shutdownTimeout
+		if timeout <= 0 {
+			timeout = DefaultShutdownTimeout
+		}
+		shutdown, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		return server.Shutdown(shutdown)
+		err := server.Shutdown(shutdown)
+		<-errs
+		return err
 	}
 }
 

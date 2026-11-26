@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import threading
@@ -56,6 +57,10 @@ HEALTH_PATH = "/v0/health"
 NORMALIZER_PATH = "/v0/contributions/normalizer"
 SUBSCRIPTION_PATH = "/v0/contributions/subscription"
 RETRIEVAL_PATH = "/v0/contributions/retrieval/search"
+MANIFEST_DIGEST_HEADER = "X-Quivr-Manifest-Digest"
+DEFAULT_REQUEST_QUEUE_SIZE = 128
+DEFAULT_IDLE_TIMEOUT = 60.0
+DEFAULT_SHUTDOWN_TIMEOUT = 30.0
 MAX_REQUEST_BYTES = 1 << 20
 # A subscription request carries the text of a Record Version; the core keeps it within 16 MiB.
 MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
@@ -120,6 +125,50 @@ class Reply:
 
     status: int
     body: dict[str, Any]
+    _payload: bytes | None = field(default=None, repr=False, compare=False)
+
+    def encode(self) -> bytes:
+        """Return the UTF-8 compact JSON payload, reusing pre-serialized bytes when available."""
+        if self._payload is not None:
+            return self._payload
+        return json.dumps(self.body, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+class _PluginHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server with production listen backlog, address reuse, and in-flight tracking."""
+
+    request_queue_size = DEFAULT_REQUEST_QUEUE_SIZE
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, server_address: tuple[str, int], handler_class: type[BaseHTTPRequestHandler]) -> None:
+        self._draining = threading.Event()
+        self._in_flight_cond = threading.Condition()
+        self._in_flight = 0
+        super().__init__(server_address, handler_class)
+
+    def begin_request(self) -> None:
+        with self._in_flight_cond:
+            self._in_flight += 1
+
+    def end_request(self) -> None:
+        with self._in_flight_cond:
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._in_flight_cond.notify_all()
+
+    def wait_in_flight(self, timeout: float | None = DEFAULT_SHUTDOWN_TIMEOUT) -> bool:
+        """Wait until all active requests finish or timeout elapses."""
+        with self._in_flight_cond:
+            return self._in_flight_cond.wait_for(lambda: self._in_flight == 0, timeout=timeout)
+
+
+def _validate_positive_timeout(name: str, value: float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number or None")
+    return float(value)
 
 
 def _error(status: int, code: str, message: str, retryable: bool = False) -> Reply:
@@ -410,13 +459,13 @@ class Plugin:
         if problems:
             log.error("subscription response violates the protocol", extra={"problems": problems})
             return _error(500, "invalid_response", "the subscription response violates the protocol: " + "; ".join(problems))
-        size = len(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode())
-        if size > manifest.subscription_max_response_bytes:
+        payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
+        if len(payload) > manifest.subscription_max_response_bytes:
             return _from_exception(TerminalError(
                 "response_too_large",
-                f"the subscription response is {size} bytes; the manifest declares at most {manifest.subscription_max_response_bytes}",
+                f"the subscription response is {len(payload)} bytes; the manifest declares at most {manifest.subscription_max_response_bytes}",
                 status=500))
-        return Reply(200, document)
+        return Reply(200, document, _payload=payload)
 
     def _invoke(self, body: bytes) -> Reply:
         if self.manifest.model.contributions.normalizer is None:
@@ -470,18 +519,25 @@ class Plugin:
         if problems:
             log.error("normalizer response violates the protocol schema", extra={"problems": problems})
             return _error(500, "invalid_response", "the normalizer response violates the protocol schema: " + "; ".join(problems))
-        size = len(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode())
-        if size > manifest.max_response_bytes:
+        payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
+        if len(payload) > manifest.max_response_bytes:
             return _from_exception(TerminalError(
                 "response_too_large",
-                f"the normalizer response is {size} bytes; the manifest declares at most {manifest.max_response_bytes}",
+                f"the normalizer response is {len(payload)} bytes; the manifest declares at most {manifest.max_response_bytes}",
                 status=500))
-        return Reply(200, document)
+        return Reply(200, document, _payload=payload)
 
     # HTTP transport.
 
-    def make_server(self, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+    def make_server(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        *,
+        idle_timeout: float | None = DEFAULT_IDLE_TIMEOUT,
+    ) -> ThreadingHTTPServer:
         """Build (but do not start) a threaded HTTP server bound to host:port."""
+        timeout_seconds = _validate_positive_timeout("idle_timeout", idle_timeout)
         self.check_registered()
         plugin = self
 
@@ -491,6 +547,7 @@ class Plugin:
             # Headers and small JSON bodies are written separately. Send
             # each promptly instead of waiting for the client's delayed ACK.
             disable_nagle_algorithm = True
+            timeout = timeout_seconds
 
             def handle(self) -> None:
                 try:
@@ -502,8 +559,15 @@ class Plugin:
                     log.debug("plugin caller disconnected")
 
             def _serve(self, method: str) -> None:
-                with request_context(self.headers):
-                    self._serve_traced(method)
+                server = self.server
+                if isinstance(server, _PluginHTTPServer):
+                    server.begin_request()
+                try:
+                    with request_context(self.headers):
+                        self._serve_traced(method)
+                finally:
+                    if isinstance(server, _PluginHTTPServer):
+                        server.end_request()
 
             def _serve_traced(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"
@@ -532,10 +596,15 @@ class Plugin:
                     except Exception:  # last resort: every answer carries the envelope
                         log.exception("unexpected error while handling %s %s", method, self.path)
                         reply = _error(500, "internal_error", "the plugin failed to handle the request; see the plugin logs")
-                payload = json.dumps(reply.body, ensure_ascii=False, separators=(",", ":")).encode()
+                payload = reply.encode()
                 self.send_response(reply.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
+                if self.path.split("?", 1)[0].startswith("/v0/"):
+                    self.send_header(MANIFEST_DIGEST_HEADER, plugin.manifest.digest)
+                if isinstance(self.server, _PluginHTTPServer) and self.server._draining.is_set():
+                    self.close_connection = True
+                    self.send_header("Connection", "close")
                 self.end_headers()
                 if method != "HEAD":
                     self.wfile.write(payload)
@@ -564,29 +633,51 @@ class Plugin:
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
                 log.debug("http %s", format % args)
 
-        server = ThreadingHTTPServer((host, port), Handler)
-        server.daemon_threads = True
-        return server
+        return _PluginHTTPServer((host, port), Handler)
 
-    def serve(self, host: str | None = None, port: int | None = None, *, log_level: int | str = logging.INFO) -> None:
+    def serve(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        *,
+        log_level: int | str = logging.INFO,
+        idle_timeout: float | None = DEFAULT_IDLE_TIMEOUT,
+        shutdown_timeout: float | None = DEFAULT_SHUTDOWN_TIMEOUT,
+    ) -> None:
         """Serve until interrupted. Host and port default to QUIVR_PLUGIN_HOST / QUIVR_PLUGIN_PORT,
         then 127.0.0.1:8080 (``quivr plugin dev`` sets both)."""
+        drain_timeout = _validate_positive_timeout("shutdown_timeout", shutdown_timeout)
         configure_logging(log_level)
         host = host or os.environ.get("QUIVR_PLUGIN_HOST") or "127.0.0.1"
         port = port if port is not None else int(os.environ.get("QUIVR_PLUGIN_PORT") or 8080)
-        server = self.make_server(host, port)
+        server = self.make_server(host, port, idle_timeout=idle_timeout)
         m = self.manifest.model
         log.info("plugin listening", extra={"plugin": m.id, "version": m.version, "address": f"http://{host}:{server.server_port}",
                                             "manifest_digest": self.manifest.digest})
 
+        stopping = threading.Event()
+
         def stop(signum, frame) -> None:
+            if stopping.is_set():
+                return
+            stopping.set()
+            if isinstance(server, _PluginHTTPServer):
+                server._draining.set()
             threading.Thread(target=server.shutdown, daemon=True).start()
 
+        previous_handlers: dict[signal.Signals, Any] = {}
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, stop)
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous_handlers[sig] = signal.getsignal(sig)
+                signal.signal(sig, stop)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            pass
+            if isinstance(server, _PluginHTTPServer):
+                server._draining.set()
         finally:
             server.server_close()
+            if isinstance(server, _PluginHTTPServer):
+                server.wait_in_flight(timeout=drain_timeout)
+            for sig, previous in previous_handlers.items():
+                signal.signal(sig, previous)
