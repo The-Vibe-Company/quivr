@@ -416,6 +416,8 @@ class Stack:
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
         more bounded attempt; every retry is recorded in readiness.json, never hidden."""
         services=() if self.uses_tei() else CORE_SERVICES
+        if not self.uses_tei():
+            self.compose('stop','tei')
         for attempt in range(1,attempts+1):
             try:
                 self.compose('up','-d','--wait','--wait-timeout','180',*services);return

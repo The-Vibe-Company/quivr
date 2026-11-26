@@ -1,8 +1,11 @@
 """Content-addressed caching for local Go engine and plugin binaries (OB-620).
 
 Exercises real `go build` on tiny throwaway modules with a local `replace`
-dependency and an embedded file, with zero network access or sleeps.
+dependency, embedded binary assets, and `testdata`, with zero network access
+or sleeps.
 """
+from concurrent.futures import ThreadPoolExecutor
+import errno
 import io
 import json
 import os
@@ -17,11 +20,18 @@ import go_bin_cache
 GO = os.environ.get('GO', 'go')
 
 
-def _write_module(root: pathlib.Path, *, dep_msg: str = 'dep-v1', embed_msg: str = 'embed-v1') -> tuple[pathlib.Path, pathlib.Path]:
+def _write_module(
+    root: pathlib.Path,
+    *,
+    dep_msg: str = 'dep-v1',
+    embed_msg: str = 'embed-v1',
+    testdata_msg: str = 'td-v1',
+    elf_payload: bytes = b'\x7fELF\x01',
+) -> tuple[pathlib.Path, pathlib.Path]:
     dep = root / 'dep'
     app = root / 'app'
     dep.mkdir(parents=True, exist_ok=True)
-    app.mkdir(parents=True, exist_ok=True)
+    (app / 'testdata').mkdir(parents=True, exist_ok=True)
     (dep / 'go.mod').write_text('module example.com/dep\n\ngo 1.21\n')
     (dep / 'dep.go').write_text(f'package dep\n\nfunc Value() string {{ return {json.dumps(dep_msg)} }}\n')
     (app / 'go.mod').write_text(
@@ -31,6 +41,8 @@ def _write_module(root: pathlib.Path, *, dep_msg: str = 'dep-v1', embed_msg: str
         'replace example.com/dep => ../dep\n'
     )
     (app / 'data.txt').write_text(embed_msg)
+    (app / 'testdata' / 'fixture.txt').write_text(testdata_msg)
+    (app / 'asset.bin').write_bytes(elf_payload)
     (app / 'main.go').write_text(
         'package main\n\n'
         'import (\n'
@@ -40,7 +52,11 @@ def _write_module(root: pathlib.Path, *, dep_msg: str = 'dep-v1', embed_msg: str
         ')\n\n'
         '//go:embed data.txt\n'
         'var data string\n\n'
-        'func main() { fmt.Printf("%s:%s", dep.Value(), data) }\n'
+        '//go:embed testdata/fixture.txt\n'
+        'var fixture string\n\n'
+        '//go:embed asset.bin\n'
+        'var asset []byte\n\n'
+        'func main() { fmt.Printf("%s:%s:%s:%x", dep.Value(), data, fixture, asset) }\n'
     )
     return app, dep
 
@@ -49,7 +65,7 @@ class GoBinCache(unittest.TestCase):
     def setUp(self):
         self.env = {**os.environ, 'GOWORK': 'off', 'GOFLAGS': ''}
 
-    def test_caches_binary_and_rebuilds_only_when_module_or_replace_source_changes(self):
+    def test_caches_binary_and_rebuilds_for_sources_replace_testdata_binary_assets_and_go_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             cache = root / 'bin'
@@ -57,37 +73,78 @@ class GoBinCache(unittest.TestCase):
 
             binary = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
             self.assertEqual(binary, cache / 'sample')
-            self.assertTrue((cache / 'sample.stamp').is_file())
-            self.assertEqual(subprocess.check_output([str(binary)], text=True), 'dep-v1:embed-v1')
+            stamp = json.loads((cache / 'sample.stamp').read_text())
+            self.assertEqual(stamp['inode'], binary.stat().st_ino)
+            self.assertEqual(stamp['size'], binary.stat().st_size)
+            self.assertEqual(subprocess.check_output([str(binary)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
 
-            # Unchanged inputs hit the cache without spawning `go build`.
-            with mock.patch.object(go_bin_cache.subprocess, 'run') as spawned:
+            # Unchanged inputs hit the cache without spawning `go build`, even in a fresh
+            # process where the in-memory `go env` cache is cold.
+            go_bin_cache._GO_ENV_CACHE.clear()
+            with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
                 again = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
             self.assertEqual(again, binary)
-            spawned.assert_not_called()
+            build.assert_not_called()
 
             # Editing a test-only file does not invalidate a non-test build.
             (app / 'sample_test.go').write_text('package main\nimport "testing"\nfunc TestNoop(t *testing.T) {}\n')
-            with mock.patch.object(go_bin_cache.subprocess, 'run') as spawned:
+            with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
                 go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
-            spawned.assert_not_called()
+            build.assert_not_called()
 
             # Editing a local `replace` dependency invalidates and rebuilds.
             (dep / 'dep.go').write_text('package dep\n\nfunc Value() string { return "dep-v2" }\n')
             rebuilt = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
-            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v1')
+            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v1:td-v1:7f454c4601')
 
-            # Editing an embedded file invalidates and rebuilds.
-            (app / 'data.txt').write_text('embed-v2')
+            # Editing an embedded file inside testdata/ invalidates and rebuilds.
+            (app / 'testdata' / 'fixture.txt').write_text('td-v2')
             rebuilt = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
-            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v2')
+            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v1:td-v2:7f454c4601')
 
-            # Changing a relevant build env var changes the fingerprint.
-            fp_default = go_bin_cache.fingerprint(app, '.', go=GO, env=self.env)
-            fp_trimmed = go_bin_cache.fingerprint(app, '.', go=GO, env={**self.env, 'GOFLAGS': '-trimpath'})
-            self.assertNotEqual(fp_default, fp_trimmed)
+            # Editing an embedded binary asset with ELF magic invalidates and rebuilds.
+            (app / 'asset.bin').write_bytes(b'\x7fELF\x02')
+            rebuilt = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
+            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v1:td-v2:7f454c4602')
 
-    def test_materialize_exposes_distinct_path_and_tracks_rebuilds(self):
+            # Changing effective Go build env vars (GOFLAGS, CGO_CFLAGS) triggers a real rebuild,
+            # and a repeat call with the same env hits the cache again.
+            for env_override in ({'GOFLAGS': '-trimpath'}, {'CGO_CFLAGS': '-O1'}):
+                with self.subTest(env_override=env_override):
+                    updated_env = {**self.env, **env_override}
+                    with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
+                        rebuilt = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=updated_env)
+                        self.assertEqual(build.call_count, 1)
+                        go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=updated_env)
+                        self.assertEqual(build.call_count, 1)
+                    self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v2:embed-v1:td-v2:7f454c4602')
+
+    def test_concurrent_ensure_serializes_and_detects_mismatched_inode_stamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            cache = root / 'bin'
+            app, _ = _write_module(root)
+
+            with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    results = list(pool.map(
+                        lambda _: go_bin_cache.ensure('concurrent', app, '.', go=GO, cache_dir=cache, env=self.env),
+                        range(4),
+                    ))
+            self.assertEqual(build.call_count, 1)
+            self.assertTrue(all(p == cache / 'concurrent' for p in results))
+
+            # A stamp whose recorded inode disagrees with the binary forces a clean rebuild.
+            stamp_path = cache / 'concurrent.stamp'
+            record = json.loads(stamp_path.read_text())
+            record['inode'] = -1
+            stamp_path.write_text(json.dumps(record))
+            with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
+                rebuilt = go_bin_cache.ensure('concurrent', app, '.', go=GO, cache_dir=cache, env=self.env)
+            self.assertEqual(build.call_count, 1)
+            self.assertEqual(subprocess.check_output([str(rebuilt)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
+
+    def test_materialize_exposes_distinct_executable_and_supports_copy_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             cache = root / 'bin'
@@ -97,16 +154,24 @@ class GoBinCache(unittest.TestCase):
             dest = root / 'stack' / 'sample'
             materialized = go_bin_cache.materialize(cached, dest)
             self.assertEqual(materialized, dest)
-            self.assertTrue(os.path.samefile(cached, dest))
-            self.assertEqual(subprocess.check_output([str(dest)], text=True), 'dep-v1:embed-v1')
+            self.assertNotEqual(dest.resolve(), cached.resolve())
+            self.assertTrue(os.access(dest, os.X_OK))
+            self.assertEqual(subprocess.check_output([str(dest)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
 
-            # Rebuilding replaces the cached inode atomically; rematerializing updates dest.
+            # Rebuilding cached replaces it atomically; dest keeps serving v1 until rematerialized.
             (dep / 'dep.go').write_text('package dep\n\nfunc Value() string { return "dep-v2" }\n')
             cached_v2 = go_bin_cache.ensure('sample', app, '.', go=GO, cache_dir=cache, env=self.env)
-            self.assertFalse(os.path.samefile(cached_v2, dest))
+            self.assertEqual(subprocess.check_output([str(dest)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
             go_bin_cache.materialize(cached_v2, dest)
-            self.assertTrue(os.path.samefile(cached_v2, dest))
-            self.assertEqual(subprocess.check_output([str(dest)], text=True), 'dep-v2:embed-v1')
+            self.assertEqual(subprocess.check_output([str(dest)], text=True), 'dep-v2:embed-v1:td-v1:7f454c4601')
+
+            # Filesystems without hardlinks fall back to an atomic copy cleanly.
+            copied = root / 'cross-device' / 'sample'
+            with mock.patch.object(go_bin_cache.os, 'link', side_effect=OSError(errno.EXDEV, 'cross-device link')):
+                go_bin_cache.materialize(cached_v2, copied)
+            self.assertTrue(os.access(copied, os.X_OK))
+            self.assertFalse(os.path.samefile(cached_v2, copied))
+            self.assertEqual(subprocess.check_output([str(copied)], text=True), 'dep-v2:embed-v1:td-v1:7f454c4601')
 
     def test_ensure_many_builds_only_misses(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -119,8 +184,8 @@ class GoBinCache(unittest.TestCase):
                 {'name': 'mod-b', 'cwd': app_b, 'package': '.', 'go': GO, 'cache_dir': cache, 'env': self.env},
             ]
             built = go_bin_cache.ensure_many(specs)
-            self.assertEqual(subprocess.check_output([str(built['mod-a'])], text=True), 'a1:embed-v1')
-            self.assertEqual(subprocess.check_output([str(built['mod-b'])], text=True), 'b1:embed-v1')
+            self.assertEqual(subprocess.check_output([str(built['mod-a'])], text=True), 'a1:embed-v1:td-v1:7f454c4601')
+            self.assertEqual(subprocess.check_output([str(built['mod-b'])], text=True), 'b1:embed-v1:td-v1:7f454c4601')
 
             with mock.patch.object(go_bin_cache, '_build_uncached', wraps=go_bin_cache._build_uncached) as build:
                 go_bin_cache.ensure_many(specs)
@@ -128,7 +193,7 @@ class GoBinCache(unittest.TestCase):
                 (app_b / 'data.txt').write_text('b-updated')
                 updated = go_bin_cache.ensure_many(specs)
                 self.assertEqual(build.call_count, 1)
-            self.assertEqual(subprocess.check_output([str(updated['mod-b'])], text=True), 'b1:b-updated')
+            self.assertEqual(subprocess.check_output([str(updated['mod-b'])], text=True), 'b1:b-updated:td-v1:7f454c4601')
 
     def test_cli_ensure_prints_cached_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +209,7 @@ class GoBinCache(unittest.TestCase):
             self.assertEqual(rc, 0)
             printed = pathlib.Path(out.getvalue().strip())
             self.assertEqual(printed, cache / 'cli-sample')
-            self.assertEqual(subprocess.check_output([str(printed)], text=True), 'dep-v1:embed-v1')
+            self.assertEqual(subprocess.check_output([str(printed)], text=True), 'dep-v1:embed-v1:td-v1:7f454c4601')
 
 
 if __name__ == '__main__':

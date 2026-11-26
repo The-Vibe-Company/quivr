@@ -446,10 +446,14 @@ class DevProfile(unittest.TestCase):
         self.assertEqual(hash_pin['spaces'], {'example.hash_embedder.small': 'served'})
         self.assertFalse((stack.directory / 'tokenizer-provenance.json').exists())
 
-        # start_dependencies only starts core services (never tei).
+        # start_dependencies stops tei (in case an existing full stack switched to fast)
+        # and starts only core services.
         with mock.patch.object(stack, 'compose') as compose:
             stack.start_dependencies()
-        compose.assert_called_once_with('up', '-d', '--wait', '--wait-timeout', '180', *local.CORE_SERVICES)
+        self.assertEqual(compose.call_args_list, [
+            mock.call('stop', 'tei'),
+            mock.call('up', '-d', '--wait', '--wait-timeout', '180', *local.CORE_SERVICES),
+        ])
 
         # up() skips prepare_tokenizer/prepare_embeddings, fixture/push start, and double migrate.
         with mock.patch.object(stack, 'check_disk'), \
@@ -502,9 +506,42 @@ class DevProfile(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'QUIVR_CORE_INGEST=on requires TEI'):
                 local.connector_plugin.from_environment(fast=True)
 
+        with mock.patch.dict(os.environ, {'QUIVR_CORE_INGEST': 'onn'}, clear=True):
+            with self.assertRaisesRegex(ValueError, "QUIVR_CORE_INGEST is on or off, not 'onn'"):
+                local.connector_plugin.from_environment(fast=True)
+
         with mock.patch.dict(os.environ, {'QUIVR_DEV_PROFILE': 'turbo'}, clear=True):
             with self.assertRaisesRegex(ValueError, 'QUIVR_DEV_PROFILE'):
                 local.dev_profile_from_environment()
+
+    def test_stop_fast_refuses_to_signal_an_unrelated_reused_pid(self):
+        stack = local.Stack(self.name)
+        stack.state['fast_ingestion_pid'] = os.getpid()
+        stack.state['fast_ingestion_binary'] = str(local.ROOT / '.scratch' / 'bin' / 'hash-embedder')
+        stack.save()
+        with mock.patch.object(local.ingestion_plugin.os, 'killpg') as killpg:
+            local.ingestion_plugin.stop_fast(stack)
+        killpg.assert_not_called()
+        self.assertNotIn('fast_ingestion_pid', json.loads(stack.statefile.read_text()))
+
+    def test_start_first_party_persists_each_pid_before_starting_the_next_plugin(self):
+        stack = local.Stack(self.name)
+        local.connector_plugin.select_first_party(stack, ['rss', 'core-retrieve'])
+        calls = 0
+        def fake_popen(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return mock.Mock(pid=424242)
+            raise OSError('spawn failed')
+        binaries = {'quivr-rss': pathlib.Path('/bin/true'), 'quivr-core-retrieve': pathlib.Path('/bin/true')}
+        with mock.patch.object(local.connector_plugin, 'stop_first_party'), \
+                mock.patch.object(local.connector_plugin.go_bin_cache, 'ensure_many', return_value=binaries), \
+                mock.patch.object(local.connector_plugin.subprocess, 'Popen', side_effect=fake_popen):
+            with self.assertRaisesRegex(OSError, 'spawn failed'):
+                local.connector_plugin.start_first_party(stack)
+        saved = json.loads(stack.statefile.read_text())
+        self.assertEqual(saved.get('rss_plugin_pid'), 424242)
 
     def test_verify_ignores_fast_dev_profile_and_retains_full_stack(self):
         created = []

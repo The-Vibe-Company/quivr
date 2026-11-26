@@ -34,7 +34,7 @@ afterwards, even on failure.
 """
 import go_bin_cache
 import plugin_environment
-import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
+import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request, uuid
 
 import ports
 
@@ -67,6 +67,26 @@ def fast_pins(stack):
     return [{'manifest': str(fast_manifest(stack)), 'endpoint': f'http://127.0.0.1:{fast_port(stack)}', 'spaces': FAST_SPACES}]
 
 
+def _owns_fast_process(stack, pid, binary_path):
+    """Verify pid still runs this stack's hash-embedder before signalling its group."""
+    expected = pathlib.Path(binary_path)
+    try:
+        if sys.platform == 'darwin':
+            comm = subprocess.run(['ps', '-o', 'comm=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
+            if not comm or pathlib.Path(comm).name != expected.name:
+                return False
+        else:
+            cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
+            if cmd != str(expected).encode():
+                return False
+            log_path = (stack.directory / 'hash-embedder-plugin.log').resolve()
+            if pathlib.Path(f'/proc/{pid}/fd/1').resolve() != log_path:
+                return False
+        return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def start_fast(stack):
     """Build (cached in .scratch/bin) and run hash-embedder for the fast dev profile."""
     stop_fast(stack)
@@ -77,14 +97,18 @@ def start_fast(stack):
     log = stack.directory / 'hash-embedder-plugin.log'
     plugin = start_plugin(stack.directory, executable, port, fast_manifest(stack), log.name)
     stack.state['fast_ingestion_pid'] = plugin.pid
+    stack.state['fast_ingestion_binary'] = str(executable)
     stack.save()
     await_healthy(plugin, port, log)
 
 
 def stop_fast(stack):
     pid = stack.state.pop('fast_ingestion_pid', None)
+    binary_path = stack.state.pop('fast_ingestion_binary', None) or str(go_bin_cache.BIN_DIR / 'hash-embedder')
     stack.save()
     if pid is None:
+        return
+    if not _owns_fast_process(stack, pid, binary_path):
         return
     try:
         os.killpg(pid, signal.SIGTERM)

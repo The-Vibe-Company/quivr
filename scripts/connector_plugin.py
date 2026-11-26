@@ -100,8 +100,12 @@ def from_environment(fast=False):
     for row in FIRST_PARTY:
         raw = os.environ.get(variable(row))
         if fast and row['id'] == 'core-ingest':
-            if (raw or '').lower() == 'on':
-                raise ValueError('QUIVR_CORE_INGEST=on requires TEI; run `make dev` (full profile) instead of fast')
+            if raw:
+                value = raw.lower()
+                if value not in ('on', 'off'):
+                    raise ValueError(f'{variable(row)} is on or off, not {value!r}')
+                if value == 'on':
+                    raise ValueError('QUIVR_CORE_INGEST=on requires TEI; run `make dev` (full profile) instead of fast')
             continue
         default = ('on' if row['id'] == 'core-retrieve' else 'off') if fast else 'on'
         value = (raw or default).lower()
@@ -180,8 +184,8 @@ def start_first_party(stack, only=None):
         with log.open('a') as out:
             p = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=out, stderr=out, start_new_session=True)
         stack.state[f"{row['id']}_plugin_pid"] = p.pid
+        stack.save()
         started.append((row['id'], p, port, log))
-    stack.save()
     deadline = time.monotonic() + 30
     pending = list(started)
     while pending:

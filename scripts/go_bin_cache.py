@@ -2,15 +2,18 @@
 """Content-addressed cache for local Go engine and plugin binaries in .scratch/bin.
 
 Rebuilds a Go binary only when its module sources, local ``go.mod`` replace
-dependencies, Go toolchain binary, or relevant build environment variables
-change. Publishes binaries and stamps atomically so concurrent runs never
-observe partial files.
+dependencies, Go toolchain binary, or effective ``go env`` build environment
+change. Serializes check/build/publish per binary with an advisory file lock
+and pairs the binary inode/size with its fingerprint in a single atomic stamp.
 """
 from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
+import fcntl
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -21,18 +24,28 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN_DIR = ROOT / '.scratch' / 'bin'
-FORMAT_VERSION = 'go-bin-cache-v1'
-BUILD_ENV_KEYS = (
-    'GOOS',
-    'GOARCH',
-    'CGO_ENABLED',
-    'GOFLAGS',
-    'GOEXPERIMENT',
-    'GOTOOLCHAIN',
-    'GOWORK',
-    'CC',
-    'CXX',
-)
+FORMAT_VERSION = 'go-bin-cache-v2'
+ENV_PREFIXES = ('GO', 'CGO_', 'PKG_CONFIG')
+ENV_EXACT_KEYS = frozenset({'CC', 'CXX', 'AR', 'PATH'})
+# go env keys that describe ephemeral temp paths, cache/telemetry locations, or
+# invocation working directory rather than build outputs (GOGCCFLAGS embeds a
+# random per-invocation go-build<n> directory in -ffile-prefix-map).
+GO_ENV_IGNORED_KEYS = frozenset({
+    'GOAUTH',
+    'GOBIN',
+    'GOCACHE',
+    'GOCACHEPROG',
+    'GOENV',
+    'GOGCCFLAGS',
+    'GOMOD',
+    'GOMODCACHE',
+    'GOPATH',
+    'GOROOT',
+    'GOTELEMETRY',
+    'GOTELEMETRYDIR',
+    'GOTMPDIR',
+    'GOTOOLDIR',
+})
 IGNORED_DIRS = frozenset({
     '.git',
     '.scratch',
@@ -47,16 +60,9 @@ IGNORED_DIRS = frozenset({
 })
 IGNORED_NAMES = frozenset({'.DS_Store'})
 IGNORED_SUFFIXES = ('.pyc', '.pyo', '.swp', '.swo')
-BINARY_MAGICS = frozenset({
-    b'\x7fELF',          # Linux ELF
-    b'\xfe\xed\xfa\xce', # Mach-O 32-bit BE
-    b'\xce\xfa\xed\xfe', # Mach-O 32-bit LE
-    b'\xfe\xed\xfa\xcf', # Mach-O 64-bit BE
-    b'\xcf\xfa\xed\xfe', # Mach-O 64-bit LE
-    b'\xca\xfe\xba\xbe', # Mach-O universal / fat
-})
 
 _SAFE_NAME = re.compile(r'^[A-Za-z0-9._-]+$')
+_GO_ENV_CACHE: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
 
 
 def _find_module_root(directory: pathlib.Path) -> pathlib.Path:
@@ -125,13 +131,14 @@ def _collect_module_roots(start_module: pathlib.Path) -> list[pathlib.Path]:
     return sorted(ordered)
 
 
-def _walk_module_files(module_root: pathlib.Path, *, include_tests: bool, include_testdata: bool) -> list[pathlib.Path]:
+def _walk_module_files(module_root: pathlib.Path, *, include_tests: bool) -> list[pathlib.Path]:
     """Return sorted source and embeddable files belonging to one Go module.
 
     Follows Go's module and ``//go:embed`` boundaries: skips nested ``go.mod``
-    submodules, skips ignored VCS/cache directories, and only hashes files under
-    directories that have a relevant ``.go`` file in themselves or an ancestor
-    within the module (plus ``go.mod`` and ``go.sum`` at the module root).
+    submodules, skips ignored VCS/cache directories, and hashes every file
+    (including ``testdata`` and binary assets) under directories that have a
+    relevant ``.go`` file in themselves or an ancestor within the module (plus
+    ``go.mod`` and ``go.sum`` at the module root).
     """
     files: list[pathlib.Path] = []
     for root_name in ('go.mod', 'go.sum'):
@@ -147,8 +154,6 @@ def _walk_module_files(module_root: pathlib.Path, *, include_tests: bool, includ
         pruned: list[str] = []
         for d in dirnames:
             if d in IGNORED_DIRS:
-                continue
-            if d == 'testdata' and not include_testdata:
                 continue
             child = current / d
             if (child / 'go.mod').is_file():
@@ -196,6 +201,37 @@ def _toolchain_identity(go: str, env: dict[str, str]) -> str:
     return go
 
 
+def _relevant_env_items(env: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(
+        (k, v) for k, v in env.items()
+        if k in ENV_EXACT_KEYS or k.startswith(ENV_PREFIXES)
+    ))
+
+
+def _effective_go_env(go: str, cwd: pathlib.Path, env: dict[str, str]) -> str:
+    """Return a canonical serialization of the effective ``go env`` build settings."""
+    key = (go, str(cwd), _relevant_env_items(env))
+    cached = _GO_ENV_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(
+            [go, 'env', '-json'],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        parsed = json.loads(result.stdout)
+        filtered = {k: v for k, v in sorted(parsed.items()) if k not in GO_ENV_IGNORED_KEYS}
+        serialized = json.dumps(filtered, sort_keys=True, separators=(',', ':'))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        serialized = json.dumps(dict(key[2]), sort_keys=True, separators=(',', ':'))
+    _GO_ENV_CACHE[key] = serialized
+    return serialized
+
+
 def fingerprint(
     cwd: pathlib.Path | str,
     package: str = '.',
@@ -206,37 +242,32 @@ def fingerprint(
     env: dict[str, str] | None = None,
 ) -> str:
     """Compute a deterministic SHA-256 fingerprint for a Go build invocation."""
-    effective_env = os.environ if env is None else env
+    effective_env = dict(os.environ if env is None else env)
     go_cmd = go or effective_env.get('GO', 'go')
     cwd_path = pathlib.Path(cwd).resolve()
     module_root = _find_module_root(cwd_path)
     include_tests = mode == 'test'
-    include_testdata = include_tests or 'testdata' in pathlib.PurePosixPath(package).parts
 
     hasher = hashlib.sha256()
     hasher.update(FORMAT_VERSION.encode())
     hasher.update(b'\0')
-    hasher.update(_toolchain_identity(go_cmd, dict(effective_env)).encode())
+    hasher.update(_toolchain_identity(go_cmd, effective_env).encode())
     hasher.update(b'\0')
     hasher.update(f'{mode}\0{cwd_path}\0{package}\0'.encode())
     for arg in extra_args:
         hasher.update(arg.encode())
         hasher.update(b'\0')
-    for key in BUILD_ENV_KEYS:
-        hasher.update(f'{key}={effective_env.get(key, "")}\0'.encode())
+    hasher.update(_effective_go_env(go_cmd, cwd_path, effective_env).encode())
+    hasher.update(b'\0')
 
     for root in _collect_module_roots(module_root):
         hasher.update(f'MODULE:{root}\0'.encode())
-        for path in _walk_module_files(root, include_tests=include_tests, include_testdata=include_testdata):
+        for path in _walk_module_files(root, include_tests=include_tests):
             try:
                 with path.open('rb') as stream:
-                    header = stream.read(4)
-                    if header in BINARY_MAGICS:
-                        continue
                     rel = path.relative_to(root).as_posix()
                     hasher.update(rel.encode())
                     hasher.update(b'\0')
-                    hasher.update(header)
                     while chunk := stream.read(65536):
                         hasher.update(chunk)
                     hasher.update(b'\0')
@@ -260,43 +291,54 @@ def _cache_name(name: str, cwd: pathlib.Path, cache_dir: pathlib.Path) -> str:
         return f'{name}-{suffix}'
 
 
-def _write_stamp_atomic(stamp_path: pathlib.Path, value: str) -> None:
+def _write_stamp_atomic(stamp_path: pathlib.Path, record: dict) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix='.' + stamp_path.name + '.', dir=stamp_path.parent)
     tmp_path = pathlib.Path(tmp_name)
     try:
         with os.fdopen(fd, 'w') as stream:
-            stream.write(value + '\n')
+            json.dump(record, stream, sort_keys=True)
+            stream.write('\n')
         os.replace(tmp_path, stamp_path)
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def _check_cache(
-    name: str,
-    cwd: pathlib.Path | str,
-    package: str = '.',
-    *,
-    go: str | None = None,
-    mode: str = 'build',
-    cache_dir: pathlib.Path | str | None = None,
-    extra_args: tuple[str, ...] = (),
-    env: dict[str, str] | None = None,
-) -> tuple[pathlib.Path, pathlib.Path, str, bool]:
-    if mode not in ('build', 'test'):
-        raise ValueError(f'unsupported build mode: {mode!r}')
-    cwd_path = pathlib.Path(cwd).resolve()
-    directory = pathlib.Path(cache_dir) if cache_dir is not None else BIN_DIR
-    cached_name = _cache_name(name, cwd_path, directory)
-    target = directory / cached_name
-    stamp_path = directory / (cached_name + '.stamp')
-    expected = fingerprint(cwd_path, package, go=go, mode=mode, extra_args=extra_args, env=env)
-    hit = (
-        target.is_file()
-        and os.access(target, os.X_OK)
-        and stamp_path.is_file()
-        and stamp_path.read_text(errors='replace').strip() == expected
+def _stamp_matches(target: pathlib.Path, stamp_path: pathlib.Path, expected: str) -> bool:
+    if not (target.is_file() and os.access(target, os.X_OK) and stamp_path.is_file()):
+        return False
+    try:
+        record = json.loads(stamp_path.read_text(errors='replace'))
+        st = target.stat()
+    except (OSError, ValueError):
+        return False
+    return (
+        isinstance(record, dict)
+        and record.get('fingerprint') == expected
+        and record.get('inode') == st.st_ino
+        and record.get('size') == st.st_size
     )
-    return target, stamp_path, expected, hit
+
+
+@contextlib.contextmanager
+def _binary_lock(directory: pathlib.Path, cached_name: str, *, exclusive: bool):
+    directory.mkdir(parents=True, exist_ok=True)
+    lock_path = directory / f'.{cached_name}.lock'
+    with lock_path.open('a+') as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _paths(
+    name: str,
+    cwd: pathlib.Path,
+    cache_dir: pathlib.Path | str | None,
+) -> tuple[pathlib.Path, str, pathlib.Path, pathlib.Path]:
+    directory = pathlib.Path(cache_dir) if cache_dir is not None else BIN_DIR
+    cached_name = _cache_name(name, cwd, directory)
+    return directory, cached_name, directory / cached_name, directory / (cached_name + '.stamp')
 
 
 def _build_uncached(
@@ -322,10 +364,41 @@ def _build_uncached(
         subprocess.run(command, cwd=cwd, env=env, check=True)
         os.chmod(tmp_path, 0o755)
         os.replace(tmp_path, target)
-        _write_stamp_atomic(stamp_path, expected)
+        st = target.stat()
+        _write_stamp_atomic(stamp_path, {'fingerprint': expected, 'inode': st.st_ino, 'size': st.st_size})
         return target
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def _ensure_locked(
+    name: str,
+    cwd: pathlib.Path,
+    package: str,
+    *,
+    go: str,
+    mode: str,
+    cache_dir: pathlib.Path | str | None,
+    extra_args: tuple[str, ...],
+    env: dict[str, str] | None,
+) -> pathlib.Path:
+    if mode not in ('build', 'test'):
+        raise ValueError(f'unsupported build mode: {mode!r}')
+    directory, cached_name, target, stamp_path = _paths(name, cwd, cache_dir)
+    expected = fingerprint(cwd, package, go=go, mode=mode, extra_args=extra_args, env=env)
+    with _binary_lock(directory, cached_name, exclusive=False):
+        if _stamp_matches(target, stamp_path, expected):
+            return target
+    with _binary_lock(directory, cached_name, exclusive=True):
+        # Recompute inside the exclusive lock so concurrent builds never pair a
+        # binary from one source revision with a stamp from another.
+        expected = fingerprint(cwd, package, go=go, mode=mode, extra_args=extra_args, env=env)
+        if _stamp_matches(target, stamp_path, expected):
+            return target
+        return _build_uncached(
+            target, stamp_path, expected, cwd, package,
+            go=go, mode=mode, extra_args=extra_args, env=env,
+        )
 
 
 def ensure(
@@ -342,21 +415,16 @@ def ensure(
     """Return a cached Go binary in ``.scratch/bin``, rebuilding only when inputs changed."""
     cwd_path = pathlib.Path(cwd).resolve()
     go_cmd = go or (os.environ if env is None else env).get('GO', 'go')
-    target, stamp_path, expected, hit = _check_cache(
-        name, cwd_path, package, go=go_cmd, mode=mode, cache_dir=cache_dir, extra_args=extra_args, env=env
-    )
-    if hit:
-        return target
-    return _build_uncached(
-        target, stamp_path, expected, cwd_path, package,
-        go=go_cmd, mode=mode, extra_args=extra_args, env=env,
+    return _ensure_locked(
+        name, cwd_path, package,
+        go=go_cmd, mode=mode, cache_dir=cache_dir, extra_args=extra_args, env=env,
     )
 
 
 def ensure_many(specs: list[dict], *, max_workers: int | None = None) -> dict[str, pathlib.Path]:
     """Ensure multiple Go binaries, running only cache misses in parallel."""
     results: dict[str, pathlib.Path] = {}
-    pending: list[tuple[str, pathlib.Path, pathlib.Path, str, pathlib.Path, str, str, str, tuple[str, ...], dict[str, str] | None]] = []
+    pending: list[tuple[str, pathlib.Path, str, str, str, pathlib.Path | str | None, tuple[str, ...], dict[str, str] | None]] = []
     for spec in specs:
         name = spec['name']
         cwd_path = pathlib.Path(spec['cwd']).resolve()
@@ -364,30 +432,32 @@ def ensure_many(specs: list[dict], *, max_workers: int | None = None) -> dict[st
         env = spec.get('env')
         go_cmd = spec.get('go') or (os.environ if env is None else env).get('GO', 'go')
         mode = spec.get('mode', 'build')
+        if mode not in ('build', 'test'):
+            raise ValueError(f'unsupported build mode: {mode!r}')
         cache_dir = spec.get('cache_dir')
         extra_args = tuple(spec.get('extra_args', ()))
-        target, stamp_path, expected, hit = _check_cache(
-            name, cwd_path, package, go=go_cmd, mode=mode, cache_dir=cache_dir, extra_args=extra_args, env=env
-        )
-        if hit:
-            results[name] = target
-        else:
-            pending.append((name, target, stamp_path, expected, cwd_path, package, go_cmd, mode, extra_args, env))
+        directory, cached_name, target, stamp_path = _paths(name, cwd_path, cache_dir)
+        expected = fingerprint(cwd_path, package, go=go_cmd, mode=mode, extra_args=extra_args, env=env)
+        with _binary_lock(directory, cached_name, exclusive=False):
+            if _stamp_matches(target, stamp_path, expected):
+                results[name] = target
+                continue
+        pending.append((name, cwd_path, package, go_cmd, mode, cache_dir, extra_args, env))
 
     if len(pending) == 1:
-        name, target, stamp_path, expected, cwd_path, package, go_cmd, mode, extra_args, env = pending[0]
-        results[name] = _build_uncached(
-            target, stamp_path, expected, cwd_path, package,
-            go=go_cmd, mode=mode, extra_args=extra_args, env=env,
+        name, cwd_path, package, go_cmd, mode, cache_dir, extra_args, env = pending[0]
+        results[name] = _ensure_locked(
+            name, cwd_path, package,
+            go=go_cmd, mode=mode, cache_dir=cache_dir, extra_args=extra_args, env=env,
         )
     elif len(pending) > 1:
         workers = max_workers or min(len(pending), os.cpu_count() or 4, 4)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 item[0]: pool.submit(
-                    _build_uncached,
-                    item[1], item[2], item[3], item[4], item[5],
-                    go=item[6], mode=item[7], extra_args=item[8], env=item[9],
+                    _ensure_locked,
+                    item[0], item[1], item[2],
+                    go=item[3], mode=item[4], cache_dir=item[5], extra_args=item[6], env=item[7],
                 )
                 for item in pending
             }
