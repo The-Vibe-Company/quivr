@@ -13,7 +13,7 @@ func NewWithTLS(endpoint string, settings outbound.TLS, apiKey ...string) (*Stor
 		return nil, fmt.Errorf("weaviate TLS: %w", err)
 	}
 	store := New(endpoint, apiKey...)
-	store.Client.Transport = telemetry.Transport(store.authenticate(outbound.Transport(config), apiKey), "weaviate.request")
+	store.Client.Transport = telemetry.Transport(store.countRequests(store.authenticate(outbound.Transport(config), apiKey)), "weaviate.request")
 	store.Client.CheckRedirect = outbound.CheckRedirect
 	return store, nil
 }

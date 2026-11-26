@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -30,6 +31,20 @@ type Store struct {
 	client       *awss3.Client
 	vectorClient *awss3.Client
 	bucket       string
+	metrics      atomic.Pointer[telemetry.DependencyMetrics]
+}
+
+// SetMetrics attaches process-local dependency call counters to this store.
+func (s *Store) SetMetrics(m *telemetry.DependencyMetrics) {
+	if s != nil {
+		s.metrics.Store(m)
+	}
+}
+
+func (s *Store) recordCall(op string) {
+	if m := s.metrics.Load(); m != nil {
+		m.Record(telemetry.DependencyS3, telemetry.ProtocolHTTP, op)
+	}
 }
 
 func New(cfg Config) *Store { return newWithTransport(cfg, outbound.Transport(nil)) }
@@ -51,15 +66,18 @@ func newWithTransport(cfg Config, transport *http.Transport) *Store {
 	return &Store{client: client, vectorClient: vectorClient, bucket: cfg.Bucket}
 }
 func (s *Store) Bootstrap(ctx context.Context) error {
+	s.recordCall(telemetry.OpBucket)
 	if _, err := s.client.HeadBucket(ctx, &awss3.HeadBucketInput{Bucket: aws.String(s.bucket)}); err == nil {
 		return nil
 	}
+	s.recordCall(telemetry.OpBucket)
 	if _, err := s.client.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(s.bucket)}); err != nil {
 		return errors.New("S3 bucket bootstrap unavailable")
 	}
 	return nil
 }
 func (s *Store) Ready(ctx context.Context) error {
+	s.recordCall(telemetry.OpBucket)
 	_, err := s.client.HeadBucket(ctx, &awss3.HeadBucketInput{Bucket: aws.String(s.bucket)})
 	return err
 }
@@ -78,6 +96,7 @@ func (s *Store) put(ctx context.Context, org string, data []byte, limit int64) (
 	digest := content.Hash(data)
 	b := content.Blob{Key: content.Hash([]byte(org)) + "/sha256/" + digest, SHA256: digest, Size: int64(len(data))}
 	checksum, _ := hex.DecodeString(digest)
+	s.recordCall(telemetry.OpPutObject)
 	_, _ = s.clientFor(limit).PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key), Body: bytes.NewReader(data), ContentLength: aws.Int64(b.Size), ContentType: aws.String("application/octet-stream"), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*"), Metadata: map[string]string{"sha256": digest}})
 	// Both a successful PUT and an ambiguous/lost response must prove the immutable bytes.
 	if _, err := s.read(ctx, b, limit); err != nil {
@@ -97,6 +116,7 @@ func (s *Store) read(ctx context.Context, b content.Blob, limit int64) ([]byte, 
 	if b.Size < 0 || b.Size > limit {
 		return nil, errors.New("unsupported canonical object size")
 	}
+	s.recordCall(telemetry.OpGetObject)
 	object, err := s.clientFor(limit).GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key)})
 	var missing *types.NoSuchKey
 	if errors.As(err, &missing) {

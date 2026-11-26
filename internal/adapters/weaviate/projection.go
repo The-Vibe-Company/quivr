@@ -46,6 +46,7 @@ type Store struct {
 	vectors            *sync.Map
 	metadataMu         sync.Mutex
 	metadataProperties map[string]bool
+	metrics            atomic.Pointer[telemetry.DependencyMetrics]
 }
 
 // legacyVector is the named vector of the built-in space and of every
@@ -220,7 +221,7 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 
 func New(endpoint string, apiKey ...string) *Store {
 	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}}
-	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.authenticate(http.DefaultTransport, apiKey), "weaviate.request")}
+	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.countRequests(store.authenticate(http.DefaultTransport, apiKey)), "weaviate.request")}
 	if store.apiKey != "" {
 		store.Client.CheckRedirect = outbound.CheckRedirect
 	}
