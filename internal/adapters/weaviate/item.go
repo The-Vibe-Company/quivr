@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/keywords"
@@ -147,7 +149,15 @@ func (s *Store) itemQuery(ctx context.Context, collection, branch, where string,
 		// The bounded window can carry more text than a 128-row page.
 		responseLimit = 16 << 20
 	}
-	if _, err := s.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, responseLimit); err != nil {
+	reader := s
+	if _, bounded := ctx.Deadline(); bounded && s.Client.Timeout != 0 {
+		// Search is already bounded by its caller. Keep the shared transport
+		// and leave the client used for projection writes alone.
+		client := *s.Client
+		client.Timeout = 0
+		reader = &Store{Endpoint: s.Endpoint, Client: &client, apiKey: s.apiKey}
+	}
+	if _, err := reader.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, responseLimit); err != nil {
 		return nil, err
 	}
 	if len(out.Errors) > 0 {
@@ -256,40 +266,121 @@ func ordered(pool map[string]content.Candidate) []content.Candidate {
 	return out
 }
 
-// termCoverage counts the distinct query terms text contains, under whichever
-// of the fields' analyzers matches the most.
-func termCoverage(text, query string, analyzers []keywords.Analyzer) int {
-	best := 0
+// passageTerms compiles the distinct query terms once per analyzer. Passage
+// coverage is the most matches under any single analyzer.
+type passageTerms struct {
+	analyzer keywords.Analyzer
+	terms    map[string]struct{}
+}
+
+func itemPassageTerms(query string, analyzers []keywords.Analyzer) []passageTerms {
+	if len(analyzers) == 0 {
+		analyzers = []keywords.Analyzer{keywords.Folded}
+	}
+	var out []passageTerms
 	for _, a := range analyzers {
-		words := map[string]bool{}
-		for _, w := range strings.Fields(a.Analyze(text)) {
-			words[w] = true
+		terms := map[string]struct{}{}
+		for word := range strings.FieldsSeq(a.Analyze(query)) {
+			terms[word] = struct{}{}
 		}
-		score := 0
-		seen := map[string]bool{}
-		for _, t := range strings.Fields(a.Analyze(query)) {
-			if words[t] && !seen[t] {
-				score++
-				seen[t] = true
+		if len(terms) > 0 {
+			out = append(out, passageTerms{a, terms})
+		}
+	}
+	return out
+}
+
+func termCoverage(text string, query []passageTerms) int {
+	best := 0
+	for _, q := range query {
+		if len(q.terms) <= best {
+			continue
+		}
+		matched := map[string]struct{}{}
+		for word := range strings.FieldsSeq(q.analyzer.Analyze(text)) {
+			if _, ok := q.terms[word]; ok {
+				matched[word] = struct{}{}
+				if len(matched) == len(q.terms) {
+					break
+				}
 			}
 		}
-		best = max(best, score)
+		best = max(best, len(matched))
 	}
 	return best
 }
 
-// Fetch one deterministic, bounded passage window. Repeated offset queries
-// re-sort the same allow-list and can consume the entire search deadline.
-func (s *Store) itemPassages(ctx context.Context, collection, where string) ([]itemRow, bool, error) {
-	branch := `sort:[{path:["segmentId"],order:asc}],`
-	rows, err := s.itemQuery(ctx, collection, branch, where, maxItemPassages, true)
-	if errors.Is(err, errResponseLimit) {
-		// One canonical passage is bounded by its 2 MiB source blob, even
-		// after JSON escaping. Recover once rather than retrying smaller pages.
-		rows, err = s.itemQuery(ctx, collection, branch, where, 1, true)
-		return rows, true, err
+const passageOrder = `sort:[{path:["segmentId"],order:asc}],`
+
+// Choose a representative only where text affects the answer. Ungrouped
+// candidates all keep their segment IDs. With relative-score fusion a dense
+// match supplies the representative and the sparse score is independent of it.
+func (s *Store) selectItemPassages(ctx context.Context, collection, where string, rows []itemRow, query []passageTerms, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
+	best := map[string]itemRow{}
+	ambiguous := map[string][]itemRow{}
+	for _, row := range rows {
+		if row.SegmentID == "" {
+			continue
+		}
+		key := candidateKey(row.candidate(false), true)
+		first, seen := best[key]
+		if !seen {
+			best[key] = row
+		} else if len(query) > 0 {
+			if len(ambiguous[key]) == 0 {
+				ambiguous[key] = append(ambiguous[key], first)
+			}
+			ambiguous[key] = append(ambiguous[key], row)
+		}
 	}
-	return rows, len(rows) == maxItemPassages, err
+	if len(ambiguous) > 0 && densePassages != nil {
+		for key := range densePassages() {
+			delete(ambiguous, key)
+		}
+	}
+	if len(ambiguous) > 0 {
+		// Pin the text read to the canonical rows in the metadata window.
+		// The same segment ID can appear in more than one generation.
+		var ids []string
+		for _, group := range ambiguous {
+			for _, row := range group {
+				ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
+			}
+		}
+		sort.Strings(ids)
+		textRows, err := s.itemQuery(ctx, collection, passageOrder, and(where, or(ids...)), len(ids), true)
+		if errors.Is(err, errResponseLimit) {
+			// The metadata window already holds the canonical first
+			// passage used for byte-limit recovery.
+			return rows[:1], true, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		scores := map[string]int{}
+		for _, row := range textRows {
+			key := candidateKey(row.candidate(false), true)
+			if len(ambiguous[key]) == 0 {
+				continue
+			}
+			score := termCoverage(row.Text, query)
+			if score > scores[key] || (score == scores[key] && row.SegmentID < best[key].SegmentID) {
+				scores[key] = score
+				best[key] = row
+			}
+		}
+	}
+	selected := make([]itemRow, 0, len(best))
+	for _, row := range best {
+		selected = append(selected, row)
+	}
+	return selected, len(rows) == maxItemPassages, nil
+}
+
+type itemPartition struct {
+	routes    []retrieval.Route
+	fields    []corpus.Field
+	analyzers []keywords.Analyzer
 }
 
 // itemSearch consolidates sparse copies and max passage scores BEFORE fusion.
@@ -302,13 +393,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	if limit == 0 {
 		limit = retrieval.CandidateLimit
 	}
-	sparse, dense := map[string]content.Candidate{}, map[string]content.Candidate{}
-	type partition struct {
-		routes    []retrieval.Route
-		fields    []corpus.Field
-		analyzers []keywords.Analyzer
-	}
-	partitions := map[string]*partition{}
+	partitions := map[string]*itemPartition{}
 	var partitionKeys []string
 	for _, r := range routes {
 		if r.Generation.Collection != collection {
@@ -321,157 +406,51 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 		b, _ := json.Marshal(fields)
 		key := string(b)
 		if partitions[key] == nil {
-			partitions[key] = &partition{fields: fields, analyzers: fieldAnalyzers(fields)}
+			partitions[key] = &itemPartition{fields: fields, analyzers: fieldAnalyzers(fields)}
 			partitionKeys = append(partitionKeys, key)
 		}
 		partitions[key].routes = append(partitions[key].routes, r)
 	}
 	sort.Strings(partitionKeys)
-	if q.Mode != "semantic" {
-		for _, key := range partitionKeys {
-			p := partitions[key]
-			where, err := s.itemWhere(ctx, p.routes, scope, q, "item")
-			if err != nil {
-				return nil, err
-			}
-			if where == "" {
-				continue
-			}
-			// The unnamed request scores the fields' own text; each analyzer then
-			// scores its copies with the query analyzed the same way.
-			requests := append([]keywords.Analyzer{{}}, p.analyzers...)
-			passageAnalyzers := p.analyzers
-			if len(passageAnalyzers) == 0 {
-				passageAnalyzers = []keywords.Analyzer{keywords.Folded}
-			}
-			items := map[string]content.Candidate{}
-			// An ownerless item may not yet have passages from the selected
-			// ingestion owner. Allow one refill at twice the candidate depth;
-			// passage retrieval has one window and bounded byte-limit recovery.
-			for round, depth := 0, limit; round < 2; round, depth = round+1, min(2400, depth*2) {
-				more := false
-				for _, analyzer := range requests {
-					var props []string
-					for _, f := range p.fields {
-						property := itemProperty(f)
-						if analyzer.Name != "" {
-							if f.Analyzer != analyzer.Name {
-								continue
-							}
-							property = analyzedProperty(f, analyzer)
-						}
-						props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
-					}
-					query := q.Query
-					if analyzer.Name != "" {
-						query = analyzer.Analyze(query)
-					}
-					if strings.TrimSpace(query) == "" {
-						continue
-					}
-					encoded, _ := json.Marshal(props)
-					rows, err := s.itemQuery(ctx, collection, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(query), encoded), where, depth, false)
-					if err != nil {
-						return nil, err
-					}
-					more = more || len(rows) == depth
-					for _, r := range rows {
-						c := r.candidate(false)
-						keepBest(items, c, true)
-					}
-				}
-				if len(items) == 0 {
-					break
-				}
-				passageWhere, err := s.itemWhere(ctx, p.routes, scope, q, "passage")
-				if err != nil {
-					return nil, err
-				}
-				var ids []string
-				for _, c := range ordered(items) {
-					ids = append(ids, equal("versionId", c.VersionID))
-				}
-				rows, exhausted, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)))
-				if err != nil {
-					return nil, err
-				}
-				// Passage selection uses lexical term coverage with deterministic ties;
-				// every returned ID is subsequently hydrated from canonical storage.
-				coverage := map[string]int{}
-				for _, r := range rows {
-					coverage[r.SegmentID] = termCoverage(r.Text, q.Query, passageAnalyzers)
-				}
-				sort.Slice(rows, func(i, j int) bool {
-					a, b := coverage[rows[i].SegmentID], coverage[rows[j].SegmentID]
-					if a != b {
-						return a > b
-					}
-					return rows[i].SegmentID < rows[j].SegmentID
-				})
-				chosen := map[string]bool{}
-				for _, r := range rows {
-					item, ok := items[r.GenerationID+"/"+r.VersionID]
-					if !ok || r.SegmentID == "" {
-						continue
-					}
-					c := r.candidate(false)
-					c.Score = item.Score
-					id := candidateKey(c, grouped)
-					if grouped && chosen[id] {
-						continue
-					}
-					chosen[id] = true
-					// Preserve the selected passage on equal original/analyzed scores.
-					if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
-						sparse[id] = c
-					}
-				}
-				// A full window or byte limit exhausts the scan budget. A broader
-				// item allow-list would repeat another truncated passage scan.
-				if len(chosen) >= limit || !more || depth >= 2400 || exhausted {
-					break
-				}
-			}
-		}
+	alpha, fusion := 0.5, retrieval.FusionRelativeScore
+	if q.Hybrid != nil {
+		alpha, fusion = q.Hybrid.Alpha, q.Hybrid.Fusion
 	}
+	var sparse, dense map[string]content.Candidate
+	legs, ctx := errgroup.WithContext(ctx)
+	denseDone := make(chan struct{})
 	if q.Mode != "lexical" {
-		where, err := s.itemWhere(ctx, routes, scope, q, "vector")
-		if err != nil {
-			return nil, err
-		}
-		if where != "" {
-			target := ""
-			for _, r := range routes {
-				space := q.Space
-				if space == "" {
-					space = r.Generation.SpaceID
-				}
-				name := s.VectorName(r.Generation, space)
-				if target != "" && target != name {
-					return nil, errors.New("routes store different vectors")
-				}
-				target = name
-				if err := s.ensureVectors(ctx, r.Generation); err != nil {
-					return nil, err
-				}
-			}
-			vector, _ := json.Marshal(q.Vector)
-			branch := fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]},", vector, quote(target))
-			for depth := limit; ; depth = min(2400, depth*2) {
-				rows, err := s.itemQuery(ctx, collection, branch, where, depth, false)
-				if err != nil {
-					return nil, err
-				}
-				for _, r := range rows {
-					if r.SegmentID != "" {
-						keepBest(dense, r.candidate(true), grouped)
+		legs.Go(func() error {
+			var err error
+			dense, err = s.itemDense(ctx, collection, routes, scope, q, limit, grouped)
+			close(denseDone)
+			return err
+		})
+	}
+	if q.Mode != "semantic" {
+		legs.Go(func() error {
+			sparse = map[string]content.Candidate{}
+			var densePassages func() map[string]content.Candidate
+			if q.Mode != "lexical" && alpha > 0 && fusion != retrieval.FusionRanked {
+				densePassages = func() map[string]content.Candidate {
+					select {
+					case <-denseDone:
+						return dense
+					case <-ctx.Done():
+						return nil
 					}
 				}
-				if !grouped || len(dense) >= limit || len(rows) < depth || depth >= 2400 {
-					break
+			}
+			for _, key := range partitionKeys {
+				if err := s.itemSparse(ctx, collection, partitions[key], scope, q, limit, grouped, sparse, densePassages); err != nil {
+					return err
 				}
 			}
-		}
+			return nil
+		})
+	}
+	if err := legs.Wait(); err != nil {
+		return nil, err
 	}
 	if q.Mode == "lexical" {
 		return ordered(sparse), nil
@@ -479,11 +458,148 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	if q.Mode == "semantic" {
 		return ordered(dense), nil
 	}
-	alpha, fusion := 0.5, retrieval.FusionRelativeScore
-	if q.Hybrid != nil {
-		alpha, fusion = q.Hybrid.Alpha, q.Hybrid.Fusion
-	}
 	return fuseItems(sparse, dense, alpha, fusion, grouped), nil
+}
+
+func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartition, scope corpus.Scope, q retrieval.Request, limit int, grouped bool, sparse map[string]content.Candidate, densePassages func() map[string]content.Candidate) error {
+	where, err := s.itemWhere(ctx, p.routes, scope, q, "item")
+	if err != nil || where == "" {
+		return err
+	}
+	requests := itemBM25(p, q.Query)
+	query := itemPassageTerms(q.Query, p.analyzers)
+	items := map[string]content.Candidate{}
+	// An ownerless item may not yet have passages from the selected
+	// ingestion owner. Allow one refill at twice the candidate depth.
+	for round, depth := 0, limit; round < 2; round, depth = round+1, min(maxItemPassages, depth*2) {
+		results := make([][]itemRow, len(requests))
+		copies, copyCtx := errgroup.WithContext(ctx)
+		for i, branch := range requests {
+			copies.Go(func() error {
+				rows, err := s.itemQuery(copyCtx, collection, branch, where, depth, false)
+				results[i] = rows
+				return err
+			})
+		}
+		if err := copies.Wait(); err != nil {
+			return err
+		}
+		more := false
+		for _, rows := range results {
+			more = more || len(rows) == depth
+			for _, row := range rows {
+				keepBest(items, row.candidate(false), true)
+			}
+		}
+		if len(items) == 0 {
+			break
+		}
+		passageWhere, err := s.itemWhere(ctx, p.routes, scope, q, "passage")
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for _, c := range ordered(items) {
+			ids = append(ids, equal("versionId", c.VersionID))
+		}
+		passageWhere = and(passageWhere, or(ids...))
+		rows, err := s.itemQuery(ctx, collection, passageOrder, passageWhere, maxItemPassages, false)
+		if err != nil {
+			return err
+		}
+		exhausted := len(rows) == maxItemPassages
+		if grouped {
+			rows, exhausted, err = s.selectItemPassages(ctx, collection, passageWhere, rows, query, densePassages)
+			if err != nil {
+				return err
+			}
+		}
+		chosen := map[string]bool{}
+		for _, row := range rows {
+			item, ok := items[candidateKey(row.candidate(false), true)]
+			if !ok || row.SegmentID == "" {
+				continue
+			}
+			c := row.candidate(false)
+			c.Score = item.Score
+			id := candidateKey(c, grouped)
+			chosen[id] = true
+			// On equal scores keep the passage chosen before the refill.
+			if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
+				sparse[id] = c
+			}
+		}
+		if len(chosen) >= limit || !more || depth >= maxItemPassages || exhausted {
+			break
+		}
+	}
+	return nil
+}
+
+func itemBM25(p *itemPartition, query string) []string {
+	var branches []string
+	for _, a := range append([]keywords.Analyzer{{}}, p.analyzers...) {
+		text := query
+		if a.Name != "" {
+			text = a.Analyze(query)
+		}
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		var props []string
+		for _, f := range p.fields {
+			property := itemProperty(f)
+			if a.Name != "" {
+				if f.Analyzer != a.Name {
+					continue
+				}
+				property = analyzedProperty(f, a)
+			}
+			props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
+		}
+		encoded, _ := json.Marshal(props)
+		branches = append(branches, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(text), encoded))
+	}
+	return branches
+}
+
+func (s *Store) itemDense(ctx context.Context, collection string, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, limit int, grouped bool) (map[string]content.Candidate, error) {
+	where, err := s.itemWhere(ctx, routes, scope, q, "vector")
+	if err != nil || where == "" {
+		return nil, err
+	}
+	target := ""
+	for _, r := range routes {
+		space := q.Space
+		if space == "" {
+			space = r.Generation.SpaceID
+		}
+		name := s.VectorName(r.Generation, space)
+		if target != "" && target != name {
+			return nil, errors.New("routes store different vectors")
+		}
+		target = name
+		if err := s.ensureVectors(ctx, r.Generation); err != nil {
+			return nil, err
+		}
+	}
+	vector, _ := json.Marshal(q.Vector)
+	branch := fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]},", vector, quote(target))
+	dense := map[string]content.Candidate{}
+	for depth := limit; ; depth = min(maxItemPassages, depth*2) {
+		rows, err := s.itemQuery(ctx, collection, branch, where, depth, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if r.SegmentID != "" {
+				keepBest(dense, r.candidate(true), grouped)
+			}
+		}
+		if !grouped || len(dense) >= limit || len(rows) < depth || depth >= maxItemPassages {
+			return dense, nil
+		}
+	}
 }
 
 func fuseItems(sparse, dense map[string]content.Candidate, alpha float64, fusion string, grouped bool) []content.Candidate {
