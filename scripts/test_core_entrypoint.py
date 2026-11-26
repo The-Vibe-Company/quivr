@@ -194,6 +194,22 @@ class CoreEntrypointTest(unittest.TestCase):
                     else:
                         self.assertEqual(migrate.call_count, 1)  # configure only; no migration
 
+    def test_core_accepts_inline_credential_and_weaviate_keys(self):
+        inline = {'QUIVR_CREDENTIAL_KEY': 'fixture-inline-credential',
+                  'WEAVIATE_API_KEY': 'fixture-inline-index-token'}
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp) / 'runtime.json'
+            with patch.dict(os.environ, {**ENV, **inline, 'QUIVR_ROLE': 'migrate'}, clear=True), \
+                    patch.object(core_entrypoint.pathlib, 'Path', return_value=runtime), \
+                    patch.object(core_entrypoint.os, 'umask'), \
+                    patch.object(core_entrypoint.os, 'execvpe', side_effect=SystemExit(0)) as launch, \
+                    self.assertRaises(SystemExit):
+                core_entrypoint.main()
+            effective = launch.call_args.args[2]
+            for name, value in inline.items():
+                self.assertEqual(effective[name], value)
+                self.assertNotIn(value, runtime.read_text())
+
     def test_refuses_secret_binding_errors_before_writing_config(self):
         for variables, message in (
             ({'DATABASE_URL': '', 'DATABASE_URL_FILE': '/missing/secret-path-sentinel'}, 'DATABASE_URL_FILE'),

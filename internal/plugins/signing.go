@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"net/http"
 	"strings"
@@ -56,14 +57,14 @@ func (k SigningKey) validAt(now int64) bool {
 // configuration must never leak into logs or public diagnostics.
 func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	var ring SigningKeys
-	if !secretinput.UniqueJSON(raw) || json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
+	if jsonv2.Unmarshal(raw, &ring, jsonv2.RejectUnknownMembers(true)) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	seen := map[string]bool{}
 	var fields struct {
 		Keys []map[string]json.RawMessage `json:"keys"`
 	}
-	if json.Unmarshal(raw, &fields) != nil {
+	if jsonv2.Unmarshal(raw, &fields) != nil {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	for i, key := range ring.Keys {
@@ -83,7 +84,7 @@ func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 }
 
 // ParseEngineSigningKeys checks the complete deployment map at startup.
-func ParseEngineSigningKeys(raw []byte) (map[string]SigningKeys, error) {
+func ParseEngineSigningKeys(raw []byte, now time.Time) (map[string]SigningKeys, error) {
 	all, err := decodeEngineSigningKeys(raw)
 	if err != nil {
 		return nil, err
@@ -91,7 +92,7 @@ func ParseEngineSigningKeys(raw []byte) (map[string]SigningKeys, error) {
 	rings := make(map[string]SigningKeys, len(all))
 	for id, rawRing := range all {
 		ring, err := ParseSigningKeys(rawRing)
-		if id == "" || err != nil {
+		if id == "" || err != nil || ring.activeAt(now).ID == "" {
 			return nil, ErrSigningKeys
 		}
 		rings[id] = ring
@@ -114,10 +115,19 @@ func EngineSigningKeys(id string) (SigningKeys, error) {
 
 func decodeEngineSigningKeys(raw []byte) (map[string]json.RawMessage, error) {
 	var all map[string]json.RawMessage
-	if !secretinput.UniqueJSON(raw) || json.Unmarshal(raw, &all) != nil || all == nil {
+	if jsonv2.Unmarshal(raw, &all) != nil || all == nil {
 		return nil, ErrSigningKeys
 	}
 	return all, nil
+}
+
+func (ring SigningKeys) activeAt(now time.Time) SigningKey {
+	for _, key := range ring.Keys {
+		if key.ID == ring.Active && key.validAt(now.Unix()) {
+			return key
+		}
+	}
+	return SigningKey{}
 }
 
 // EngineToken binds exact request bytes and the operation to a plugin audience.
@@ -129,13 +139,7 @@ func EngineToken(ring SigningKeys, pluginID, method, target string, body []byte,
 	if expiry.Unix() <= now.Unix() {
 		return "", ErrSigningKeys
 	}
-	var selected SigningKey
-	for _, key := range ring.Keys {
-		if key.ID == ring.Active && key.validAt(now.Unix()) {
-			selected = key
-			break
-		}
-	}
+	selected := ring.activeAt(now)
 	secret, err := base64.RawURLEncoding.Strict().DecodeString(selected.Secret)
 	if err != nil || len(secret) < 32 {
 		return "", ErrSigningKeys

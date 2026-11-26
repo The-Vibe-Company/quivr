@@ -348,7 +348,7 @@ func Run(command string, args ...string) error {
 	if err := cfg.validateAccessKeys(); err != nil {
 		return err
 	}
-	if err := validateEngineSigning(pins); err != nil {
+	if err := validateEngineSigning(pins, time.Now()); err != nil {
 		return err
 	}
 	logger := slog.Default()

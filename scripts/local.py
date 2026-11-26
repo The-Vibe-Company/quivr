@@ -222,7 +222,7 @@ class Stack:
             raise RuntimeError(f'project {self.name} is not running; start it with `make dev` before `make migrate`')
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
-            run([str(self.directory/'quivr'),'migrate'],env=local_secrets.engine_environment(self.directory/'config.json'),stdout=log,stderr=log)
+            run([str(self.directory/'quivr'),'migrate'],env=self.engine_environment('config.json'),stdout=log,stderr=log)
     def shutdown_grace(self,config):
         # Match positive Go duration units and env precedence used by processSettings.
         value=os.environ.get('QUIVR_SHUTDOWN_GRACE') or json.loads((self.directory/config).read_text()).get('shutdown_grace') or '60s'

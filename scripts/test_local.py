@@ -4,6 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
+import base64
 import http.server, json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
 from unittest import mock
 
@@ -50,8 +51,52 @@ class Isolation(unittest.TestCase):
                 keys = pathlib.Path(bindings['QUIVR_API_KEYS_FILE'])
                 self.assertEqual(stat.S_IMODE(keys.stat().st_mode), 0o600)
                 self.assertIn(stack.state[token_name], json.loads(keys.read_text()))
-                self.assertEqual('QUIVR_CREDENTIAL_KEY_FILE' in bindings, token_name == 'admin')
-                self.assertIn(stack.state['password'], pathlib.Path(bindings['DATABASE_URL_FILE']).read_text())
+                expected = {
+                    'DATABASE_URL': f"postgres://quivr:{stack.state['password']}@127.0.0.1:43001/quivr?sslmode=disable",
+                    'QUIVR_CURSOR_KEY': stack.state['cursor_key'],
+                    'S3_ACCESS_KEY': stack.state['s3_access'],
+                    'S3_SECRET_KEY': stack.state['s3_secret'],
+                }
+                if token_name == 'admin':
+                    expected['QUIVR_CREDENTIAL_KEY'] = stack.state['credential_key']
+                else:
+                    self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+                destinations = json.loads(raw)['destinations']
+                for suffix in ('a', 'b', 'k'):
+                    key = destinations[f'local-receiver-org-{suffix}']['secret_env']
+                    expected[key] = 'whsec_' + base64.b64encode(f'local-test-signing-secret-org-{suffix}!'.encode()).decode()
+                expected[destinations[local.CAPTURE_DESTINATION]['secret_env']] = local.CAPTURE_SECRET
+                guide_secret = 'whsec_' + base64.b64encode(b'local-test-signing-secret-guides').decode()
+                for destination in destinations.values():
+                    self.assertNotIn('secret', destination)
+                    expected.setdefault(destination['secret_env'], guide_secret)
+                for variable, value in expected.items():
+                    self.assertEqual(pathlib.Path(bindings[variable + '_FILE']).read_text(), value, variable)
+
+    def test_keyless_environment_discards_credentials_before_files_exist(self):
+        stack = local.Stack(self.names[0])
+        for name in ('keyless.json', 'keyless-worker.json'):
+            with self.subTest(config=name), mock.patch.dict(os.environ, {
+                    'QUIVR_CREDENTIAL_KEY': 'fixture-inline-key',
+                    'QUIVR_CREDENTIAL_KEY_FILE': '/fixture/credential-key'}):
+                bindings = stack.engine_environment(name)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY', bindings)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+
+    def test_migrate_launch_can_sign_calls_to_the_local_archive_plugin(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, ['object-storage-archive'])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')), \
+                mock.patch.object(local, 'run') as launch:
+            stack.migrate()
+        self.assertEqual(launch.call_args.args[0][-1], 'migrate')
+        env = launch.call_args.kwargs['env']
+        self.assertEqual(env['QUIVR_CONFIG'], str(stack.directory / 'config.json'))
+        self.assertIn(stack.state['password'], pathlib.Path(env['DATABASE_URL_FILE']).read_text())
+        ring = json.loads(env['QUIVR_ENGINE_PLUGIN_KEYS'])['connector.object_storage_archive']
+        self.assertEqual(ring['active'], 'local')
+        self.assertTrue(ring['keys'][0]['secret'])
 
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])

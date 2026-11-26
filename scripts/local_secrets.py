@@ -43,11 +43,13 @@ def engine_environment(config, environ=None):
     keyless = config.name in ('keyless.json', 'keyless-worker.json')
     root = config.parent / ('keyless-secrets' if keyless else 'secrets')
     env = dict(os.environ if environ is None else environ)
+    if keyless:
+        env.pop('QUIVR_CREDENTIAL_KEY', None)
+        env.pop('QUIVR_CREDENTIAL_KEY_FILE', None)
     if root.is_dir():
-        if keyless:
-            env.pop('QUIVR_CREDENTIAL_KEY', None)
-            env.pop('QUIVR_CREDENTIAL_KEY_FILE', None)
         for path in root.iterdir():
+            if keyless and path.name == 'QUIVR_CREDENTIAL_KEY':
+                continue
             if not path.name.isupper() or not path.is_file():
                 continue
             env.pop(path.name, None)

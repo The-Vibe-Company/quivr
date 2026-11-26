@@ -1,9 +1,12 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadSecretBindings(t *testing.T) {
@@ -49,5 +52,84 @@ func TestLoadSecretBindings(t *testing.T) {
 	scope, ok := cfg.Keys[apiToken]
 	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" {
 		t.Fatal("API secret binding did not preserve the bearer token's scope")
+	}
+}
+
+func TestRejectSecretBindingsWithoutLeakingInput(t *testing.T) {
+	const secret = "fixture-private-value"
+	for _, tc := range []struct {
+		name, binding, field, inline, file string
+		mount, exists                      bool
+		code                               configCode
+	}{
+		{name: "conflict", binding: "DATABASE_URL", field: "database_url", inline: secret, file: secret, mount: true, exists: true, code: configConflict},
+		{name: "missing file", binding: "DATABASE_URL", field: "database_url", mount: true, code: configInvalid},
+		{name: "empty file", binding: "DATABASE_URL", field: "database_url", mount: true, exists: true, code: configInvalid},
+		{name: "NUL in file", binding: "DATABASE_URL", field: "database_url", file: secret + "\x00", mount: true, exists: true, code: configInvalid},
+		{name: "malformed JSON", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"` + secret + `":`, code: configInvalid},
+		{name: "unknown field", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"fixture":{"` + secret + `":true}}`, code: configInvalid},
+		{name: "duplicate tokens", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"` + secret + `":{},"` + secret + `":{}}`, code: configInvalid},
+		{name: "case variant scope field", binding: "QUIVR_API_KEYS", field: "keys", inline: `{"fixture":{"organization":"example","Organization":"` + secret + `"}}`, code: configInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "")
+			t.Setenv("DATABASE_URL_FILE", "")
+			path := ""
+			if tc.mount {
+				path = filepath.Join(t.TempDir(), "fixture-private-path")
+			}
+			if tc.exists {
+				if err := os.WriteFile(path, []byte(tc.file), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv(tc.binding, tc.inline)
+			t.Setenv(tc.binding+"_FILE", path)
+			var cfg Config
+			err := cfg.loadSecrets(false)
+			var diagnostic *configError
+			if !errors.As(err, &diagnostic) || diagnostic.code != tc.code || diagnostic.field != tc.field {
+				t.Fatalf("expected a %s diagnostic for %s", tc.code, tc.field)
+			}
+			if strings.Contains(err.Error(), secret) || (tc.mount && strings.Contains(err.Error(), path)) {
+				t.Fatal("diagnostic included the supplied secret or mount path")
+			}
+		})
+	}
+}
+
+func TestStartupRequiresCurrentlyValidUnambiguousSigningRings(t *testing.T) {
+	const secret = "c3ludGhldGljLXNpZ25pbmcta2V5LXdpdGgtMzItYnl0ZXM"
+	const primary = `{"id":"primary","secret":"` + secret + `"`
+	const secondary = `{"id":"secondary","secret":"` + secret + `"}`
+	now := time.Unix(100, 0)
+	for _, tc := range []struct {
+		name, active, key string
+		valid             bool
+	}{
+		{"active at start boundary", `"active":"primary"`, primary + `,"not_before":100,"not_after":101}`, true},
+		{"expired despite valid secondary", `"active":"primary"`, primary + `,"not_after":100}`, false},
+		{"future despite valid secondary", `"active":"primary"`, primary + `,"not_before":101}`, false},
+		{"case variant ring field", `"active":"secondary","Active":"primary"`, primary + `}`, false},
+		{"case variant key field", `"active":"primary"`, primary + `,"Secret":"` + secret + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QUIVR_ENGINE_PLUGIN_KEYS_FILE", "")
+			t.Setenv("QUIVR_ENGINE_PLUGIN_KEYS", `{"example":{`+tc.active+`,"keys":[`+tc.key+`,`+secondary+`]}}`)
+			err := validateEngineSigning(nil, now)
+			if tc.valid {
+				if err != nil {
+					t.Fatal("currently valid ring was refused")
+				}
+				return
+			}
+			var diagnostic *configError
+			if !errors.As(err, &diagnostic) || diagnostic.code != configInvalid || diagnostic.field != "QUIVR_ENGINE_PLUGIN_KEYS" {
+				t.Fatal("startup accepted the ring or returned the wrong diagnostic")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatal("signing diagnostic included the secret")
+			}
+		})
 	}
 }

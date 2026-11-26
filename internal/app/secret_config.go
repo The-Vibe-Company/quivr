@@ -1,9 +1,10 @@
 package app
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -71,9 +72,7 @@ func loadSecretMap[T any](name, field string, target *map[string]T) error {
 		return err
 	}
 	var decoded map[string]T
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if !secretinput.UniqueJSON([]byte(raw)) || decoder.Decode(&decoded) != nil || decoded == nil {
+	if json.Unmarshal([]byte(raw), &decoded, json.RejectUnknownMembers(true)) != nil || decoded == nil {
 		return badConfig(configInvalid, field, "secret binding must hold a valid JSON object")
 	}
 	*target = decoded
@@ -101,16 +100,16 @@ func (cfg Config) validateAccessKeys() error {
 	return nil
 }
 
-func validateEngineSigning(pins *plugins.PinSet) error {
+func validateEngineSigning(pins *plugins.PinSet, now time.Time) error {
 	raw, err := boundSecret(plugins.EnvSigningKeys, plugins.EnvSigningKeys)
 	if err != nil {
 		return err
 	}
 	var rings map[string]plugins.SigningKeys
 	if raw != "" {
-		rings, err = plugins.ParseEngineSigningKeys([]byte(raw))
+		rings, err = plugins.ParseEngineSigningKeys([]byte(raw), now)
 		if err != nil {
-			return badConfig(configInvalid, plugins.EnvSigningKeys, "invalid engine plugin signing key rings")
+			return badConfig(configInvalid, plugins.EnvSigningKeys, "each engine signing ring must be valid and have a currently valid active key")
 		}
 	}
 	for _, pin := range pins.Pins() {
