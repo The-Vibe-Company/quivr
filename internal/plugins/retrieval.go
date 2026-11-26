@@ -223,6 +223,7 @@ type Candidate struct {
 	PassageText     string        `json:"passage_text,omitempty"`
 	SourceRanges    []SourceRange `json:"source_ranges,omitempty"`
 	SourceSeparator string        `json:"source_separator,omitempty"`
+	Region          *ImageRegion  `json:"region,omitempty"`
 	Score           float64       `json:"score"`
 	Explanation     string        `json:"explanation,omitempty"`
 }

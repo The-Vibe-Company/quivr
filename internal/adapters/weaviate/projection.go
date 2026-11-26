@@ -3,13 +3,16 @@ package weaviate
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/keywords"
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -220,8 +224,12 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 }
 
 func New(endpoint string, apiKey ...string) *Store {
+	return newStore(endpoint, outbound.DefaultTransport(), apiKey)
+}
+
+func newStore(endpoint string, transport http.RoundTripper, apiKey []string) *Store {
 	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}}
-	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.countRequests(store.authenticate(http.DefaultTransport, apiKey)), "weaviate.request")}
+	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.countRequests(store.authenticate(transport, apiKey)), "weaviate.request")}
 	if store.apiKey != "" {
 		store.Client.CheckRedirect = outbound.CheckRedirect
 	}
@@ -421,13 +429,80 @@ func sameProperties(stored, want map[string]any) bool {
 	return true
 }
 
-// projectionBatch bounds request size and the number of unverified objects.
+// projectionBatch bounds write requests and identity lookups.
 const projectionBatch = 100
 
-// insertBatch checks every object result. A lost HTTP response is reconciled
-// by the caller reading deterministic identities; an explicit request or object
-// error or malformed successful response must never be treated as success.
-func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error {
+type projectionObject struct {
+	Class      string               `json:"class"`
+	ID         string               `json:"id"`
+	Properties map[string]any       `json:"properties"`
+	Vectors    map[string][]float32 `json:"vectors,omitempty"`
+}
+
+const embeddingRevision = "embeddingRevision"
+
+type projectionRow struct {
+	SegmentID  string `json:"segmentId"`
+	Revision   int64  `json:"embeddingRevision"`
+	Additional struct {
+		ID      string `json:"id"`
+		Created int64  `json:"creationTimeUnix,string"`
+	} `json:"_additional"`
+}
+
+// projectionRows lists identities without fetching text or vectors.
+func (s *Store) projectionRows(ctx context.Context, collection, where string, limit int, order, fields string) ([]projectionRow, error) {
+	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, order, fields)
+	var response struct {
+		Data struct {
+			Get map[string][]projectionRow `json:"Get"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
+		return nil, err
+	}
+	rows := response.Data.Get[collection]
+	if len(response.Errors) > 0 || rows == nil {
+		return nil, errors.New("projection query failed")
+	}
+	for _, row := range rows {
+		if row.Additional.ID == "" {
+			return nil, errors.New("projection identity missing")
+		}
+	}
+	return rows, nil
+}
+
+func containsAny(field string, values []string) string {
+	raw, _ := json.Marshal(values)
+	return "{path:[" + quote(field) + "],operator:ContainsAny,valueText:" + string(raw) + "}"
+}
+
+func (s *Store) verifyObject(ctx context.Context, want projectionObject) error {
+	stored, found, err := s.object(ctx, want.Class, want.ID)
+	if err != nil {
+		return err
+	}
+	if !found || !sameProperties(stored.Properties, want.Properties) {
+		return errors.New("projection verification mismatch")
+	}
+	for name, vector := range want.Vectors {
+		expected, expectedErr := content.VectorBytes(vector)
+		recovered, err := content.VectorBytes(stored.Vectors[name])
+		if expectedErr != nil || err != nil || !bytes.Equal(recovered, expected) {
+			return errors.New("embedding projection verification failed")
+		}
+	}
+	return nil
+}
+
+// insertBatch trusts per-object success and reconciles lost responses by
+// deterministic identity. Explicit failures and malformed responses are errors.
+func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) error {
+	if len(objects) == 0 {
+		return nil
+	}
 	var result []struct {
 		ID     string `json:"id"`
 		Result struct {
@@ -440,6 +515,11 @@ func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error
 	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
 	if err != nil {
 		if status == 0 {
+			for _, object := range objects {
+				if err := s.verifyObject(ctx, object); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if status >= 400 {
@@ -451,16 +531,59 @@ func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error
 		return errors.New("projection publication failed")
 	}
 	for i, r := range result {
-		if r.ID != objects[i]["id"] || r.Result.Status != "SUCCESS" || r.Result.Errors != nil {
+		if r.ID != objects[i].ID || r.Result.Status != "SUCCESS" || r.Result.Errors != nil {
 			return errors.New("projection publication failed")
 		}
 	}
 	return nil
 }
 
-// insert uses the same checked batch path for a standalone item anchor.
-func (s *Store) insert(ctx context.Context, object map[string]any) error {
-	return s.insertBatch(ctx, []map[string]any{object})
+// publishAnchors leaves matching anchors untouched, including anchors written
+// before routing properties were introduced. Batch upserts can change the
+// document ID of an existing anchor, so on replay inspect only IDs that exist.
+func (s *Store) publishAnchors(ctx context.Context, collection string, objects []projectionObject) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	ids := make([]string, len(objects))
+	for i, object := range objects {
+		ids[i] = object.ID
+	}
+	rows, err := s.projectionRows(ctx, collection, containsAny("id", ids), len(ids), "", "_additional{id}")
+	if err != nil {
+		return err
+	}
+	exists := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		exists[row.Additional.ID] = true
+	}
+	pending := objects[:0]
+	for _, object := range objects {
+		if exists[object.ID] {
+			stored, found, err := s.object(ctx, collection, object.ID)
+			if err != nil {
+				return err
+			}
+			if found {
+				item := object.Properties[itemKind] == "item"
+				if !item {
+					for _, key := range []string{sourceNamespaceProperty, projectionPluginProperty, sourceMediaTypeProperty} {
+						if stored.Properties[key] == nil {
+							delete(object.Properties, key)
+						}
+					}
+				}
+				if sameProperties(stored.Properties, object.Properties) {
+					continue
+				}
+				if item {
+					return errors.New("immutable item projection mismatch")
+				}
+			}
+		}
+		pending = append(pending, object)
+	}
+	return s.insertBatch(ctx, pending)
 }
 
 // Publish projects each segment's immutable anchor and, for item-capable
@@ -487,25 +610,11 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		}
 	}
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
-	objects := make([]map[string]any, 0, projectionBatch)
+	objects := make([]projectionObject, 0, projectionBatch)
 	flush := func() error {
-		if len(objects) == 0 {
-			return nil
-		}
-		if err := s.insertBatch(ctx, objects); err != nil {
-			return err
-		}
-		for _, object := range objects {
-			stored, found, err := s.object(ctx, g.Collection, object["id"].(string))
-			if err != nil {
-				return err
-			}
-			if !found || !sameProperties(stored.Properties, object["properties"].(map[string]any)) {
-				return errors.New("projection verification mismatch")
-			}
-		}
+		err := s.publishAnchors(ctx, g.Collection, objects)
 		objects = objects[:0]
-		return nil
+		return err
 	}
 
 	for i, p := range seg.Segments {
@@ -532,39 +641,36 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		if g.SpacesProjected && p.Derivation.LexicalText != "" {
 			properties[lexicalProperty] = p.Derivation.LexicalText
 		}
-		existing, found, err := s.object(ctx, g.Collection, id)
-		if err != nil {
-			return err
-		}
-		if found && existing.Properties[sourceNamespaceProperty] == nil {
-			// An anchor projected before Source Namespaces stays as written:
-			// its generation is not source-filterable, and a rewrite would
-			// re-index it.
-			delete(properties, sourceNamespaceProperty)
-		}
-		if found && existing.Properties[projectionPluginProperty] == nil {
-			delete(properties, projectionPluginProperty)
-		}
-		if found && existing.Properties[sourceMediaTypeProperty] == nil {
-			delete(properties, sourceMediaTypeProperty)
-		}
-		if found && sameProperties(existing.Properties, properties) {
-			continue
-		}
-		objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": properties})
-		if len(objects) == projectionBatch {
+		lastPassageWithItem := g.ItemKeywordsProjected && i == len(seg.Segments)-1
+		if len(objects) == projectionBatch || (lastPassageWithItem && len(objects) == projectionBatch-1) {
 			if err := flush(); err != nil {
 				return err
 			}
 		}
-	}
-	if err := flush(); err != nil {
-		return err
+		objects = append(objects, projectionObject{Class: g.Collection, ID: id, Properties: properties})
 	}
 	if g.ItemKeywordsProjected {
-		return s.publishItem(ctx, g, org, corpusID, namespace, v, metadata)
+		objects = append(objects, itemAnchor(g, org, corpusID, namespace, v, metadata))
 	}
-	return nil
+	return flush()
+}
+
+func itemAnchor(g content.Generation, org, corpusID, namespace string, v content.Version, metadata map[string]any) projectionObject {
+	props := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "recordId": v.RecordID, sourceNamespaceProperty: namespace, itemKind: "item"}
+	for k, value := range metadata {
+		props[k] = value
+	}
+	values := content.ItemText(v, g.Fields)
+	for _, f := range content.ItemFields(g.Fields) {
+		if text := values[f.Name]; text != "" {
+			props[itemProperty(f)] = text
+			if a, ok := keywords.Lookup(f.Analyzer); ok {
+				props[analyzedProperty(f, a)] = a.Analyze(text)
+			}
+		}
+	}
+	id := uuidOf(content.StableID("item-keywords", org, g.ID, v.ID))
+	return projectionObject{Class: g.Collection, ID: id, Properties: props}
 }
 
 func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
@@ -797,8 +903,8 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 // PublishEmbeddings attaches vectors without updating or deleting the segment's
 // lexical anchor. For each segment it creates one enriched object beside the
 // anchor carrying the segment's vector in every space of data, each under its
-// named vector, verifies it, then removes any other enriched object of the
-// segment. Search sees the anchor throughout; retrieval deduplicates by segment.
+// named vector. After the write is confirmed, it removes stale enriched
+// objects. Search sees the anchor throughout and retrieval deduplicates by segment.
 func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid embedding projection")
@@ -824,147 +930,236 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], p)
 	}
 
-	type attachment struct {
-		id, segment string
-		vectors     []content.EmbeddingData
-	}
-	pending := make([]attachment, 0, projectionBatch)
-	objects := make([]map[string]any, 0, projectionBatch)
-	flush := func() error {
-		if len(objects) > 0 {
-			if err := s.insertBatch(ctx, objects); err != nil {
-				return err
-			}
-		}
-		for _, a := range pending {
-			// Existing objects may disappear while the rest of the batch is built.
-			// Verify the current identity before cleanup or durable coverage.
-			stored, found, err := s.object(ctx, g.Collection, a.id)
-			if err != nil {
-				return err
-			}
-			if !found || stored.Properties["segmentId"] != a.segment {
-				return errors.New("embedding projection verification failed")
-			}
-			for _, p := range a.vectors {
-				recovered, err := content.VectorBytes(stored.Vectors[s.VectorName(g, p.Artifact.SpaceID)])
-				if err != nil || content.Hash(recovered) != p.Artifact.Payload.SHA256 {
-					return errors.New("embedding projection verification failed")
-				}
-			}
-			// Cleanup still runs on retries of objects already verified and written.
-			if err := s.removeStaleEnriched(ctx, g, org, a.segment, a.id); err != nil {
-				return err
-			}
-		}
-		pending = pending[:0]
-		objects = objects[:0]
+	if len(order) == 0 {
 		return nil
 	}
-	for _, segment := range order {
-		vectors := bySegment[segment]
-		payload := vectors[0].Artifact.Payload.SHA256
-		if len(vectors) > 1 {
-			// Several spaces: the identity covers every payload, by space.
-			keys := make([]string, len(vectors))
-			for i, p := range vectors {
-				keys[i] = p.Artifact.SpaceID + "=" + p.Artifact.Payload.SHA256
-			}
-			sort.Strings(keys)
-			payload = content.Hash([]byte(strings.Join(keys, "\n")))
+	revisionSchema := map[string]any{"name": embeddingRevision, "dataType": []string{"int"}, "indexFilterable": false, "indexSearchable": false}
+	if err := s.ensureProperties(ctx, g.Collection, []map[string]any{revisionSchema}); err != nil {
+		return err
+	}
+	for segments := range slices.Chunk(order, projectionBatch) {
+		if err := s.publishEmbeddingBatch(ctx, g, org, segments, bySegment); err != nil {
+			return err
 		}
-		named := map[string]any{}
-		for _, p := range vectors {
-			named[s.VectorName(g, p.Artifact.SpaceID)] = p.Vector
+	}
+	return nil
+}
+
+func (s *Store) embeddingObject(g content.Generation, org, segment string, vectors []content.EmbeddingData) (projectionObject, error) {
+	keys := make([]string, 0, len(vectors))
+	named := make(map[string][]float32, len(vectors))
+	checksums := make(map[string]string, len(vectors))
+	for _, p := range vectors {
+		name := s.VectorName(g, p.Artifact.SpaceID)
+		checksum := p.Artifact.Payload.SHA256
+		if old, ok := checksums[name]; ok && old != checksum {
+			return projectionObject{}, errors.New("conflicting embedding payloads for named vector")
 		}
-		id := enrichedID(org, g.ID, segment, payload)
-		_, found, err := s.object(ctx, g.Collection, id)
+		checksums[name] = checksum
+		named[name] = p.Vector
+		keys = append(keys, p.Artifact.SpaceID+"="+checksum)
+	}
+	payload := vectors[0].Artifact.Payload.SHA256
+	if len(keys) > 1 {
+		// Several spaces: the identity covers every payload, by space.
+		sort.Strings(keys)
+		payload = content.Hash([]byte(strings.Join(keys, "\n")))
+	}
+	return projectionObject{
+		Class: g.Collection, ID: enrichedID(org, g.ID, segment, payload),
+		Properties: map[string]any{"segmentId": segment}, Vectors: named,
+	}, nil
+}
+
+const (
+	// The common case is an anchor and one enriched object per segment.
+	embeddingInventoryLimit  = 3 * projectionBatch
+	embeddingInventoryFields = "segmentId " + embeddingRevision + " _additional{id creationTimeUnix}"
+	embeddingRevisionOrder   = ",sort:[{path:[\"" + embeddingRevision + "\"],order:desc}]"
+)
+
+func (s *Store) embeddingRows(ctx context.Context, collection, where, order string) ([]projectionRow, error) {
+	rows, err := s.projectionRows(ctx, collection, where, embeddingInventoryLimit, order, embeddingInventoryFields)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.SegmentID == "" || row.Revision < 0 {
+			return nil, errors.New("invalid embedding inventory")
+		}
+	}
+	return rows, nil
+}
+
+func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
+	scope := and(equal("organization", org), equal("generationId", g.ID))
+	inventory := func(segments []string) ([]projectionRow, error) {
+		return s.embeddingRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)), "")
+	}
+	rows, err := inventory(segments)
+	if err != nil {
+		return err
+	}
+	full := len(rows) >= embeddingInventoryLimit
+	rowsBySegment := make(map[string][]projectionRow, len(segments))
+	for _, row := range rows {
+		rowsBySegment[row.SegmentID] = append(rowsBySegment[row.SegmentID], row)
+	}
+
+	var replacements []string
+	pending := make([]projectionObject, 0, len(segments))
+	var existing []projectionObject
+	for _, segment := range segments {
+		object, err := s.embeddingObject(g, org, segment, bySegment[segment])
 		if err != nil {
 			return err
 		}
-		if !found {
-			// Never create an enriched object for a segment without its lexical anchor.
-			anchor, projected, err := s.object(ctx, g.Collection, objectID(org, g.ID, segment))
+		anchorID := objectID(org, g.ID, segment)
+		rows := rowsBySegment[segment]
+		if full {
+			// Read the highest revisions for each segment independently when
+			// the bounded inventory could have omitted them.
+			rows, err = s.embeddingRows(ctx, g.Collection, and(scope, equal("segmentId", segment)), embeddingRevisionOrder)
 			if err != nil {
 				return err
 			}
-			if !projected {
-				return retrieval.ErrProjectionMissing
-			}
-			lexical := map[string]any{}
-			for _, key := range lexicalProperties {
-				// An anchor written before a property existed has no value to copy.
-				if value, ok := anchor.Properties[key]; ok {
-					lexical[key] = value
-				}
-			}
-			if g.ItemKeywordsProjected {
-				lexical[itemKind] = "vector"
-			}
-			for key, value := range anchor.Properties {
-				if strings.HasPrefix(key, "m_") {
-					lexical[key] = value
-				}
-			}
-			// Matching identities were omitted above, so a completed retry does
-			// not rewrite the enriched object or its permanent lexical anchor.
-			objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named})
 		}
-		pending = append(pending, attachment{id: id, segment: segment, vectors: vectors})
-		if len(pending) == projectionBatch {
-			if err := flush(); err != nil {
+		var revision int64
+		var found, replacing bool
+		for _, row := range rows {
+			switch row.Additional.ID {
+			case anchorID:
+				continue
+			case object.ID:
+				found = true
+			default:
+				replacing = true
+				revision = max(revision, row.Revision)
+			}
+		}
+		if replacing {
+			replacements = append(replacements, segment)
+		}
+		if len(rows) >= embeddingInventoryLimit && !found {
+			// An older object with the requested ID may be beyond the page.
+			if _, found, err = s.object(ctx, g.Collection, object.ID); err != nil {
 				return err
 			}
 		}
-	}
-	return flush()
-}
-
-// staleListLimit bounds one listing of a segment's objects; a segment holds
-// its anchor and, between two attachments, a few enriched objects.
-const staleListLimit = 100
-
-// removeStaleEnriched deletes the segment's other enriched objects in the
-// generation. It lists the segment's objects and deletes the others by
-// identity, never by a filter excluding the kept one: Weaviate indexes an
-// object's id after its other properties and evaluates NotEqual as the
-// complement of Equal, so while a concurrent attachment creates the kept
-// object such a filter matches it. The lexical anchor is never deleted, so
-// keyword search keeps the segment visible even while an enriched object is
-// replaced. Segments belong to one Version, so no other Version's objects match.
-func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org, segment, keep string) error {
-	anchor := objectID(org, g.ID, segment)
-	where := "{operator:And,operands:[" + equal("organization", org) + "," + equal("generationId", g.ID) + "," + equal("segmentId", segment) + "]}"
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d){_additional{id}}}}", g.Collection, where, staleListLimit)
-	for {
-		var response struct {
-			Data struct {
-				Get map[string][]struct {
-					Additional struct {
-						ID string `json:"id"`
-					} `json:"_additional"`
-				} `json:"Get"`
-			} `json:"data"`
-			Errors []any `json:"errors"`
+		if found {
+			existing = append(existing, object)
+			continue
 		}
-		if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
+		anchor, projected, err := s.object(ctx, g.Collection, anchorID)
+		if err != nil {
 			return err
 		}
-		rows, ok := response.Data.Get[g.Collection]
-		if len(response.Errors) > 0 || !ok {
-			return errors.New("projection query failed")
+		if !projected {
+			return retrieval.ErrProjectionMissing
 		}
-		for _, r := range rows {
-			if r.Additional.ID == keep || r.Additional.ID == anchor {
-				continue
+		for _, key := range lexicalProperties {
+			// A legacy anchor may have no value to copy.
+			if value, ok := anchor.Properties[key]; ok {
+				object.Properties[key] = value
 			}
-			// A concurrent attachment may have deleted it first.
-			if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+r.Additional.ID, nil, nil); err != nil && status != http.StatusNotFound {
+		}
+		if g.ItemKeywordsProjected {
+			object.Properties[itemKind] = "vector"
+		}
+		for key, value := range anchor.Properties {
+			if strings.HasPrefix(key, "m_") {
+				object.Properties[key] = value
+			}
+		}
+		if replacing {
+			if revision >= math.MaxInt32 {
+				return errors.New("embedding revision exhausted")
+			}
+			object.Properties[embeddingRevision] = revision + 1
+		}
+		pending = append(pending, object)
+	}
+	if err := s.insertBatch(ctx, pending); err != nil {
+		return err
+	}
+	for _, object := range existing {
+		// A replayed identity has no acknowledgement from this batch.
+		if err := s.verifyObject(ctx, object); err != nil {
+			return err
+		}
+	}
+	if len(replacements) == 0 {
+		return nil
+	}
+
+	// Read the replacements together after the write. Concurrent publishers
+	// can see different sets, so each may only delete objects that lose to a
+	// higher-ranked object. This prevents writers from deleting both replacements.
+	rows, err = inventory(replacements)
+	if err != nil {
+		return err
+	}
+	if len(rows) >= embeddingInventoryLimit {
+		for _, segment := range replacements {
+			if err := s.removeStaleEnrichedOverflow(ctx, g, org, scope, segment); err != nil {
 				return err
 			}
 		}
-		// A full listing may hide more stale objects behind the ones just deleted.
-		if len(rows) < staleListLimit {
+		return nil
+	}
+	return s.removeStaleEnriched(ctx, g, org, rows)
+}
+
+// Embedding revisions order successive replacements. Creation time orders
+// older objects without a revision and IDs break ties between concurrent writes.
+func compareEmbeddings(a, b projectionRow) int {
+	if n := cmp.Compare(a.Revision, b.Revision); n != 0 {
+		return n
+	}
+	if a.Revision == 0 {
+		if n := cmp.Compare(a.Additional.Created, b.Additional.Created); n != 0 {
+			return n
+		}
+	}
+	return cmp.Compare(a.Additional.ID, b.Additional.ID)
+}
+
+func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org string, rows []projectionRow) error {
+	winners := make(map[string]projectionRow)
+	for _, row := range rows {
+		if row.Additional.ID == objectID(org, g.ID, row.SegmentID) {
+			continue
+		}
+		if winner, ok := winners[row.SegmentID]; !ok || compareEmbeddings(row, winner) > 0 {
+			winners[row.SegmentID] = row
+		}
+	}
+	for _, row := range rows {
+		id := row.Additional.ID
+		if id == objectID(org, g.ID, row.SegmentID) || id == winners[row.SegmentID].Additional.ID {
+			continue
+		}
+		// Delete observed identities. A filter excluding the winner's ID could
+		// match a concurrent insert before Weaviate indexes its ID.
+		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+			return err
+		}
+	}
+	return nil
+}
+
+// An interrupted series of replacements can exceed the shared inventory.
+func (s *Store) removeStaleEnrichedOverflow(ctx context.Context, g content.Generation, org, scope, segment string) error {
+	where := and(scope, equal("segmentId", segment))
+	for {
+		rows, err := s.embeddingRows(ctx, g.Collection, where, "")
+		if err != nil {
+			return err
+		}
+		if err := s.removeStaleEnriched(ctx, g, org, rows); err != nil {
+			return err
+		}
+		if len(rows) < embeddingInventoryLimit {
 			return nil
 		}
 	}

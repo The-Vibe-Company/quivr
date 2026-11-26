@@ -257,7 +257,7 @@ def main(argv=None):
         if 'threads' in ready and ready['threads'] != args.threads:
             raise ValueError('reported CPU threads differ from encoder')
         report.update({'input_sha256': hashlib.sha256(raw).hexdigest(), 'model': MODEL,
-                       'source_revision': REVISION, 'dtype': 'float32', 'runtime': ready,
+                       'source_revision': REVISION, 'dtype': ready.get('precision', 'float32'), 'runtime': ready,
                        'machine': platform.machine(), 'cpu_cores': args.cpu_cores,
                        'threads': args.threads, 'concurrency': args.concurrency,
                        'query_count': len(data['queries']), 'candidate_count': len(data['candidates']),

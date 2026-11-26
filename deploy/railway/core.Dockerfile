@@ -44,8 +44,11 @@ RUN python scripts/prepare_tokenizer.py \
 
 # Optional offline text runtime. The default image contains neither CPU wheels
 # nor model weights; deployment builders opt in before enabling query routing.
+# QUIVR_QUERY_ENCODER_BACKEND selects the default quantized ONNX Runtime (onnx)
+# or the legacy PyTorch FP32 fallback (pytorch).
 FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS query-encoder
 ARG QUIVR_BUILD_LOCAL_QUERY_ENCODER=0
+ARG QUIVR_QUERY_ENCODER_BACKEND=onnx
 WORKDIR /app
 COPY scripts/prepare_query_encoder.py ./scripts/
 COPY third_party/query-encoder ./third_party/query-encoder
@@ -53,9 +56,16 @@ RUN mkdir -p /opt/query-encoder/model /opt/query-encoder/venv \
  && case "$QUIVR_BUILD_LOCAL_QUERY_ENCODER" in \
       0) ;; \
       1) python -m venv /opt/query-encoder/venv \
-         && /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
-              --require-hashes -r third_party/query-encoder/requirements.txt \
-         && python scripts/prepare_query_encoder.py --output /opt/query-encoder/model ;; \
+         && case "$QUIVR_QUERY_ENCODER_BACKEND" in \
+              onnx) /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+                      --only-binary=:all: --no-deps --require-hashes -r third_party/query-encoder/requirements.txt \
+                    && python scripts/prepare_query_encoder.py --output /opt/query-encoder/model ;; \
+              pytorch) /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+                         --require-hashes -r third_party/query-encoder/requirements-pytorch.txt \
+                       && cp third_party/query-encoder/model-lock-pytorch.json third_party/query-encoder/model-lock.json \
+                       && python scripts/prepare_query_encoder.py --output /opt/query-encoder/model ;; \
+              *) echo 'QUIVR_QUERY_ENCODER_BACKEND must be onnx or pytorch' >&2; exit 1 ;; \
+            esac ;; \
       *) echo 'QUIVR_BUILD_LOCAL_QUERY_ENCODER must be 0 or 1' >&2; exit 1 ;; \
     esac
 

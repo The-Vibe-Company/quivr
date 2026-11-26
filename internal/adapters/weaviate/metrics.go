@@ -34,6 +34,8 @@ func (t metricsTransport) CloseIdleConnections() {
 	}
 }
 
+func (t metricsTransport) Unwrap() http.RoundTripper { return t.base }
+
 func (s *Store) countRequests(base http.RoundTripper) http.RoundTripper {
 	return metricsTransport{base: base, store: s, basePath: endpointBasePath(s.Endpoint)}
 }

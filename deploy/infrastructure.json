@@ -25,6 +25,33 @@
         }
       }
     },
+    "temporal": {
+      "image": "temporalio/auto-setup:1.29.7@sha256:f14912b699cf73015ad5c4fc18d522d4b014db90e794039214dfb7c022c2644f",
+      "environment": {
+        "DB": "postgres12",
+        "DB_PORT": "5432",
+        "DBNAME": "temporal",
+        "VISIBILITY_DBNAME": "temporal_visibility",
+        "NUM_HISTORY_SHARDS": "4",
+        "SQL_MAX_CONNS": "20",
+        "SQL_MAX_IDLE_CONNS": "20",
+        "SQL_VIS_MAX_CONNS": "10",
+        "SQL_VIS_MAX_IDLE_CONNS": "10",
+        "DEFAULT_NAMESPACE": "default",
+        "DEFAULT_NAMESPACE_RETENTION": "72h",
+        "SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES": "true",
+        "SKIP_DB_CREATE": "false",
+        "SKIP_SCHEMA_SETUP": "false"
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "1073741824",
+            "cpus": "1"
+          }
+        }
+      }
+    },
     "weaviate": {
       "image": "cr.weaviate.io/semitechnologies/weaviate:1.39.14@sha256:6b66785a400f6e458cbc201aa18309d798008def5a7d6ab13a97cac6c3ada5ac",
       "environment": {
@@ -87,6 +114,23 @@
             "QUIVR_POSTGRES_WORK_MEM": "16MB",
             "QUIVR_POSTGRES_MAX_WAL_SIZE": "32GB",
             "QUIVR_POSTGRES_MIN_WAL_SIZE": "4GB"
+          }
+        },
+        "temporal": {
+          "environment": {
+            "NUM_HISTORY_SHARDS": "64",
+            "SQL_MAX_CONNS": "50",
+            "SQL_MAX_IDLE_CONNS": "50",
+            "SQL_VIS_MAX_CONNS": "20",
+            "SQL_VIS_MAX_IDLE_CONNS": "20"
+          },
+          "deploy": {
+            "resources": {
+              "limits": {
+                "memory": "4000000000",
+                "cpus": "4"
+              }
+            }
           }
         },
         "api": {

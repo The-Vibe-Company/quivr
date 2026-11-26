@@ -1,10 +1,12 @@
 package outbound_test
 
 import (
+	"crypto/tls"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/testutil/tlsfixture"
@@ -75,5 +77,12 @@ func TestTLSServerNamesAcceptDNSAndIPAddresses(t *testing.T) {
 		if _, err := (outbound.TLS{ServerName: name}).Build(true); err != nil {
 			t.Fatalf("valid server name %q refused: %v", name, err)
 		}
+	}
+}
+
+func TestDependencyTransportPool(t *testing.T) {
+	pool := outbound.Transport(&tls.Config{MinVersion: tls.VersionTLS12})
+	if pool.MaxIdleConns != 512 || pool.MaxIdleConnsPerHost != 128 || pool.IdleConnTimeout != 90*time.Second {
+		t.Fatalf("idle pool total=%d per host=%d timeout=%s, want 512, 128, 90s", pool.MaxIdleConns, pool.MaxIdleConnsPerHost, pool.IdleConnTimeout)
 	}
 }

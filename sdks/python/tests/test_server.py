@@ -4,6 +4,8 @@ import copy
 import io
 import json
 import logging
+import os
+import signal
 import socket
 import struct
 import sys
@@ -13,9 +15,11 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
-from quivr_plugin import ConfigurationError, RetryableError, TerminalError, configure_logging, validate_configuration
+from quivr_plugin import ConfigurationError, RetryableError, TerminalError, configure_logging, match, validate_configuration
 from quivr_plugin.schema import protocol_errors
+from quivr_plugin.server import DEFAULT_IDLE_TIMEOUT, DEFAULT_REQUEST_QUEUE_SIZE, MANIFEST_DIGEST_HEADER, Plugin, Reply
 from quivr_plugin.testing import build_request, expect_response, invoke_fixture
 
 from support import DATA, MANIFEST, make_plugin, make_request
@@ -297,8 +301,292 @@ class HTTPTransport(Base):
                 conn.endheaders()
                 response = conn.getresponse()
                 self.assertEqual(response.status, status)
+                self.assertEqual(response.getheader(MANIFEST_DIGEST_HEADER), self.plugin.manifest.digest)
                 body = json.loads(response.read())
                 self.assertEqual(protocol_errors("error.schema.json", body), [])
+
+    def test_server_backlog_reuse_and_idle_timeout(self):
+        with self.assertRaises(ValueError):
+            self.plugin.make_server("127.0.0.1", 0, idle_timeout=0)
+        with self.assertRaises(ValueError):
+            self.plugin.make_server("127.0.0.1", 0, idle_timeout=-5)
+
+        default_server = self.plugin.make_server("127.0.0.1", 0)
+        self.addCleanup(default_server.server_close)
+        self.assertEqual(default_server.request_queue_size, DEFAULT_REQUEST_QUEUE_SIZE)
+        self.assertEqual(default_server.request_queue_size, 128)
+        self.assertTrue(default_server.allow_reuse_address)
+        self.assertEqual(default_server.RequestHandlerClass.timeout, DEFAULT_IDLE_TIMEOUT)
+
+        # Observe a real idle HTTP/1.1 keep-alive connection being closed when
+        # the configured socket idle timeout expires, freeing its worker thread.
+        server = self.plugin.make_server("127.0.0.1", 0, idle_timeout=0.05)
+        accepted = []
+        errors = []
+        finished = threading.Event()
+        accept = server.get_request
+        finish = server.process_request_thread
+
+        def capture_socket():
+            connection, address = accept()
+            accepted.append(connection)
+            return connection, address
+
+        def observed_finish(*args):
+            try:
+                finish(*args)
+            finally:
+                finished.set()
+
+        server.get_request = capture_socket
+        server.process_request_thread = observed_finish
+        server.handle_error = lambda *_: errors.append(sys.exc_info()[1])
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/v0/health")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(json.loads(resp.read()), {"status": "ok"})
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0].gettimeout(), 0.05)
+        self.assertTrue(finished.wait(5), "idle keep-alive handler thread did not exit on timeout")
+        self.assertEqual(errors, [], "idle timeout must not escape as a server error")
+        self.assertEqual(conn.sock.recv(1), b"", "server must close the idle keep-alive socket")
+
+    def test_manifest_digest_header_on_all_v0_responses(self):
+        import http.client
+
+        expected = self.plugin.manifest.digest
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        def send(method: str, path: str, body: bytes = b"") -> http.client.HTTPResponse:
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            self.addCleanup(conn.close)
+            conn.request(method, path, body=body)
+            resp = conn.getresponse()
+            resp.read()
+            return resp
+
+        self.assertEqual(send("GET", "/v0/discovery").getheader(MANIFEST_DIGEST_HEADER), expected)
+        self.assertEqual(send("GET", "/v0/health").getheader(MANIFEST_DIGEST_HEADER), expected)
+        self.assertEqual(send("GET", "/v0/unknown").getheader(MANIFEST_DIGEST_HEADER), expected)
+        self.assertEqual(send("GET", "/v0/contributions/normalizer").getheader(MANIFEST_DIGEST_HEADER), expected)
+        self.assertIsNone(send("GET", "/not-v0").getheader(MANIFEST_DIGEST_HEADER))
+
+        @self.plugin.health_check
+        def unhealthy():
+            raise RetryableError("warming_up", "loading models")
+
+        resp = send("GET", "/v0/health")
+        self.assertEqual(resp.status, 503)
+        self.assertEqual(resp.getheader(MANIFEST_DIGEST_HEADER), expected)
+
+        ok_body = json.dumps(make_request(self.doc).to_dict()).encode()
+        resp = send("POST", "/v0/contributions/normalizer", ok_body)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.getheader(MANIFEST_DIGEST_HEADER), expected)
+
+        # Signed API 0.14.0 401 responses also carry X-Quivr-Manifest-Digest.
+        manifest_014 = Path(self.tmp.name) / "quivr-plugin.yaml"
+        manifest_014.write_text(MANIFEST.read_text().replace(">=0.1.0 <0.2.0", ">=0.14.0 <0.15.0"))
+        signed_plugin = Plugin(manifest_014)
+        signed_plugin.normalizer(lambda inv: {"manifest": {"kind": "manifest", "parts": []}})
+        signed_server = signed_plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=signed_server.serve_forever, daemon=True).start()
+        self.addCleanup(signed_server.server_close)
+        self.addCleanup(signed_server.shutdown)
+        conn = http.client.HTTPConnection("127.0.0.1", signed_server.server_port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/v0/discovery")
+        resp = conn.getresponse()
+        resp.read()
+        self.assertEqual(resp.status, 401)
+        self.assertEqual(resp.getheader(MANIFEST_DIGEST_HEADER), signed_plugin.manifest.digest)
+
+    def test_single_json_serialization_for_normalizer_and_subscription(self):
+        import quivr_plugin.server as server_mod
+
+        real_dumps = server_mod.json.dumps
+        # Normalizer HTTP path
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        body = real_dumps(make_request(self.doc).to_dict()).encode()
+        with mock.patch.object(server_mod.json, "dumps", wraps=real_dumps) as spy:
+            req = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/v0/contributions/normalizer", data=body)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+                parsed = json.load(resp)
+            self.assertEqual(parsed["manifest"]["kind"], "manifest")
+            response_dumps = [call for call in spy.call_args_list if call.args and call.args[0] == parsed]
+            self.assertEqual(len(response_dumps), 1, "normalizer HTTP response must serialize JSON only once")
+
+        # Subscription HTTP path
+        sub_plugin = Plugin(DATA / "subscription-plugin.yaml")
+
+        @sub_plugin.subscription
+        def evaluate(invocation):
+            return [match(ev, "matched", part_keys=["title"]) for ev in invocation.evaluations]
+
+        sub_server = sub_plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=sub_server.serve_forever, daemon=True).start()
+        self.addCleanup(sub_server.server_close)
+        self.addCleanup(sub_server.shutdown)
+        sub_body = real_dumps({
+            "invocation_id": "inv-1",
+            "idempotency_key": "key-1",
+            "contribution": "subscription",
+            "organization_id": "org",
+            "record": {"corpus_id": "c", "record_id": "r", "record_version_id": "v", "enriched": False,
+                       "parts": [{"key": "title", "role": "title", "text": "headline"}]},
+            "evaluations": [{"id": "e1", "expression": {"kind": "substring", "text": "headline"}, "configuration": {},
+                             "subscriptions": [{"subscription_id": "s", "subscription_version_id": "sv",
+                                                "saved_query_id": "q", "saved_query_version_id": "qv"}]}],
+            "configuration": {},
+        }).encode()
+        with mock.patch.object(server_mod.json, "dumps", wraps=real_dumps) as spy:
+            req = urllib.request.Request(f"http://127.0.0.1:{sub_server.server_port}/v0/contributions/subscription", data=sub_body)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+                parsed = json.load(resp)
+            self.assertEqual(len(parsed["decisions"]), 1)
+            response_dumps = [call for call in spy.call_args_list if call.args and call.args[0] == parsed]
+            self.assertEqual(len(response_dumps), 1, "subscription HTTP response must serialize JSON only once")
+
+        # Reply equality remains based on status and body only.
+        self.assertEqual(Reply(200, {"ok": True}, _payload=b'{"ok":true}'), Reply(200, {"ok": True}))
+
+    def test_serve_handles_sigterm_and_sigint_gracefully(self):
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(sig=sig.name):
+                plugin = make_plugin()
+                entered = threading.Event()
+                release = threading.Event()
+                started = threading.Event()
+                holder: dict[str, object] = {}
+                client_result: dict[str, object] = {}
+
+                @plugin.health_check
+                def held_health():
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError("timed out waiting for shutdown signal")
+
+                real_make_server = plugin.make_server
+
+                def capture_server(*args, **kwargs):
+                    srv = real_make_server(*args, **kwargs)
+                    holder["server"] = srv
+                    started.set()
+                    return srv
+
+                def run_client():
+                    if not started.wait(5):
+                        return
+                    port = holder["server"].server_port
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v0/health", timeout=5) as resp:
+                            client_result["status"] = resp.status
+                            client_result["body"] = json.load(resp)
+                            client_result["digest"] = resp.headers.get(MANIFEST_DIGEST_HEADER)
+                    except Exception as exc:
+                        client_result["error"] = exc
+
+                def send_signal():
+                    if not entered.wait(5):
+                        return
+                    os.kill(os.getpid(), sig)
+                    holder["server"]._draining.wait(5)
+                    release.set()
+
+                prev = signal.getsignal(sig)
+                client_thread = threading.Thread(target=run_client, daemon=True)
+                signal_thread = threading.Thread(target=send_signal, daemon=True)
+                client_thread.start()
+                signal_thread.start()
+                try:
+                    with mock.patch.object(plugin, "make_server", side_effect=capture_server):
+                        plugin.serve("127.0.0.1", 0, log_level=logging.ERROR)
+                finally:
+                    release.set()
+                    client_thread.join(timeout=5)
+                    signal_thread.join(timeout=5)
+                    root = logging.getLogger()
+                    for handler in list(root.handlers):
+                        if getattr(handler, "_quivr_plugin", False):
+                            root.removeHandler(handler)
+                self.assertEqual(signal.getsignal(sig), prev, "serve() must restore previous signal handlers")
+                self.assertNotIn("error", client_result)
+                self.assertEqual(client_result.get("status"), 200)
+                self.assertEqual(client_result.get("body"), {"status": "ok"})
+                self.assertEqual(client_result.get("digest"), plugin.manifest.digest)
+
+    def test_draining_rejects_new_keepalive_requests_before_dispatch(self):
+        import http.client
+
+        dispatched = []
+
+        @self.plugin.normalizer
+        def guard_normalizer(invocation):
+            dispatched.append(invocation.request.invocation_id)
+            raise AssertionError("normalizer must not run after draining starts")
+
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/v0/health")
+        first = conn.getresponse()
+        self.assertEqual(first.status, 200)
+        self.assertEqual(json.loads(first.read()), {"status": "ok"})
+
+        # Simulate SIGTERM/SIGINT draining while the keep-alive socket stays open.
+        server._draining.set()
+        body = json.dumps(make_request(self.doc).to_dict()).encode()
+        conn.request("POST", "/v0/contributions/normalizer", body=body)
+        second = conn.getresponse()
+        payload = json.loads(second.read())
+        self.assertEqual(second.status, 503)
+        self.assertEqual(second.getheader("Connection"), "close")
+        self.assertEqual(second.getheader(MANIFEST_DIGEST_HEADER), self.plugin.manifest.digest)
+        self.assertEqual(payload["code"], "shutting_down")
+        self.assertIs(payload["retryable"], True)
+        self.assertEqual(protocol_errors("error.schema.json", payload), [])
+        self.assertEqual(dispatched, [], "draining must reject new requests before plugin dispatch")
+
+        # Signed API 0.14.0 rejects with 503 shutting_down before authentication (not 401).
+        manifest_014 = Path(self.tmp.name) / "quivr-plugin-drain.yaml"
+        manifest_014.write_text(MANIFEST.read_text().replace(">=0.1.0 <0.2.0", ">=0.14.0 <0.15.0"))
+        signed_plugin = Plugin(manifest_014)
+        signed_plugin.normalizer(lambda inv: {"manifest": {"kind": "manifest", "parts": []}})
+        signed_server = signed_plugin.make_server("127.0.0.1", 0)
+        signed_server._draining.set()
+        threading.Thread(target=signed_server.serve_forever, daemon=True).start()
+        self.addCleanup(signed_server.server_close)
+        self.addCleanup(signed_server.shutdown)
+        signed_conn = http.client.HTTPConnection("127.0.0.1", signed_server.server_port, timeout=5)
+        self.addCleanup(signed_conn.close)
+        signed_conn.request("GET", "/v0/discovery")
+        resp = signed_conn.getresponse()
+        signed_payload = json.loads(resp.read())
+        self.assertEqual(resp.status, 503)
+        self.assertEqual(signed_payload["code"], "shutting_down")
+        self.assertIs(signed_payload["retryable"], True)
+        self.assertEqual(resp.getheader("Connection"), "close")
+        self.assertEqual(resp.getheader(MANIFEST_DIGEST_HEADER), signed_plugin.manifest.digest)
 
 
 class Fixtures(Base):

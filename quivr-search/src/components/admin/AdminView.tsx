@@ -33,6 +33,7 @@ import { SourceLogo, logoIds } from "../feed/SourceLogo";
 import type { Connector } from "../../lib/connectors";
 import { Bottlenecks } from "./Bottlenecks";
 import { Plugins } from "./Plugins";
+import { SearchPhases } from "./SearchPhases";
 import { Usage } from "./Usage";
 import { History } from "./History";
 
@@ -43,6 +44,7 @@ const TABS = [
   { key: "flow", label: "Flux", title: "Ce qui passe dans le tuyau" },
   { key: "plugins", label: "Plugins", title: "Plugins" },
   { key: "usage", label: "Utilisation", title: "Utilisation" },
+  { key: "search", label: "Recherche", title: "Phases d’une recherche" },
   { key: "history", label: "En base", title: "Documents en base" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -202,6 +204,7 @@ export function AdminView({
             >
               {tab === "plugins" && <Plugins onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
               {tab === "usage" && <Usage onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
+              {tab === "search" && <SearchPhases onUnauthorized={onUnauthorized} bare />}
               {tab === "history" && <History onUnauthorized={onUnauthorized} bare />}
               {tab === "flow" && (
                 <div className="admin-main" data-open={selected ? "" : undefined}>

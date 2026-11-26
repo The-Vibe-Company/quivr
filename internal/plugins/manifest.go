@@ -735,6 +735,17 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 	spaces, _ := ingestion["spaces"].(map[string]any)
 	for _, name := range sortedKeys(spaces) {
 		space, _ := spaces[name].(map[string]any)
+		if indexes, ok := space["indexes"].([]any); ok {
+			for _, idx := range indexes {
+				if idx == "image" {
+					if minimum, admitted := admitsFeature(r, FeatureMultimodalIngestion); !admitted {
+						issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/ingestion/spaces/" + pointerToken(name) + "/indexes",
+							Message: fmt.Sprintf("vector space %q indexes image content, which exists since Plugin API %s and the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", name, FeatureSince(FeatureMultimodalIngestion), r.String(), FeatureSince(FeatureMultimodalIngestion), minimum.Major, minimum.Minor+1)})
+					}
+					break
+				}
+			}
+		}
 		if _, priced := space["input_price"]; !priced {
 			continue
 		}

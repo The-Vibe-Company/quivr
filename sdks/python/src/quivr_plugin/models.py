@@ -320,7 +320,7 @@ class VectorSpace(Model):
     model: str
     dimensions: int
     metric: Literal["cosine", "dot", "l2"]
-    indexes: list[Literal["text"]]
+    indexes: list[Literal["text", "image"]]
     query_modalities: list[Literal["text"]]
     description: str | None = None
     input_price: VectorSpaceInputPrice | None = None
@@ -984,6 +984,19 @@ class SegmentAndEmbedRequestPartsItem(Model):
 
 
 @dataclass(kw_only=True)
+class IngestionBlobPart(Model):
+    "One verified Blob Part passed to a multimodal ingestion plugin by reference."
+
+    key: str
+    role: str
+    blob_id: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+    reference: SignedUrlReference | FileReference
+
+
+@dataclass(kw_only=True)
 class SegmentAndEmbedRequestPage(Model):
     "Since Plugin API 0.18. Bounded ingestion of exactly one source window. Offsets remain in that request Part. The host durably records each negotiated page before requesting the next."
 
@@ -1003,6 +1016,7 @@ class SegmentAndEmbedRequest(Model):
     version: SegmentAndEmbedRequestVersion
     language: str | None = None
     parts: list[SegmentAndEmbedRequestPartsItem]
+    blob_parts: list[IngestionBlobPart] | None = None
     spaces: list[str]
     page: SegmentAndEmbedRequestPage | None = None
 
@@ -1015,6 +1029,20 @@ class SegmentAndEmbedResponseSegmentsItemSourceRangesItem(Model):
 
 
 @dataclass(kw_only=True)
+class ImageRegion(Model):
+    "Normalized bounding-box provenance for an image segment: origin at top-left, coordinates in [0, 1], with x + width <= 1 and y + height <= 1."
+
+    coordinate_system: Literal["normalized_bbox"] = "normalized_bbox"
+    x: float
+    y: float
+    width: float
+    height: float
+    image_width: int | None = None
+    image_height: int | None = None
+    label: str | None = None
+
+
+@dataclass(kw_only=True)
 class SegmentAndEmbedResponseSegmentsItem(Model):
     part_key: str
     start: int
@@ -1023,6 +1051,7 @@ class SegmentAndEmbedResponseSegmentsItem(Model):
     source_separator: str | None = None
     vectors: dict[str, list[float]]
     lexical_text: str | None = None
+    region: ImageRegion | None = None
     provenance: dict[str, Any] | None = None
 
 
@@ -1060,6 +1089,14 @@ class EmbedQueryResponse(Model):
 
 
 @dataclass(kw_only=True)
+class IngestionFixtureIngestionBlobPartsItem(Model):
+    key: str
+    role: str
+    path: str
+    media_type: str
+
+
+@dataclass(kw_only=True)
 class IngestionFixtureIngestionExpectSegmentsItem(Model):
     part_key: str
     start: int
@@ -1074,7 +1111,8 @@ class IngestionFixtureIngestionExpect(Model):
 
 @dataclass(kw_only=True)
 class IngestionFixtureIngestion(Model):
-    parts: list[SegmentAndEmbedRequestPartsItem]
+    parts: list[SegmentAndEmbedRequestPartsItem] | None = None
+    blob_parts: list[IngestionFixtureIngestionBlobPartsItem] | None = None
     language: str | None = None
     configuration: dict[str, Any] | None = None
     spaces: list[str] | None = None
@@ -1190,6 +1228,7 @@ class Candidate(Model):
     passage_text: str | None = None
     source_ranges: list[SourceRange] | None = None
     source_separator: str | None = None
+    region: ImageRegion | None = None
     explanation: str | None = None
 
 
@@ -1362,9 +1401,12 @@ __all__ = [
     "FixtureReceiveRequest",
     "FixtureRecord",
     "Health",
+    "ImageRegion",
     "Ingestion",
+    "IngestionBlobPart",
     "IngestionFixture",
     "IngestionFixtureIngestion",
+    "IngestionFixtureIngestionBlobPartsItem",
     "IngestionFixtureIngestionExpect",
     "IngestionFixtureIngestionExpectSegmentsItem",
     "IngestionLimits",

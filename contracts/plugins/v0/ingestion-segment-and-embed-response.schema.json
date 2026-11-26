@@ -97,6 +97,10 @@
             "type": "string",
             "description": "Optional keyword-search text for the segment (for example lower-cased, folded or stemmed words). The core indexes it in a separate keyword field; excerpts always come from the source text. At most 16384 code points, no NUL."
           },
+          "region": {
+            "$ref": "plugin-manifest.schema.json#/$defs/ImageRegion",
+            "description": "Since Plugin API 0.20. Required on segments referencing a Blob Part (start = end = 0); normalized bounding-box provenance with 0 <= x, y <= 1, 0 < width, height <= 1, x + width <= 1 and y + height <= 1."
+          },
           "provenance": {
             "type": "object",
             "description": "Optional details of how the segment was made (token counts, the embedded text's template), at most 4 KiB once serialized. Stored with the segmentation, never interpreted."

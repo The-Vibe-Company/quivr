@@ -23,6 +23,7 @@ import (
 	s3store "github.com/The-Vibe-Company/quivr/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
@@ -77,6 +78,7 @@ type Config struct {
 	ProbeListen             string                  `json:"probe_listen"`
 	CursorKey               string                  `json:"cursor_key"`
 	RetainImportAuditDetail bool                    `json:"retain_import_audit_detail"`
+	AuditReadAccess         bool                    `json:"audit_read_access"`
 	AuditRetentionMonths    int                     `json:"audit_retention_months"`
 	ChangeRetention         string                  `json:"change_retention"`
 	Keys                    map[string]corpus.Scope `json:"keys"`
@@ -401,6 +403,9 @@ func Run(command string, args ...string) error {
 		return err
 	}
 	for token, s := range cfg.Keys {
+		if s.ActorID != "" && !audit.ValidActorID(s.ActorID) {
+			return badConfig(configInvalid, "keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
+		}
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
 		}
@@ -577,12 +582,13 @@ func Run(command string, args ...string) error {
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
+		var prerequisite *postgres.PrerequisiteError
 		if contract {
 			contractCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrMigrationBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
@@ -590,7 +596,7 @@ func Run(command string, args ...string) error {
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
@@ -648,6 +654,18 @@ func Run(command string, args ...string) error {
 					err = projection.Ready(ctx)
 				}
 			}
+		}
+		return err
+	}
+	preflight, cancelPreflight := context.WithTimeout(ctx, 5*time.Second)
+	err = postgres.CheckPrerequisites(preflight, pool, false)
+	cancelPreflight()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return postgres.ErrPrerequisiteConnection
 		}
 		return err
 	}
@@ -861,6 +879,9 @@ func Run(command string, args ...string) error {
 	spaceSnapshots := retrieval.NewSpaceSnapshots(lifecycle.WorkContext(ctx), spaces, coverageRefresh)
 	metadataProjection := retrieval.MetadataProjection{Projection: projection, Metadata: records}
 	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaceSnapshots, Projection: metadataProjection, Content: contents}
+	if command == "api" {
+		search.QueryVectors = retrieval.NewQueryVectorCache()
+	}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
@@ -868,7 +889,7 @@ func Run(command string, args ...string) error {
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
-	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore}
+	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore, BlobSource: uploadStore, Signer: blobs}
 	deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
@@ -932,7 +953,10 @@ func Run(command string, args ...string) error {
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, func(w io.Writer) {
+			recorder.WriteMetrics(w)
+			search.QueryVectors.WriteMetrics(w)
+		})), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
 	}
 	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes, loadMetrics), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
@@ -941,7 +965,7 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore), httpapi.WithReadAudit(cfg.AuditReadAccess),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithLoadMetrics(loadMetrics), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),

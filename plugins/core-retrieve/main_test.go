@@ -208,3 +208,35 @@ func TestSearchesTheFullSpaceBoundary(t *testing.T) {
 		t.Fatalf("final ranking: %+v (%v), want all 16 owners", answer, err)
 	}
 }
+
+// Hybrid search queries text and legacy hybrid spaces with hybrid fusion and
+// pure image cross-modal spaces (indexes: ["image"]) with near_vector so
+// natural-language queries reach image regions while text/legacy search stays untouched.
+func TestCrossModalImageSpaceUsesNearVectorWhileTextKeepsHybrid(t *testing.T) {
+	req := &quivrplugin.SearchRequest{
+		Round: 1,
+		Limit: 10,
+		Spaces: []quivrplugin.SearchSpace{
+			{ID: "core.ingest.e5-small@1", Role: "served", Indexes: []string{"text"}, QueryModalities: []string{"text"}},
+			{ID: "legacy.hybrid@1", Role: "served", Indexes: []string{"hybrid"}, QueryModalities: []string{"text"}},
+			{ID: "crossmodal.image.vision@1", Role: "served", Indexes: []string{"image"}, QueryModalities: []string{"text"}},
+		},
+	}
+	req.Query.Text, req.Query.Mode = "red coastal lighthouse", "hybrid"
+	answer, err := (retriever{}).Search(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(answer.Requests) != 3 {
+		t.Fatalf("got %d requests, want 3", len(answer.Requests))
+	}
+	if answer.Requests[0].Space != "core.ingest.e5-small@1" || answer.Requests[0].Primitive != quivrplugin.PrimitiveHybrid {
+		t.Fatalf("text space request = %+v, want hybrid", answer.Requests[0])
+	}
+	if answer.Requests[1].Space != "legacy.hybrid@1" || answer.Requests[1].Primitive != quivrplugin.PrimitiveHybrid {
+		t.Fatalf("legacy hybrid space request = %+v, want hybrid", answer.Requests[1])
+	}
+	if answer.Requests[2].Space != "crossmodal.image.vision@1" || answer.Requests[2].Primitive != quivrplugin.PrimitiveNearVector || answer.Requests[2].Field != "" || answer.Requests[2].Alpha != nil {
+		t.Fatalf("image space request = %+v, want pure near_vector", answer.Requests[2])
+	}
+}
