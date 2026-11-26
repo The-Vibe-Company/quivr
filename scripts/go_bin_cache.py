@@ -63,7 +63,7 @@ IGNORED_NAMES = frozenset({'.DS_Store'})
 IGNORED_SUFFIXES = ('.pyc', '.pyo', '.swp', '.swo')
 
 _SAFE_NAME = re.compile(r'^[A-Za-z0-9._-]+$')
-_GO_ENV_CACHE: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
+_GO_ENV_CACHE: dict[tuple[str, str, tuple[tuple[str, str], ...], str], str] = {}
 
 
 def _find_module_root(directory: pathlib.Path) -> pathlib.Path:

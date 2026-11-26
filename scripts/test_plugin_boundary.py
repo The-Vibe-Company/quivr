@@ -42,6 +42,7 @@ class PluginBoundaryTest(unittest.TestCase):
                 "package main\n\n// Never import \"" + INTERNAL + "/content\" here.\n"
                 'import (\n\t"fmt"\n\t"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"\n)\n'
                 f'const snippet = `package sample; import "{INTERNAL}/foo"\nimport "{INTERNAL}/bar"`\n'
+                f'var πimport = "{INTERNAL}/not_an_import"\n'
             ),
             "plugins/feeds/go.mod": "module example.com/feeds\n\nrequire github.com/The-Vibe-Company/quivr/sdks/go v0.0.0\n\nreplace github.com/The-Vibe-Company/quivr/sdks/go => ../../sdks/go\n",
         })
@@ -75,6 +76,7 @@ class PluginBoundaryTest(unittest.TestCase):
             "plugins/quoted/go.mod: requires or replaces the engine module",
             "plugins/rhs/go.mod: requires or replaces the engine module",
             "plugins/rhsdir/go.mod: requires or replaces the engine module",
+            "plugins/space dir/go.mod: requires or replaces the engine module",
             "plugins/spacepath/go.mod: requires or replaces the engine module",
             "plugins/work/go.work: uses or replaces the engine module",
         ):

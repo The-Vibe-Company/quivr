@@ -142,6 +142,46 @@ class MigrationCompatibilityTests(unittest.TestCase):
         self.assertIn(('reap', 1), events)
         self.assertIn(('compose', 'down', '--volumes'), events)
 
+    def test_force_cleanup_skips_unverified_pids_without_signal_owned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stack_dir = pathlib.Path(tmp)
+            compose_calls: list[tuple] = []
+
+            class LegacyStack:
+                def __init__(self):
+                    self.directory = stack_dir
+                    self.state = {'pids': [1001, 1002]}
+                    self.launched = {}
+
+                def compose(self, *args):
+                    compose_calls.append(args)
+
+            stack = LegacyStack()
+            expected_cmd = str(stack_dir / 'quivr')
+
+            def fake_check_output(cmd, **kwargs):
+                pid = cmd[-1]
+                return (expected_cmd + '\n') if pid == '1001' else '/usr/bin/unrelated\n'
+
+            def fake_read_bytes(path_self):
+                if str(path_self) == '/proc/1001/cmdline':
+                    return expected_cmd.encode() + b'\0api\0'
+                return b'/usr/bin/unrelated\0'
+
+            with mock.patch.object(mc.os, 'kill') as kill_mock, \
+                    mock.patch.object(mc.subprocess, 'check_output', side_effect=fake_check_output), \
+                    mock.patch.object(pathlib.Path, 'read_bytes', fake_read_bytes):
+                mc._force_cleanup_stack(stack)
+
+            kill_mock.assert_called_once_with(1001, signal.SIGKILL)
+            self.assertEqual(compose_calls, [('down', '--volumes')])
+
+            # If ownership cannot be verified (no directory), never call os.kill.
+            bare_stack = types.SimpleNamespace(state={'pids': [2002]}, compose=lambda *a: None)
+            with mock.patch.object(mc.os, 'kill') as kill_mock:
+                mc._force_cleanup_stack(bare_stack)
+            kill_mock.assert_not_called()
+
     def test_pip_constraint_rewritten_when_present_and_popped_when_absent(self):
         for has_constraints in (True, False):
             with self.subTest(has_constraints=has_constraints), tempfile.TemporaryDirectory() as tmp:

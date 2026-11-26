@@ -24,7 +24,7 @@ TREES = ("plugins", "sdks/go", "deploy/plugins")
 SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", "testdata"}
 
 _GO_TOKEN = re.compile(
-    r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|`[^`]*`|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|[();.]',
+    r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|`[^`]*`|\'(?:\\.|[^\'\\])*\'|\w+|[();.]',
     re.S,
 )
 _MOD_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`|\S+')

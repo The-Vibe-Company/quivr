@@ -76,8 +76,27 @@ def main():
         print('Compatibility evidence:', output, flush=True)
 
 
+def _owns_stack_process(stack, pid):
+    """Verify that pid still belongs to this stack's quivr binary before signaling."""
+    owns = getattr(stack, 'owns_process', None)
+    if callable(owns):
+        return bool(owns(pid))
+    directory = getattr(stack, 'directory', None)
+    if directory is None:
+        return False
+    expected = str(pathlib.Path(directory) / 'quivr').encode()
+    try:
+        if sys.platform == 'darwin':
+            cmd = subprocess.check_output(['ps', '-o', 'comm=', '-p', str(pid)], text=True, stderr=subprocess.DEVNULL).strip().encode()
+        else:
+            cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
+        return cmd == expected
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _force_cleanup_stack(stack):
-    """Force-terminate any tracked host processes and tear down Compose volumes on failed shutdown."""
+    """Force-terminate verified host processes and tear down Compose volumes on failed shutdown."""
     state = getattr(stack, 'state', None)
     pids = list(state.get('pids', [])) if isinstance(state, dict) else []
     signal_owned = getattr(stack, 'signal_owned', None)
@@ -85,7 +104,7 @@ def _force_cleanup_stack(stack):
         try:
             if callable(signal_owned):
                 signal_owned(pid, signal.SIGKILL)
-            else:
+            elif _owns_stack_process(stack, pid):
                 os.kill(pid, signal.SIGKILL)
         except (OSError, ProcessLookupError, PermissionError):
             pass
@@ -93,6 +112,8 @@ def _force_cleanup_stack(stack):
     if isinstance(launched, dict):
         for proc in launched.values():
             try:
+                if callable(getattr(proc, 'poll', None)) and proc.poll() is None and callable(getattr(proc, 'kill', None)):
+                    proc.kill()
                 proc.wait(timeout=1)
             except Exception:
                 pass
