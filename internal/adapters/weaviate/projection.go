@@ -1129,6 +1129,13 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 	if err := s.insertBatch(ctx, pending); err != nil {
 		return err
 	}
+	for _, object := range existing {
+		// Verify replayed identities before destructive cleanup so a corrupt
+		// winner cannot trigger deletion of older objects.
+		if err := s.verifyObject(ctx, object); err != nil {
+			return err
+		}
+	}
 	if len(replacements) > 0 {
 		// Read the replacements together after the write. Concurrent publishers
 		// can see different sets, so each may only delete objects that lose to a
@@ -1146,12 +1153,12 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		} else if err := s.removeStaleEnriched(ctx, g, org, rows); err != nil {
 			return err
 		}
-	}
-	for _, object := range existing {
-		// Verify replayed identities after stale cleanup so a superseded object
-		// that was just retired cannot return nil and commit missing vectors.
-		if err := s.verifyObject(ctx, object); err != nil {
-			return err
+		for _, object := range existing {
+			// Re-verify after cleanup so a superseded replayed identity that was
+			// just retired cannot return nil and commit deleted vectors.
+			if err := s.verifyObject(ctx, object); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

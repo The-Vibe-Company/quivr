@@ -122,6 +122,8 @@ func (p IngestBlobPart) ReadBlob(ctx context.Context, maxBytes int64) ([]byte, e
 			}
 			return nil, TerminalIngestError("input_unavailable", "blob storage service refused the read")
 		}
+	} else {
+		return nil, TerminalIngestError("invalid_input", "unsupported blob reference kind")
 	}
 	defer reader.Close()
 	if err := ctx.Err(); err != nil {

@@ -784,7 +784,8 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 			exhausted = len(rows) == scanLimit
 			if exhausted {
 				present, _ := groupPassageRows(rows)
-				if missing := missingCandidates(ranked, present); len(missing) > 0 {
+				bounded := ranked[:min(len(ranked), passageSelectionLimit(q, limit))]
+				if missing := missingCandidates(bounded, present); len(missing) > 0 {
 					recovered, err := s.recoverMissingPassages(ctx, collection, passageWhere, missing, passagesPerTopItem)
 					if err != nil {
 						return err

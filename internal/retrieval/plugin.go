@@ -66,6 +66,9 @@ type Usage struct {
 	OverObjective bool
 	// Objective is the resolved profile's declared latency objective.
 	Objective time.Duration
+	// DefaultProfile reports whether the resolved ranker/profile is the
+	// deployment's default search profile (even when requested by full name or alias).
+	DefaultProfile bool
 	// Phases is the time the search spent in each of its phases.
 	Phases   Phases
 	Profiles []ProfileUsage
@@ -175,8 +178,9 @@ func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q R
 	fb.Ranker = defRanker
 	q.Profile = defLocal
 	if chain == nil {
-		chain = &searchChain{enforce: defRanker.Manifest().SupportsSearchBudget()}
+		chain = &searchChain{}
 	}
+	chain.enforce = defRanker.Manifest().SupportsSearchBudget()
 	res, err := fb.rankProfile(ctx, ctx, scope, q, routes, out, started, chain, nil, timing, false)
 	if err != nil {
 		return res, err
@@ -185,12 +189,20 @@ func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q R
 	return res, nil
 }
 
+func (s Service) isDefaultResolved(m *plugins.Manifest, localProfile string) bool {
+	if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok && defRanker != nil {
+		dm := defRanker.Manifest()
+		return m.ID == dm.ID && localProfile == defLocal
+	}
+	return localProfile == DefaultProfile
+}
+
 func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Request, routes []Route, fallback *Result, reason string, chain *searchChain, timing *Phases, started time.Time, rounds int, profile plugins.RetrievalProfile) Result {
 	slog.WarnContext(ctx, "deep search degraded to default hybrid results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
 	out.ProfileVersion = fallback.ProfileVersion
 	out.Hits = append([]Hit{}, fallback.Hits[:min(len(fallback.Hits), q.Limit)]...)
 	out.Degraded = appendDegradation(chain.degradations(), reason, routes)
-	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), Phases: *timing}
+	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), DefaultProfile: false, Phases: *timing}
 	for _, f := range chain.profiles {
 		out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
 	}
@@ -342,7 +354,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			for _, h := range answer.Ranking.Hits {
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), Phases: *timing}
+			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), DefaultProfile: s.isDefaultResolved(m, q.Profile), Phases: *timing}
 			for _, f := range chain.profiles {
 				out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
 			}

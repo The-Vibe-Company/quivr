@@ -322,8 +322,8 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 			if res.Usage.Phases.PluginRounds < 200*time.Millisecond {
 				t.Fatalf("Phases.PluginRounds=%s missing 200ms reranker wait", res.Usage.Phases.PluginRounds)
 			}
-			if len(res.Usage.Profiles) < 2 {
-				t.Fatalf("Usage.Profiles=%+v; want both failed deep and fallback default entries", res.Usage.Profiles)
+			if len(res.Usage.Profiles) != 2 || res.Usage.Profiles[0].Profile != "example.rerank/deep" || res.Usage.Profiles[1].Profile != "core.retrieve/default" {
+				t.Fatalf("Usage.Profiles=%+v; want [example.rerank/deep, core.retrieve/default]", res.Usage.Profiles)
 			}
 		})
 	})
@@ -331,6 +331,7 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 	// 9. Scoped inner default profile call (overridden query) must not be cached as fallback.
 	t.Run("overridden query inner default call is not reused as fallback", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
+			var rewrittenRun atomic.Int32
 			var fallbackRun atomic.Int32
 			s, _, _ := newPair(nil, nil, 0)
 			origBase, _, _ := s.ProfilesRouter.Resolve("default")
@@ -338,8 +339,13 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 			trackedBase := &profileRanker{
 				m: *origBase.Manifest(),
 				round: func(ctx context.Context, q plugins.SearchRequest) ([]byte, error) {
-					if q.Round == 1 && q.Query.Text == "harbour" {
-						fallbackRun.Add(1)
+					if q.Round == 1 {
+						switch q.Query.Text {
+						case "narrow rewritten query":
+							rewrittenRun.Add(1)
+						case "harbour":
+							fallbackRun.Add(1)
+						}
 					}
 					return origBase.Round(ctx, q)
 				},
@@ -367,6 +373,9 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 			res, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "deep", Limit: 2})
 			if err != nil {
 				t.Fatalf("fallback search failed: %v", err)
+			}
+			if rewrittenRun.Load() != 1 {
+				t.Fatalf("expected nested rewritten query call to run once, got %d", rewrittenRun.Load())
 			}
 			if fallbackRun.Load() != 1 {
 				t.Fatalf("expected clean fallback with original query 'harbour' to run once, got %d", fallbackRun.Load())

@@ -167,6 +167,8 @@ class SingleMachineTest(unittest.TestCase):
                       'custom-stack-temporal-data-backup\ncustom-stack-temporal-data\n']
             def fake_docker(args):
                 calls.append(args)
+                if args[:2] == ['volume', 'inspect']:
+                    return json.dumps([{'Labels': {'quivr.model': 'gemma'}}])
                 if args[:2] == ['volume', 'ls']:
                     self.assertIn('name=^custom-stack-temporal-data$', args)
                     return listed.pop(0)
@@ -195,6 +197,8 @@ class SingleMachineTest(unittest.TestCase):
             fail_calls = []
             def failing_verify(args):
                 fail_calls.append(args)
+                if args[:2] == ['volume', 'inspect']:
+                    return json.dumps([{'Labels': {'quivr.model': 'gemma'}}])
                 if '--verify-only' in args:
                     raise RuntimeError('Docker operation failed')
                 return ''

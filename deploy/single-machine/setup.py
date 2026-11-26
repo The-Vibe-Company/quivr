@@ -273,6 +273,13 @@ def prepare_cache(directory, mirror, source):
 
 def verify_cache(directory, values, images):
     volume = values['COMPOSE_PROJECT_NAME'] + '-model-cache'
+    try:
+        info = json.loads(docker(['volume', 'inspect', volume]))
+    except (RuntimeError, json.JSONDecodeError, ValueError) as error:
+        raise RuntimeError('model cache volume is missing or unreadable; inspect Docker privately or run setup.py prepare before setup.py upgrade') from error
+    labels = (info[0].get('Labels') or {}) if info else {}
+    if labels.get('quivr.model') != values['QUIVR_EMBEDDING']:
+        raise ValueError('cache model differs; run setup.py prepare or use a fresh installation')
     command = ['run', '--rm', '-v', volume + ':/models:ro', '--entrypoint',
                '/opt/query-encoder/venv/bin/python',
                images['cpu-embeddings'], '/app/deploy/single-machine/cache.py',
@@ -280,7 +287,7 @@ def verify_cache(directory, values, images):
     try:
         docker(command)
     except RuntimeError as error:
-        raise RuntimeError('model cache is missing required files for this release; run setup.py prepare before setup.py upgrade') from error
+        raise RuntimeError('model cache verification failed; inspect Docker privately or run setup.py prepare before setup.py upgrade') from error
 
 
 def main():

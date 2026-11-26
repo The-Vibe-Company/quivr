@@ -21,8 +21,8 @@ func TestLoadSecretBindings(t *testing.T) {
 		"DATABASE_URL":     db,
 		"QUIVR_CURSOR_KEY": cursor,
 		"S3_SECRET_KEY":    secret,
-		"QUIVR_API_KEYS":   `{"` + apiToken + `":{"organization":"example","actor_id":"svc-api","actions":["corpora:read"],"corpora":["*"]}}`,
-		"QUIVR_ADMIN_KEYS": `{"` + adminToken + `":{"organization":"example","actor_id":"svc-admin","actions":["plugins:admin"],"corpora":["*"]}}`,
+		"QUIVR_API_KEYS":   `{"` + apiToken + `":{"organization":"example","actor_id":"0123456789abcdef0123456789abcdef","actions":["corpora:read"],"corpora":["*"]}}`,
+		"QUIVR_ADMIN_KEYS": `{"` + adminToken + `":{"organization":"example","actor_id":"fedcba9876543210fedcba9876543210","actions":["plugins:admin"],"corpora":["*"]}}`,
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "value")
@@ -52,11 +52,11 @@ func TestLoadSecretBindings(t *testing.T) {
 		t.Fatal("resolved credentials differ from their dedicated bindings or legacy fallback")
 	}
 	scope, ok := cfg.Keys[apiToken]
-	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" || scope.ActorID != "svc-api" {
+	if !ok || len(cfg.Keys) != 1 || !scope.Allows("corpora:read") || scope.Organization != "example" || scope.ActorID != "0123456789abcdef0123456789abcdef" {
 		t.Fatal("API secret binding did not preserve the bearer token's scope")
 	}
 	adminScope, ok := cfg.AdminKeys[adminToken]
-	if !ok || len(cfg.AdminKeys) != 1 || !adminScope.Allows("plugins:admin") || adminScope.Organization != "example" || adminScope.ActorID != "svc-admin" {
+	if !ok || len(cfg.AdminKeys) != 1 || !adminScope.Allows("plugins:admin") || adminScope.Organization != "example" || adminScope.ActorID != "fedcba9876543210fedcba9876543210" {
 		t.Fatal("admin secret binding did not preserve the bearer token's scope")
 	}
 }

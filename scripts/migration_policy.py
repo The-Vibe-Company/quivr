@@ -59,14 +59,21 @@ def _pg_default_fkey_name(table, cols):
     return raw[:63]
 
 
-def foreign_key_history(sql, known):
-    """Keep only proven foreign-key constraints declared by earlier migrations."""
+def foreign_key_history(sql, known, is_contract=False, is_legacy=False):
+    """Keep only proven foreign-key constraints declared by earlier migrations.
+
+    Unrecognized DDL clears evidence so stale constraints cannot pass later
+    expansion checks. Optional contract migrations never prove new constraints
+    and invalidate evidence for any table they alter, drop, or rename.
+    """
     known = set(known)
     try:
         for raw in parse_sql(sql):
             stmt = raw.stmt()
             kind = stmt['@']
             if kind == 'CreateStmt':
+                if is_contract:
+                    continue
                 rel = stmt['relation']
                 schema = rel.get('schemaname') or 'public'
                 table = rel['relname']
@@ -88,17 +95,43 @@ def foreign_key_history(sql, known):
                 for cmd in stmt['cmds']:
                     op = cmd['subtype']['name']
                     if op == 'AT_DropConstraint':
-                        known.discard((schema, table, cmd.get('name')))
+                        if cmd.get('behavior', {}).get('name', 'DROP_RESTRICT') != 'DROP_RESTRICT':
+                            known.clear()
+                        else:
+                            known.discard((schema, table, cmd.get('name')))
                     elif op == 'AT_AddConstraint':
-                        c = cmd.get('def_') or {}
-                        if c.get('contype', {}).get('name') == 'CONSTR_FOREIGN':
-                            cols = [a['sval'] for a in (c.get('fk_attrs') or ())]
-                            name = c.get('conname') or _pg_default_fkey_name(table, cols)
-                            known.add((schema, table, name))
+                        if not is_contract:
+                            c = cmd.get('def_') or {}
+                            if c.get('contype', {}).get('name') == 'CONSTR_FOREIGN':
+                                cols = [a['sval'] for a in (c.get('fk_attrs') or ())]
+                                name = c.get('conname') or _pg_default_fkey_name(table, cols)
+                                known.add((schema, table, name))
+                    elif op in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull', 'AT_SetNotNull', 'AT_ColumnDefault'):
+                        continue
+                    else:
+                        known = {k for k in known if (k[0], k[1]) != (schema, table)}
             elif kind == 'DropStmt' and stmt['removeType']['name'] == 'OBJECT_TABLE':
-                for parts in stmt['objects']:
-                    t = index_name(parts)
-                    known = {k for k in known if (k[0], k[1]) != t}
+                if stmt.get('behavior', {}).get('name', 'DROP_RESTRICT') != 'DROP_RESTRICT':
+                    known.clear()
+                else:
+                    for parts in stmt['objects']:
+                        t = index_name(parts)
+                        known = {k for k in known if (k[0], k[1]) != t}
+            elif kind == 'DropStmt' and stmt['removeType']['name'] == 'OBJECT_INDEX':
+                continue
+            elif kind == 'VacuumStmt' and not stmt['is_vacuumcmd'] and stmt.get('rels'):
+                continue
+            elif kind in ('IndexStmt', 'CreateSeqStmt', 'AlterSeqStmt', 'CreateEnumStmt', 'CommentStmt',
+                          'CreateFunctionStmt', 'CreateTrigStmt', 'GrantStmt',
+                          'SelectStmt', 'UpdateStmt', 'InsertStmt', 'DeleteStmt'):
+                continue
+            elif kind == 'DoStmt' and is_legacy:
+                # Hash-pinned legacy data migrations do not alter table constraints.
+                continue
+            elif kind == 'CreateSchemaStmt' and not stmt.get('schemaElts'):
+                continue
+            else:
+                known.clear()
     except Error:
         known.clear()
     return known
@@ -293,14 +326,14 @@ def check(root, base, previous):
             pass
         is_contract = sql.split('\n')[0].removesuffix('\r') == CONTRACT
         base_indexes = set() if is_contract else index_history(sql, base_indexes)
-        base_fkeys = set() if is_contract else foreign_key_history(sql, base_fkeys)
+        base_fkeys = foreign_key_history(sql, base_fkeys, is_contract=is_contract, is_legacy=name in inventory)
     known_indexes = set()
     known_fkeys = set()
     for path in sorted((root / 'migrations').glob('*.sql')):
         sql = path.read_bytes().decode('utf-8')
         if path.name in inventory:
             known_indexes = index_history(sql, known_indexes)
-            known_fkeys = foreign_key_history(sql, known_fkeys)
+            known_fkeys = foreign_key_history(sql, known_fkeys, is_contract=False, is_legacy=True)
             continue
         if path.name.endswith(('_down.sql', '.down.sql')):
             found.append(path.name+': down migrations are forbidden; roll back the application')
@@ -314,5 +347,5 @@ def check(root, base, previous):
         # Optional contracts cannot prove an index or constraint exists in an expansion.
         is_contract = sql.split('\n')[0].removesuffix('\r') == CONTRACT
         known_indexes = set() if is_contract else index_history(sql, known_indexes)
-        known_fkeys = set() if is_contract else foreign_key_history(sql, known_fkeys)
+        known_fkeys = foreign_key_history(sql, known_fkeys, is_contract=is_contract)
     return found

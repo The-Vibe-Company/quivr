@@ -116,6 +116,12 @@ func (c *QueryVectorCache) store(key string, vector []float32) {
 	}
 	key = strings.Clone(key)
 	c.mu.Lock()
+	if node := c.entries[key]; node != nil {
+		// Another flight already populated this immutable key; refresh LRU without duplicating nodes.
+		c.lru.MoveToFront(node)
+		c.mu.Unlock()
+		return
+	}
 	evicted := int64(0)
 	for c.lru.Len() >= c.maxEntries || c.bytes+size > c.maxBytes {
 		node := c.lru.Back()

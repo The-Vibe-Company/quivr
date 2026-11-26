@@ -90,7 +90,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 		(err != nil && !overload) ||
 		(err == nil && (result.Usage == nil || result.Usage.Rounds == 0))
 	var targetLatency time.Duration
-	if result.Usage != nil && result.Usage.Objective > 0 && q.Profile != "" && q.Profile != retrieval.DefaultProfile {
+	if result.Usage != nil && result.Usage.Objective > 0 && !result.Usage.DefaultProfile {
 		targetLatency = result.Usage.Objective
 	}
 	lease.ReleaseWithTarget(overload, skipObserve, targetLatency)
