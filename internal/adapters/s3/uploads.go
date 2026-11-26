@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -60,6 +61,7 @@ func (s *Store) Verify(ctx context.Context, objectKey string, size int64, sha256
 	if size < 1 || size > uploads.MaxUploadBytes {
 		return errors.New("unsupported transfer size")
 	}
+	s.recordCall(telemetry.OpHeadObject)
 	head, err := s.client.HeadObject(ctx, &awss3.HeadObjectInput{
 		Bucket: aws.String(s.bucket), Key: aws.String(objectKey), ChecksumMode: types.ChecksumModeEnabled,
 	})
@@ -84,6 +86,7 @@ func (s *Store) Verify(ctx context.Context, objectKey string, size int64, sha256
 			return nil
 		}
 	}
+	s.recordCall(telemetry.OpGetObject)
 	object, err := s.client.GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey)})
 	if err != nil {
 		return errors.New("transferred object unavailable")

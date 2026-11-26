@@ -12,9 +12,17 @@ import (
 
 func TestDefaultClientRetainsConnectionsForConcurrentIndexRequests(t *testing.T) {
 	store := weaviate.New("http://index.test")
-	pool, ok := store.Client.Transport.(*http.Transport)
+	transport := store.Client.Transport
+	for {
+		unwrapper, ok := transport.(interface{ Unwrap() http.RoundTripper })
+		if !ok {
+			break
+		}
+		transport = unwrapper.Unwrap()
+	}
+	pool, ok := transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("index transport = %T, want an HTTP pool", store.Client.Transport)
+		t.Fatalf("index transport = %T, want an HTTP pool", transport)
 	}
 	if pool.MaxIdleConns != 512 || pool.MaxIdleConnsPerHost != 128 || pool.IdleConnTimeout != 90*time.Second {
 		t.Fatalf("idle pool total=%d per host=%d timeout=%s, want 512, 128, 90s", pool.MaxIdleConns, pool.MaxIdleConnsPerHost, pool.IdleConnTimeout)

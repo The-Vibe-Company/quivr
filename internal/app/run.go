@@ -516,10 +516,12 @@ func Run(command string, args ...string) error {
 		closeResources(deadline)
 		graceExpired = deadline.Err() != nil
 	}()
+	dependencyMetrics := telemetry.NewDependencyMetrics()
 	poolConfig, err := cfg.poolConfig()
 	if err != nil {
 		return err
 	}
+	postgres.AttachDependencyMetrics(poolConfig, dependencyMetrics)
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return badConfig(configInvalid, "database_url", "invalid database configuration")
@@ -547,6 +549,7 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return invalidConfig("s3", "invalid object storage settings", err)
 	}
+	blobs.SetMetrics(dependencyMetrics)
 	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}
 	normalizations := postgres.NormalizationStore{Pool: pool, Blobs: blobs, RetainImportAuditDetail: cfg.RetainImportAuditDetail}
@@ -586,6 +589,7 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	projection.SetMetrics(dependencyMetrics)
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
@@ -955,7 +959,7 @@ func Run(command string, args ...string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
@@ -964,7 +968,7 @@ func Run(command string, args ...string) error {
 			recorder.WriteMetrics(w)
 			hydrationBlobCache.WriteMetrics(w)
 			search.QueryVectors.WriteMetrics(w)
-		})), queueSnapshots), loadMetrics, poolMetrics))
+		})), queueSnapshots), loadMetrics, poolMetrics, dependencyMetrics))
 	}
 	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes, loadMetrics), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
