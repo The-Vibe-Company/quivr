@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
+	"slices"
 	"strconv"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -127,8 +128,11 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		return content.Receipt{}, corpus.ErrNotFound
 	}
 	identity := &pgx.Batch{}
-	identity.Queue(`INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
-	identity.Queue(`UPDATE records SET acceptance_order=acceptance_order+1 WHERE organization=$1 AND id=$2 RETURNING acceptance_order,desired_position,withdrawn`, scope.Organization, recordID)
+	identity.Queue(`WITH record AS (
+ INSERT INTO records(organization,id,corpus_id,namespace,record_key,record_acl)
+ VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING organization,corpus_id,namespace,record_acl
+)`+recordVisibilityAdmissionSQL+` SELECT 1`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.ACL)
+	identity.Queue(`UPDATE records SET acceptance_order=acceptance_order+1 WHERE organization=$1 AND id=$2 RETURNING acceptance_order,desired_position,withdrawn,record_acl`, scope.Organization, recordID)
 	result := tx.SendBatch(ctx, identity)
 	if _, err = result.Exec(); err != nil {
 		_ = result.Close()
@@ -137,7 +141,8 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	var order int64
 	var position string
 	var withdrawn bool
-	err = result.QueryRow().Scan(&order, &position, &withdrawn)
+	var acl []string
+	err = result.QueryRow().Scan(&order, &position, &withdrawn, &acl)
 	closeErr := result.Close()
 	if err != nil {
 		return content.Receipt{}, err
@@ -145,7 +150,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if closeErr != nil {
 		return content.Receipt{}, closeErr
 	}
-	if withdrawn {
+	if withdrawn || len(c.ACL) > 0 && !slices.Equal(c.ACL, acl) {
 		return content.Receipt{}, content.ErrConflict
 	}
 	if c.Revision == "" {

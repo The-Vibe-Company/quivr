@@ -10,6 +10,8 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 const auditExportPath = "/v0/admin/audit/export"
@@ -38,9 +40,26 @@ func requestAuditEvent(r *http.Request, scope corpus.Scope, keyID string) audit.
 }
 
 func (a *API) serveAudited(w *responseWriter, r *http.Request, scope corpus.Scope, keyID string) {
+	refused := false
+	delegated := keyID != "" && scope.VisibilityMode == visibility.Enforce
+	if delegated && r.Pattern == visibilityGrantPath && (r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		// Policy administration is always performed by a management key.
+		refused = true
+	}
+	if delegated && readsData(r) {
+		actor := r.Header.Values("X-Quivr-Actor")
+		if len(actor) == 1 && audit.ValidActorID(actor[0]) {
+			scope.ActorID = actor[0]
+		}
+		principals, valid := callerPrincipals(r.Header.Values("X-Quivr-Principals"))
+		refused = len(actor) != 1 || !audit.ValidActorID(actor[0]) || !valid || requiresNonDelegatedKey(r.Pattern)
+		if !refused {
+			r = r.WithContext(visibility.WithPrincipals(r.Context(), principals))
+		}
+	}
 	if a.Audit != nil {
 		event := requestAuditEvent(r, scope, keyID)
-		if route, sensitive := auditedRoutes[r.Method+" "+r.Pattern]; sensitive && keyID != "" {
+		if route, sensitive := auditedRoutes[r.Method+" "+r.Pattern]; sensitive && keyID != "" && !refused {
 			a.serveSensitive(w, r, route, event)
 			return
 		}
@@ -54,6 +73,10 @@ func (a *API) serveAudited(w *responseWriter, r *http.Request, scope corpus.Scop
 			}
 			return a.appendAccessAudit(r.Context(), &event, status, code)
 		}
+	}
+	if refused {
+		writeError(w, publicerr.Forbidden, nil)
+		return
 	}
 	a.servePushAudited(w, r)
 }

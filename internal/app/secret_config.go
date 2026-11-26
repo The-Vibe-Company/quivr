@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/secretinput"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 func boundSecret(name, field string) (string, error) {
@@ -94,6 +95,9 @@ func (cfg Config) validateAccessKeys() error {
 		return badConfig(configMissing, "keys", "keys must contain at least one scoped API key")
 	}
 	for token, scope := range cfg.Keys {
+		if !visibility.ValidMode(scope.VisibilityMode) {
+			return badConfig(configInvalid, "keys.visibility_mode", "visibility_mode must be none or enforce")
+		}
 		if scope.ActorID != "" && !audit.ValidActorID(scope.ActorID) {
 			return badConfig(configInvalid, "keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
 		}

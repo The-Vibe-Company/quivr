@@ -30,15 +30,17 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 type Store struct {
-	grpc     pb.WeaviateClient
-	Endpoint string
-	Client   *http.Client
-	apiKey   string
+	grpc       pb.WeaviateClient
+	Endpoint   string
+	Client     *http.Client
+	apiKey     string
+	Visibility visibility.Resolver
 	// PurgeTimeout bounds each purge selection/delete request independently of search.
 	PurgeTimeout time.Duration
 	purgeBatch   atomic.Int64
@@ -425,7 +427,7 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
 }
 
-var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, "body", "title", lexicalProperty, "recordId", itemKind, passageText}
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, recordACLProperty, recordACLRestrictedProperty, "body", "title", lexicalProperty, "recordId", itemKind, passageText}
 
 type storedObject struct {
 	Properties map[string]any       `json:"properties"`
@@ -716,6 +718,11 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
 	}
+	if len(v.RecordACL) > 0 {
+		if err := s.ensureProperties(ctx, g.Collection, visibilityProperties()); err != nil {
+			return err
+		}
+	}
 	if err := s.ensureItemSchema(ctx, g); err != nil {
 		return err
 	}
@@ -742,6 +749,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
+		addRecordACL(properties, v.RecordACL)
 		if g.ItemKeywordsProjected {
 			delete(properties, "body")
 			delete(properties, "title")
@@ -779,6 +787,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 
 func itemAnchor(g content.Generation, org, corpusID, namespace string, v content.Version, metadata map[string]any) projectionObject {
 	props := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "recordId": v.RecordID, sourceNamespaceProperty: namespace, itemKind: "item"}
+	addRecordACL(props, v.RecordACL)
 	for k, value := range metadata {
 		props[k] = value
 	}
@@ -883,7 +892,7 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		routeFilters := []filter{projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		routeFilters := []filter{projectionOwnerFilter(r.Generation, q.EvaluationPlugin), routeVisibility(ctx, r.CorpusID)}
 		if tenantFrom(ctx) == "" {
 			routeFilters = append([]filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}, routeFilters...)
 		}

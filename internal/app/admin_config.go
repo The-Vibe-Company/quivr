@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/audit"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 func (cfg Config) validateAdminListener() (separated bool, shareProbe bool, err error) {
@@ -34,6 +35,9 @@ func (cfg Config) validateAdminListener() (separated bool, shareProbe bool, err 
 		return false, false, badConfig(configMissing, "admin_keys", "admin_keys must contain at least one scoped admin key when admin_listen is configured")
 	}
 	for token, s := range cfg.AdminKeys {
+		if !visibility.ValidMode(s.VisibilityMode) {
+			return false, false, badConfig(configInvalid, "admin_keys.visibility_mode", "visibility_mode must be none or enforce")
+		}
 		if s.ActorID != "" && !audit.ValidActorID(s.ActorID) {
 			return false, false, badConfig(configInvalid, "admin_keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
 		}

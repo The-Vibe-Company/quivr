@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // ProfileVersion identifies the projection recipe every generation is built
@@ -233,6 +234,7 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 	if err != nil {
 		return err
 	}
+	v.RecordACL = r.ACL
 	if err = s.Projection.Publish(ctx, g, org, r.Source.CorpusID, r.Source.Namespace, v, seg); err != nil {
 		return err
 	}
@@ -246,6 +248,7 @@ func (s Service) PrepareIndex(ctx context.Context, org string, v content.Version
 	if err != nil {
 		return g, err
 	}
+	v.RecordACL = r.ACL
 	err = s.Projection.Publish(ctx, g, org, r.Source.CorpusID, r.Source.Namespace, v, seg)
 	return g, err
 }
@@ -383,7 +386,22 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}, OverObjective: elapsed > m.Contributions.Retrieval.Profiles[q.Profile].Objective()}
 		return out, nil
 	}
-	return s.rank(ctx, parentCtx, scope, q, routes, out, started)
+	chain := &searchChain{}
+	if _, enforced := visibility.Principals(ctx); enforced {
+		chain.visibleCandidates = make(map[content.Candidate]struct{})
+	}
+	out, err := s.rank(ctx, parentCtx, scope, q, routes, out, started, chain)
+	if err == nil && len(out.Hits) > 0 && len(chain.visibleCandidates) > 0 {
+		// A saved fallback may finish at the profile deadline. Keep this
+		// last authorization read bounded by the live request context.
+		check, stop := context.WithTimeout(parentCtx, 250*time.Millisecond)
+		defer stop()
+		scope.Corpora = q.CorpusIDs
+		if err = s.recheckResult(check, scope, chain.visibleCandidates, &out); err != nil {
+			return Result{}, ErrUnavailable
+		}
+	}
+	return out, err
 }
 
 // normalizeQuery prepares a query: valid text of at most MaxQueryCodepoints,

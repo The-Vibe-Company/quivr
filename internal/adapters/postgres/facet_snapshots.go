@@ -16,6 +16,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // Fast facet counting (THE-1387). Exact aggregation reads every current
@@ -70,10 +71,14 @@ type snapshotField struct {
 type dayRange struct{ from, to time.Time }
 
 func (s RecordStore) CountFacetsFast(ctx context.Context, org string, q content.FacetQuery) (content.FacetCounts, error) {
-	if days, ok := snapshotScope(q); ok && len(q.Records.FilterRoutes) > 0 {
-		counts, ok, err := s.snapshotFacets(ctx, org, q, days)
-		if err != nil || ok {
-			return counts, err
+	// Shared snapshots contain corpus-wide counts. Delegated reads instead
+	// take the bounded live count below, then a caller-scoped sample on timeout.
+	if _, enforced := visibility.Principals(ctx); !enforced {
+		if days, ok := snapshotScope(q); ok && len(q.Records.FilterRoutes) > 0 {
+			counts, ok, err := s.snapshotFacets(ctx, org, q, days)
+			if err != nil || ok {
+				return counts, err
+			}
 		}
 	}
 	counted, err := s.boundedFacetRows(ctx, org, q, "", facetExactAttempt)
@@ -381,8 +386,9 @@ func (s RecordStore) sampleFacets(ctx context.Context, org string, q content.Fac
 	}
 	// 1/256 of the IDs tells the Corpora's size.
 	var probe int64
-	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM records WHERE organization=$1 AND corpus_id=ANY($2::text[]) AND id COLLATE "C">=$3 AND id COLLATE "C"<$4`,
-		org, ids, recordIDPrefix, recordIDPrefix+"01").Scan(&probe); err != nil {
+	args := []any{org, ids, recordIDPrefix, recordIDPrefix + "01"}
+	acl := visibilityPredicate(ctx, &args, "records")
+	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM records WHERE organization=$1 AND corpus_id=ANY($2::text[]) AND id COLLATE "C">=$3 AND id COLLATE "C"<$4`+acl, args...).Scan(&probe); err != nil {
 		return content.FacetCounts{}, err
 	}
 	const span = 1 << 16

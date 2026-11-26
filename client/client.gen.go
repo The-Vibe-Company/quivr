@@ -1263,6 +1263,24 @@ func (e VectorSpaceRole) Valid() bool {
 	}
 }
 
+// Defines values for VisibilityGrantVisibility.
+const (
+	Public     VisibilityGrantVisibility = "public"
+	Restricted VisibilityGrantVisibility = "restricted"
+)
+
+// Valid indicates whether the value is a known member of the VisibilityGrantVisibility enum.
+func (e VisibilityGrantVisibility) Valid() bool {
+	switch e {
+	case Public:
+		return true
+	case Restricted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookEventSchemaVersion.
 const (
 	N1 WebhookEventSchemaVersion = "1"
@@ -2454,10 +2472,13 @@ type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
 
 	// Extensions Keys are plugin namespaces. Data is validated against the installed schema version; source data is not a computed Annotation.
-	Extensions     *Extensions    `json:"extensions,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Provenance     *Provenance    `json:"provenance,omitempty"`
-	Source         SourceIdentity `json:"source"`
+	Extensions     *Extensions `json:"extensions,omitempty"`
+	IdempotencyKey string      `json:"idempotency_key"`
+	Provenance     *Provenance `json:"provenance,omitempty"`
+
+	// RecordAcl Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
+	RecordAcl *[]VisibilityPrincipal `json:"record_acl,omitempty"`
+	Source    SourceIdentity         `json:"source"`
 
 	// SourcePosition Optional monotonic source position, encoded as decimal text to avoid JSON numeric precision loss.
 	SourcePosition *string `json:"source_position,omitempty"`
@@ -3818,6 +3839,18 @@ type VersionSteps struct {
 	WithdrawnAt *time.Time `json:"withdrawn_at,omitempty"`
 }
 
+// VisibilityGrant defines model for VisibilityGrant.
+type VisibilityGrant struct {
+	AllowedPrincipals []VisibilityPrincipal     `json:"allowed_principals"`
+	Visibility        VisibilityGrantVisibility `json:"visibility"`
+}
+
+// VisibilityGrantVisibility defines model for VisibilityGrant.Visibility.
+type VisibilityGrantVisibility string
+
+// VisibilityPrincipal defines model for VisibilityPrincipal.
+type VisibilityPrincipal = string
+
 // WebhookEvent Immutable reference-only notification. Retries preserve event_id and the exact stored body bytes; signing timestamp changes per attempt. No document content, excerpt, explanation, cursor or secret is embedded.
 type WebhookEvent struct {
 	EventId    string    `json:"event_id"`
@@ -4076,6 +4109,21 @@ type GetCorpusStatsParams struct {
 // GetCorpusStatsParamsResolution defines parameters for GetCorpusStats.
 type GetCorpusStatsParamsResolution string
 
+// DeleteVisibilityGrantParams defines parameters for DeleteVisibilityGrant.
+type DeleteVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
+// GetVisibilityGrantParams defines parameters for GetVisibilityGrant.
+type GetVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
+// SetVisibilityGrantParams defines parameters for SetVisibilityGrant.
+type SetVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
 type ListDeliveryAttemptsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -4198,6 +4246,9 @@ type RebuildCorpusProjectionJSONRequestBody = ActionRequest
 
 // ConfigureRetrievalJSONRequestBody defines body for ConfigureRetrieval for application/json ContentType.
 type ConfigureRetrievalJSONRequestBody = ConfigUpdate
+
+// SetVisibilityGrantJSONRequestBody defines body for SetVisibilityGrant for application/json ContentType.
+type SetVisibilityGrantJSONRequestBody = VisibilityGrant
 
 // CountFacetsJSONRequestBody defines body for CountFacets for application/json ContentType.
 type CountFacetsJSONRequestBody = FacetRequest
@@ -4926,7 +4977,7 @@ type ClientInterface interface {
 
 	// StreamChanges performs a GET /v0/changes/stream (the `StreamChanges` operationId) request.
 	//
-	// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
+	// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
 	StreamChanges(ctx context.Context, params *StreamChangesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListConnectorKinds performs a GET /v0/connector-kinds (the `ListConnectorKinds` operationId) request.
@@ -5168,6 +5219,28 @@ type ClientInterface interface {
 	//
 	// The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
 	ListVectorSpaces(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteVisibilityGrant performs a DELETE /v0/corpora/{corpus_id}/visibility-grants (the `DeleteVisibilityGrant` operationId) request.
+	//
+	// Remove the grant for a source namespace in an authorized Corpus.
+	DeleteVisibilityGrant(ctx context.Context, corpusId string, params *DeleteVisibilityGrantParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVisibilityGrant performs a GET /v0/corpora/{corpus_id}/visibility-grants (the `GetVisibilityGrant` operationId) request.
+	//
+	// Read the grant for a source namespace in an authorized Corpus.
+	GetVisibilityGrant(ctx context.Context, corpusId string, params *GetVisibilityGrantParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetVisibilityGrantWithBody performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Replace or create the grant for a source namespace in an authorized Corpus.
+	SetVisibilityGrantWithBody(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetVisibilityGrant performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Replace or create the grant for a source namespace in an authorized Corpus.
+	SetVisibilityGrant(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, body SetVisibilityGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetDelivery performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
 	//
@@ -6124,7 +6197,7 @@ func (c *Client) PollChanges(ctx context.Context, params *PollChangesParams, req
 
 // StreamChanges performs a GET /v0/changes/stream (the `StreamChanges` operationId) request.
 //
-// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
+// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
 func (c *Client) StreamChanges(ctx context.Context, params *StreamChangesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewStreamChangesRequest(c.Server, params)
 	if err != nil {
@@ -6767,6 +6840,68 @@ func (c *Client) UnarchiveCorpus(ctx context.Context, corpusId string, reqEditor
 // The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
 func (c *Client) ListVectorSpaces(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListVectorSpacesRequest(c.Server, corpusId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteVisibilityGrant performs a DELETE /v0/corpora/{corpus_id}/visibility-grants (the `DeleteVisibilityGrant` operationId) request.
+//
+// Remove the grant for a source namespace in an authorized Corpus.
+func (c *Client) DeleteVisibilityGrant(ctx context.Context, corpusId string, params *DeleteVisibilityGrantParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteVisibilityGrantRequest(c.Server, corpusId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetVisibilityGrant performs a GET /v0/corpora/{corpus_id}/visibility-grants (the `GetVisibilityGrant` operationId) request.
+//
+// Read the grant for a source namespace in an authorized Corpus.
+func (c *Client) GetVisibilityGrant(ctx context.Context, corpusId string, params *GetVisibilityGrantParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVisibilityGrantRequest(c.Server, corpusId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetVisibilityGrantWithBody performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request,
+// with any type of body and a specified content type.
+//
+// Replace or create the grant for a source namespace in an authorized Corpus.
+func (c *Client) SetVisibilityGrantWithBody(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVisibilityGrantRequestWithBody(c.Server, corpusId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetVisibilityGrant performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Replace or create the grant for a source namespace in an authorized Corpus.
+func (c *Client) SetVisibilityGrant(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, body SetVisibilityGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVisibilityGrantRequest(c.Server, corpusId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10908,6 +11043,190 @@ func NewListVectorSpacesRequest(server string, corpusId string) (*http.Request, 
 	return req, nil
 }
 
+// NewDeleteVisibilityGrantRequest constructs an http.Request for the DeleteVisibilityGrant method
+func NewDeleteVisibilityGrantRequest(server string, corpusId string, params *DeleteVisibilityGrantParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/visibility-grants", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "source_namespace", params.SourceNamespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetVisibilityGrantRequest constructs an http.Request for the GetVisibilityGrant method
+func NewGetVisibilityGrantRequest(server string, corpusId string, params *GetVisibilityGrantParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/visibility-grants", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "source_namespace", params.SourceNamespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetVisibilityGrantRequest calls the generic SetVisibilityGrant builder with application/json body
+func NewSetVisibilityGrantRequest(server string, corpusId string, params *SetVisibilityGrantParams, body SetVisibilityGrantJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetVisibilityGrantRequestWithBody(server, corpusId, params, "application/json", bodyReader)
+}
+
+// NewSetVisibilityGrantRequestWithBody constructs an http.Request for the SetVisibilityGrant method, with any body, and a specified content type
+func NewSetVisibilityGrantRequestWithBody(server string, corpusId string, params *SetVisibilityGrantParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/visibility-grants", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "source_namespace", params.SourceNamespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetDeliveryRequest constructs an http.Request for the GetDelivery method
 func NewGetDeliveryRequest(server string, deliveryId string) (*http.Request, error) {
 	var err error
@@ -13069,7 +13388,7 @@ type ClientWithResponsesInterface interface {
 
 	// StreamChangesWithResponse performs a GET /v0/changes/stream (the `StreamChanges` operationId) request.
 	//
-	// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
+	// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	StreamChangesWithResponse(ctx context.Context, params *StreamChangesParams, reqEditors ...RequestEditorFn) (*StreamChangesResponse, error)
@@ -13367,6 +13686,34 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListVectorSpacesWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*ListVectorSpacesResponse, error)
+
+	// DeleteVisibilityGrantWithResponse performs a DELETE /v0/corpora/{corpus_id}/visibility-grants (the `DeleteVisibilityGrant` operationId) request.
+	//
+	// Remove the grant for a source namespace in an authorized Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	DeleteVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *DeleteVisibilityGrantParams, reqEditors ...RequestEditorFn) (*DeleteVisibilityGrantResponse, error)
+
+	// GetVisibilityGrantWithResponse performs a GET /v0/corpora/{corpus_id}/visibility-grants (the `GetVisibilityGrant` operationId) request.
+	//
+	// Read the grant for a source namespace in an authorized Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *GetVisibilityGrantParams, reqEditors ...RequestEditorFn) (*GetVisibilityGrantResponse, error)
+
+	// SetVisibilityGrantWithBodyWithResponse performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Replace or create the grant for a source namespace in an authorized Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	SetVisibilityGrantWithBodyWithResponse(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVisibilityGrantResponse, error)
+
+	// SetVisibilityGrantWithResponse performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Replace or create the grant for a source namespace in an authorized Corpus.
+	SetVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, body SetVisibilityGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVisibilityGrantResponse, error)
 
 	// GetDeliveryWithResponse performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
 	//
@@ -16762,6 +17109,136 @@ func (r ListVectorSpacesResponse) ContentType() string {
 	return ""
 }
 
+type DeleteVisibilityGrantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DeleteVisibilityGrantResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteVisibilityGrantResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteVisibilityGrantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteVisibilityGrantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteVisibilityGrantResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetVisibilityGrantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *VisibilityGrant
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetVisibilityGrantResponse) GetJSON200() *VisibilityGrant {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetVisibilityGrantResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetVisibilityGrantResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVisibilityGrantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVisibilityGrantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetVisibilityGrantResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetVisibilityGrantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r SetVisibilityGrantResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r SetVisibilityGrantResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetVisibilityGrantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetVisibilityGrantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetVisibilityGrantResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetDeliveryResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -19208,7 +19685,7 @@ func (c *ClientWithResponses) PollChangesWithResponse(ctx context.Context, param
 
 // StreamChangesWithResponse performs a GET /v0/changes/stream (the `StreamChanges` operationId) request.
 //
-// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
+// SSE over the same safe published journal with stable per-Record ordering and exact start-now semantics as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) StreamChangesWithResponse(ctx context.Context, params *StreamChangesParams, reqEditors ...RequestEditorFn) (*StreamChangesResponse, error) {
@@ -19751,6 +20228,58 @@ func (c *ClientWithResponses) ListVectorSpacesWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseListVectorSpacesResponse(rsp)
+}
+
+// DeleteVisibilityGrantWithResponse performs a DELETE /v0/corpora/{corpus_id}/visibility-grants (the `DeleteVisibilityGrant` operationId) request.
+//
+// Remove the grant for a source namespace in an authorized Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) DeleteVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *DeleteVisibilityGrantParams, reqEditors ...RequestEditorFn) (*DeleteVisibilityGrantResponse, error) {
+	rsp, err := c.DeleteVisibilityGrant(ctx, corpusId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteVisibilityGrantResponse(rsp)
+}
+
+// GetVisibilityGrantWithResponse performs a GET /v0/corpora/{corpus_id}/visibility-grants (the `GetVisibilityGrant` operationId) request.
+//
+// Read the grant for a source namespace in an authorized Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *GetVisibilityGrantParams, reqEditors ...RequestEditorFn) (*GetVisibilityGrantResponse, error) {
+	rsp, err := c.GetVisibilityGrant(ctx, corpusId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVisibilityGrantResponse(rsp)
+}
+
+// SetVisibilityGrantWithBodyWithResponse performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request,
+// with any type of body and a specified content type.
+//
+// Replace or create the grant for a source namespace in an authorized Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) SetVisibilityGrantWithBodyWithResponse(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVisibilityGrantResponse, error) {
+	rsp, err := c.SetVisibilityGrantWithBody(ctx, corpusId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetVisibilityGrantResponse(rsp)
+}
+
+// SetVisibilityGrantWithResponse performs a PUT /v0/corpora/{corpus_id}/visibility-grants (the `SetVisibilityGrant` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Replace or create the grant for a source namespace in an authorized Corpus.
+func (c *ClientWithResponses) SetVisibilityGrantWithResponse(ctx context.Context, corpusId string, params *SetVisibilityGrantParams, body SetVisibilityGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVisibilityGrantResponse, error) {
+	rsp, err := c.SetVisibilityGrant(ctx, corpusId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetVisibilityGrantResponse(rsp)
 }
 
 // GetDeliveryWithResponse performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
@@ -22680,6 +23209,97 @@ func ParseListVectorSpacesResponse(rsp *http.Response) (*ListVectorSpacesRespons
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteVisibilityGrantResponse parses an HTTP response from a DeleteVisibilityGrantWithResponse call
+func ParseDeleteVisibilityGrantResponse(rsp *http.Response) (*DeleteVisibilityGrantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteVisibilityGrantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVisibilityGrantResponse parses an HTTP response from a GetVisibilityGrantWithResponse call
+func ParseGetVisibilityGrantResponse(rsp *http.Response) (*GetVisibilityGrantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVisibilityGrantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VisibilityGrant
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetVisibilityGrantResponse parses an HTTP response from a SetVisibilityGrantWithResponse call
+func ParseSetVisibilityGrantResponse(rsp *http.Response) (*SetVisibilityGrantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetVisibilityGrantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

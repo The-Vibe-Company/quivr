@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // coverageEntries bounds the Corpora a CoverageCache holds; past it the
@@ -44,9 +45,10 @@ func (c *CoverageCache) clock() time.Time {
 }
 
 // spaces describes the spaces of a route's generation, from the cache while
-// fresh, else from the registry.
+// fresh, else from the registry. Delegated descriptions depend on principals
+// and bypass the shared cache.
 func (c *CoverageCache) spaces(ctx context.Context, registry SpaceRegistry, org string, r Route) ([]content.SpaceCoverage, int64, error) {
-	if c == nil {
+	if _, enforced := visibility.Principals(ctx); c == nil || enforced {
 		_, spaces, total, err := registry.VectorSpaces(ctx, org, r.CorpusID)
 		return spaces, total, err
 	}

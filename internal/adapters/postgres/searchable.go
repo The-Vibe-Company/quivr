@@ -494,6 +494,16 @@ CROSS JOIN LATERAL (SELECT c.organization,c.record_id AS id,c.corpus_id,c.curren
 CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND ` + effectiveServingSQL("pc", "g", "v") + `) OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
 `
 
+func hydrationVisibility(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (string, []any) {
+	args := hydrationArgs(scope, cs)
+	acl := visibilityPredicate(ctx, &args, "visible_record")
+	if acl == "" {
+		return "", args
+	}
+	return ` AND EXISTS (SELECT 1 FROM records visible_record
+ WHERE (visible_record.organization,visible_record.id)=(c.organization,c.record_id)` + acl + ")", args
+}
+
 var hydrationFenceSQL = `
 WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT route.archived AND ($6::boolean OR r.corpus_id=ANY($7::text[]))`
 
@@ -594,7 +604,8 @@ func (s ProjectionStore) RecheckHydration(ctx context.Context, scope corpus.Scop
 	if len(cs) == 0 {
 		return out, nil
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, hydrationLookupsSQL(false)+`SELECT c.n,r.corpus_id `+hydrationCandidatesSQL+hydrationFenceSQL, hydrationArgs(scope, cs)...)
+	acl, args := hydrationVisibility(ctx, scope, cs)
+	rows, err := database(ctx, s.Pool).Query(ctx, hydrationLookupsSQL(false)+`SELECT c.n,r.corpus_id `+hydrationCandidatesSQL+hydrationFenceSQL+acl, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -620,7 +631,8 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 	if len(cs) == 0 {
 		return out, nil
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, hydrateSQL, hydrationArgs(scope, cs)...)
+	acl, args := hydrationVisibility(ctx, scope, cs)
+	rows, err := database(ctx, s.Pool).Query(ctx, hydrateSQL+acl, args...)
 	if err != nil {
 		return nil, err
 	}

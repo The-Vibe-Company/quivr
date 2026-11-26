@@ -33,6 +33,7 @@ func (s EvaluationStore) Recent(ctx context.Context, org string, corpora []strin
 	// Keep eligibility a point read while the ordered records scan walks to its
 	// limit. OFFSET prevents the planner from turning EXISTS into a corpus join.
 	where += ` AND EXISTS(SELECT 1 FROM record_versions v WHERE v.organization=r.organization AND v.id=r.current_version_id AND ` + eligibleVersionPointSQL + ` OFFSET 0)`
+	where += visibilityPredicate(ctx, &args, "r")
 	args = append(args, limit)
 	bound := fmt.Sprintf(" LIMIT $%d", len(args))
 	page := `SELECT r.corpus_id,r.id AS record_id,r.current_version_id AS version_id,r.current_accepted_at AS accepted_at,

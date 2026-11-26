@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,7 +25,12 @@ func (s CorpusStatsStore) RecordCount(ctx context.Context, org, id string, q con
 		return out, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	header, err := statsHeader(ctx, tx, org, id)
+	var header content.CorpusStats
+	if _, enforced := visibility.Principals(ctx); enforced {
+		header, err = statsCorpus(ctx, tx, org, id)
+	} else {
+		header, err = statsHeader(ctx, tx, org, id)
+	}
 	if err != nil {
 		return out, err
 	}
@@ -32,8 +38,10 @@ func (s CorpusStatsStore) RecordCount(ctx context.Context, org, id string, q con
 	q.CorpusIDs = []string{id}
 	args := []any{org, id}
 	where := catalogRange(q, &args)
+	acl := visibilityPredicate(ctx, &args, "records")
+	where += acl
 	sql := `SELECT count(*) FROM records WHERE ` + where
-	if q.AcceptedAfter == nil && q.AcceptedBefore == nil {
+	if acl == "" && q.AcceptedAfter == nil && q.AcceptedBefore == nil {
 		sql = `SELECT count(*) FROM (SELECT 1 FROM records WHERE ` + where + ` LIMIT 10001) capped`
 	}
 
@@ -47,7 +55,7 @@ func (s CorpusStatsStore) RecordCount(ctx context.Context, org, id string, q con
 		return out, recordCountQueryError(ctx, err)
 	}
 
-	if q.AcceptedAfter == nil && q.AcceptedBefore == nil && out.Count > 10000 {
+	if acl == "" && q.AcceptedAfter == nil && q.AcceptedBefore == nil && out.Count > 10000 {
 		out.Count = header.CatalogTotal
 		out.Approximate = true
 		out.Complete = header.Complete
@@ -129,7 +137,7 @@ func (s CorpusStatsStore) Bootstrap(ctx context.Context, limit int) (bool, error
 	return true, tx.Commit(ctx)
 }
 
-func statsHeader(ctx context.Context, tx pgx.Tx, org, id string) (content.CorpusStats, error) {
+func statsCorpus(ctx context.Context, tx pgx.Tx, org, id string) (content.CorpusStats, error) {
 	out := content.CorpusStats{CorpusID: id}
 	var archived bool
 	err := tx.QueryRow(ctx, `SELECT c.archived,coalesce(b.complete,false),statement_timestamp() FROM corpora c LEFT JOIN corpus_record_bootstrap b ON (b.organization,b.corpus_id)=(c.organization,c.id) WHERE c.organization=$1 AND c.id=$2`, org, id).Scan(&archived, &out.Complete, &out.ObservedAt)
@@ -138,6 +146,14 @@ func statsHeader(ctx context.Context, tx pgx.Tx, org, id string) (content.Corpus
 	}
 	if archived {
 		return out, corpus.ErrArchived
+	}
+	return out, nil
+}
+
+func statsHeader(ctx context.Context, tx pgx.Tx, org, id string) (content.CorpusStats, error) {
+	out, err := statsCorpus(ctx, tx, org, id)
+	if err != nil {
+		return out, err
 	}
 	out.Approximate = !out.Complete
 	err = tx.QueryRow(ctx, `SELECT coalesce(sum(eligible),0),coalesce(sum(catalog),0),coalesce(sum(undated),0),coalesce(sum(catalog_undated),0),
@@ -153,7 +169,7 @@ func (s CorpusStatsStore) CorpusStats(ctx context.Context, org, id string, q con
 		return content.CorpusStats{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	out, err := statsHeader(ctx, tx, org, id)
+	out, err := statsHeaderForCaller(ctx, tx, org, id)
 	if err != nil {
 		return out, err
 	}
@@ -194,7 +210,13 @@ func (s CorpusStatsStore) CorpusStats(ctx context.Context, org, id string, q con
 			next := end
 			h.Next = &next
 		}
-		rows, err := tx.Query(ctx, `SELECT date_trunc($3,hour,'UTC'),sum(eligible),sum(catalog) FROM corpus_record_hours WHERE organization=$1 AND corpus_id=$2 AND hour >= $4 AND hour < $5 GROUP BY 1 ORDER BY 1`, org, id, unit, from, end)
+		args := []any{org, id, unit, from, end}
+		sql := `SELECT date_trunc($3,hour,'UTC'),sum(eligible),sum(catalog) FROM corpus_record_hours WHERE organization=$1 AND corpus_id=$2 AND hour >= $4 AND hour < $5 GROUP BY 1 ORDER BY 1`
+		if acl := visibilityPredicate(ctx, &args, "r"); acl != "" {
+			sql = `SELECT date_trunc($3,r.current_accepted_at,'UTC'),count(*) FILTER (WHERE ` + eligibleVersionSQL + `),count(*)` +
+				statsRecordsSQL + ` AND r.current_accepted_at >= $4 AND r.current_accepted_at < $5` + acl + ` GROUP BY 1 ORDER BY 1`
+		}
+		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return out, err
 		}
@@ -226,9 +248,25 @@ func (s CorpusStatsStore) CorpusStats(ctx context.Context, org, id string, q con
 		}
 		// Select a bounded set of source keys before summing its stripes. OFFSET 0
 		// fences the keyset selection from an unbounded hash aggregate plan.
-		rows, err := tx.Query(ctx, `SELECT k.namespace,k.connector_id,c.eligible,c.catalog FROM (
+		args := []any{org, id, after.Namespace, after.ConnectorID, limit + 1}
+		sql := `SELECT k.namespace,k.connector_id,c.eligible,c.catalog FROM (
    SELECT DISTINCT namespace,connector_id FROM corpus_record_sources WHERE organization=$1 AND corpus_id=$2 AND (namespace,connector_id)>($3 COLLATE "C",$4 COLLATE "C") ORDER BY namespace,connector_id LIMIT $5 OFFSET 0
-  ) k CROSS JOIN LATERAL (SELECT sum(eligible) AS eligible,sum(catalog) AS catalog FROM corpus_record_sources s WHERE organization=$1 AND corpus_id=$2 AND s.namespace=k.namespace AND s.connector_id=k.connector_id OFFSET 0) c ORDER BY k.namespace,k.connector_id`, org, id, after.Namespace, after.ConnectorID, limit+1)
+  ) k CROSS JOIN LATERAL (SELECT sum(eligible) AS eligible,sum(catalog) AS catalog FROM corpus_record_sources s WHERE organization=$1 AND corpus_id=$2 AND s.namespace=k.namespace AND s.connector_id=k.connector_id OFFSET 0) c ORDER BY k.namespace,k.connector_id`
+		if acl := visibilityPredicate(ctx, &args, "r"); acl != "" {
+			sql = `WITH visible AS (
+ SELECT r.namespace,coalesce(a.connector_instance_id,p.connector_instance_id,'unknown') AS connector_id,
+  ` + eligibleVersionSQL + ` AS eligible
+ FROM records r
+ LEFT JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
+ LEFT JOIN accepted_revisions a ON (a.organization,a.record_id,a.slot)=(r.organization,r.id,v.slot)
+ LEFT JOIN accepted_revisions p ON v.id IS NULL AND (p.organization,p.version_id)=(r.organization,r.desired_version_id) AND p.accepted_at IS NOT NULL
+ WHERE r.organization=$1 AND r.corpus_id=$2` + acl + `
+)
+SELECT namespace,connector_id,count(*) FILTER (WHERE eligible),count(*) FROM visible
+WHERE (namespace COLLATE "C",connector_id COLLATE "C")>($3,$4)
+GROUP BY namespace,connector_id ORDER BY namespace COLLATE "C",connector_id COLLATE "C" LIMIT $5`
+		}
+		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return out, err
 		}
@@ -253,4 +291,29 @@ func (s CorpusStatsStore) CorpusStats(ctx context.Context, org, id string, q con
 		out.Sources = sources
 	}
 	return out, tx.Commit(ctx)
+}
+
+// Enforced aggregates use canonical eligibility and visibility in the same
+// repeatable-read snapshot as the caller's histogram and source pages.
+const statsRecordsSQL = ` FROM records r LEFT JOIN record_versions v
+ ON (v.organization,v.id)=(r.organization,r.current_version_id)
+ WHERE r.organization=$1 AND r.corpus_id=$2`
+
+func statsHeaderForCaller(ctx context.Context, tx pgx.Tx, org, id string) (content.CorpusStats, error) {
+	args := []any{org, id}
+	acl := visibilityPredicate(ctx, &args, "r")
+	if acl == "" {
+		return statsHeader(ctx, tx, org, id)
+	}
+	out, err := statsCorpus(ctx, tx, org, id)
+	if err != nil {
+		return out, err
+	}
+	out.Complete = true
+	err = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+eligibleVersionSQL+`),count(*),
+ count(*) FILTER (WHERE r.current_accepted_at IS NULL AND `+eligibleVersionSQL+`),
+ count(*) FILTER (WHERE r.current_accepted_at IS NULL),
+ date_trunc('hour',min(r.current_accepted_at),'UTC'),date_trunc('hour',max(r.current_accepted_at),'UTC')`+
+		statsRecordsSQL+acl, args...).Scan(&out.Total, &out.CatalogTotal, &out.UndatedTotal, &out.CatalogUndatedTotal, &out.FirstCatalogHour, &out.LastCatalogHour)
+	return out, err
 }

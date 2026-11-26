@@ -88,6 +88,7 @@ func (s ActivityStore) LatestActivity(ctx context.Context, org string, after *co
 		query += ` AND (a.accepted_at,a.version_id) < ($3,$4)`
 		args = append(args, after.AcceptedAt, after.VersionID)
 	}
+	query += visibilityPredicate(ctx, &args, "r")
 	rows, err := s.Pool.Query(ctx, query+` ORDER BY a.accepted_at DESC,a.version_id DESC LIMIT $2`, args...)
 	if err != nil {
 		return nil, err
@@ -101,9 +102,11 @@ func (s ActivityStore) LatestActivity(ctx context.Context, org string, after *co
 func (s ActivityStore) VersionActivity(ctx context.Context, org, versionID string) (content.Activity, error) {
 	// A revision accepted since step times were recorded is found by its
 	// Version id; an earlier one only once materialized, through its Version.
-	a, err := scanActivity(s.Pool.QueryRow(ctx, activityColumns+` WHERE a.organization=$1 AND a.version_id=$2 AND a.accepted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`, org, versionID))
+	args := []any{org, versionID}
+	acl := visibilityPredicate(ctx, &args, "r")
+	a, err := scanActivity(s.Pool.QueryRow(ctx, activityColumns+` WHERE a.organization=$1 AND a.version_id=$2 AND a.accepted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`+acl, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
-		a, err = scanActivity(s.Pool.QueryRow(ctx, activityColumns+` WHERE (a.organization,a.record_id,a.slot)=(SELECT organization,record_id,slot FROM record_versions WHERE organization=$1 AND id=$2) AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`, org, versionID))
+		a, err = scanActivity(s.Pool.QueryRow(ctx, activityColumns+` WHERE (a.organization,a.record_id,a.slot)=(SELECT organization,record_id,slot FROM record_versions WHERE organization=$1 AND id=$2) AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`+acl, args...))
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, corpus.ErrNotFound

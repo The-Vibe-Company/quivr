@@ -23,7 +23,9 @@ func (s ReceiptStore) HasReceipt(ctx context.Context, org, key string) (bool, er
 func (s ReceiptStore) Receipt(ctx context.Context, org, id string) (content.Receipt, error) {
 	r := content.Receipt{Diagnostics: []content.Diagnostic{}}
 	var code string
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT rc.id,rc.state,coalesce(rc.outcome,''),rc.record_id,coalesce(rc.version_id,''),r.corpus_id,r.namespace,r.record_key,rc.processing,rc.error_code FROM ingestion_receipts rc JOIN records r ON (r.organization,r.id)=(rc.organization,rc.record_id) WHERE rc.organization=$1 AND rc.id=$2`, org, id).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Processing.State, &code)
+	args := []any{org, id}
+	acl := visibilityPredicate(ctx, &args, "r")
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT rc.id,rc.state,coalesce(rc.outcome,''),rc.record_id,coalesce(rc.version_id,''),r.corpus_id,r.namespace,r.record_key,rc.processing,rc.error_code FROM ingestion_receipts rc JOIN records r ON (r.organization,r.id)=(rc.organization,rc.record_id) WHERE rc.organization=$1 AND rc.id=$2`+acl, args...).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Processing.State, &code)
 	if err != nil {
 		return r, notFound(err)
 	}

@@ -1263,6 +1263,24 @@ func (e VectorSpaceRole) Valid() bool {
 	}
 }
 
+// Defines values for VisibilityGrantVisibility.
+const (
+	Public     VisibilityGrantVisibility = "public"
+	Restricted VisibilityGrantVisibility = "restricted"
+)
+
+// Valid indicates whether the value is a known member of the VisibilityGrantVisibility enum.
+func (e VisibilityGrantVisibility) Valid() bool {
+	switch e {
+	case Public:
+		return true
+	case Restricted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookEventSchemaVersion.
 const (
 	N1 WebhookEventSchemaVersion = "1"
@@ -2454,10 +2472,13 @@ type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
 
 	// Extensions Keys are plugin namespaces. Data is validated against the installed schema version; source data is not a computed Annotation.
-	Extensions     *Extensions    `json:"extensions,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Provenance     *Provenance    `json:"provenance,omitempty"`
-	Source         SourceIdentity `json:"source"`
+	Extensions     *Extensions `json:"extensions,omitempty"`
+	IdempotencyKey string      `json:"idempotency_key"`
+	Provenance     *Provenance `json:"provenance,omitempty"`
+
+	// RecordAcl Optional principal override set when the Record is first created. Revisions may omit it or repeat the same nonempty set.
+	RecordAcl *[]VisibilityPrincipal `json:"record_acl,omitempty"`
+	Source    SourceIdentity         `json:"source"`
 
 	// SourcePosition Optional monotonic source position, encoded as decimal text to avoid JSON numeric precision loss.
 	SourcePosition *string `json:"source_position,omitempty"`
@@ -3818,6 +3839,18 @@ type VersionSteps struct {
 	WithdrawnAt *time.Time `json:"withdrawn_at,omitempty"`
 }
 
+// VisibilityGrant defines model for VisibilityGrant.
+type VisibilityGrant struct {
+	AllowedPrincipals []VisibilityPrincipal     `json:"allowed_principals"`
+	Visibility        VisibilityGrantVisibility `json:"visibility"`
+}
+
+// VisibilityGrantVisibility defines model for VisibilityGrant.Visibility.
+type VisibilityGrantVisibility string
+
+// VisibilityPrincipal defines model for VisibilityPrincipal.
+type VisibilityPrincipal = string
+
 // WebhookEvent Immutable reference-only notification. Retries preserve event_id and the exact stored body bytes; signing timestamp changes per attempt. No document content, excerpt, explanation, cursor or secret is embedded.
 type WebhookEvent struct {
 	EventId    string    `json:"event_id"`
@@ -4076,6 +4109,21 @@ type GetCorpusStatsParams struct {
 // GetCorpusStatsParamsResolution defines parameters for GetCorpusStats.
 type GetCorpusStatsParamsResolution string
 
+// DeleteVisibilityGrantParams defines parameters for DeleteVisibilityGrant.
+type DeleteVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
+// GetVisibilityGrantParams defines parameters for GetVisibilityGrant.
+type GetVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
+// SetVisibilityGrantParams defines parameters for SetVisibilityGrant.
+type SetVisibilityGrantParams struct {
+	SourceNamespace string `form:"source_namespace" json:"source_namespace"`
+}
+
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
 type ListDeliveryAttemptsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -4198,6 +4246,9 @@ type RebuildCorpusProjectionJSONRequestBody = ActionRequest
 
 // ConfigureRetrievalJSONRequestBody defines body for ConfigureRetrieval for application/json ContentType.
 type ConfigureRetrievalJSONRequestBody = ConfigUpdate
+
+// SetVisibilityGrantJSONRequestBody defines body for SetVisibilityGrant for application/json ContentType.
+type SetVisibilityGrantJSONRequestBody = VisibilityGrant
 
 // CountFacetsJSONRequestBody defines body for CountFacets for application/json ContentType.
 type CountFacetsJSONRequestBody = FacetRequest
@@ -4819,6 +4870,15 @@ type ServerInterface interface {
 
 	// (GET /v0/corpora/{corpus_id}/vector-spaces)
 	ListVectorSpaces(w http.ResponseWriter, r *http.Request, corpusId string)
+
+	// (DELETE /v0/corpora/{corpus_id}/visibility-grants)
+	DeleteVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params DeleteVisibilityGrantParams)
+
+	// (GET /v0/corpora/{corpus_id}/visibility-grants)
+	GetVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params GetVisibilityGrantParams)
+
+	// (PUT /v0/corpora/{corpus_id}/visibility-grants)
+	SetVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params SetVisibilityGrantParams)
 
 	// (GET /v0/deliveries/{delivery_id})
 	GetDelivery(w http.ResponseWriter, r *http.Request, deliveryId string)
@@ -5644,6 +5704,42 @@ func (siw *ServerInterfaceWrapper) ListVectorSpaces(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) DeleteVisibilityGrant(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+	var params DeleteVisibilityGrantParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVisibilityGrant(w, r, corpusId, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) GetVisibilityGrant(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+	var params GetVisibilityGrantParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetVisibilityGrant(w, r, corpusId, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) SetVisibilityGrant(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+	var params SetVisibilityGrantParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetVisibilityGrant(w, r, corpusId, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 func (siw *ServerInterfaceWrapper) GetDelivery(w http.ResponseWriter, r *http.Request) {
 	deliveryId := string(r.PathValue("delivery_id"))
 
@@ -6183,6 +6279,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora", wrapper.CreateCorpus)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}", wrapper.GetCorpus)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v0/corpora/{corpus_id}", wrapper.RenameCorpus)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v0/corpora/{corpus_id}/visibility-grants", wrapper.DeleteVisibilityGrant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/visibility-grants", wrapper.GetVisibilityGrant)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/corpora/{corpus_id}/visibility-grants", wrapper.SetVisibilityGrant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/archive", wrapper.ArchiveCorpus)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/unarchive", wrapper.UnarchiveCorpus)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/corpora/{corpus_id}/retrieval", wrapper.ConfigureRetrieval)
@@ -9462,6 +9561,145 @@ func (response ListVectorSpacesdefaultJSONResponse) VisitListVectorSpacesRespons
 	return err
 }
 
+type DeleteVisibilityGrantRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Params      DeleteVisibilityGrantParams
+}
+
+type DeleteVisibilityGrantResponseObject interface {
+	VisitDeleteVisibilityGrantResponse(w http.ResponseWriter) error
+}
+
+// DeleteVisibilityGrantResponseFunc writes a deferred response, including streams and plugin answers.
+type DeleteVisibilityGrantResponseFunc func(http.ResponseWriter)
+
+func (response DeleteVisibilityGrantResponseFunc) VisitDeleteVisibilityGrantResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type DeleteVisibilityGrant204Response struct {
+}
+
+func (response DeleteVisibilityGrant204Response) VisitDeleteVisibilityGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteVisibilityGrantdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteVisibilityGrantdefaultJSONResponse) VisitDeleteVisibilityGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVisibilityGrantRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Params      GetVisibilityGrantParams
+}
+
+type GetVisibilityGrantResponseObject interface {
+	VisitGetVisibilityGrantResponse(w http.ResponseWriter) error
+}
+
+// GetVisibilityGrantResponseFunc writes a deferred response, including streams and plugin answers.
+type GetVisibilityGrantResponseFunc func(http.ResponseWriter)
+
+func (response GetVisibilityGrantResponseFunc) VisitGetVisibilityGrantResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type GetVisibilityGrant200JSONResponse VisibilityGrant
+
+func (response GetVisibilityGrant200JSONResponse) VisitGetVisibilityGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVisibilityGrantdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetVisibilityGrantdefaultJSONResponse) VisitGetVisibilityGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVisibilityGrantRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Params      SetVisibilityGrantParams
+	Body        *SetVisibilityGrantJSONRequestBody
+}
+
+type SetVisibilityGrantResponseObject interface {
+	VisitSetVisibilityGrantResponse(w http.ResponseWriter) error
+}
+
+// SetVisibilityGrantResponseFunc writes a deferred response, including streams and plugin answers.
+type SetVisibilityGrantResponseFunc func(http.ResponseWriter)
+
+func (response SetVisibilityGrantResponseFunc) VisitSetVisibilityGrantResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type SetVisibilityGrant204Response struct {
+}
+
+func (response SetVisibilityGrant204Response) VisitSetVisibilityGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetVisibilityGrantdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetVisibilityGrantdefaultJSONResponse) VisitSetVisibilityGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetDeliveryRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest *http.Request
@@ -11641,6 +11879,15 @@ type StrictServerInterface interface {
 	// (GET /v0/corpora/{corpus_id}/vector-spaces)
 	ListVectorSpaces(ctx context.Context, request ListVectorSpacesRequestObject) (ListVectorSpacesResponseObject, error)
 
+	// (DELETE /v0/corpora/{corpus_id}/visibility-grants)
+	DeleteVisibilityGrant(ctx context.Context, request DeleteVisibilityGrantRequestObject) (DeleteVisibilityGrantResponseObject, error)
+
+	// (GET /v0/corpora/{corpus_id}/visibility-grants)
+	GetVisibilityGrant(ctx context.Context, request GetVisibilityGrantRequestObject) (GetVisibilityGrantResponseObject, error)
+
+	// (PUT /v0/corpora/{corpus_id}/visibility-grants)
+	SetVisibilityGrant(ctx context.Context, request SetVisibilityGrantRequestObject) (SetVisibilityGrantResponseObject, error)
+
 	// (GET /v0/deliveries/{delivery_id})
 	GetDelivery(ctx context.Context, request GetDeliveryRequestObject) (GetDeliveryResponseObject, error)
 
@@ -13469,6 +13716,93 @@ func (sh *strictHandler) ListVectorSpaces(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListVectorSpacesResponseObject); ok {
 		if err := validResponse.VisitListVectorSpacesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteVisibilityGrant operation middleware
+func (sh *strictHandler) DeleteVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params DeleteVisibilityGrantParams) {
+	var request DeleteVisibilityGrantRequestObject
+
+	request.CorpusId = corpusId
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteVisibilityGrant(ctx, request.(DeleteVisibilityGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteVisibilityGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteVisibilityGrantResponseObject); ok {
+		if err := validResponse.VisitDeleteVisibilityGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetVisibilityGrant operation middleware
+func (sh *strictHandler) GetVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params GetVisibilityGrantParams) {
+	var request GetVisibilityGrantRequestObject
+
+	request.CorpusId = corpusId
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetVisibilityGrant(ctx, request.(GetVisibilityGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetVisibilityGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetVisibilityGrantResponseObject); ok {
+		if err := validResponse.VisitGetVisibilityGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetVisibilityGrant operation middleware
+func (sh *strictHandler) SetVisibilityGrant(w http.ResponseWriter, r *http.Request, corpusId string, params SetVisibilityGrantParams) {
+	var request SetVisibilityGrantRequestObject
+
+	request.CorpusId = corpusId
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetVisibilityGrant(ctx, request.(SetVisibilityGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetVisibilityGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetVisibilityGrantResponseObject); ok {
+		if err := validResponse.VisitSetVisibilityGrantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

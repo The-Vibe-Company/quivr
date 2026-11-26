@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5"
@@ -34,7 +35,9 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 		// with stale statistics. Legacy engine spaces keep generation routing.
 		if c.OwnerPluginID != "" {
 			var present bool
-			err = database(ctx, s.Pool).QueryRow(ctx, spaceOwnerPresenceSQL, org, corpusID, g.ID, c.OwnerPluginID, c.ID).Scan(&present)
+			args := []any{org, corpusID, g.ID, c.OwnerPluginID, c.ID}
+			sql := presenceVisibility(ctx, spaceOwnerPresenceSQL, &args)
+			err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
 			if err != nil {
 				return g, nil, err
 			}
@@ -54,7 +57,9 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			continue
 		}
 		var present bool
-		err = database(ctx, s.Pool).QueryRow(ctx, corpusEligibilityPresenceSQL, org, corpusID).Scan(&present)
+		args := []any{org, corpusID}
+		sql := presenceVisibility(ctx, corpusEligibilityPresenceSQL, &args)
+		err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
 		if err != nil {
 			return g, nil, err
 		}
@@ -87,3 +92,8 @@ const corpusEligibilityPresenceSQL = `SELECT EXISTS(
   WHERE (v.organization,v.id)=(r.organization,r.current_version_id) OFFSET 0
  ) v ON true
  WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
+
+// Both presence queries end in the closing parenthesis of their EXISTS.
+func presenceVisibility(ctx context.Context, sql string, args *[]any) string {
+	return strings.TrimSuffix(sql, ")") + visibilityPredicate(ctx, args, "r") + ")"
+}

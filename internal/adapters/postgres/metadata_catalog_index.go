@@ -189,7 +189,7 @@ func metadataOrderedWindow(ctx context.Context, tx pgx.Tx, org, id string, q con
 	unfiltered.Metadata = nil
 	where := catalogRange(unfiltered, &args)
 	cursor, order := catalogCursor(q, &args)
-	where += cursor
+	where += cursor + visibilityPredicate(ctx, &args, "records")
 	args = append(args, size)
 	limit := fmt.Sprintf("$%d", len(args))
 	matched := catalogMetadataDates(q, &args, true)
@@ -319,7 +319,7 @@ func metadataCandidatePage(ctx context.Context, tx pgx.Tx, org, id string, q con
 	unfiltered.Metadata = nil
 	where := catalogRange(unfiltered, &args) + catalogMetadataDates(q, &args, true)
 	cursor, order := catalogCursor(q, &args)
-	where += cursor
+	where += cursor + visibilityPredicate(ctx, &args, "records")
 	args = append(args, q.Limit)
 	// The lateral limit keeps lookup work proportional to the bounded anchor,
 	// even when a planner would otherwise prefer the catalog's ordered walk.

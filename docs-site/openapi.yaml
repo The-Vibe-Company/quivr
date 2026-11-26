@@ -2118,6 +2118,81 @@ paths:
       tags:
       - Corpora
       summary: Rename corpus
+  /v0/corpora/{corpus_id}/visibility-grants:
+    parameters:
+    - name: corpus_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    - name: source_namespace
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    get:
+      operationId: getVisibilityGrant
+      description: Read the grant for a source namespace in an authorized Corpus.
+      x-required-permissions:
+      - visibility:read
+      responses:
+        '200':
+          description: Current source grant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityGrant'
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Corpora
+      summary: Get visibility grant
+    put:
+      operationId: setVisibilityGrant
+      description: Replace or create the grant for a source namespace in an authorized Corpus.
+      x-required-permissions:
+      - visibility:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityGrant'
+      responses:
+        '204':
+          description: Grant write committed.
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Corpora
+      summary: Set visibility grant
+    delete:
+      operationId: deleteVisibilityGrant
+      description: Remove the grant for a source namespace in an authorized Corpus.
+      x-required-permissions:
+      - visibility:write
+      responses:
+        '204':
+          description: Grant write committed.
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Corpora
+      summary: Delete visibility grant
   /v0/corpora/{corpus_id}/archive:
     post:
       operationId: archiveCorpus
@@ -2281,9 +2356,9 @@ paths:
         as polling. Cross-Record commit order is not guaranteed; resuming an older cursor can redeliver an event. Last-Event-ID
         takes precedence over query cursor on reconnect. id is an opaque Change Cursor; data.event_id is deduplication identity.
         Named change events carry ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including
-        initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP 410/409; after headers
-        send stream_error with Error JSON then close, without advancing id. Use authenticated streaming fetch/http client.
-        See contract for checkpoint framing and resync.'
+        initial start-now checkpoint. Delegated streams send idle checkpoints on the keepalive cadence. Resume cursor expires
+        or scope changes: before headers use HTTP 410/409; after headers send stream_error with Error JSON then close, without
+        advancing id. Use authenticated streaming fetch/http client. See contract for checkpoint framing and resync.'
       responses:
         '200':
           description: Successful response
@@ -5876,6 +5951,27 @@ components:
         then:
           required:
           - invocation_id
+    VisibilityPrincipal:
+      type: string
+      pattern: ^[A-Za-z0-9_.-]{1,32}:[A-Za-z0-9_.-]{1,128}$
+    VisibilityGrant:
+      type: object
+      additionalProperties: false
+      required:
+      - visibility
+      - allowed_principals
+      properties:
+        visibility:
+          type: string
+          enum:
+          - public
+          - restricted
+        allowed_principals:
+          type: array
+          uniqueItems: true
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/VisibilityPrincipal'
     IngestCommand:
       type: object
       additionalProperties: false
@@ -5885,6 +5981,15 @@ components:
           minLength: 1
         source:
           $ref: '#/components/schemas/SourceIdentity'
+        record_acl:
+          description: Optional principal override set when the Record is first created. Revisions may omit it or repeat the
+            same nonempty set.
+          type: array
+          minItems: 1
+          uniqueItems: true
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/VisibilityPrincipal'
         source_revision:
           type: string
           minLength: 1

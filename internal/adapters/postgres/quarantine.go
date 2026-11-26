@@ -48,8 +48,9 @@ func stuckArgs(org string, corpora []string, f quarantine.Filter) []any {
 // Quarantined lists one page of stuck Versions in Version id order.
 func (s QuarantineStore) Quarantined(ctx context.Context, org string, corpora []string, f quarantine.Filter, after string, limit int) ([]quarantine.Entry, error) {
 	args := append(stuckArgs(org, corpora, f), after, limit)
+	acl := visibilityPredicate(ctx, &args, "r")
 	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT v.id,v.record_id,r.corpus_id,rc.id,coalesce(v.quarantine_stage,'ingestion'),`+reasonSQL+`,coalesce(v.quarantined_at,rc.accepted_at)
-FROM `+stuckSQL+` AND v.id>$8 ORDER BY v.id LIMIT $9`, args...)
+FROM `+stuckSQL+acl+` AND v.id>$8 ORDER BY v.id LIMIT $9`, args...)
 	if err != nil {
 		return nil, err
 	}
