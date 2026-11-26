@@ -142,6 +142,19 @@ while True: signal.pause()
             with self.assertRaisesRegex(RuntimeError, r'after 1 bounded attempt\(s\) \(exited: none\)'):
                 stack.start_dependencies()
         self.assertEqual(len(json.loads((stack.directory / 'readiness.json').read_text())['dependency_start_retries']), 2)  # no crash: not retried
+        # Outage restart of an individual dependency uses the same bounded crash-retry and --wait path.
+        targeted = []
+        def compose_targeted(*args, **kwargs):
+            targeted.append(args)
+            if args[0] == 'up' and sum(1 for item in targeted if item[0] == 'up') == 1:
+                raise local.subprocess.CalledProcessError(1, 'compose')
+            return mock.Mock(stdout='seaweed\n')
+        with mock.patch.object(stack, 'compose', side_effect=compose_targeted):
+            stack.start_dependencies('seaweed', wait_timeout=90)
+        self.assertEqual([args for args in targeted if args[0] == 'up'], [
+            ('up', '-d', '--wait', '--wait-timeout', '90', 'seaweed'),
+            ('up', '-d', '--wait', '--wait-timeout', '90', 'seaweed'),
+        ])
 
     def test_migrate_refuses_a_stopped_project_with_guidance(self):
         stack = local.Stack(self.names[0])
@@ -551,6 +564,7 @@ class DevProfile(unittest.TestCase):
             raise OSError('spawn failed')
         binaries = {'quivr-rss': pathlib.Path('/bin/true'), 'quivr-core-retrieve': pathlib.Path('/bin/true')}
         with mock.patch.object(local.connector_plugin, 'stop_first_party'), \
+                mock.patch.object(local.connector_plugin.ports, 'allocate', side_effect=[41001, 41002]), \
                 mock.patch.object(local.connector_plugin.go_bin_cache, 'ensure_many', return_value=binaries), \
                 mock.patch.object(local.connector_plugin.subprocess, 'Popen', side_effect=fake_popen):
             with self.assertRaisesRegex(OSError, 'spawn failed'):

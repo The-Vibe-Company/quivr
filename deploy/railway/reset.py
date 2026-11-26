@@ -27,7 +27,7 @@ CREATE = 'mutation($input:VolumeCreateInput!){volumeCreate(input:$input){id proj
 ATTACH = '''mutation($volumeId:String!,$environmentId:String!,$input:VolumeInstanceUpdateInput!){
  volumeInstanceUpdate(volumeId:$volumeId,environmentId:$environmentId,input:$input)}'''
 DELETE = 'mutation($volumeId:String!){volumeDelete(volumeId:$volumeId)}'
-MOUNTS = {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data', 'weaviate': '/var/lib/weaviate'}
+MOUNTS = {'postgres': '/data', 'seaweed': '/data', 'weaviate': '/var/lib/weaviate'}
 WRITERS = ('autoscaler', 'web', 'api', 'worker', 'worker-bulk')
 STARTING = ('QUEUED', 'WAITING', 'INITIALIZING', 'BUILDING', 'DEPLOYING')
 
@@ -107,8 +107,8 @@ class RailwayReset:
             raise RuntimeError('environment is outside the declared project')
         services = [e['node'] for e in project['services']['edges']]
         selectors = self.spec.get('services') or {s['name']: s['name'] for s in services}
-        allowed = set(MOUNTS) | set(WRITERS) | {'tei'}
-        if set(selectors) - allowed or not (set(MOUNTS) | {'api', 'worker'}) <= set(selectors):
+        allowed = set(MOUNTS) | set(WRITERS) | {'temporal', 'tei'}
+        if set(selectors) - allowed or not (set(MOUNTS) | {'temporal', 'api', 'worker'}) <= set(selectors):
             raise ValueError('declare every service using the supported installation roles')
         # An omitted service could keep writing or autoscaling while volumes change.
         for role, selector in selectors.items():
@@ -233,7 +233,7 @@ class RailwayReset:
     def reset(self):
         checkpoint = Checkpoint(self.checkpoint_path, self.spec)
         writers = [k for k in WRITERS if k in self.deployments]
-        dependencies = list(MOUNTS) + (['tei'] if 'tei' in self.deployments else [])
+        dependencies = list(MOUNTS) + ['temporal'] + (['tei'] if 'tei' in self.deployments else [])
         roles = writers + dependencies
         volume_sizes = {}
         role = 'installation'

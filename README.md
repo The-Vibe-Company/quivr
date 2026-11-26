@@ -32,8 +32,12 @@ created by the Quivr team.
   withdrawn document leaves search at once, and alerts that caught it are told.
 - **Plug in your own logic.** File formats, sources, embedding models, ranking and alert
   rules are plugins: small HTTP services you can replace, in any language.
+- **Audit access and changes.** List or export sensitive actions and permission refusals
+  by actor, and enable auditing for reads and searches through configuration.
 - **Let AI agents use it.** `quivr mcp` lets an agent search Quivr and quote what it
   finds, with the source of every passage.
+- **Use your own database.** Quivr runs with a non-superuser login on
+  [DBA-managed PostgreSQL 17](https://docs.quivr.thevibecompany.co/run-quivr/deploy#use-dba-managed-postgresql).
 
 ## How it works
 

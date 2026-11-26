@@ -74,7 +74,7 @@ ticket = "THE-1207"
 name = "railway-api"
 branch = "main"
 live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service api --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
-paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
+paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/prepare_query_encoder.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "third_party/query-encoder/**", "sdks/**", "plugins/**", "deploy/cpu/**", "deploy/modal/embedding_api.py", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
 timeout_minutes = 30
 requires_env = ["RAILWAY_LINK_DIR"]
 pause_on_failure = true
@@ -83,7 +83,7 @@ pause_on_failure = true
 name = "railway-worker"
 branch = "main"
 live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service worker --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
-paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
+paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/prepare_query_encoder.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "third_party/query-encoder/**", "sdks/**", "plugins/**", "deploy/cpu/**", "deploy/modal/embedding_api.py", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
 timeout_minutes = 30
 requires_env = ["RAILWAY_LINK_DIR"]
 pause_on_failure = true

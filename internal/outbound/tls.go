@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // TLS leaves protocol selection to the dependency when Enabled is omitted.
@@ -109,8 +110,26 @@ func (c TLS) ForURL(endpoint string) (*tls.Config, error) {
 // Transport clones the standard transport, retaining its proxy and dial policy.
 // HTTP clients use CheckRedirect to keep credentials on the dependency origin.
 func Transport(config *tls.Config) *http.Transport {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := cloneTransport(http.DefaultTransport.(*http.Transport))
 	transport.TLSClientConfig = config
+	return transport
+}
+
+// DefaultTransport tunes a copy of the standard HTTP pool and preserves
+// custom default RoundTrippers as installed.
+func DefaultTransport() http.RoundTripper {
+	base := http.DefaultTransport
+	if transport, ok := base.(*http.Transport); ok {
+		return cloneTransport(transport)
+	}
+	return base
+}
+
+func cloneTransport(base *http.Transport) *http.Transport {
+	transport := base.Clone()
+	transport.MaxIdleConns = 512
+	transport.MaxIdleConnsPerHost = 128
+	transport.IdleConnTimeout = 90 * time.Second
 	return transport
 }
 

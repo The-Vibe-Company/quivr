@@ -1,13 +1,33 @@
 {
   "$schema": "https://skillpack.app/schemas/companion-manifest.v2.schema.json",
   "name": "ship-pr-dev",
-  "version": "1.6.0",
+  "version": "1.6.2",
   "title": "Ship PR",
   "description": "Ship a verified PR from a branch or approved plan through one independent review, latest-SHA green CI and a report-only learning pass; never merge.",
-  "notes": "## What it does\n\nShip PR owns delivery from a local branch to a human-reviewable PR. The coordinator keeps architecture, Git, PR state, and final acceptance while bounded workers handle separable implementation, independent review, difficult CI diagnosis, and the final report-only learning pass.\n\n## Credit routing\n\n- Codex workers request gpt-5.6-luna with max effort and fresh self-contained context.\n- Claude Code workers request claude-sonnet-5, normally at high effort when supported.\n- OpenCode workers inherit the user's default model.\n- Trivial implementation stays inline; review uses one isolated primary with no review subagents.\n- Deterministic checks, Git, PR operations, and CI polling stay in the coordinator.\n\n## Review ownership\n\nRequires the review-code-dev v2 Alibaba delegation contract (tested with 2.0.0). The coordinator bootstraps OCR without additional LLM config, freezes scope and dispatches one isolated reviewer. Frontend and other focus areas stay in this review. Critical/high block readiness; medium requires a fix or explicit human acceptance. Coverage and source freshness must pass. No legacy specialist router or native fallback is assumed.\n\n## Readiness\n\nShip PR never merges and never reports success until local evidence is fresh, review blockers are resolved, every visible non-skipped latest-SHA CI item is green, and capture-learning-tools completed report-only.\n\n## Completion and persistence\n\nAttempt counts trigger reassessment rather than automatic abandonment. Continue scoped repairs when new evidence supports a useful next step; stop for concrete access, external-state, or human-decision blockers. Local-only requests end with locally verified work and an explicit remote-CI limitation. Inspired by Eric Provencher’s article: https://x.com/pvncher/status/2095991462416490862.",
+  "notes": "## What it does\n\nShip PR owns delivery from a local branch to a human-reviewable PR. The coordinator keeps architecture, Git, PR state, and final acceptance while bounded workers handle separable implementation, independent review, difficult CI diagnosis, and the final report-only learning pass.\n\n## Credit routing\n\n- Codex workers request gpt-5.6-luna with max effort and fresh self-contained context.\n- Claude Code workers request claude-sonnet-5, normally at high effort when supported.\n- OpenCode workers inherit the user's default model.\n- Trivial implementation stays inline; review uses one isolated primary with no review subagents.\n- Deterministic checks, Git, PR operations, and CI polling stay in the coordinator.\n\n## Review ownership\n\nRequires the review-code-dev v2 Alibaba delegation contract (tested with 2.2.0). The coordinator bootstraps OCR without additional LLM config, freezes scope and dispatches one isolated reviewer. Frontend and other focus areas stay in this review. Critical/high block readiness; medium requires a fix or explicit human acceptance. Coverage and source freshness must pass. No legacy specialist router or native fallback is assumed.\n\n## Readiness\n\nShip PR never merges and never reports success until local evidence is fresh, review blockers are resolved, every visible non-skipped latest-SHA CI item is green, and capture-learning-tools completed report-only.\n\n## Completion and persistence\n\nAttempt counts trigger reassessment rather than automatic abandonment. Continue scoped repairs when new evidence supports a useful next step; stop for concrete access, external-state, or human-decision blockers. Local-only requests end with locally verified work and an explicit remote-CI limitation. Inspired by Eric Provencher’s article: https://x.com/pvncher/status/2095991462416490862.",
   "metadata": {
     "companionSkillId": "bccb0c35-71bf-4fe8-ad7c-7a931889fa84",
+    "usage": {
+      "schemaVersion": 1,
+      "skillId": "bccb0c35-71bf-4fe8-ad7c-7a931889fa84",
+      "version": "1.6.2",
+      "origin": "https://skillpack.app"
+    },
     "changelog": [
+      {
+        "version": "1.6.2",
+        "date": "2026-11-18",
+        "changes": [
+          "Update the review gate for review-code-dev 2.2.0 and require matching delegate preview and rule scope flags."
+        ]
+      },
+      {
+        "version": "1.6.1",
+        "date": "2026-09-23",
+        "changes": [
+          "Replace model activation reporting with automatic Skillpack runtime collection."
+        ]
+      },
       {
         "version": "1.6.0",
         "date": "2026-09-23",

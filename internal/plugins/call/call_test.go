@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/call"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -25,14 +27,15 @@ import (
 func TestInvocationRefusesDiscoveryMismatch(t *testing.T) {
 	for _, mismatch := range []string{"digest", "version"} {
 		t.Run(mismatch, func(t *testing.T) {
-			posts := 0
+			var gets, posts atomic.Int32
 			pin := policyPin()
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
-					posts++
+					posts.Add(1)
 					_, _ = w.Write([]byte(`{}`))
 					return
 				}
+				gets.Add(1)
 				digest, version := pin.ManifestDigest, pin.Manifest.Version
 				if mismatch == "digest" {
 					digest = "sha256:" + strings.Repeat("0", 64)
@@ -45,9 +48,12 @@ func TestInvocationRefusesDiscoveryMismatch(t *testing.T) {
 			pin.Endpoint = server.URL
 			for _, operation := range operations {
 				_, err := call.Invoke(context.Background(), pin, operation, call.Bytes([]byte(`{}`)), nil, nil)
-				if err == nil || posts != 0 {
-					t.Fatalf("%s with %s mismatch: error %v, posts %d; want refusal and no POST", operation, mismatch, err, posts)
+				if err == nil || posts.Load() != 0 {
+					t.Fatalf("%s with %s mismatch: error %v, posts %d; want refusal and no POST", operation, mismatch, err, posts.Load())
 				}
+			}
+			if got := int(gets.Load()); got != len(operations) {
+				t.Fatalf("discovery requests after mismatch = %d, want %d", got, len(operations))
 			}
 		})
 	}
@@ -128,6 +134,7 @@ func TestInvocationOwnsDeadlineInsideOuterEnvelope(t *testing.T) {
 			t.Run("expiry/"+operation+"/"+phase, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					pin := policyPin()
+					pin.Endpoint = freshEndpoint()
 					parent, cancel := context.WithCancel(context.Background())
 					if phase == "outer deadline" {
 						parent, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -137,9 +144,8 @@ func TestInvocationOwnsDeadlineInsideOuterEnvelope(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					previous := http.DefaultTransport
-					defer func() { http.DefaultTransport = previous }()
-					http.DefaultTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
+					defer devhost.SetTransport(nil)
+					devhost.SetTransport(roundTrip(func(r *http.Request) (*http.Response, error) {
 						body := "{}"
 						if r.URL.Path == "/v0/discovery" {
 							if phase == "discovery" {
@@ -149,7 +155,7 @@ func TestInvocationOwnsDeadlineInsideOuterEnvelope(t *testing.T) {
 							body = string(discovery)
 						}
 						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
-					})
+					}))
 					_, err = call.Invoke(parent, pin, operation, func(ctx context.Context, _ string) ([]byte, error) {
 						if phase == "build" {
 							<-ctx.Done()

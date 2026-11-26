@@ -411,20 +411,18 @@ class Stack:
         else:
             fixture_plugin.stop(self)
         self.start_processes()
-    def start_dependencies(self,attempts=2):
+    def start_dependencies(self,*services,attempts=2,wait_timeout=180):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
         more bounded attempt; every retry is recorded in readiness.json, never hidden."""
-        if self.uses_tei():
-            services=()
-        else:
+        if not services and not self.uses_tei():
             # Switching an existing full stack to fast stops and removes any TEI container so it
             # neither consumes resources nor shows up as exited during retry checks.
             self.compose('rm','-s','-f','tei')
             services=CORE_SERVICES
         for attempt in range(1,attempts+1):
             try:
-                self.compose('up','-d','--wait','--wait-timeout','180',*services);return
+                self.compose('up','-d','--wait','--wait-timeout',str(wait_timeout),*services);return
             except subprocess.CalledProcessError as error:
                 crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',*services,capture_output=True,text=True).stdout.split()
                 self.readiness.setdefault('dependency_start_retries',[]).append({'attempt':attempt,'exited':crashed})
@@ -471,7 +469,7 @@ class Stack:
                 try: os.kill(pid,signal.SIGKILL)
                 except ProcessLookupError: pass
             s['pids']=[];self.save()
-            self.compose('start',dependency)
+            self.start_dependencies(dependency, wait_timeout=90)
             self.config()
             self.start_processes()
             replay=call('POST','/v0/records',command);assert replay['receipt_id']==rid

@@ -479,8 +479,14 @@ received and Match rollups every 200 ms and records query text (`timing_override
 | Worker | `quivr_delivery_pending`, `quivr_delivery_oldest_pending_age_seconds` (THE-656) | gauges |
 | Both | `quivr_plugin_calls_total{plugin,operation,outcome=succeeded\|failed}`, `quivr_plugin_call_duration_seconds{plugin,operation}` (THE-795) | counter, histogram |
 | API | `quivr_searches_total{mode,profile,outcome}`, `quivr_search_duration_seconds{mode,profile}` (THE-795) | counter, histogram |
+| API | `quivr_query_vector_cache_lookups_total{result=hit\|miss}`, `quivr_query_vector_cache_evictions_total` | counters |
 | Worker | `quivr_matches_created_total{evaluator}` (THE-798) | counter |
 | Both | `quivr_observability_flush_failures_total`, `quivr_observability_dropped_events_total` | counters |
+
+The query vector cache holds up to 4,096 entries within a 12 MiB per-process
+budget. A miss counts each caller that finds no completed vector, including
+callers that join an in-flight encoding. Divide hits by total lookups to
+calculate the hit rate.
 
 Logs are structured JSON with bounded fields:
 - `command accepted`: `request_id`, `receipt_id`, `record_id`.

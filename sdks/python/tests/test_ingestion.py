@@ -84,7 +84,11 @@ class Ingestion(unittest.TestCase):
                 typed_request = seen[0]
                 if path == SEGMENT:
                     self.assertIsInstance(typed_request, SegmentAndEmbedRequest)
-                    self.assertEqual(typed_request.parts[0].text, request["parts"][0]["text"])
+                    if request["parts"]:
+                        self.assertEqual(typed_request.parts[0].text, request["parts"][0]["text"])
+                    else:
+                        self.assertTrue(typed_request.blob_parts)
+                        self.assertEqual(typed_request.blob_parts[0].blob_id, request["blob_parts"][0]["blob_id"])
                 else:
                     self.assertIsInstance(typed_request, EmbedQueryRequest)
                     self.assertEqual(typed_request.space, request["space"])
@@ -133,6 +137,52 @@ class Ingestion(unittest.TestCase):
                 reply = self.invoke(SEGMENT, self.segment_request)
                 self.assertEqual(reply.status, 500, reply.body)
                 self.assertEqual(reply.body.get("code"), "invalid_response", reply.body)
+
+    def test_multimodal_blob_regions_and_pre_020_rejection(self):
+        # Pre-0.20 plugin must reject segments carrying region metadata.
+        @self.plugin.segment_and_embed
+        def segment_pre_020(_request):
+            return {"segments": [{
+                "part_key": "body", "start": 0, "end": 5,
+                "region": {"coordinate_system": "normalized_bbox", "x": 0, "y": 0, "width": 1, "height": 1},
+                "vectors": {"example.words.small": [1, 0, 0, 0]},
+            }]}
+
+        reply = self.invoke(SEGMENT, self.segment_request)
+        self.assertEqual((reply.status, reply.body.get("code")), (500, "invalid_response"), reply.body)
+
+        # 0.20 plugin accepts distinct normalized regions on a Blob Part and rejects duplicate/OOB regions.
+        mm_plugin = Plugin(REPO / "contracts/plugins/v0/fixtures/manifests/valid/ingestion-multimodal.yaml")
+        mm_req = json.loads((REPO / "contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-blob.json").read_text())
+
+        @mm_plugin.segment_and_embed
+        def segment_valid(_request):
+            return {"segments": [
+                {
+                    "part_key": "image", "start": 0, "end": 0,
+                    "region": {"coordinate_system": "normalized_bbox", "x": 0.0, "y": 0.0, "width": 0.5, "height": 0.5},
+                    "vectors": {"example.vision.image": [1, 0, 0, 0]},
+                },
+                {
+                    "part_key": "image", "start": 0, "end": 0,
+                    "region": {"coordinate_system": "normalized_bbox", "x": 0.5, "y": 0.0, "width": 0.5, "height": 0.5},
+                    "vectors": {"example.vision.image": [0, 1, 0, 0]},
+                },
+            ]}
+
+        ok_reply = mm_plugin.handle("POST", SEGMENT, json.dumps(mm_req).encode())
+        self.assertEqual(ok_reply.status, 200, ok_reply.body)
+
+        @mm_plugin.segment_and_embed
+        def segment_dup(_request):
+            r = {"coordinate_system": "normalized_bbox", "x": 0.0, "y": 0.0, "width": 0.5, "height": 0.5}
+            return {"segments": [
+                {"part_key": "image", "start": 0, "end": 0, "region": r, "vectors": {"example.vision.image": [1, 0, 0, 0]}},
+                {"part_key": "image", "start": 0, "end": 0, "region": r, "vectors": {"example.vision.image": [0, 1, 0, 0]}},
+            ]}
+
+        dup_reply = mm_plugin.handle("POST", SEGMENT, json.dumps(mm_req).encode())
+        self.assertEqual((dup_reply.status, dup_reply.body.get("code")), (500, "invalid_response"), dup_reply.body)
 
 
 if __name__ == "__main__":

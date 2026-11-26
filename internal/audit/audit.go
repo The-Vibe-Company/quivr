@@ -1,10 +1,11 @@
-// Package audit defines the durable trail of sensitive operator commands.
+// Package audit defines the durable trail of engine access and sensitive commands.
 package audit
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"time"
 )
 
@@ -12,7 +13,8 @@ import (
 type Event struct {
 	ID           int64     `json:"id"`
 	Time         time.Time `json:"time"`
-	Actor        string    `json:"actor"`
+	Actor        string    `json:"actor"` // API key ID, retained for older consumers.
+	ActorID      string    `json:"actor_id,omitempty"`
 	Action       string    `json:"action"`
 	TargetType   string    `json:"target_type"`
 	TargetID     string    `json:"target_id"`
@@ -26,6 +28,7 @@ var ErrReadOnly = errors.New("audited command was a read-only estimate")
 
 type Detail struct {
 	CredentialVersion int    `json:"credential_version,omitempty"`
+	Route             string `json:"route,omitempty"`
 	Status            int    `json:"status"`
 	ErrorCode         string `json:"error_code,omitempty"`
 	PlanID            string `json:"plan_id,omitempty"`
@@ -33,22 +36,30 @@ type Detail struct {
 type Filter struct {
 	Since, Until                        time.Time
 	Actor, Action, TargetType, TargetID string
+	ActorID                             string `json:"actor_id,omitempty"`
 	After                               int64
 	Limit                               int
 }
 
 // Store runs the command in the same transaction as its event. A refused
 // outcome rolls back command writes before committing the refusal event.
+// Append commits an event for an access attempt independently of any command.
 type Store interface {
 	Record(context.Context, *Event, func(context.Context) error) error
+	Append(context.Context, *Event) error
 	List(context.Context, string, Filter) ([]Event, error)
 }
 
+var actorIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// ValidActorID accepts the wire form of an opaque 128-bit identifier.
+func ValidActorID(id string) bool { return actorIDPattern.MatchString(id) }
+
 func Log(ctx context.Context, e Event) {
-	slog.InfoContext(ctx, "sensitive action", "event", "quivr.audit", "audit_id", e.ID,
-		"time", e.Time, "actor", e.Actor, "action", e.Action, "target_type", e.TargetType,
+	slog.InfoContext(ctx, "audit event", "event", "quivr.audit", "audit_id", e.ID,
+		"time", e.Time, "actor", e.Actor, "actor_id", e.ActorID, "api_key_id", e.Actor, "action", e.Action, "target_type", e.TargetType,
 		"target_id", e.TargetID, "organization", e.Organization, "outcome", e.Outcome,
-		"request_id", e.RequestID, "detail", e.Detail)
+		"request_id", e.RequestID, "correlation_id", e.RequestID, "detail", e.Detail)
 }
 
 type targetRecorderKey struct{}

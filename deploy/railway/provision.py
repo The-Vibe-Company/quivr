@@ -23,7 +23,7 @@ def load_services(profile='small', overrides=None):
         limits = shared.get('deploy', {}).get('resources', {}).get('limits')
         if limits:
             services[name]['limits'] = limits
-        if name == 'weaviate':
+        if name in ('temporal', 'weaviate'):
             services[name]['image'] = shared['image']
     return services
 
@@ -40,6 +40,9 @@ def deployment_config(spec, new):
         config['dockerfilePath'] = f"deploy/railway/{spec['dockerfile']}.Dockerfile"
         if spec['dockerfile'] == 'postgres':
             config['source'] = {'image': None}
+    elif 'image' in spec:
+        config['dockerfilePath'] = None
+        config['source'] = {'image': spec['image']}
     if 'healthcheck' in spec:
         config.update(healthcheckPath=spec['healthcheck'],
                       healthcheckTimeout=spec.get('healthcheck_timeout', 180))
@@ -120,6 +123,8 @@ def main():
         variables = dict(spec.get('variables', {}))
         if name == 'postgres':
             variables['POSTGRES_PASSWORD'] = values['database_password']
+        elif name == 'temporal':
+            variables['POSTGRES_PWD'] = values['database_password']
         elif name == 'seaweed':
             variables.update({k: common[k] for k in ['S3_ACCESS_KEY', 'S3_SECRET_KEY']})
         elif name in ('api', 'worker', 'worker-bulk'):

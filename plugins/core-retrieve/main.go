@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -53,6 +54,15 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			for _, space := range pending[:min(8, len(pending))] {
 				next := c
 				next.Space = space.ID
+				// Pure image cross-modal spaces (indexes includes "image" without "text"
+				// or legacy "hybrid") carry no lexical text in that space; query them by
+				// near_vector while preserving hybrid fusion for text and legacy spaces.
+				if next.Primitive == quivrplugin.PrimitiveHybrid && isImageOnlySpace(space.Indexes) {
+					next.Primitive = quivrplugin.PrimitiveNearVector
+					next.Field = ""
+					next.Alpha = nil
+					next.Fusion = ""
+				}
 				requests = append(requests, next)
 			}
 		}
@@ -140,6 +150,10 @@ func explain(c quivrplugin.CandidateRequest) string {
 		fusion = "ranked fusion (RRF)"
 	}
 	return fmt.Sprintf("keywords and vectors in %s, alpha %g, %s", c.Space, weight, fusion)
+}
+
+func isImageOnlySpace(indexes []string) bool {
+	return slices.Contains(indexes, "image") && !slices.Contains(indexes, "text") && !slices.Contains(indexes, "hybrid")
 }
 
 func main() {

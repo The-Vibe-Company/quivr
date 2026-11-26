@@ -497,14 +497,14 @@ CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM proje
 var hydrationFenceSQL = `
 WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT route.archived`
 
-var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),
- jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator')
+var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),coalesce(e.id,''),coalesce(e.space_id,''),
+ jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator','region',c.derivation->'region')
 ` + hydrationCandidatesSQL + `
-JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id FROM version_parts p
- WHERE (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
+LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id FROM version_parts p
+ WHERE c.derivation->'region' IS NULL AND (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
  ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
-JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
- WHERE (b.organization,b.blob_id)>=(c.organization,p.blob_id)
+LEFT JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
+ WHERE c.derivation->'region' IS NULL AND p.blob_id IS NOT NULL AND (b.organization,b.blob_id)>=(c.organization,p.blob_id)
  ORDER BY b.organization,b.blob_id LIMIT 1) b ON (b.organization,b.blob_id)=(c.organization,p.blob_id)
 LEFT JOIN LATERAL (SELECT ec.artifact_id AS id,ec.space_id FROM ` + embeddingCoverageForSegmentSQL("c.organization", "c.segment_id") + ` ec WHERE ec.generation_id=g.id AND ((c.evaluation_plugin='' AND ` + selectedVectorSpaceSQL("pc", "g", "v") + `=ec.space_id) OR (c.evaluation_plugin<>'' AND ec.space_id=c.evaluation_space))
   AND ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY ec.artifact_id LIMIT 1) e ON true

@@ -45,6 +45,9 @@ func migrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, includeContr
 	if err != nil {
 		return err
 	}
+	if err = CheckPrerequisites(ctx, pool, true); err != nil {
+		return err
+	}
 	// An up-to-date schema needs no lock: a deploy without new migrations
 	// starts even while another session holds the migration lock.
 	if pending, _, err := pendingMigrations(ctx, pool, names); err != nil || len(pending) == 0 {
@@ -85,13 +88,24 @@ func migrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, includeContr
 			return err
 		}
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
+			if permissionDenied(err) {
+				return &PrerequisiteError{fmt.Sprintf("PostgreSQL denied permission in migration %s. Ask the DBA to verify that the Quivr role owns its existing schema objects", name)}
+			}
 			return fmt.Errorf("migration %s failed: %w", name, err)
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations VALUES($1)", name); err != nil {
+			if permissionDenied(err) {
+				return &PrerequisiteError{ledgerInsertDenied}
+			}
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func permissionDenied(err error) bool {
+	var databaseError *pgconn.PgError
+	return errors.As(err, &databaseError) && databaseError.Code == "42501"
 }
 
 // schemaState returns the pending migrations of fsys and, when there are

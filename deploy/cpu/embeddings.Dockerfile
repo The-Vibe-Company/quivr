@@ -2,16 +2,28 @@
 # for python:3.12-slim-bookworm on 2026-10-30.
 FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 
+ARG QUIVR_QUERY_ENCODER_BACKEND=onnx
+
 WORKDIR /app
 
 # The runtime owns both offline model preparers. The cache wrapper selects one
 # model and writes installation-model.json only after its files verify.
+# Defaults to the lightweight quantized ONNX Runtime stack; set
+# QUIVR_QUERY_ENCODER_BACKEND=pytorch for the legacy PyTorch FP32 fallback.
 COPY third_party/query-encoder/requirements.txt /app/third_party/query-encoder/requirements.txt
-RUN python -m venv /opt/query-encoder/venv \
- && /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
-      --require-hashes -r /app/third_party/query-encoder/requirements.txt
-
+COPY third_party/query-encoder/requirements-pytorch.txt /app/third_party/query-encoder/requirements-pytorch.txt
 COPY third_party/query-encoder/model-lock.json /app/third_party/query-encoder/model-lock.json
+COPY third_party/query-encoder/model-lock-pytorch.json /app/third_party/query-encoder/model-lock-pytorch.json
+RUN python -m venv /opt/query-encoder/venv \
+ && case "$QUIVR_QUERY_ENCODER_BACKEND" in \
+      onnx) /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+              --only-binary=:all: --no-deps --require-hashes -r /app/third_party/query-encoder/requirements.txt ;; \
+      pytorch) /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+                 --require-hashes -r /app/third_party/query-encoder/requirements-pytorch.txt \
+               && cp /app/third_party/query-encoder/model-lock-pytorch.json /app/third_party/query-encoder/model-lock.json ;; \
+      *) echo 'QUIVR_QUERY_ENCODER_BACKEND must be onnx or pytorch' >&2; exit 1 ;; \
+    esac
+
 COPY third_party/e5/model-lock.json /app/third_party/e5/model-lock.json
 COPY third_party/query-encoder/NOTICE.md third_party/query-encoder/LICENSE.apache-2.0 /usr/share/quivr/notices/embeddinggemma/
 COPY scripts/prepare_query_encoder.py /app/scripts/prepare_query_encoder.py

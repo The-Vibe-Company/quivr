@@ -725,7 +725,9 @@ paths:
         Validate envelope structure/size first, then each entry independently against IngestCommand,
         including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request
         bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP
-        200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion
+        200 carries Receipt or Error per entry, with the same error codes as single submission.
+        If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries
+        still return their receipts or errors. Retry the affected entry using its original key. Same ingestion
         family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by
         an 8-second deadline for the whole batch, including envelope decoding and validation. Caller
         cancellation or an earlier caller deadline also applies. An entry that times out, and every
@@ -2867,10 +2869,10 @@ paths:
   /v0/admin/audit:
     get:
       operationId: listAuditEvents
-      description: List immutable sensitive-action entries for the API key's organization, newest first.
+      description: List immutable audit entries for the API key's organization, newest first.
         Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants;
         since is inclusive and until exclusive. Cursors bind organization, permissions and filters
-        including limit; reuse the same filters on later pages. Reads and searches are not audited.
+        including limit; reuse the same filters on later pages. Reads and searches appear when enabled by the operator.
       x-required-permissions:
       - audit:read
       parameters:
@@ -2886,6 +2888,10 @@ paths:
         in: query
         description: Exact API key identifier; no substring matching.
         schema: {type: string}
+      - name: actor_id
+        in: query
+        description: Exact opaque actor identifier.
+        schema: {type: string, pattern: '^[0-9a-f]{32}$'}
       - name: action
         in: query
         description: Exact audit action name; no substring matching.
@@ -2907,6 +2913,67 @@ paths:
       responses:
         '200':
           description: An organization-scoped page of audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+        default:
+          description: Structured error; 401 invalid API key, 403 without audit:read or with restricted
+            Corpus scope, 422 invalid_cursor, 422 invalid_schema or invalid_limit, 503 storage_unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v0/admin/audit/export:
+    get:
+      operationId: exportAuditEvents
+      description: Download an organization-scoped JSON page of audit entries, newest first.
+        Requires audit:read and organization-wide Corpus scope. Reuse the same filters and limit
+        with each export cursor to download subsequent pages. Export requests are audited.
+      x-required-permissions:
+      - audit:read
+      parameters:
+      - name: since
+        in: query
+        description: Inclusive RFC3339 timestamp.
+        schema: {type: string, format: date-time}
+      - name: until
+        in: query
+        description: Exclusive RFC3339 timestamp.
+        schema: {type: string, format: date-time}
+      - name: actor
+        in: query
+        description: Exact API key identifier; no substring matching.
+        schema: {type: string}
+      - name: actor_id
+        in: query
+        description: Exact opaque actor identifier.
+        schema: {type: string, pattern: '^[0-9a-f]{32}$'}
+      - name: action
+        in: query
+        description: Exact audit action name; no substring matching.
+        schema: {type: string}
+      - name: target_type
+        in: query
+        description: Exact target type; no substring matching.
+        schema: {type: string}
+      - name: target_id
+        in: query
+        description: Exact target identifier; no substring matching.
+        schema: {type: string}
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      - name: page_cursor
+        in: query
+        schema: {type: string}
+      responses:
+        '200':
+          description: An organization-scoped page of audit entries for download.
+          headers:
+            Content-Disposition:
+              description: Attachment filename for the exported page.
+              schema: {type: string}
           content:
             application/json:
               schema:
@@ -3937,6 +4004,15 @@ paths:
       responses:
         '200':
           description: Successful response
+          headers:
+            Server-Timing:
+              description: Time spent in each search phase, in milliseconds (routing, coverage, plugin, encode, index, hydrate).
+              schema:
+                type: string
+            X-Correlation-ID:
+              description: The caller's valid X-Correlation-ID, or the request ID when none was sent; carried into logs, audit events and traces.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -4100,7 +4176,10 @@ components:
       properties:
         id: {type: string, pattern: '^[1-9][0-9]*$', description: 'Decimal audit identifier, represented as text to preserve bigint precision.'}
         time: {type: string, format: date-time}
-        actor: {type: string, description: SHA-256-derived API key identifier; empty for unauthenticated attempts.}
+        actor: {type: string, description: Legacy field for the API key identifier; empty when no API key is authenticated.}
+        actor_id: {type: string, description: Opaque actor identifier. Omitted when no actor could be authenticated.}
+        api_key_id: {type: string, description: SHA-256-derived identifier of the authenticated API key.}
+        correlation_id: {type: string, description: Request correlation identifier from X-Request-ID.}
         action: {type: string}
         target_type: {type: string}
         target_id: {type: string, description: Target identifier; empty if refusal occurred before the target could be resolved.}
@@ -4113,6 +4192,7 @@ components:
           required: [status]
           properties:
             status: {type: integer, minimum: 100, maximum: 599}
+            route: {type: string, description: Registered HTTP route template or unmatched.}
             error_code: {type: string}
             plan_id: {type: string}
             credential_version: {type: integer, minimum: 1}
@@ -8448,6 +8528,8 @@ components:
             - coordinate_system
         availability:
           $ref: '#/components/schemas/Availability'
+        region:
+          $ref: '#/components/schemas/ImageRegion'
         explanation:
           type: string
           minLength: 1
@@ -8480,6 +8562,48 @@ components:
         not:
           required:
           - vector_space_id
+    ImageRegion:
+      type: object
+      additionalProperties: false
+      properties:
+        coordinate_system:
+          type: string
+          enum:
+          - normalized_bbox
+        x:
+          type: number
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          minimum: 0
+          maximum: 1
+        width:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        height:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        image_width:
+          type: integer
+          minimum: 1
+        image_height:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[^\x00]*$
+      required:
+      - coordinate_system
+      - x
+      - y
+      - width
+      - height
+      description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
     SearchResponse:
       type: object
       additionalProperties: false

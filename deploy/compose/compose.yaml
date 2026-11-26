@@ -42,17 +42,24 @@ services:
       timeout: 2s
       retries: 40
   temporal:
-    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
-    command: [server, start-dev, --ip, 0.0.0.0, --headless, --db-filename, /home/temporal/temporal.db]
+    extends: {file: ../infrastructure.json, service: temporal}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: quivr
+      POSTGRES_PWD: ${QUIVR_DB_PASSWORD:?}
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_BROADCAST_ADDRESS: 127.0.0.1
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
     ports:
       - "127.0.0.1::7233"
-    volumes:
-      - temporal-data:/home/temporal
     healthcheck:
-      test: [CMD, temporal, operator, cluster, health, --address, '127.0.0.1:7233']
+      test: [CMD-SHELL, 'temporal operator namespace describe --address 127.0.0.1:7233 --namespace "$${DEFAULT_NAMESPACE:-default}"']
       interval: 1s
       timeout: 2s
-      retries: 40
+      retries: 90
     logging:
       driver: json-file
       options: {max-size: 1m, max-file: '3'}
@@ -102,6 +109,5 @@ networks:
 
 volumes:
   data:
-  temporal-data:
   seaweed-data:
   weaviate-data:
