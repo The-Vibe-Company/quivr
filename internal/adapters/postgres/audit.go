@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/audit"
@@ -101,17 +102,26 @@ func appendAudit(ctx context.Context, db querier, e *audit.Event) error {
  VALUES($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9) RETURNING id,occurred_at`, e.Actor, e.ActorID, e.Action,
 		e.TargetType, e.TargetID, e.Organization, e.Outcome, e.RequestID, detail).Scan(&e.ID, &e.Time)
 }
+
+// The same expression indexes and selects the effective actor for both old
+// and new rows. Only rows without an explicit actor fall back to the key ID.
+const auditActorExpression = "COALESCE(actor_id, actor)"
+
 func (s AuditStore) List(ctx context.Context, org string, f audit.Filter) ([]audit.Event, error) {
 	if f.Limit < 1 || f.Limit > 201 {
 		return nil, errors.New("invalid audit limit")
 	}
-	query := `SELECT id,occurred_at,actor,COALESCE(actor_id,actor),action,target_type,target_id,organization,outcome,request_id,detail FROM audit_events
+	query := `SELECT id,occurred_at,actor,` + auditActorExpression + `,action,target_type,target_id,organization,outcome,request_id,detail FROM audit_events
  WHERE organization=$1 AND ($2::timestamptz IS NULL OR occurred_at >= $2) AND ($3::timestamptz IS NULL OR occurred_at < $3)
  AND ($4='' OR actor=$4) AND ($5='' OR action=$5) AND ($6='' OR target_type=$6) AND ($7='' OR target_id=$7)
- AND ($8::bigint=0 OR id<$8)`
-	args := []any{org, auditTime(f.Since), auditTime(f.Until), f.Actor, f.Action, f.TargetType, f.TargetID, f.After, f.Limit}
+ AND id <= $8`
+	pageEnd := int64(math.MaxInt64)
+	if f.After != 0 {
+		pageEnd = max(0, f.After) - 1
+	}
+	args := []any{org, auditTime(f.Since), auditTime(f.Until), f.Actor, f.Action, f.TargetType, f.TargetID, pageEnd, f.Limit}
 	if f.ActorID != "" {
-		query += ` AND COALESCE(actor_id,actor)=$10`
+		query += " AND " + auditActorExpression + "=$10"
 		args = append(args, f.ActorID)
 	}
 	rows, err := s.Pool.Query(ctx, query+` ORDER BY id DESC LIMIT $9`, args...)

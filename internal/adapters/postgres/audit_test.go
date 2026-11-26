@@ -2,8 +2,10 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // The storage owner proves request-wide atomicity over a single-statement
@@ -214,6 +217,10 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 	if err != nil || len(paged) != 1 || paged[0].ID != issued[0] {
 		t.Fatalf("actor next page: %+v (%v), want ID %d", paged, err, issued[0])
 	}
+	keyOnly, err := store.List(ctx, org, audit.Filter{ActorID: "key-1", Limit: 10})
+	if err != nil || len(keyOnly) != 0 {
+		t.Fatalf("configured actors matched by their API key ID: %+v (%v)", keyOnly, err)
+	}
 	legacy, err := store.List(ctx, org, audit.Filter{ActorID: "key-id", Action: "corpus.create", Limit: 10})
 	if err != nil || len(legacy) != 2 || legacy[0].ActorID != "key-id" {
 		t.Fatalf("legacy actor fallback: %+v (%v)", legacy, err)
@@ -303,4 +310,70 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// This plan test proves that both identity forms share an index lookup,
+// even when most rows carry the actor ID being searched as a key ID.
+func TestActorAuditPagesSeekEffectiveActorIndex(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	pool := rebuildAdapterPool(t, ctx)
+	org := fmt.Sprintf("actor-index-%d", time.Now().UnixNano())
+	const actorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
+	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO audit_events(actor,actor_id,action,target_type,target_id,organization,outcome,request_id,detail)
+ SELECT CASE WHEN i%2=0 OR i=1 THEN $2 ELSE 'other-key' END,
+        CASE WHEN i=2 THEN $2 WHEN i%2=0 THEN 'other-actor' END,
+        'http.read','http_route','',$1,'accepted','','{"status":200}'::jsonb
+ FROM generate_series(1,10000) AS i`, org, actorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "ANALYZE audit_events"); err != nil {
+		t.Fatal(err)
+	}
+
+	trace := &lastReadTrace{}
+	cfg := pool.Config().Copy()
+	cfg.ConnConfig.Tracer = trace
+	traced, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer traced.Close()
+	store := postgres.AuditStore{Pool: traced}
+	items, err := store.List(ctx, org, audit.Filter{ActorID: actorID, Limit: 2})
+	if err != nil || len(items) != 2 || items[0].ID <= items[1].ID ||
+		items[0].ActorID != actorID || items[1].ActorID != actorID {
+		t.Fatalf("want one explicit actor and one legacy actor in descending order, got %+v (%v)", items, err)
+	}
+
+	var raw []byte
+	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+trace.query.SQL, trace.query.Args...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var result []struct{ Plan readPlanNode }
+	if err := json.Unmarshal(raw, &result); err != nil || len(result) != 1 {
+		t.Fatalf("decode audit page plan: %s (%v)", raw, err)
+	}
+	scans := 0
+	var visit func(readPlanNode)
+	visit = func(plan readPlanNode) {
+		if plan.Relation == "audit_events" {
+			scans++
+			if plan.Index != "audit_events_by_actor_id" || !strings.Contains(plan.Condition, "organization =") ||
+				!strings.Contains(plan.Condition, "COALESCE(actor_id, actor)") ||
+				!strings.Contains(plan.Condition, "id <=") || plan.Rows != 2 || plan.Removed != 0 {
+				t.Errorf("audit lookup must seek both matches without scanning their neighbors: %+v", plan)
+			}
+		}
+		for _, child := range plan.Plans {
+			visit(child)
+		}
+	}
+	visit(result[0].Plan)
+	if scans != 1 {
+		t.Fatalf("want one effective actor index scan, got %d: %s", scans, raw)
+	}
 }

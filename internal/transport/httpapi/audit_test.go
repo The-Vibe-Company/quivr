@@ -152,7 +152,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		{"POST", "/v0/operations/operation_a/resume", "operation.resume", "operation", "operation_a"},
 		{"POST", "/v0/admin/backfills", "operation.backfill", "operation", ""},
 		{"POST", "/v0/admin/quarantine/reprocess", "operation.reprocess", "operation", ""},
-		{"POST", "/v0/admin/subscriptions/evaluator-migrations", "evaluation.migrate", "subscription", ""},
+		{"POST", "/v0/admin/subscriptions/evaluator-migrations", "evaluation.migrate", "evaluator_migration", ""},
 		{"POST", "/v0/admin/subscriptions/evaluation-retirements", "evaluation.retire", "evaluation_retirement", ""},
 		{"POST", "/v0/admin/spaces/space_a/promote", "vector_space.promote", "vector_space", "space_a"},
 	} {
@@ -390,6 +390,7 @@ func TestAuditAccessLevels(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		keyIDs := make(map[string]string)
 		for _, tc := range []struct {
 			method, path, key, body string
 			status                  int
@@ -436,6 +437,9 @@ func TestAuditAccessLevels(t *testing.T) {
 			} else if e.ActorID != actorID || e.Actor == "" || e.Actor == actorID || e.Organization != scope.Organization {
 				t.Fatalf("configured identity missing: %+v", e)
 			}
+			if e.Actor != "" {
+				keyIDs[tc.key] = e.Actor
+			}
 			if tc.path == "/v0/records/batch" && (e.Detail.Status != 404 || e.Outcome != "refused") {
 				t.Fatalf("batch entry refusal lost: %+v", e)
 			}
@@ -444,8 +448,55 @@ func TestAuditAccessLevels(t *testing.T) {
 		if err != nil || bytes.Contains(encoded, []byte(private)) || bytes.Contains(encoded, []byte("unrecognized-key")) {
 			t.Fatalf("audit carries a raw credential, query or URL parameter: %s (%v)", encoded, err)
 		}
-		if reads && sink.events[2].Actor == sink.events[len(sink.events)-1].Actor {
-			t.Fatal("key rotation changed no API key identity")
+		if reads && (keyIDs["first-key"] == "" || keyIDs["rotated-key"] == "" || keyIDs["first-key"] == keyIDs["rotated-key"]) {
+			t.Fatalf("actor should have distinct API key IDs across rotation: %v", keyIDs)
 		}
+	}
+}
+
+type auditEvaluatorMoves struct {
+	from monitoring.SubscriptionVersion
+}
+
+func (m auditEvaluatorMoves) PinningSubscriptions(context.Context, string, string, string, []string, string, int) ([]monitoring.Subscription, error) {
+	return []monitoring.Subscription{{ID: m.from.SubscriptionID, Current: m.from}}, nil
+}
+
+func (auditEvaluatorMoves) MoveEvaluator(_ context.Context, _ string, from monitoring.SubscriptionVersion, _ monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
+	from.VersionID = "version_after"
+	return from, nil
+}
+
+type auditEvaluator struct{ monitoring.EvaluationPort }
+
+func (auditEvaluator) Validate(map[string]any, map[string]any) error { return nil }
+
+func TestAuditEvaluatorMigrationIdentifiesVersionTransition(t *testing.T) {
+	sink := &auditSink{}
+	from := monitoring.SubscriptionVersion{SubscriptionID: "subscription_a", VersionID: "version_before",
+		SavedQueryID: "query_a", SavedQueryVersionID: "query_version_a",
+		Evaluator: monitoring.Evaluator{PluginID: "alert-rules", Version: "1.0.0"}}
+	service := monitoring.Service{
+		Moves:      auditEvaluatorMoves{from},
+		Store:      &definitions{versions: map[string]any{"query_a/query_version_a": monitoring.SavedQueryVersion{}}},
+		Evaluators: monitoring.Evaluators{"alert-rules@1.1.0": auditEvaluator{}},
+	}
+	keys := map[string]corpus.Scope{
+		"operator": {Organization: "org_a", Actions: []string{"plugins:admin"}, Corpora: []string{"*"}},
+	}
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey,
+		httpapi.WithAudit(sink), httpapi.WithMonitoring(service))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body := postRaw(t, handler, "/v0/admin/subscriptions/evaluator-migrations", "operator",
+		[]byte(`{"plugin_id":"alert-rules","from_version":"1.0.0","dry_run":false}`))
+	moved, _ := body["moved"].([]any)
+	if status != 200 || len(moved) != 1 || len(sink.events) != 1 {
+		t.Fatalf("evaluator migration returned %d, body=%v, events=%+v", status, body, sink.events)
+	}
+	if event := sink.events[0]; event.Action != "evaluation.migrate" || event.Outcome != "accepted" ||
+		event.TargetType != "evaluator_migration" || event.TargetID != "alert-rules@1.0.0->1.1.0" {
+		t.Fatalf("missing migration target: %+v", event)
 	}
 }

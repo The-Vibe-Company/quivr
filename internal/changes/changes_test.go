@@ -70,6 +70,8 @@ func TestResumeStateSurvivesServiceReadsAndV1RemainsNumeric(t *testing.T) {
 	}
 
 	v1 := service.Cursor(scope, "corpus", 7)
+	// Adding audit attribution to an existing key leaves its cursor valid.
+	scope.ActorID = "38e61a6d8a6f4849aca7b0f7dd7880d6"
 	legacy, err := service.Start(context.Background(), scope, "corpus", v1)
 	if err != nil || legacy.Position != 7 || legacy.StartID != "" {
 		t.Fatalf("v1 resume=%+v err=%v", legacy, err)

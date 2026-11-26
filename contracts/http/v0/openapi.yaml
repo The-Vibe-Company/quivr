@@ -725,7 +725,9 @@ paths:
         Validate envelope structure/size first, then each entry independently against IngestCommand,
         including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request
         bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP
-        200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion
+        200 carries Receipt or Error per entry, with the same error codes as single submission.
+        If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries
+        still return their receipts or errors. Retry the affected entry using its original key. Same ingestion
         family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by
         an 8-second deadline for the whole batch, including envelope decoding and validation. Caller
         cancellation or an earlier caller deadline also applies. An entry that times out, and every

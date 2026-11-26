@@ -65,7 +65,7 @@ var auditedRoutes = map[string]auditedRoute{
 	"POST /v0/operations/{operation_id}/resume":                   {"operation.resume", "operation", "operation_id"},
 	"POST /v0/admin/backfills":                                    {"operation.backfill", "operation", ""},
 	"POST /v0/admin/quarantine/reprocess":                         {"operation.reprocess", "operation", ""},
-	"POST " + evaluatorMigrationsPath:                             {"evaluation.migrate", "subscription", ""},
+	"POST " + evaluatorMigrationsPath:                             {"evaluation.migrate", "evaluator_migration", ""},
 	"POST /v0/admin/subscriptions/evaluation-retirements":         {"evaluation.retire", "evaluation_retirement", ""},
 	"POST /v0/admin/spaces/{vector_space_id}/promote":             {"vector_space.promote", "vector_space", "vector_space_id"},
 }
