@@ -23,6 +23,7 @@ import (
 	s3store "github.com/The-Vibe-Company/quivr/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
@@ -77,6 +78,7 @@ type Config struct {
 	ProbeListen             string                  `json:"probe_listen"`
 	CursorKey               string                  `json:"cursor_key"`
 	RetainImportAuditDetail bool                    `json:"retain_import_audit_detail"`
+	AuditReadAccess         bool                    `json:"audit_read_access"`
 	AuditRetentionMonths    int                     `json:"audit_retention_months"`
 	ChangeRetention         string                  `json:"change_retention"`
 	Keys                    map[string]corpus.Scope `json:"keys"`
@@ -401,6 +403,9 @@ func Run(command string, args ...string) error {
 		return err
 	}
 	for token, s := range cfg.Keys {
+		if s.ActorID != "" && !audit.ValidActorID(s.ActorID) {
+			return badConfig(configInvalid, "keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
+		}
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
 		}
@@ -950,7 +955,7 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore), httpapi.WithReadAudit(cfg.AuditReadAccess),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithLoadMetrics(loadMetrics), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
