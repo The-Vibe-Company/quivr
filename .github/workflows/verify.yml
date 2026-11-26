@@ -142,6 +142,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
     needs:
     - paths-filter
@@ -215,6 +216,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
   part:
     name: verify ${{ matrix.part }}
@@ -280,6 +282,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
     - if: always()
       run: python3 scripts/ci_summary.py "${{ steps.failure-artifact.outputs.artifact-url }}"
@@ -330,6 +333,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
     needs:
     - paths-filter
@@ -366,6 +370,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
     needs:
     - paths-filter
@@ -422,11 +427,11 @@ jobs:
         tags: quivr-scan:local
         build-args: |
           VERSION=dev
-          REVISION=${{ github.sha }}
+          REVISION=${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
           PLUGIN=${{ matrix.plugin }}
         labels: |
           org.opencontainers.image.version=dev
-          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.revision=${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
         cache-from: type=gha,scope=scan-${{ matrix.component || matrix.plugin || 'engine' }}
         # PRs read the default branch's layers without exporting their own.
         cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,scope=scan-{0}', matrix.component || matrix.plugin || 'engine') || '' }}
@@ -444,7 +449,7 @@ jobs:
     - name: Check hosted image token packing offline
       if: matrix.plugin == 'hosted-embed'
       env:
-        REVISION: ${{ github.sha }}
+        REVISION: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
       run: python3 scripts/image_smoke.py quivr-scan:local --plugin hosted-embed --plugin-id hosted.embed --version dev --revision "$REVISION"
     - uses: ./.github/actions/grype-database-restore
       with:
@@ -476,6 +481,7 @@ jobs:
         if-no-files-found: ignore
         retention-days: 3
         compression-level: 0
+        overwrite: true
       id: failure-artifact
     if: needs.paths-filter.outputs.has-images == 'true'
   single-machine:

@@ -58,7 +58,11 @@ def main():
     # The previous checkout installs its own locks, so it must not inherit the candidate's pip constraints.
     env = dict(os.environ)
     if 'PIP_CONSTRAINT' in env:
-        env['PIP_CONSTRAINT'] = str(source / 'scripts' / 'ci-constraints.txt')
+        constraints = source / 'scripts' / 'ci-constraints.txt'
+        if constraints.is_file():
+            env['PIP_CONSTRAINT'] = str(constraints)
+        else:
+            env.pop('PIP_CONSTRAINT', None)
     try:
         run([sys.executable, str(pathlib.Path(__file__).resolve()), '--previous-source', str(source), '--candidate', str(candidate), '--output', str(output)], cwd=source, env=env)
         report['result'] = 'passed'
@@ -111,10 +115,18 @@ def exercise(args):
         stack.tests(PATTERN)
         shutil.copyfile(stack.directory / 'acceptance.log', args.output / 'restarted-previous.log')
     finally:
-        stack.stop_processes()
-        stack.down(reset=True)
-        for log in stack.directory.glob('*-startup.log'):
-            shutil.copyfile(log, args.output / ('previous-'+log.name))
+        try:
+            for log in stack.directory.glob('*-startup.log'):
+                shutil.copyfile(log, args.output / ('previous-' + log.name))
+        finally:
+            try:
+                stack.down(reset=True)
+            except Exception:
+                try:
+                    stack.compose('down', '--volumes')
+                except Exception:
+                    pass
+                raise
 
 
 if __name__ == '__main__':

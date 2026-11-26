@@ -4,16 +4,81 @@
 
 const WINDOW = 500;
 
-/** `routing;dur=1.5, encode;dur=4` as { routing: 1.5, encode: 4 }. */
+/** Split `input` on unquoted `delimiter`, respecting W3C/RFC 9110 quoted strings and `\"` escapes. */
+function splitUnquoted(input, delimiter) {
+  const parts = [];
+  let start = 0;
+  let inQuotes = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inQuotes) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inQuotes = false;
+      continue;
+    }
+    if (ch === '"') inQuotes = true;
+    else if (ch === delimiter) {
+      parts.push(input.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(input.slice(start));
+  return parts;
+}
+
+/** Decode a token or quoted-string parameter value, returning null when malformed. */
+function parseParamValue(raw) {
+  const value = raw.trim();
+  if (!value.startsWith('"')) return value;
+  let out = "";
+  let escaped = false;
+  for (let i = 1; i < value.length; i++) {
+    const ch = value[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      return i === value.length - 1 ? out : null;
+    }
+    out += ch;
+  }
+  return null;
+}
+
+/** `routing;dur=1.5, encode;dur=4` as a null-prototype map { routing: 1.5, encode: 4 }. */
 export function parseServerTiming(header) {
-  const phases = {};
-  for (const metric of String(header || "").split(",")) {
-    const [name, ...params] = metric.trim().split(";");
-    const dur = params
-      .map((param) => param.trim().split("="))
-      .find(([key]) => key === "dur");
-    const ms = dur ? Number(dur[1]) : NaN;
-    if (name && Number.isFinite(ms) && ms >= 0) phases[name] = ms;
+  const phases = Object.create(null);
+  for (const metric of splitUnquoted(String(header || ""), ",")) {
+    const [rawName, ...params] = splitUnquoted(metric, ";");
+    const name = rawName.trim();
+    if (!name) continue;
+    let durRaw;
+    for (const param of params) {
+      const eq = param.indexOf("=");
+      if (eq === -1) continue;
+      if (param.slice(0, eq).trim().toLowerCase() === "dur") {
+        durRaw = param.slice(eq + 1);
+        break;
+      }
+    }
+    if (durRaw === undefined) continue;
+    const decoded = parseParamValue(durRaw);
+    if (decoded === null) continue;
+    const trimmed = decoded.trim();
+    if (!trimmed) continue;
+    const ms = Number(trimmed);
+    if (Number.isFinite(ms) && ms >= 0) phases[name] = ms;
   }
   return phases;
 }

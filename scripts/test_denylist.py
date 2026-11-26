@@ -48,6 +48,20 @@ class Findings(unittest.TestCase):
 
     def test_digest_normalizes_the_term(self):
         self.assertEqual(d.digest('  Acme-Widgets '), d.digest('acme widgets'))
+        self.assertEqual(d.digest('Zörblax'), d.digest('zorblax'))
+
+    def test_diacritics_adjacent_line_bigrams_and_long_camelcase_ids_match(self):
+        self.assertEqual(self.matches('Zörblax and Écme'), [(1, 'zorblax')])
+        self.assertEqual(self.matches('Acmé\nWídgets'), [(2, 'acme widgets')])
+        self.assertEqual(self.matches('Acme\n\nWidgets'), [])
+        self.assertEqual(
+            self.matches('Zorblax2026HandlerV2ServiceFactory2027Implementation'),
+            [(1, 'zorblax')],
+        )
+        self.assertEqual(
+            self.matches('AcmeWidgets2026HandlerV2ServiceFactory2027Impl'),
+            [(1, 'acme widgets')],
+        )
 
 
 class Repository(unittest.TestCase):

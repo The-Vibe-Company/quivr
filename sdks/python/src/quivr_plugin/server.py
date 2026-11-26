@@ -20,9 +20,11 @@ import json
 import logging
 import math
 import os
+import re
 import signal
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from .tracing import request_context
@@ -49,7 +51,7 @@ from .manifest import LoadedManifest, load_manifest
 from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SearchRequest, SearchResponse, SubscriptionRequest
 from .schema import protocol_errors
 from .subscription import SubscriptionInvocation, as_response, response_problems
-from .signing import verify
+from .signing import ENV_KEYS, verify
 from .api_versions import FEATURE_SINCE
 
 DISCOVERY_PATH = "/v0/discovery"
@@ -169,6 +171,90 @@ def _validate_positive_timeout(name: str, value: float | None) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive finite number or None")
     return float(value)
+
+
+_HEALTH_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MIN_SECRET_LENGTH = 4
+_REDACTED = "[redacted]"
+
+
+def _extract_json_string_values(raw: str) -> list[tuple[str, str]]:
+    """Scan JSON string literal values even in malformed JSON or duplicate keys."""
+    out: list[tuple[str, str]] = []
+    last_key = ""
+    i = 0
+    n = len(raw)
+    while i < n:
+        if raw[i] != '"':
+            i += 1
+            continue
+        start = i
+        i += 1
+        closed = False
+        while i < n:
+            if raw[i] == "\\":
+                i += 2
+                continue
+            if raw[i] == '"':
+                closed = True
+                break
+            i += 1
+        if closed:
+            lit = raw[start : i + 1]
+            try:
+                val = json.loads(lit)
+                if not isinstance(val, str):
+                    val = raw[start + 1 : i]
+            except ValueError:
+                val = raw[start + 1 : i]
+            i += 1
+        else:
+            val = raw[start + 1 :]
+        j = i
+        while j < n and raw[j] in " \t\r\n":
+            j += 1
+        if closed and j < n and raw[j] == ":":
+            last_key = val
+            continue
+        if val:
+            out.append((last_key, val))
+        last_key = ""
+    return out
+
+
+def _health_secrets(manifest: LoadedManifest) -> list[str]:
+    """Collect signing ring values and manifest-declared secrets for health redaction."""
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        if not value:
+            return
+        seen.add(value)
+        escaped = json.dumps(value)[1:-1]
+        if escaped and escaped != value:
+            seen.add(escaped)
+
+    ring = os.environ.get(ENV_KEYS, "")
+    if ring:
+        add(ring)
+        for key, value in _extract_json_string_values(ring):
+            if key == "secret" or len(value) >= _MIN_SECRET_LENGTH:
+                add(value)
+    for secret in manifest.model.secrets or ():
+        add(os.environ.get(secret.name, ""))
+    return sorted(seen, key=len, reverse=True)
+
+
+def _redact(text: str, secrets: list[str]) -> str:
+    for secret in secrets:
+        text = text.replace(secret, _REDACTED)
+    return text
+
+
+def _sanitize_health_code(code: Any, secrets: list[str]) -> str:
+    if not isinstance(code, str) or not _HEALTH_CODE.match(code) or _redact(code, secrets) != code:
+        return "unhealthy"
+    return code
 
 
 def _error(status: int, code: str, message: str, retryable: bool = False) -> Reply:
@@ -349,13 +435,31 @@ class Plugin:
             )
             return Reply(status, document)
         if path == HEALTH_PATH:
+            if self._health is None:
+                return Reply(200, Health().to_dict())
+            secrets = _health_secrets(self.manifest)
             try:
-                if self._health is not None:
-                    self._health()
+                self._health()
             except PluginError as exc:
-                return Reply(503, exc.envelope().to_dict())
+                env = exc.envelope().to_dict()
+                code = _sanitize_health_code(env.get("code"), secrets)
+                message = _redact(str(env.get("message", "")), secrets).strip() or code
+                if len(message) > 1024:
+                    message = message[:1023] + "…"
+                env["code"] = code
+                env["message"] = message
+                env["retryable"] = True
+                if "error_class" in env and env["error_class"] != "transient":
+                    if env.get("retry_after_seconds", 0) > 0:
+                        env["error_class"] = "transient"
+                    else:
+                        env.pop("error_class", None)
+                return Reply(503, env)
             except Exception:  # a failing check means not ready, never a dropped connection
-                log.exception("health check raised an unexpected exception")
+                log.error(
+                    "health check raised an unexpected exception\n%s",
+                    _redact(traceback.format_exc(), secrets),
+                )
                 return _error(503, "unhealthy", "the health check raised an unexpected exception; see the plugin logs", True)
             return Reply(200, Health().to_dict())
         if path == SUBSCRIPTION_PATH:
@@ -573,12 +677,19 @@ class Plugin:
                 if isinstance(self.server, _PluginHTTPServer) and self.server._draining.is_set():
                     reply = _error(503, "shutting_down", "the plugin server is shutting down", True)
                     self.close_connection = True
+                elif self.headers.get_all("Transfer-Encoding"):
+                    reply = _error(501, "not_implemented", "Transfer-Encoding is not supported")
+                    self.close_connection = True
+                elif len(content_lengths := self.headers.get_all("Content-Length", [])) > 1:
+                    reply = _error(400, "invalid_request", "duplicate Content-Length header")
+                    self.close_connection = True
                 else:
-                    raw_length = self.headers.get("Content-Length") or "0"
-                    try:
-                        length = int(raw_length)
-                    except ValueError:
-                        length = -1
+                    if content_lengths:
+                        raw_length = content_lengths[0].strip()
+                        length = int(raw_length) if raw_length.isascii() and raw_length.isdigit() else -1
+                    else:
+                        raw_length = "0"
+                        length = 0
                     if length < 0:
                         reply = _error(400, "invalid_request", f"invalid Content-Length {raw_length!r}")
                         self.close_connection = True
@@ -608,6 +719,7 @@ class Plugin:
                     self.send_header(MANIFEST_DIGEST_HEADER, plugin.manifest.digest)
                 if isinstance(self.server, _PluginHTTPServer) and self.server._draining.is_set():
                     self.close_connection = True
+                if self.close_connection:
                     self.send_header("Connection", "close")
                 self.end_headers()
                 if method != "HEAD":

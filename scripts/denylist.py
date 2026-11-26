@@ -18,6 +18,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DENYLIST = ROOT / 'scripts' / 'denylist.sha256'
@@ -36,18 +37,34 @@ _CHECKSUM = re.compile(r'(?:\bh1:|\bsha(?:1|256|384|512)-)[A-Za-z0-9+/]+=*')
 _BLOB = re.compile(r'''(?<![^\s"'`])[A-Za-z0-9+/]{40,}=*(?![^\s"'`,])''')
 
 
+_HEX_BLOB = re.compile(r'^(?:[0-9a-f]{40,}|[0-9A-F]{40,})$')
+
+
+def _fold(text):
+    """NFKD-fold diacritics to ASCII so accented variants match plain denylist entries."""
+    return ''.join(ch for ch in unicodedata.normalize('NFKD', text) if unicodedata.category(ch) != 'Mn')
+
+
+def _is_opaque_blob(value):
+    # Random hex/base64 checksums have many digits and either pure-hex alphabet
+    # or base64 punctuation/padding (+, /, =). Long CamelCase identifiers with
+    # years or version numbers stay out of _BLOB so they are still checked.
+    if len(re.findall(r'[0-9]', value)) < 4:
+        return False
+    return bool(_HEX_BLOB.match(value)) or any(ch in value for ch in '+/=')
+
+
 def _opaque(text):
     text = _CHECKSUM.sub(' ', text)
-    # Random base64 has many digits; long identifiers and paths rarely have four.
-    return _BLOB.sub(lambda m: ' ' if len(re.findall(r'[0-9]', m.group())) >= 4 else m.group(), text)
+    return _BLOB.sub(lambda m: ' ' if _is_opaque_blob(m.group()) else m.group(), text)
 
 
 def words(text):
-    return [word.lower() for word in _WORD.findall(text)]
+    return [word.lower() for word in _WORD.findall(_fold(text))]
 
 
 def tokens(text):
-    text = _opaque(text)
+    text = _opaque(_fold(text))
     for pattern, repl in _CASE:
         text = pattern.sub(repl, text)
     return words(text)
@@ -63,16 +80,28 @@ def load(path):
 
 
 def find_in_text(text, hashes):
+    prev_words_last = None
+    prev_tokens_last = None
     for number, line in enumerate(text.splitlines(), 1):
         seen = set()
-        # Check both "WordJoined" as one word and its case-split parts.
-        for split in (words(line), tokens(line)):
+        line_words = words(line)
+        line_tokens = tokens(line)
+        # Check both "WordJoined" as one word and its case-split parts,
+        # plus adjacent-line bigrams across a single newline.
+        for split, prev_last in ((line_words, prev_words_last), (line_tokens, prev_tokens_last)):
+            if prev_last is not None and split:
+                bigram = prev_last + ' ' + split[0]
+                if bigram not in seen and digest(bigram) in hashes:
+                    seen.add(bigram)
+                    yield number, bigram
             for size in range(1, MAX_WORDS + 1):
                 for start in range(len(split) - size + 1):
                     term = ' '.join(split[start:start + size])
                     if term not in seen and digest(term) in hashes:
                         seen.add(term)
                         yield number, term
+        prev_words_last = line_words[-1] if line_words else None
+        prev_tokens_last = line_tokens[-1] if line_tokens else None
 
 
 def files(root):

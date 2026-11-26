@@ -41,6 +41,11 @@ test-go:
 test-python:
 	$(CONFORMANCE_PYTHON) scripts/check.py --unittest conformance --module conformance.test_runner
 	python3 scripts/check.py --unittest scripts
+	@for dir in .agents/skills/*/scripts; do \
+		set -- "$$dir"/test_*.py; \
+		[ -f "$$1" ] || continue; \
+		python3 scripts/check.py --unittest "$$dir" || exit $$?; \
+	done
 test-eval:
 	python3 scripts/check.py --unittest scripts/eval --preload ranx $(if $(eval-shard),--shard $(eval-shard))
 test-sdk-python:

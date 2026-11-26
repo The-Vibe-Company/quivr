@@ -737,8 +737,10 @@ async function handle(req, res) {
         response = await adminFor(id).timeline(timeline[1]);
       else if (stats && req.method === "GET")
         response = await adminFor(id).stats(stats[1], url);
-      else if (path === "/demo/admin/search-phases" && req.method === "GET")
+      else if (path === "/demo/admin/search-phases" && req.method === "GET") {
+        await adminFor(id).authorize();
         response = { status: 200, data: searchPhases.summary() };
+      }
       else if (path === "/demo/admin/history" && req.method === "GET")
         response = { status: 200, data: await adminFor(id).history(url) };
       else if (path === "/demo/admin/plugins" && req.method === "GET")

@@ -11,7 +11,7 @@ MANIFEST = ROOT / 'internal/plugins/devhost/fakeplugin/scriptedsource/fixture.ya
 
 
 def binary(stack):
-    return go_bin_cache.ensure('fixture-plugin', stack.source, './tests/fakeplugin', go=GO)
+    return go_bin_cache.ensure('fixture-plugin', stack.source, './tests/fakeplugin', go=GO, env=plugin_environment.inherited())
 
 
 def pins(stack):

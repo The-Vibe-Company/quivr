@@ -39,7 +39,7 @@ def signing():
 
 
 def build(directory):
-    cached = go_bin_cache.ensure('quivr-hosted-embed', PLUGIN, '.', go=os.environ.get('GO', 'go'))
+    cached = go_bin_cache.ensure('quivr-hosted-embed', PLUGIN, '.', go=os.environ.get('GO', 'go'), env=plugin_environment.inherited())
     return go_bin_cache.materialize(cached, directory.resolve() / 'hosted-embed')
 
 

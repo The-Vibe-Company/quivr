@@ -69,7 +69,17 @@ class BenchClient:
             response = error
         with response:
             raw = response.read()
-            payload = json.loads(raw) if raw else {}
+            try:
+                payload = json.loads(raw) if raw else {}
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                snippet = raw[:160].decode("utf-8", errors="replace").strip()
+                if response.status not in expected_codes:
+                    raise RuntimeError(
+                        f"{method} {path} returned HTTP {response.status} (non-JSON body: {snippet!r})"
+                    ) from exc
+                raise RuntimeError(
+                    f"{method} {path} returned HTTP {response.status} with invalid JSON ({snippet!r})"
+                ) from exc
             if response.status not in expected_codes:
                 code = payload.get("code", "") if isinstance(payload, dict) else ""
                 raise RuntimeError(f"{method} {path} returned HTTP {response.status} ({code or raw[:160]!r})")
@@ -417,7 +427,7 @@ def _restart_local_api(stack) -> None:
 
 def _start_local_stack(stack_name: str | None) -> tuple[object, bool]:
     """Attach to an existing local stack or start a fresh isolated stack."""
-    from local import GO, Stack, run
+    from local import Stack
     import connector_plugin
 
     if stack_name:
@@ -435,10 +445,17 @@ def _start_local_stack(stack_name: str | None) -> tuple[object, bool]:
     from prepare_tokenizer import prepare as prepare_tokenizer
 
     stack = Stack("quivr-perf-bench-" + uuid.uuid4().hex[:10])
+    stack.state.update(
+        push_plugin=False,
+        fixture_plugin=False,
+        alerts_plugin=False,
+        subscription_template=False,
+    )
+    stack.save()
     connector_plugin.select_first_party(stack, connector_plugin.CORE)
     prepare_tokenizer()
     prepare_embeddings()
-    run([GO, "build", "-o", str(stack.directory / "quivr"), "./cmd/quivr"])
+    stack.build_quivr()
     stack.compose("pull", "--quiet")
     stack.compose("up", "-d", "--wait", "--wait-timeout", "300")
     stack.migrate()

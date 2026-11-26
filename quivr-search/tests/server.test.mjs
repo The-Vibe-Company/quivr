@@ -952,6 +952,7 @@ test("the Veille feed and Admin routes need the demo session", async (t) => {
     "/demo/admin/stream",
     "/demo/admin/documents/v/timeline",
     "/demo/admin/stats/steps",
+    "/demo/admin/search-phases",
     "/demo/admin/history",
     "/demo/sources/logo/connector_any",
   ])
@@ -988,6 +989,9 @@ test("the Veille feed and the Admin tab explain a key without access", async (t)
   const admin = await fetch(base + "/demo/admin");
   assert.equal(admin.status, 403);
   assert.match((await admin.json()).message, /observability:read/);
+  const phases = await fetch(base + "/demo/admin/search-phases");
+  assert.equal(phases.status, 403);
+  assert.match((await phases.json()).message, /observability:read/);
 });
 
 test("the Admin tab relays the demo corpus's documents live, fences timelines and stays read-only", async (t) => {

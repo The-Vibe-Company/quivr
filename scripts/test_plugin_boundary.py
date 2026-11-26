@@ -47,6 +47,30 @@ class PluginBoundaryTest(unittest.TestCase):
         result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_semicolon_backtick_quoted_replace_rhs_and_gowork_are_caught(self):
+        root = self.tree({
+            "go.mod": "module github.com/The-Vibe-Company/quivr\n",
+            "plugins/semi/main.go": f'package main; import "{INTERNAL}/auth"\n',
+            "plugins/raw/main.go": f"package main\n\nimport `{INTERNAL}/search`\n",
+            "plugins/rawblock/main.go": f"package main\n\nimport (\n\t_ `{INTERNAL}/ingest`\n)\n",
+            "plugins/quoted/go.mod": 'module example.com/quoted\n\nrequire "github.com/The-Vibe-Company/quivr" v0.0.0\n',
+            "plugins/rhs/go.mod": 'module example.com/rhs\n\nreplace example.com/alias => "github.com/The-Vibe-Company/quivr" v0.0.0\n',
+            "plugins/rhsdir/go.mod": "module example.com/rhsdir\n\nreplace example.com/alias => ../..\n",
+            "plugins/work/go.work": "go 1.24\n\nuse (\n\t../..\n)\n",
+        })
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        for expected in (
+            f"plugins/semi/main.go: imports {INTERNAL}/auth",
+            f"plugins/raw/main.go: imports {INTERNAL}/search",
+            f"plugins/rawblock/main.go: imports {INTERNAL}/ingest",
+            "plugins/quoted/go.mod: requires or replaces the engine module",
+            "plugins/rhs/go.mod: requires or replaces the engine module",
+            "plugins/rhsdir/go.mod: requires or replaces the engine module",
+            "plugins/work/go.work: uses or replaces the engine module",
+        ):
+            self.assertIn(expected, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

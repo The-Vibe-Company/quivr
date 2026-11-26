@@ -235,7 +235,7 @@ def pins(stack):
 
 
 def binary(stack):
-    return go_bin_cache.ensure('static-source', stack.source / 'sdks' / 'go', './examples/static-source', go=GO)
+    return go_bin_cache.ensure('static-source', stack.source / 'sdks' / 'go', './examples/static-source', go=GO, env=plugin_environment.inherited())
 
 
 def healthy(stack):
