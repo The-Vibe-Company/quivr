@@ -54,8 +54,11 @@ type rebuildProjection struct {
 	fakeProjection
 	missing      map[string]bool
 	keywordScore float64
+	tenantRanks  bool
 	err          error
 }
+
+func (p *rebuildProjection) UsesRouteRankFusion([]retrieval.Route) bool { return p.tenantRanks }
 
 func (p *rebuildProjection) Search(_ context.Context, routes []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
 	p.searched = append(p.searched, q)
@@ -81,7 +84,12 @@ func (p *rebuildProjection) Search(_ context.Context, routes []retrieval.Route, 
 			}
 			out = append(out, content.Candidate{SegmentID: segment, GenerationID: r.Generation.ID, Score: score})
 		} else {
-			out = append(out, content.Candidate{SegmentID: "vec-healthy", GenerationID: r.Generation.ID, Score: 2})
+			out = append(out, content.Candidate{SegmentID: "vec-" + r.CorpusID, GenerationID: r.Generation.ID, Score: 2})
+		}
+	}
+	if q.RankAcrossRoutes {
+		for i := range out {
+			out[i].Score = 1. / 61
 		}
 	}
 	return out, nil
@@ -104,6 +112,7 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 		evaluation   bool
 		everySpace   bool
 		keywordScore float64
+		tenantRanks  bool
 		twoSpaces    bool
 		otherFilter  bool
 		indexErr     error
@@ -122,6 +131,7 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 		{name: "other served model clears transient keyword fallback", ids: []string{"healthy", "rebuilding"}, populated: true, everySpace: true},
 		{name: "evaluation vectors remain outside normal hybrid", ids: []string{"healthy", "rebuilding"}, populated: true, evaluation: true},
 		{name: "incomparable keyword score scale", ids: []string{"healthy", "rebuilding"}, keywordScore: 1000},
+		{name: "native route ranks survive lexical fallback", ids: []string{"healthy", "healthy-neighbor", "rebuilding"}, tenantRanks: true},
 		{name: "two healthy spaces share one keyword query", ids: []string{"healthy", "rebuilding"}, twoSpaces: true},
 		{name: "distinct source filters keep distinct keyword queries", ids: []string{"healthy", "rebuilding"}, twoSpaces: true, otherFilter: true},
 		{name: "shared space", ids: []string{"healthy", "rebuilding"}, sameSpace: true},
@@ -138,6 +148,9 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 			routes := spaceRouting{
 				"healthy":    pluginGeneration("healthy-generation", true, "space"),
 				"rebuilding": pluginGeneration("rebuilt-generation", true, "example.small@1"),
+			}
+			if tc.tenantRanks {
+				routes["healthy-neighbor"] = pluginGeneration("healthy-neighbor-generation", true, "space")
 			}
 			if tc.sameSpace {
 				routes["rebuilding"] = pluginGeneration("rebuilt-generation", true, "space")
@@ -156,7 +169,7 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 			if tc.stale || tc.populated {
 				delete(missing, "rebuilding")
 			}
-			projection := &rebuildProjection{missing: missing, keywordScore: tc.keywordScore, err: tc.indexErr}
+			projection := &rebuildProjection{missing: missing, keywordScore: tc.keywordScore, tenantRanks: tc.tenantRanks, err: tc.indexErr}
 			s := service(&projection.fakeProjection, &fakeEmbeddings{})
 			s.Projection = projection
 			s.Routing = routes
@@ -203,7 +216,7 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 				t.Fatalf("hits %v; want rebuilt corpus keywords and healthy corpus vectors", found)
 			}
 			var degraded []retrieval.Degradation
-			if tc.mode != "lexical" && !tc.stale && !tc.empty && !tc.everySpace && (len(ids) == 2 || ids[0] == "rebuilding") {
+			if tc.mode != "lexical" && !tc.stale && !tc.empty && !tc.everySpace && (len(ids) > 1 || ids[0] == "rebuilding") {
 				degraded = []retrieval.Degradation{{Reason: "vectors_unavailable", CorpusIDs: []string{"rebuilding"}}}
 			}
 			if !reflect.DeepEqual(result.Degraded, degraded) {
@@ -214,6 +227,13 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 				// score scales must not decide the cross-partition ranking.
 				if result.Hits[0].Score != result.Hits[1].Score {
 					t.Fatalf("best keyword and hybrid candidates have incomparable scores %g and %g", result.Hits[0].Score, result.Hits[1].Score)
+				}
+			}
+			if tc.tenantRanks {
+				for _, h := range result.Hits {
+					if h.Score != 1./61 {
+						t.Fatalf("per-corpus rank one was changed across the fallback merge: %+v", result.Hits)
+					}
 				}
 			}
 			if tc.twoSpaces {

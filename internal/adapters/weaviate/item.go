@@ -180,8 +180,8 @@ func (s *Store) searchRows(ctx context.Context, collection string, branch search
 	if s.grpc != nil {
 		return s.grpcSearchRows(ctx, collection, branch, where, order, limit, fields, responseLimit, item)
 	}
-	query := fmt.Sprintf("{Get{%s(%s%swhere:%s,limit:%d){%s _additional{score distance}}}}",
-		collection, branch.graphql(), order.graphql(), where, limit, strings.Join(fields, " "))
+	query := fmt.Sprintf("{Get{%s(%s%s%s%slimit:%d){%s _additional{score distance}}}}",
+		collection, tenantArgument(ctx), branch.graphql(), order.graphql(), where.graphql(), limit, strings.Join(fields, " "))
 	var out struct {
 		Data struct {
 			Get map[string][]itemRow `json:"Get"`
@@ -245,7 +245,10 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		if err = s.ensureMetadata(ctx, r.Generation); err != nil {
 			return filter{}, err
 		}
-		values := []filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
+		var values []filter
+		if tenantFrom(ctx) == "" {
+			values = append(values, equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID))
+		}
 		if kind != "item" {
 			values = append(values, projectionOwnerFilter(r.Generation, q.EvaluationPlugin))
 		}
@@ -265,7 +268,10 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 	} else if kind == "passage" {
 		kinds = or(kinds, equal(itemKind, segmentKind))
 	}
-	all := []filter{equal("organization", scope.Organization), kinds, or(clauses...)}
+	all := []filter{kinds, or(clauses...)}
+	if tenantFrom(ctx) == "" {
+		all = append([]filter{equal("organization", scope.Organization)}, all...)
+	}
 	if len(q.SourceNamespaces) > 0 {
 		var namespaces []filter
 		for _, v := range q.SourceNamespaces {
@@ -616,7 +622,11 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 	})
 	ids := make([]filter, 0, len(rows))
 	for _, row := range rows {
-		ids = append(ids, and(equal("generationId", row.GenerationID), equal("segmentId", row.SegmentID)))
+		id := equal("segmentId", row.SegmentID)
+		if tenantFrom(ctx) == "" {
+			id = and(equal("generationId", row.GenerationID), id)
+		}
+		ids = append(ids, id)
 	}
 	// Reserve room for the seed and replacement of a segment during a swap.
 	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, or(ids...)), passageOrder, 2*len(ids), true, true)
@@ -1082,7 +1092,7 @@ func fuseItems(sparse, dense map[string]content.Candidate, alpha float64, fusion
 // together: by recipe (item keywords or passages) and, for a vector search,
 // by the named vector that stores the space, which differs between
 // generations built with different index settings.
-func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+func (s *Store) searchCollection(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("projection route missing")
 	}

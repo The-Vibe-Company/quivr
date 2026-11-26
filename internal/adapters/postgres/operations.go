@@ -128,7 +128,7 @@ func (s OperationStore) acceptCommandAttempt(ctx context.Context, org, kind, cor
 		}
 	}
 	id = content.StableID("operation", org, kind, corpusID, key)
-	op, err := insertOperation(ctx, tx, org, id, kind, corpusID, key, canonical, "", target)
+	op, err := insertOperation(ctx, tx, org, id, kind, corpusID, key, canonical, "", s.RebuildCollection, target)
 	if err != nil {
 		return op, err
 	}
@@ -176,7 +176,7 @@ type pin struct {
 // insertOperation commits a queued Operation with its own new logical target
 // generation, dispatch intent and journal event. A nil pin builds the target
 // with the Corpus's currently effective retrieval configuration.
-func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, key string, canonical []byte, previous string, target *pin) (operations.Operation, error) {
+func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, key string, canonical []byte, previous, rebuildCollection string, target *pin) (operations.Operation, error) {
 	if kind != operations.KindProjectionRebuild && kind != operations.KindRetrievalConfiguration {
 		// Other kinds must define their own target before they become controllable.
 		return operations.Operation{}, operations.ErrUnsupportedKind
@@ -187,16 +187,17 @@ func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, ke
 	if target != nil {
 		retrieval, version = target.Retrieval, &target.Version
 	}
-	// The target is a new logical generation in the default generation's shared
-	// physical collection and pinned profile. It carries the registry's served
+	// An explicit rebuild can move to the current physical layout. A
+	// retrieval configuration change uses the Corpus's recorded layout.
+	// The new generation carries the registry's served
 	// and evaluation spaces (the default's space when nothing is registered),
 	// each as a named vector. Every object it gets is written with its Source
 	// Namespace, so it is projected for filtering.
 	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,retrieval,retrieval_version,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
-SELECT $1,d.collection,d.profile_version,false,COALESCE(`+servedSpaceSQL+`,d.space_id),$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version),true,
+SELECT $1,CASE WHEN $6='' THEN d.collection WHEN $7 THEN $6 ELSE r.collection END,d.profile_version,false,COALESCE(`+servedSpaceSQL+`,d.space_id),$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version),true,
  COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine'))),true,true,true
 FROM `+effectiveGenerationsSQL+` d, projection_generations r, corpora c
-WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL("$2", "$3"), generation, org, corpusID, retrieval, version)
+WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL("$2", "$3"), generation, org, corpusID, retrieval, version, rebuildCollection, kind == operations.KindProjectionRebuild)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -376,7 +377,7 @@ func (s OperationStore) acceptRerunAttempt(ctx context.Context, org, sourceID, k
 			return operations.Operation{}, err
 		}
 	}
-	op, err := insertOperation(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.Kind, source.CorpusID, key, canonical, sourceID, target)
+	op, err := insertOperation(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.Kind, source.CorpusID, key, canonical, sourceID, s.RebuildCollection, target)
 	if err != nil {
 		return op, err
 	}
@@ -500,4 +501,7 @@ func (s OperationStore) controlAttempt(ctx context.Context, org, id string, next
 }
 
 // OperationStore persists operation commands and lifecycle control.
-type OperationStore struct{ Pool *pgxpool.Pool }
+type OperationStore struct {
+	Pool              *pgxpool.Pool
+	RebuildCollection string
+}

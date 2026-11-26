@@ -11,8 +11,11 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +60,46 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := corpus.Scope{Organization: "relevance-fixture", Corpora: []string{"fixture"}}
+	// Production item BM25 and unified segment projections in an isolated
+	// mono-tenant baseline and a native tenant, with identical documents.
+	org := "relevance-item-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	mono, native := g, g
+	mono.Collection, native.Collection = "QuivrRelevanceItems"+strings.TrimPrefix(org, "relevance-item-"), weaviate.InitialCollection
+	mono.ItemKeywordsProjected, native.ItemKeywordsProjected = true, true
+	if err := projection.Bootstrap(ctx, mono.Collection); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		req, err := http.NewRequestWithContext(cleanup, http.MethodDelete, projection.Endpoint+"/v1/schema/"+mono.Collection, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		reply, err := projection.Client.Do(req)
+		if err != nil {
+			t.Errorf("remove fixture collection %s: %v", mono.Collection, err)
+			return
+		}
+		defer reply.Body.Close()
+		if reply.StatusCode != http.StatusOK && reply.StatusCode != http.StatusNoContent {
+			t.Errorf("remove fixture collection %s: HTTP %d", mono.Collection, reply.StatusCode)
+		}
+	}()
+	if err := projection.Bootstrap(ctx, native.Collection); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.EnsureGeneration(ctx, native.Collection, org, "fixture", native.ID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if r, err := projection.PurgeGeneration(cleanup, native.Collection, org, "fixture", native.ID); err != nil || !r.Complete {
+			t.Errorf("remove fixture tenant %s: %+v (%v)", org, r, err)
+		}
+	}()
 	var rows [][]string
 	if err = json.Unmarshal(fixture, &rows); err != nil {
 		t.Fatal(err)
@@ -80,9 +123,18 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw, _ := content.VectorBytes(vector)
-		e := content.Embedding{Organization: scope.Organization, SegmentID: p.ID, SpaceID: g.SpaceID, Payload: content.Blob{SHA256: content.Hash(raw)}}
+		e := content.Embedding{Organization: scope.Organization, CorpusID: "fixture", SegmentID: p.ID, SpaceID: g.SpaceID, Payload: content.Blob{SHA256: content.Hash(raw)}}
 		if err = projection.PublishEmbeddings(ctx, g, scope.Organization, []content.EmbeddingData{{Artifact: e, Vector: vector}}); err != nil {
 			t.Fatal(err)
+		}
+		e.Organization = org
+		for _, item := range []content.Generation{mono, native} {
+			if err := projection.Publish(ctx, item, org, "fixture", "example-feed", v, seg); err != nil {
+				t.Fatal(err)
+			}
+			if err := projection.PublishEmbeddings(ctx, item, org, []content.EmbeddingData{{Artifact: e, Vector: vector}}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	report := map[string]any{"fixture": "original CC0 FR/EN v1; 24 queries, one relevant document each", "fixture_sha256": content.Hash(fixture), "scope": "real TEI/Weaviate adapters with explicit title/body in a fixture-only collection (BM25 statistics isolated); public ingestion remains inline body until THE-648", "profile": retrieval.ProfileVersion, "space_id": model.Space().ID, "producer": model.Producer(), "known_limitation": "THE-641: prior semantic MRR@10 .9583/Recall@3 1; hybrid .7969/.9583. Report separately, never tune to fixture."}
@@ -106,6 +158,16 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 			hits, err := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: g}}, scope, q)
 			if err != nil {
 				t.Fatal(err)
+			}
+			itemQuery := q
+			itemQuery.GroupBy, itemQuery.K = "record", 10
+			itemScope := corpus.Scope{Organization: org, Corpora: []string{"fixture"}}
+			baseline, baselineErr := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: mono}}, itemScope, itemQuery)
+			tenant, tenantErr := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: native}}, itemScope, itemQuery)
+			if baselineErr != nil || tenantErr != nil || len(baseline) == 0 || !slices.EqualFunc(baseline, tenant, func(a, b content.Candidate) bool {
+				return a.SegmentID == b.SegmentID && a.VersionID == b.VersionID && math.Abs(a.Score-b.Score) <= 1e-6
+			}) {
+				t.Fatalf("%s %s item parity: legacy %v (%v), tenant %v (%v)", mode, r[0], baseline, baselineErr, tenant, tenantErr)
 			}
 			rank := 0
 			ids := []string{}
@@ -133,6 +195,7 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 			t.Error("semantic smoke baseline regressed")
 		}
 	}
+	t.Log("native and monolithic item ranking and scores matched for all 24 queries in all three modes")
 	out, _ := json.MarshalIndent(report, "", "  ")
 	if err = os.WriteFile(filepath.Join(filepath.Dir(path), "relevance-report.json"), out, 0600); err != nil {
 		t.Fatal(err)

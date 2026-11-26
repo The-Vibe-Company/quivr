@@ -24,7 +24,8 @@ created by the Quivr team.
 - **Collect content** you send one by one or in batches, or that Quivr pulls from
   sources on a schedule. Files such as PDFs are read by plugins.
 - **Search** by keywords, by meaning, or both. Every result points to the exact passage,
-  document and version it comes from, so you can always cite it.
+  document and version it comes from, so you can always cite it. Search up to 16
+  corpora together. New corpora have their own partitions in the search index.
 - **Follow a topic.** Save an alert such as `"harbour strike" AND (ferry OR port)`, or a
   plain-language description, and Quivr records every new document that matches, with
   the reason. Your application reads the matches or receives them as signed webhooks.

@@ -5,11 +5,12 @@ import (
 	"errors"
 
 	"fmt"
-	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"io"
 	"log/slog"
 	"sync/atomic"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
 // Purge kinds: an abandoned (Organization, Corpus, generation) triple, or a
@@ -33,13 +34,14 @@ const (
 // PurgeItem is one claimed purge. Collections name the physical collections
 // its objects may live in.
 type PurgeItem struct {
-	Organization string
-	Kind         string
-	CorpusID     string
-	GenerationID string
-	VersionID    string
-	Collections  []string
-	NoticedAt    time.Time
+	Organization  string
+	Kind          string
+	CorpusID      string
+	GenerationID  string
+	VersionID     string
+	Collections   []string
+	VersionRoutes []Route
+	NoticedAt     time.Time
 }
 
 // PurgeResult is the outcome of one bounded delete-by-filter. Complete means
@@ -58,6 +60,9 @@ type PurgeStore interface {
 	NoticePurges(ctx context.Context, limit int) (int, error)
 	// ClaimPurges leases up to limit unpurged items noticed before now-grace.
 	ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]PurgeItem, error)
+	// WithTenantVersionPurge serializes tenant maintenance with archive and
+	// unarchive, passing the current temperature to restore afterward.
+	WithTenantVersionPurge(ctx context.Context, org, corpusID string, purge func(archived bool) (PurgeResult, error)) (PurgeResult, error)
 	// RecordPurge adds deleted objects to the item's record and releases its
 	// lease; complete marks it purged so it is never claimed again.
 	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool, limit int) (bool, error)
@@ -67,6 +72,7 @@ type PurgeStore interface {
 type PurgeProjection interface {
 	PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (PurgeResult, error)
 	PurgeVersion(ctx context.Context, collection, org, versionID string) (PurgeResult, error)
+	PurgeVersionInGeneration(ctx context.Context, collection, org, corpusID, generationID, versionID string, archived bool) (PurgeResult, error)
 }
 
 // PurgeMetrics counts completed purges and deleted objects per kind.
@@ -177,31 +183,44 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		if ctx.Err() != nil {
 			return completed, errors.Join(failure, ctx.Err())
 		}
+		var itemErr error
 		deleted, complete, remaining := 0, true, 0
 		for _, collection := range item.Collections {
-			if err = ctx.Err(); err != nil {
+			if itemErr = ctx.Err(); itemErr != nil {
 				break
 			}
 			var r PurgeResult
 			if item.Kind == PurgeGeneration {
-				r, err = p.Projection.PurgeGeneration(ctx, collection, item.Organization, item.CorpusID, item.GenerationID)
+				r, itemErr = p.Projection.PurgeGeneration(ctx, collection, item.Organization, item.CorpusID, item.GenerationID)
 			} else {
-				r, err = p.Projection.PurgeVersion(ctx, collection, item.Organization, item.VersionID)
+				r, itemErr = p.Projection.PurgeVersion(ctx, collection, item.Organization, item.VersionID)
 			}
 			deleted += r.Deleted
 			remaining += r.RemainingAtLeast
-			if err != nil {
+			if itemErr != nil {
 				break
 			}
 			complete = complete && r.Complete
 		}
-		if err != nil {
+		for _, route := range item.VersionRoutes {
+			if itemErr != nil {
+				break
+			}
+			var r PurgeResult
+			r, itemErr = p.Store.WithTenantVersionPurge(ctx, item.Organization, route.CorpusID, func(archived bool) (PurgeResult, error) {
+				return p.Projection.PurgeVersionInGeneration(ctx, route.Generation.Collection, item.Organization, route.CorpusID, route.Generation.ID, item.VersionID, archived)
+			})
+			deleted += r.Deleted
+			remaining += r.RemainingAtLeast
+			complete = complete && r.Complete
+		}
+		if itemErr != nil {
 			complete = false
 			if p.Metrics != nil {
 				p.Metrics.Failures[item.Kind].Add(1)
 			}
-			failure = errors.Join(failure, err)
-			slog.Warn("projection purge batch failed", "kind", item.Kind, "reason", err.Error(), "objects_deleted", deleted)
+			failure = errors.Join(failure, itemErr)
+			slog.Warn("projection purge batch failed", "kind", item.Kind, "reason", itemErr.Error(), "objects_deleted", deleted)
 		}
 		// Save confirmed progress even on partial failure/cancellation. The bounded
 		// cleanup context retains the managed process shutdown budget.

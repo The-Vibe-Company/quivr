@@ -3,16 +3,24 @@ package postgres
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Store struct{ Pool *pgxpool.Pool }
+type CorpusProjection interface {
+	EnsureGeneration(ctx context.Context, collection, org, corpusID, generationID string) error
+	SetGenerationActive(ctx context.Context, collection, org, corpusID, generationID string, active bool) error
+}
+
+type Store struct {
+	Pool             *pgxpool.Pool
+	Projection       CorpusProjection
+	TenantCollection string
+}
 
 func (s Store) Create(ctx context.Context, org string, input corpus.CreateInput) (corpus.Corpus, bool, error) {
 	canonical, err := json.Marshal(input)
@@ -23,18 +31,80 @@ func (s Store) Create(ctx context.Context, org string, input corpus.CreateInput)
 	if err != nil {
 		return corpus.Corpus{}, false, err
 	}
-	var idbytes [16]byte
-	if _, err = rand.Read(idbytes[:]); err != nil {
+	// A lost response after tenant creation can be retried with the same
+	// tenant identity, even when the PostgreSQL transaction rolled back.
+	id := content.StableID("corpus", org, input.Key)[:len("corpus_")+32]
+	db := database(ctx, s.Pool)
+	if s.TenantCollection != "" && s.Projection == nil {
+		return corpus.Corpus{}, false, errors.New("tenant provisioning unavailable")
+	}
+	if s.TenantCollection == "" {
+		c, conflict, _, err := createCorpus(ctx, db, org, id, input.Key, input.Name, canonical, retrieval)
+		return c, conflict, err
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
 		return corpus.Corpus{}, false, err
 	}
-	c := corpus.Corpus{}
-	var stored, config []byte
-	err = database(ctx, s.Pool).QueryRow(ctx, `INSERT INTO corpora(organization,id,request_key,canonical_request,name,retrieval) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization,request_key) DO UPDATE SET request_key=EXCLUDED.request_key RETURNING id,name,retrieval,canonical_request,archived`, org, "corpus_"+hex.EncodeToString(idbytes[:]), input.Key, canonical, input.Name, retrieval).Scan(&c.ID, &c.Name, &config, &stored, &c.Archived)
+	defer tx.Rollback(ctx)
+	if err := lockProjectionRouting(ctx, tx); err != nil {
+		return corpus.Corpus{}, false, err
+	}
+	c, conflict, created, err := createCorpus(ctx, tx, org, id, input.Key, input.Name, canonical, retrieval)
+	if err != nil || conflict {
+		return c, conflict, err
+	}
+	if created {
+		gen := content.StableID("generation", s.TenantCollection, org, id)
+		if err := pinCorpusGeneration(ctx, tx, s.TenantCollection, org, id, gen); err != nil {
+			return c, false, err
+		}
+		if err := s.Projection.EnsureGeneration(ctx, s.TenantCollection, org, id, gen); err != nil {
+			return c, false, err
+		}
+	}
+	return c, false, tx.Commit(ctx)
+}
+
+// Pin only the Corpora created by the tenant-aware API. The shared default
+// remains readable by previous binaries while the upgrade is rolling.
+func pinCorpusGeneration(ctx context.Context, tx pgx.Tx, collection, org, id, generation string) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected,ingestion_routing,coverage_routed)
+ SELECT $1,$2,d.profile_version,false,d.space_id,$3,$4,true,d.spaces,d.spaces_projected,true,true,d.ingestion_routing,d.coverage_routed
+ FROM `+effectiveGenerationsSQL+` d WHERE d.active`, generation, collection, org, id)
 	if err != nil {
-		return c, false, err
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("default projection generation missing")
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id) VALUES($1,$2,$3)`, org, id, generation); err != nil {
+		return err
+	}
+	if err := markRoutingGeneration(ctx, tx, generation); err != nil {
+		return err
+	}
+	return markRoutingCorpus(ctx, tx, org, id)
+}
+
+func corpusProjectionRoute(ctx context.Context, db querier, org, id string) (collection, generation string, err error) {
+	err = db.QueryRow(ctx, `SELECT g.collection,g.id FROM `+effectiveGenerationsSQL+` g WHERE g.id=`+routedGenerationSQL("$1", "$2"), org, id).Scan(&collection, &generation)
+	return
+}
+
+func createCorpus(ctx context.Context, db querier, org, id, key, name string, canonical, retrieval []byte) (c corpus.Corpus, conflict, created bool, err error) {
+	var stored, config []byte
+	err = db.QueryRow(ctx, `INSERT INTO corpora(organization,id,request_key,canonical_request,name,retrieval) VALUES($1,$2,$3,$4,$5,$6)
+ ON CONFLICT(organization,request_key) DO NOTHING RETURNING id,name,retrieval,canonical_request,archived`, org, id, key, canonical, name, retrieval).Scan(&c.ID, &c.Name, &config, &stored, &c.Archived)
+	created = err == nil
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = db.QueryRow(ctx, `SELECT id,name,retrieval,canonical_request,archived FROM corpora WHERE organization=$1 AND request_key=$2 FOR UPDATE`, org, key).Scan(&c.ID, &c.Name, &config, &stored, &c.Archived)
+	}
+	if err != nil {
+		return c, false, false, err
 	}
 	err = json.Unmarshal(config, &c.Retrieval)
-	return c, !bytes.Equal(canonical, stored), err
+	return c, !bytes.Equal(canonical, stored), created, err
 }
 
 // effectiveRetrievalSQL is Corpus c's effective retrieval configuration: the

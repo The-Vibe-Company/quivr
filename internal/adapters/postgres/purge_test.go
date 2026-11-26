@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -224,13 +225,20 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	if _, err = f.pool.Exec(ctx, `UPDATE projection_purges SET noticed_at=now()-interval '2 hours' WHERE organization=$1`, f.org); err != nil {
 		t.Fatal(err)
 	}
-	items := claimOwn(t, ctx, f.store, f.org, time.Hour)
+	generationRoute, err := f.store.Generation(ctx, f.org, f.corpusID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purger := postgres.PurgeStore{Pool: f.pool, TenantCollection: generationRoute.Collection}
+	items := claimOwn(t, ctx, purger, f.org, time.Hour)
 	if len(items) != 2 {
 		t.Fatalf("claimed %+v", items)
 	}
 	for _, it := range items {
-		if len(it.Collections) == 0 {
-			t.Fatalf("version item without collections %+v", it)
+		if slices.Contains(it.Collections, generationRoute.Collection) || len(it.VersionRoutes) != 1 ||
+			it.VersionRoutes[0].CorpusID != f.corpusID || it.VersionRoutes[0].Generation.ID != generationRoute.ID ||
+			it.VersionRoutes[0].Generation.Collection != generationRoute.Collection {
+			t.Fatalf("version purge should target the owning Corpus's serving tenant: %+v", it)
 		}
 		if _, err = f.store.RecordPurge(ctx, it, 2, true, 1000); err != nil {
 			t.Fatal(err)

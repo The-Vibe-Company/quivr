@@ -21,3 +21,8 @@ func (p MetadataProjection) Publish(ctx context.Context, g content.Generation, o
 	}
 	return p.Metadata.SaveProjectionMetadata(ctx, org, v.ID, g.ID, content.ProjectionMetadata(v, g.Fields))
 }
+
+func (p MetadataProjection) UsesRouteRankFusion(routes []Route) bool {
+	fusion, ok := p.Projection.(RouteRankFusion)
+	return ok && fusion.UsesRouteRankFusion(routes)
+}

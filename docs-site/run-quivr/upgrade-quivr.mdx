@@ -25,6 +25,12 @@ Start a new worker and wait for its `/readyz` to report ready. Then send SIGTERM
 
 Start each new API instance and wait for `/readyz` to return HTTP 204 before routing traffic to it. Send SIGTERM to drain the previous instance after the new one is ready, then wait for it to exit. Keep at least one ready API serving throughout the rollout.
 
+## Move corpora to the tenant-backed index
+
+The migration prepares `QuivrTextV5` alongside the older collections. Wait for every previous worker and API instance to drain and stop before creating V5 corpora or starting rebuilds. Previous binaries cannot serve V5 corpora, so defer both operations while you need application rollback.
+
+New corpora use V5 automatically. To move an existing corpus, request `POST /v0/corpora/{id}/rebuilds` and follow the returned Operation. The previous generation keeps serving until validation passes and Quivr switches the route.
+
 ## Initialize document totals
 
 The document statistics migration adds empty rollups without scanning the corpus. New writers maintain totals in their publication transactions. Leave `corpus_stats.bootstrap_enabled` at its default `false` while previous API or worker instances can still write.
