@@ -115,14 +115,9 @@ separately for SQL performance analysis.
 
 ## The configuration file
 
-`QUIVR_CONFIG` holds the path of a JSON file. Give `api`, `worker` and `migrate` the same file, except for addresses such as `probe_listen`. It must set:
+`QUIVR_CONFIG` holds the path of a JSON file. Give `api`, `worker` and `migrate` the same file, except for addresses such as `probe_listen`. Set `temporal_address`, `weaviate_url`, and the `s3` endpoint and bucket in the file. Pin at least one ingestion plugin and one retrieval plugin, normally `core.ingest` and `core.retrieve`. The API requires both, and the worker requires an ingestion plugin. `core.ingest` also needs a Text Embeddings Inference server for its model. [First-party plugins](/run-quivr/catalog#core-ingest)
 
-- `database_url`, `temporal_address`, `weaviate_url` and `s3`: where the four services are;
-- `cursor_key`: a stable secret of at least 32 bytes that signs change-feed cursors;
-- `keys`: the API keys and what each may do. You create keys here; give `plugins:admin` only to operator keys;
-- `plugins`: at least one ingestion plugin and one retrieval plugin, normally the first-party `core.ingest` and `core.retrieve`. The `api` refuses to start without both, and the `worker` without an ingestion plugin. `core.ingest` also needs a Text Embeddings Inference server for its model; see [First-party plugins](/run-quivr/catalog#core-ingest).
-
-The file holds the database URL, storage credentials and API keys, so keep it readable only by Quivr's processes. The [Configuration reference](/reference/configuration) lists every field, and [Pin a plugin](/run-quivr/pin) shows how to add one.
+Supply the database URL, storage credentials, a stable cursor signing key and scoped API keys through the [secret bindings](/reference/configuration#secret-bindings). Give `plugins:admin` only to operator keys. [Pin a plugin](/run-quivr/pin) shows how to add a plugin.
 
 [Choose an embedding model](/run-quivr/choose-an-embedding-model) before pinning inference. For historical collection, follow [Run a large import](/run-quivr/run-a-large-import) to budget PostgreSQL, Weaviate and provider capacity, select bulk workers and monitor backlog.
 
@@ -156,29 +151,30 @@ Put the configuration in `config.json`, readable by UID/GID `10001`, the image's
 
 On a Linux host, `sudo chown 10001:10001 config.json` and `sudo chmod 600 config.json` give that user sole access. Create the network with `docker network create quivr` if it does not exist, then attach your services to it.
 
-`QUIVR_CONFIG` selects the mounted file by environment variable. It does not map arbitrary environment variables to JSON fields. To supply secrets from your platform, render a protected configuration file before starting the containers. Leave `log_directory` unset to keep logs on the process output stream. The root filesystem can be read-only; `/tmp` is the declared writable temporary directory. A configured file-log directory needs its own writable mount.
+Mount the runtime JSON through `QUIVR_CONFIG`. Supply credentials through environment or mounted files as specified in the [secret bindings](/reference/configuration#secret-bindings). Leave `log_directory` unset to keep logs on the process output stream. The root filesystem can be read-only; `/tmp` is the declared writable temporary directory. A configured file-log directory needs its own writable mount.
 
 Each API and worker process caches successful plugin discovery checks for 30 seconds by default. Set `QUIVR_PLUGIN_DISCOVERY_TTL` on both processes to a Go duration such as `10s`, or set it to `0` to check discovery on every call. Invalid or unset values use the default. Transport failures, manifest digest mismatches, and Contribution responses with HTTP 401, 404, or 5xx invalidate the cached check.
 
 Plugins negotiating Plugin API `0.14.0` require [signed engine requests](/reference/plugin-protocol#signed-engine-requests). Older manifest ranges keep working unsigned, with an engine startup warning. Provision a separate key ring for each plugin using that reference's format. Put the complete plugin-id-to-ring map in `QUIVR_ENGINE_PLUGIN_KEYS` for both API and worker; give each plugin only its own ring in `QUIVR_PLUGIN_SIGNING_KEYS`. These are dedicated environment secrets, separate from the JSON configuration and cosign image signatures.
 
-The examples below use Docker environment files: `engine-signing.env` contains the engine variable, and `push-source-signing.env` contains only that plugin's variable with the matching ring. Create an equivalent file for each other plugin negotiating signed calls. Protect these host files with `chmod 600`, or inject the variables with your platform's secret manager. Never send the engine's complete map to a plugin or bake keys into an image.
+The examples use Docker environment files. Put the engine's secret bindings, including its signing rings, in `engine-secrets.env`. Put only the push-source plugin's matching ring in `push-source-signing.env`. Create an equivalent file for each other plugin negotiating signed calls. Protect these host files with `chmod 600`, or inject the variables with your platform's secret manager. Never send the engine's complete map to a plugin or bake keys into an image.
 
 For example, not run; this needs your services and configuration. Run migration first, then use the same image and file for separate API and worker containers:
 
 ```sh
 docker run --rm --read-only --tmpfs /tmp --network quivr \
+  --env-file engine-secrets.env \
   -e QUIVR_CONFIG=/etc/quivr/config.json \
   --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
   "$IMAGE" migrate
 docker run -d --name quivr-api --read-only --tmpfs /tmp --network quivr \
-  --env-file engine-signing.env \
+  --env-file engine-secrets.env \
   -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
   -e QUIVR_CONFIG=/etc/quivr/config.json \
   --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
   "$IMAGE" api
 docker run -d --name quivr-worker --read-only --tmpfs /tmp --network quivr \
-  --env-file engine-signing.env \
+  --env-file engine-secrets.env \
   -p 127.0.0.1:8082:8081 -e QUIVR_CONFIG=/etc/quivr/config.json \
   --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
   "$IMAGE" worker

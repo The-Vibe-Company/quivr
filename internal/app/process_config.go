@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/secretinput"
 )
 
 func override(name, configured string) string {
@@ -82,7 +83,10 @@ func (cfg Config) logSecrets() []string {
 		secrets = append(secrets, token)
 	}
 	for _, destination := range cfg.Destinations {
-		secrets = append(secrets, destination.Secret, os.Getenv(destination.SecretEnv))
+		secrets = append(secrets, destination.Secret)
+		if destination.SecretEnv != "" {
+			secrets = append(secrets, secretForRedaction(destination.SecretEnv))
+		}
 	}
 	for _, raw := range []string{cfg.DatabaseURL, cfg.TEIURL, cfg.WeaviateURL, cfg.S3.Endpoint, cfg.PublicURL} {
 		if u, err := url.Parse(raw); err == nil && u.User != nil {
@@ -120,7 +124,7 @@ func (cfg Config) logSecrets() []string {
 	}
 	// Signing key rings live in the engine environment, independently of pins.
 	// Collect their secrets while retaining non-secret plugin and key IDs.
-	if raw := os.Getenv(plugins.EnvSigningKeys); raw != "" {
+	if raw := secretForRedaction(plugins.EnvSigningKeys); raw != "" {
 		secrets = append(secrets, raw)
 		var rings map[string]json.RawMessage
 		if json.Unmarshal([]byte(raw), &rings) == nil {
@@ -137,6 +141,15 @@ func (cfg Config) logSecrets() []string {
 	}
 
 	return secrets
+}
+
+// Startup still needs to redact inline values when validation rejects a conflict.
+func secretForRedaction(name string) string {
+	value, err := secretinput.Read(name)
+	if err != nil {
+		return os.Getenv(name)
+	}
+	return value
 }
 
 // The startup summary is an allowlist; opaque settings, URLs, credential values

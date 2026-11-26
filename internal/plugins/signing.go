@@ -9,12 +9,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/secretinput"
 )
 
 // EnvSigningKeys maps plugin ids to independent key rings. Secrets are
@@ -56,14 +57,14 @@ func (k SigningKey) validAt(now int64) bool {
 // configuration must never leak into logs or public diagnostics.
 func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	var ring SigningKeys
-	if !uniqueJSON(raw) || json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
+	if jsonv2.Unmarshal(raw, &ring, jsonv2.RejectUnknownMembers(true)) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	seen := map[string]bool{}
 	var fields struct {
 		Keys []map[string]json.RawMessage `json:"keys"`
 	}
-	if json.Unmarshal(raw, &fields) != nil {
+	if jsonv2.Unmarshal(raw, &fields) != nil {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	for i, key := range ring.Keys {
@@ -82,14 +83,51 @@ func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	return ring, nil
 }
 
+// ParseEngineSigningKeys checks the complete deployment map at startup.
+func ParseEngineSigningKeys(raw []byte, now time.Time) (map[string]SigningKeys, error) {
+	all, err := decodeEngineSigningKeys(raw)
+	if err != nil {
+		return nil, err
+	}
+	rings := make(map[string]SigningKeys, len(all))
+	for id, rawRing := range all {
+		ring, err := ParseSigningKeys(rawRing)
+		if id == "" || err != nil || ring.activeAt(now).ID == "" {
+			return nil, ErrSigningKeys
+		}
+		rings[id] = ring
+	}
+	return rings, nil
+}
+
 // EngineSigningKeys resolves one plugin's secret ring, including registry pins.
 func EngineSigningKeys(id string) (SigningKeys, error) {
-	var all map[string]json.RawMessage
-	raw := []byte(os.Getenv(EnvSigningKeys))
-	if !uniqueJSON(raw) || json.Unmarshal(raw, &all) != nil {
+	raw, err := secretinput.Read(EnvSigningKeys)
+	if err != nil {
 		return SigningKeys{}, ErrSigningKeys
 	}
+	all, err := decodeEngineSigningKeys([]byte(raw))
+	if err != nil {
+		return SigningKeys{}, err
+	}
 	return ParseSigningKeys(all[id])
+}
+
+func decodeEngineSigningKeys(raw []byte) (map[string]json.RawMessage, error) {
+	var all map[string]json.RawMessage
+	if jsonv2.Unmarshal(raw, &all) != nil || all == nil {
+		return nil, ErrSigningKeys
+	}
+	return all, nil
+}
+
+func (ring SigningKeys) activeAt(now time.Time) SigningKey {
+	for _, key := range ring.Keys {
+		if key.ID == ring.Active && key.validAt(now.Unix()) {
+			return key
+		}
+	}
+	return SigningKey{}
 }
 
 // EngineToken binds exact request bytes and the operation to a plugin audience.
@@ -101,13 +139,7 @@ func EngineToken(ring SigningKeys, pluginID, method, target string, body []byte,
 	if expiry.Unix() <= now.Unix() {
 		return "", ErrSigningKeys
 	}
-	var selected SigningKey
-	for _, key := range ring.Keys {
-		if key.ID == ring.Active && key.validAt(now.Unix()) {
-			selected = key
-			break
-		}
-	}
+	selected := ring.activeAt(now)
 	secret, err := base64.RawURLEncoding.Strict().DecodeString(selected.Secret)
 	if err != nil || len(secret) < 32 {
 		return "", ErrSigningKeys
@@ -164,48 +196,4 @@ func SigningContext(ctx context.Context, pin *Pin) (context.Context, error) {
 		return ctx, err
 	}
 	return WithRequestSigning(ctx, pin.Manifest.ID, ring), nil
-}
-
-// uniqueJSON refuses ambiguous operator key configuration at every object level.
-func uniqueJSON(raw []byte) bool {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	var value func() bool
-	value = func() bool {
-		token, err := d.Token()
-		if err != nil {
-			return false
-		}
-		switch token {
-		case json.Delim('{'):
-			seen := map[string]bool{}
-			for d.More() {
-				token, err := d.Token()
-				name, ok := token.(string)
-				if err != nil || !ok || seen[name] {
-					return false
-				}
-				seen[name] = true
-				if !value() {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim('}')
-		case json.Delim('['):
-			for d.More() {
-				if !value() {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim(']')
-		default:
-			return true
-		}
-	}
-	if !value() {
-		return false
-	}
-	_, err := d.Token()
-	return err == io.EOF
 }

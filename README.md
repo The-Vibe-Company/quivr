@@ -39,6 +39,9 @@ created by the Quivr team.
 - **Use your own database.** Quivr runs with a non-superuser login on
   [DBA-managed PostgreSQL 17](https://docs.quivr.thevibecompany.co/run-quivr/deploy#use-dba-managed-postgresql).
 
+Self-hosted processes accept credentials from dedicated environment variables or mounted
+files. [Secret bindings](https://docs.quivr.thevibecompany.co/reference/configuration#secret-bindings)
+
 ## How it works
 
 ```mermaid

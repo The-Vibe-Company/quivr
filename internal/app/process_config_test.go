@@ -61,6 +61,8 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	t.Setenv("QUIVR_LOG_LEVEL", "")
 	t.Setenv("QUIVR_SHUTDOWN_GRACE", "")
 	t.Setenv("EXAMPLE_WEBHOOK_SECRET", "sentinel-env-secret")
+	t.Setenv("EXAMPLE_WEBHOOK_SECRET_FILE", filepath.Join(t.TempDir(), "webhook"))
+	t.Setenv("QUIVR_ENGINE_PLUGIN_KEYS_FILE", filepath.Join(t.TempDir(), "signing-rings"))
 	const signingSecret = "c2lnbmluZy1zZWNyZXQtc2VudGluZWwtMzItYnl0ZXM"
 	t.Setenv(plugins.EnvSigningKeys, `{"malformed-plugin":{"keys":"invalid"},"example-plugin":{"active":"primary","keys":[{"id":"primary","secret":"`+signingSecret+`"}]}}`)
 	cfg := Config{LogDirectory: t.TempDir(), CursorKey: "sentinel-cursor-secret", CredentialKey: "sentinel-credential-secret",
@@ -79,6 +81,7 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	events.stop(context.Background(), false)
 	slog.Info("provider metadata", "detail", "sentinel-plugin-secret")
 	slog.Info("signer metadata", "detail", signingSecret)
+	slog.Info("webhook metadata", "detail", "sentinel-env-secret")
 	LogFailure(errors.New("sentinel-db-secret sentinel-env-secret"))
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeInvalidConfiguration, Message: "sentinel-bearer-secret"}}})
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeNamespaceConflict, Message: "sentinel-bearer-secret"}}})

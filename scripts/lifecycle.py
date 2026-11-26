@@ -9,6 +9,8 @@ Assertions go through the public API; the harness only starts and stops the proj
 import json, os, subprocess, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
+import local_secrets
+
 from deploy.reset_storage import s3_request
 from deploy.weaviate_client import WeaviateClient
 
@@ -63,7 +65,7 @@ def verify(stack):
         'content': {'kind': 'text', 'text': 'The ferry timetable lists the morning crossing.'}})
     assert status == 202, receipt
     from deploy.reset_support import wait_until
-    index_client = WeaviateClient.from_config(json.loads((stack.directory / 'config.json').read_text()))
+    index_client = WeaviateClient.from_config(local_secrets.read_dependencies(stack.directory / 'config.json'))
     def indexed():
         return len(index_client.request_json('/v1/objects?limit=1').get('objects') or [])
     wait_until(indexed, lambda count: count > 0, seconds=30)
@@ -81,7 +83,7 @@ def verify(stack):
         return result.stdout
     assert 'Applied.' in apply()
     assert 'No changes.' in apply()
-    config = json.loads((stack.directory / 'config.json').read_text())['s3']
+    config = local_secrets.read_dependencies(stack.directory / 'config.json')['s3']
     s3_request(config['endpoint'], config['access_key'], config['secret_key'], 'PUT',
                '/' + config['bucket'] + '/installation-reset-proof', b'neutral reset fixture')
     temporal = stack.compose('ps', '-q', 'temporal', capture_output=True, text=True).stdout.strip()

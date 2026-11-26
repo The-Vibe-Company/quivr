@@ -60,7 +60,7 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		return
 	}
 	const required = `"database_url":"postgres://localhost/db?sslmode=disable","cursor_key":"01234567890123456789012345678901","keys":{"01234567890123456789012345678901":{"organization":"example","actions":["corpora:read"],"corpora":["*"]}}`
-	for _, tc := range []struct{ name, raw, code, field string }{
+	tests := []struct{ name, raw, code, field string }{
 		{"missing", `{}`, "config_missing", "database_url"},
 		{"missing-config-env", "", "config_missing", "QUIVR_CONFIG"},
 		{"missing-config-file", "", "config_invalid", "QUIVR_CONFIG"},
@@ -81,7 +81,20 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		{"nested-duration", `{` + required + `,"delivery":{"timeout":"secret-value-sentinel"}}`, "config_invalid", "delivery.timeout"},
 		{"event-matches-secret", `{"database_url":"postgres://quivr:secret-value-sentinel@localhost/db","cursor_key":"secret-value-sentinel"}`, "config_invalid", "cursor_key"},
 		{"secret", `{"database_url":"postgres://user:secret-value-sentinel@localhost/db","cursor_key":"secret-value-sentinel"}`, "config_invalid", "cursor_key"},
-	} {
+		{"invalid-database-secret", `{` + required + `,"weaviate_url":"http://localhost:8080","temporal_address":"localhost:7233","s3":{"endpoint":"http://localhost:8333","bucket":"content","access_key":"fixture","secret_key":"fixture"}}`, "config_invalid", "database_url"},
+		{"secret-file", `{}`, "config_invalid", "database_url"},
+		{"secret-conflict", `{}`, "config_conflict", "database_url"},
+		{"secret-map", `{` + required + `}`, "config_invalid", "keys"},
+		{"signing-map", `{` + required + `}`, "config_invalid", "QUIVR_ENGINE_PLUGIN_KEYS"},
+	}
+	secretEnvs := map[string][]string{
+		"invalid-database-secret": {"DATABASE_URL=postgres://user:secret-value-sentinel@localhost/%ZZ"},
+		"secret-file":             {"DATABASE_URL_FILE=/missing/secret-value-sentinel"},
+		"secret-conflict":         {"DATABASE_URL=secret-value-sentinel", "DATABASE_URL_FILE=/missing/secret-value-sentinel"},
+		"secret-map":              {`QUIVR_API_KEYS={"secret-value-sentinel":{},"secret-value-sentinel":{}}`},
+		"signing-map":             {`QUIVR_ENGINE_PLUGIN_KEYS={"example":{"active":"primary","keys":[{"id":"primary","secret":"secret-value-sentinel"}]}}`},
+	}
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "config.json")
 			if tc.raw != "" {
@@ -95,7 +108,7 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestConfigurationRefusalDiagnostics$")
 			// Keep inherited credentials and logging overrides out of the child.
-			cmd.Env = []string{"QUIVR_TEST_STARTUP=1", "QUIVR_CONFIG=" + file, "TZ=Etc/GMT-2"}
+			cmd.Env = append([]string{"QUIVR_TEST_STARTUP=1", "QUIVR_CONFIG=" + file, "TZ=Etc/GMT-2"}, secretEnvs[tc.name]...)
 			output, err := cmd.CombinedOutput()
 			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 				t.Fatalf("exit = %v, want 1; output: %s", err, output)

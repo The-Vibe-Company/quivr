@@ -4,6 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
+import base64
 import http.server, json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
 from unittest import mock
 
@@ -30,6 +31,98 @@ class Isolation(unittest.TestCase):
             self.assertNotEqual(a.state[key], b.state[key], key)
             self.assertGreaterEqual(len(a.state[key]), 32, key)
         self.assertNotEqual(a.state['api_port'], b.state['api_port'])
+
+    def test_generated_configs_bind_credentials_without_storing_them(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, [])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')):
+            stack.config()
+        for name, token_name in (('config.json', 'admin'), ('worker.json', 'admin'),
+                                 ('short-retention.json', 'admin'), ('keyless.json', 'keyless'),
+                                 ('keyless-worker.json', 'keyless')):
+            with self.subTest(config=name):
+                path = stack.directory / name
+                raw = path.read_text()
+                for key in ('password', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'admin', 'keyless'):
+                    self.assertNotIn(stack.state[key], raw)
+                self.assertNotIn(local.CAPTURE_SECRET, raw)
+                bindings = stack.engine_environment(name)
+                keys = pathlib.Path(bindings['QUIVR_API_KEYS_FILE'])
+                self.assertEqual(stat.S_IMODE(keys.stat().st_mode), 0o600)
+                self.assertIn(stack.state[token_name], json.loads(keys.read_text()))
+                expected = {
+                    'DATABASE_URL': f"postgres://quivr:{stack.state['password']}@127.0.0.1:43001/quivr?sslmode=disable",
+                    'QUIVR_CURSOR_KEY': stack.state['cursor_key'],
+                    'S3_ACCESS_KEY': stack.state['s3_access'],
+                    'S3_SECRET_KEY': stack.state['s3_secret'],
+                }
+                if token_name == 'admin':
+                    expected['QUIVR_CREDENTIAL_KEY'] = stack.state['credential_key']
+                else:
+                    self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+                destinations = json.loads(raw)['destinations']
+                for suffix in ('a', 'b', 'k'):
+                    key = destinations[f'local-receiver-org-{suffix}']['secret_env']
+                    expected[key] = 'whsec_' + base64.b64encode(f'local-test-signing-secret-org-{suffix}!'.encode()).decode()
+                expected[destinations[local.CAPTURE_DESTINATION]['secret_env']] = local.CAPTURE_SECRET
+                guide_secret = 'whsec_' + base64.b64encode(b'local-test-signing-secret-guides').decode()
+                for destination in destinations.values():
+                    self.assertNotIn('secret', destination)
+                    expected.setdefault(destination['secret_env'], guide_secret)
+                for variable, value in expected.items():
+                    self.assertEqual(pathlib.Path(bindings[variable + '_FILE']).read_text(), value, variable)
+
+    def test_keyless_environment_discards_credentials_before_files_exist(self):
+        stack = local.Stack(self.names[0])
+        for name in ('keyless.json', 'keyless-worker.json'):
+            with self.subTest(config=name), mock.patch.dict(os.environ, {
+                    'QUIVR_CREDENTIAL_KEY': 'fixture-inline-key',
+                    'QUIVR_CREDENTIAL_KEY_FILE': '/fixture/credential-key'}):
+                bindings = stack.engine_environment(name)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY', bindings)
+                self.assertNotIn('QUIVR_CREDENTIAL_KEY_FILE', bindings)
+
+    def test_migrate_launch_can_sign_calls_to_the_local_archive_plugin(self):
+        stack = local.Stack(self.names[0])
+        local.connector_plugin.select_first_party(stack, ['object-storage-archive'])
+        with mock.patch.object(local, 'MACOS', True), \
+                mock.patch.object(stack, 'compose', return_value=mock.Mock(stdout='127.0.0.1:43001')), \
+                mock.patch.object(local, 'run') as launch:
+            stack.migrate()
+        self.assertEqual(launch.call_args.args[0][-1], 'migrate')
+        env = launch.call_args.kwargs['env']
+        self.assertEqual(env['QUIVR_CONFIG'], str(stack.directory / 'config.json'))
+        self.assertIn(stack.state['password'], pathlib.Path(env['DATABASE_URL_FILE']).read_text())
+        archive, = local.connector_plugin.first_party(stack)
+        ring = json.loads(env['QUIVR_ENGINE_PLUGIN_KEYS'])['connector.object_storage_archive']
+        self.assertEqual(ring, local.connector_plugin.signing_ring(stack, archive))
+
+    def test_first_party_build_and_launch_filter_engine_secret_bindings(self):
+        stack = local.Stack(self.names[0])
+        plugins = local.connector_plugin
+        plugins.select_first_party(stack, ['object-storage-archive'])
+        archive, = plugins.first_party(stack)
+        engine_secrets = {
+            'QUIVR_ENGINE_PLUGIN_KEYS_FILE': '/fixture/engine-keys',
+            'QUIVR_ENGINE_PLUGIN_KEYS': 'fixture-engine-rings',
+            'DATABASE_URL_FILE': '/fixture/database-url',
+            'QUIVR_API_KEYS_FILE': '/fixture/api-keys',
+        }
+        with mock.patch.dict(os.environ, {**engine_secrets, 'PATH': '/fixture/bin'}, clear=True), \
+                mock.patch.object(plugins.ports, 'allocate', return_value=41001), \
+                mock.patch.object(plugins.go_bin_cache, 'ensure_many', return_value={'quivr-object-storage-archive': pathlib.Path('/bin/true')}) as build, \
+                mock.patch.object(plugins.subprocess, 'Popen', return_value=mock.Mock(pid=12345)) as launch, \
+                mock.patch.object(plugins, 'healthy_port', return_value=True):
+            plugins.start_first_party(stack)
+
+        build_env = build.call_args.args[0][0]['env']
+        launch_env = launch.call_args.kwargs['env']
+        for env in (build_env, launch_env):
+            self.assertTrue(engine_secrets.keys().isdisjoint(env))
+            self.assertEqual(env['PATH'], '/fixture/bin')
+        self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', build_env)
+        self.assertEqual(json.loads(launch_env['QUIVR_PLUGIN_SIGNING_KEYS']), plugins.signing_ring(stack, archive))
 
     def test_state_survives_reload_so_down_then_dev_reuses_credentials(self):
         first = local.Stack(self.names[0])

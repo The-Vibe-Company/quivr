@@ -13,6 +13,7 @@ import zipfile
 import uuid
 
 
+import local_secrets
 from deploy.reset_storage import s3_request
 
 
@@ -53,7 +54,7 @@ def correction_members(count=2000, keys=31, marker=''):
 
 
 def seed(stack, bucket='synthetic-archive-source', prefix='inbox/', count=10, marker='', fixture='simple'):
-    cfg = json.loads((stack.directory / 'config.json').read_text())['s3']
+    cfg = local_secrets.read_dependencies(stack.directory / 'config.json')['s3']
     args = (cfg['endpoint'], cfg['access_key'], cfg['secret_key'])
     # Each isolated verification stack owns its bucket, created exactly once.
     s3_request(*args, 'PUT', '/' + bucket)

@@ -146,7 +146,11 @@ func Start(opts Options) (*Process, error) {
 	cmd.Dir = opts.Dir
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if !strings.EqualFold(name, plugins.EnvSigningKeys) && !strings.EqualFold(name, plugins.EnvPluginSigningKeys) {
+		switch strings.ToUpper(name) {
+		case plugins.EnvSigningKeys, plugins.EnvSigningKeys + "_FILE",
+			plugins.EnvPluginSigningKeys, plugins.EnvPluginSigningKeys + "_FILE":
+			continue
+		default:
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}

@@ -191,7 +191,7 @@ def target(context, source, isolated):
             with (self.directory / (command + '-stdout.log')).open('ab') as stdout, \
                  (self.directory / (command + '-stderr.log')).open('ab') as stderr:
                 process = subprocess.Popen([str(self.directory / 'quivr'), command], cwd=ROOT,
-                                           env={**os.environ, 'QUIVR_CONFIG': str(self.directory / config)},
+                                           env=self.engine_environment(config),
                                            stdout=stdout, stderr=stderr, start_new_session=True)
             self.state['pids'].append(process.pid)
             if command in ('api', 'worker'):

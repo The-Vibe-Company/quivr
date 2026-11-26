@@ -26,6 +26,7 @@ built with ``go build`` into the stack directory whenever the stack starts
 them. The Railway image pins the same plugins (deploy/railway/core-entrypoint.py
 ``CONNECTORS``).
 """
+import local_secrets
 import plugin_environment
 import base64, hashlib, hmac, json, os, pathlib, signal, subprocess, time, urllib.request
 
@@ -76,7 +77,7 @@ def signing_ring(stack, row):
 
 
 def engine_environment(stack, inherited=None):
-    keys = json.loads((inherited or {}).get('QUIVR_ENGINE_PLUGIN_KEYS') or os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
+    keys = json.loads((inherited or {}).get('QUIVR_ENGINE_PLUGIN_KEYS') or local_secrets.read_secret(os.environ, 'QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
     for row in first_party(stack):
         if row.get('signing_id'):
             keys[row['signing_id']] = signing_ring(stack, row)
@@ -168,8 +169,9 @@ def start_first_party(stack, only=None):
     rows = [row for row in first_party(stack) if only is None or row['id'] in only]
     if not rows:
         return
+    inherited = plugin_environment.inherited()
     binaries = go_bin_cache.ensure_many([
-        {'name': f"quivr-{row['id']}", 'cwd': stack.source / 'plugins' / row['id'], 'package': '.', 'go': GO}
+        {'name': f"quivr-{row['id']}", 'cwd': stack.source / 'plugins' / row['id'], 'package': '.', 'go': GO, 'env': inherited}
         for row in rows
     ])
     started = []
@@ -178,7 +180,7 @@ def start_first_party(stack, only=None):
         binary = binaries[f"quivr-{row['id']}"]
         log = stack.directory / f"{row['id']}-plugin.log"
         port = first_party_port(stack, row)
-        env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
+        env = {**inherited, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         if row.get('signing_id'):
             env['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(signing_ring(stack, row))
         with log.open('a') as out:

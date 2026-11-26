@@ -23,7 +23,6 @@ import (
 	s3store "github.com/The-Vibe-Company/quivr/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
-	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
@@ -270,6 +269,9 @@ func Run(command string, args ...string) error {
 	if err = decoder.Decode(new(any)); err != io.EOF {
 		return badConfig(configInvalid, ConfigEnv, "invalid configuration JSON: expected a single object")
 	}
+	if err := cfg.loadSecrets(command == "storage" || command == "journal"); err != nil {
+		return err
+	}
 	if command == "journal" {
 		return runJournal(cfg, args, os.Stdout)
 	}
@@ -346,8 +348,12 @@ func Run(command string, args ...string) error {
 		return badConfig(configMissing, "cursor_key", "cursor_key is required")
 	case len(cfg.CursorKey) < 32:
 		return badConfig(configInvalid, "cursor_key", "cursor_key must have at least 32 bytes")
-	case len(cfg.Keys) == 0:
-		return badConfig(configMissing, "keys", "keys must contain at least one scoped API key")
+	}
+	if err := cfg.validateAccessKeys(); err != nil {
+		return err
+	}
+	if err := validateEngineSigning(pins, time.Now()); err != nil {
+		return err
 	}
 	logger := slog.Default()
 	if command == "migrate" {
@@ -408,14 +414,6 @@ func Run(command string, args ...string) error {
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
 		return err
-	}
-	for token, s := range cfg.Keys {
-		if s.ActorID != "" && !audit.ValidActorID(s.ActorID) {
-			return badConfig(configInvalid, "keys.actor_id", "actor_id must be a 32-character lowercase hexadecimal identifier")
-		}
-		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
-			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
-		}
 	}
 	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {
 		return err
@@ -492,6 +490,19 @@ func Run(command string, args ...string) error {
 	if command == "api" && len(pins.Retrievals()) == 0 {
 		return badConfig(configMissing, "plugins", "no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
 	}
+	for _, required := range []struct{ field, value string }{
+		{"weaviate_url", cfg.WeaviateURL}, {"temporal_address", cfg.TemporalAddress},
+		{"s3.endpoint", cfg.S3.Endpoint}, {"s3.bucket", cfg.S3.Bucket},
+		{"s3.access_key", cfg.S3.AccessKey}, {"s3.secret_key", cfg.S3.SecretKey},
+	} {
+		if required.value == "" {
+			return badConfig(configMissing, required.field, "required setting is missing")
+		}
+	}
+	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
+	if err != nil {
+		return invalidConfig("s3", "invalid object storage settings", err)
+	}
 	signals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	loops := lifecycle.New()
@@ -536,19 +547,6 @@ func Run(command string, args ...string) error {
 		}
 	}
 
-	for _, required := range []struct{ field, value string }{
-		{"weaviate_url", cfg.WeaviateURL}, {"temporal_address", cfg.TemporalAddress},
-		{"s3.endpoint", cfg.S3.Endpoint}, {"s3.bucket", cfg.S3.Bucket},
-		{"s3.access_key", cfg.S3.AccessKey}, {"s3.secret_key", cfg.S3.SecretKey},
-	} {
-		if required.value == "" {
-			return badConfig(configMissing, required.field, "required setting is missing")
-		}
-	}
-	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
-	if err != nil {
-		return invalidConfig("s3", "invalid object storage settings", err)
-	}
 	blobs.SetMetrics(dependencyMetrics)
 	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}

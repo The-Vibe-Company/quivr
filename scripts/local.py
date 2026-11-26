@@ -7,6 +7,7 @@ from prepare_tokenizer import prepare as prepare_tokenizer, requirements
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
 import go_bin_cache
+import local_secrets
 import gotest
 import guides
 import normalizer_plugin
@@ -227,22 +228,32 @@ class Stack:
             observability=OBSERVABILITY_OVERRIDES)
         if self.uses_fast_ingestion():
             cfg['ingestion']={'default':'example.hash_embedder'}
-        if os.environ.get('WEAVIATE_API_KEY'):
-            cfg['weaviate_api_key'] = os.environ['WEAVIATE_API_KEY']
+        # Keyless variant (THE-691): same stack without credential_key, its own Organization
+        # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
+        keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
+        keyless={**cfg, 's3':dict(cfg['s3']), 'destinations':{k:dict(v) for k,v in cfg['destinations'].items()}}
+        keyless.pop('credential_key')
+        # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
+        keyless.update(log_directory=str(keyless_logs),plugins=(push_plugin.pins(self) if self.use_push_plugin() else [])+subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+ingestion_plugin.fast_pins(self)+(fixture_plugin.pins(self) if self.use_fixture_plugin() else []),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        # Conformance can build a pre-secret-bindings binary at an older revision.
+        if (self.source/'internal/app/secret_config.go').is_file():
+            local_secrets.split_config(self.directory, cfg)
+            local_secrets.split_config(self.directory, keyless, keyless=True)
+        elif os.environ.get('WEAVIATE_API_KEY'):
+            cfg['weaviate_api_key'] = keyless['weaviate_api_key'] = os.environ['WEAVIATE_API_KEY']
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         if self.uses_tei():
             (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
-        worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps({**cfg,'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
-        # Keyless variant (THE-691): same stack without credential_key, its own Organization
-        # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
-        keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
-        keyless={k:v for k,v in cfg.items() if k!='credential_key'}
-        # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
-        keyless.update(log_directory=str(keyless_logs),plugins=(push_plugin.pins(self) if self.use_push_plugin() else [])+subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+ingestion_plugin.fast_pins(self)+(fixture_plugin.pins(self) if self.use_fixture_plugin() else []),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        worker=self.directory/'worker.json';worker.write_text(json.dumps({**cfg,'probe_listen':f"127.0.0.1:{s['worker_probe_port']}",'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
+    def engine_environment(self, config):
+        env = local_secrets.engine_environment(self.directory/config)
+        env.pop('QUIVR_ENGINE_PLUGIN_KEYS_FILE', None)
+        env.update(connector_plugin.engine_environment(self,push_plugin.engine_environment(self)))
+        return env
     def running(self):
         """Whether this project's PostgreSQL container is up; make migrate needs a started project."""
         return bool(self.compose('ps','-q','--status','running','postgres',capture_output=True,text=True).stdout.strip())
@@ -251,7 +262,7 @@ class Stack:
             raise RuntimeError(f'project {self.name} is not running; start it with `make dev` before `make migrate`')
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
-            run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
+            run([str(self.directory/'quivr'),'migrate'],env=self.engine_environment('config.json'),stdout=log,stderr=log)
     def shutdown_grace(self,config):
         # Match positive Go duration units and env precedence used by processSettings.
         value=os.environ.get('QUIVR_SHUTDOWN_GRACE') or json.loads((self.directory/config).read_text()).get('shutdown_grace') or '60s'
@@ -265,7 +276,7 @@ class Stack:
     def spawn(self,command,config):
         grace=self.shutdown_grace(config)
         with (self.directory/(command+'-startup.log')).open('a') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env=self.engine_environment(config),stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid)
         self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace
         if command in ('api','worker'):self.state[command+'_pid']=p.pid
@@ -363,7 +374,7 @@ class Stack:
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         grace=self.shutdown_grace('short-retention.json')
         with (self.directory/'short-api-startup.log').open('w') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env=self.engine_environment('short-retention.json'),stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace;self.launched[s['short_probe_port']]=p;self.save()
         self.await_ready('short_probe_port')
     def stop_processes(self):
@@ -584,10 +595,15 @@ def persistence(stack):
 
 def adapters(stack):
     stack.stop_processes()
-    env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')}
-    stack.go_test(['-count=1','./internal/adapters/weaviate/...','./internal/adapters/tei/...','./internal/adapters/s3/...','./internal/processing/...'],env,'adapters')
-    # adapter-postgres owns the database-only tests; this one also needs TEI and S3.
-    stack.go_test(['-count=1','-run','^TestDurableEmbeddingConflictAndAtomicEnrichment$','./internal/adapters/postgres/...'],env,'adapters-postgres')
+    # Adapter tests use their own fixture input, with no engine process.
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', dir=stack.directory, prefix='adapter-fixture-') as config:
+        json.dump(local_secrets.read_dependencies(stack.directory/'config.json'), config)
+        config.flush()
+        env={**os.environ,'QUIVR_ADAPTER_CONFIG':config.name}
+        stack.go_test(['-count=1','./internal/adapters/weaviate/...','./internal/adapters/tei/...','./internal/adapters/s3/...','./internal/processing/...'],env,'adapters')
+        # adapter-postgres owns the database-only tests; this one also needs TEI and S3.
+        stack.go_test(['-count=1','-run','^TestDurableEmbeddingConflictAndAtomicEnrichment$','./internal/adapters/postgres/...'],env,'adapters-postgres')
     stack.start_processes()
 
 def delivery_restart(stack):
@@ -850,7 +866,7 @@ def run_stack(command,part=None,profile=None):
             connector_plugin.select_first_party(stack,[r['id'] for r in connector_plugin.FIRST_PARTY] if verification else connector_plugin.from_environment(fast=fast))
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps,part)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\nUse it from this shell: eval \"$(make -s env)\"\n{describe_dev_profile(stack)}\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — use it from this shell: eval \"$(make -s env)\"\n{describe_dev_profile(stack)}\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
         elif command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(command=='reset')
         status='passed'

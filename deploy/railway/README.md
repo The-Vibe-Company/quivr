@@ -135,13 +135,13 @@ or rotating a credential, returns `503 credentials_unavailable`.
 
 To enable them later, set `QUIVR_CREDENTIAL_KEY` (32+ random bytes) to the SAME value
 on both api and worker, then restart api and worker. No migration is needed. The one
-side effect is that adding, changing or removing the key changes how connector
-requests are fingerprinted for idempotency. A connector create sent before the change
-and retried after it returns `409 idempotency_conflict` instead of replaying. Keep the
-value stable afterwards: changing or removing it also makes stored credentials
-unreadable (`access_error` / `credential_unreadable`) until they are deposited again. `provision.py` generates this value by default.
+side effect is that adding, changing or removing the key changes connector request fingerprints. Retrying an earlier Connector creation returns `409 idempotency_conflict`.
+Keep the key stable. Changing or removing it makes stored credentials unreadable
+(`access_error` / `credential_unreadable`) until they are deposited again. `provision.py` generates this value by default.
 
-## Operator key (optional)
+## Secret bindings
+
+The core entrypoint keeps credentials in the process environment and writes the nonsecret settings to `QUIVR_CONFIG`. Existing Railway secret variables still work. To use a mounted secret, append `_FILE` to its variable name and set that variable to the readable file path. This applies to `DATABASE_URL`, the S3 and Weaviate keys, the cursor and credential keys, the API keys, the engine signing rings, and the provider keys used by sidecars. The API, workers and migration use the same binding names. Set `QUIVR_API_KEYS` or `QUIVR_API_KEYS_FILE` for an explicit scope map in place of the individual Railway API, operator, and queue key variables. See the [configuration reference](../../docs-site/reference/configuration.mdx#secret-bindings).
 
 `QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, `plugins:admin`, `operations:write` and
 `observability:read` and `queues:read`; the web app never gets administration or queue grants. Use it from inside the deployment

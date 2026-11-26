@@ -6,9 +6,28 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 
 `quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen` and the queues each worker serves. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
 
-In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; only the dedicated environment overrides listed below override its fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; the dedicated bindings below can supply credentials and override selected fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+
+## Secret bindings
+
+Set these variables on the engine process, or append `_FILE` to the variable name and set it to the path of a mounted secret. A nonempty binding overrides the corresponding legacy JSON field. Use one source per variable. An unreadable or empty mounted secret or two nonempty sources for the same variable cause startup to fail. Quivr removes one final LF or CRLF from a mounted value.
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string, including credentials |
+| `S3_ACCESS_KEY` and `S3_SECRET_KEY` | Object-storage access key and secret key |
+| `WEAVIATE_API_KEY` | Optional Weaviate bearer token |
+| `QUIVR_CURSOR_KEY` | Cursor signing key, at least 32 bytes |
+| `QUIVR_CREDENTIAL_KEY` | Optional credential encryption key, at least 32 bytes |
+| `QUIVR_API_KEYS` | Complete JSON object of [scoped API keys](#api-keys) |
+| `QUIVR_ENGINE_PLUGIN_KEYS` | JSON object mapping plugin IDs to [engine signing rings](/reference/plugin-protocol#signed-engine-requests) |
+| `QUIVR_TELEMETRY_HEADERS` | Optional JSON object mapping OTLP header names to strings |
+
+A Vault or Kubernetes secret mount must be readable by Quivr. For example, set `DATABASE_URL_FILE=/run/secrets/database-url` and `QUIVR_API_KEYS_FILE=/run/secrets/api-keys`, mount both files read-only, and omit `database_url` and `keys` from the runtime JSON. Restart the engine processes after changing bindings. For webhook secrets, set `secret_env` to the name of a dedicated variable and use that variable or its `_FILE` counterpart.
 
 ## Top-level fields
+
+Required fields can come from a secret binding where listed above. Existing inline fields remain readable for upgrades.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -120,6 +139,8 @@ With `true`, Quivr also retains full canonical request copies and successful nor
 
 Level 1 is always on. Quivr records sensitive writes, administrative commands, credential changes, audit exports, and HTTP authentication and permission refusals in PostgreSQL. Because scoped lookups use the same 404 for inaccessible and missing resources, 404s on known routes also enter the audit trail. Attempts without an authenticated key have no API key ID, actor ID, or assigned Organization. These deployment-level entries remain in PostgreSQL and appear in the API process's `quivr.audit` logs. Organization-scoped readers see their own Organization's entries.
 
+Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry unless Level 2 is enabled. API keys and their permissions are deployment configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
+
 Set `"audit_read_access": true` in the JSON file named by `QUIVR_CONFIG` and restart the API to enable Level 2 for HTTP reads, search, facets, subscription previews and successful dry-run estimates. This uses the same binary. Entries contain route templates and bounded status details. They exclude bearer tokens, credentials, request bodies, search terms and read target IDs. Sensitive command entries can contain resolved target IDs and credential versions. Evaluator migrations identify the version transition as `plugin_id@from_version->to_version`.
 
 Each entry includes the time, action, outcome, `correlation_id` from `X-Request-ID`, and the authenticated `actor_id` and `api_key_id` when available. A key's configured actor ID can be reused on rotation to group events across keys. Keys without a configured actor ID use their API key ID as a fallback. The legacy `actor` and `request_id` fields still carry the API key ID and request ID.
@@ -192,11 +213,11 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 
 ## API keys
 
-`keys` maps each bearer token to what it may do. Every request's key decides its Organization, its actions and its Corpora:
+`QUIVR_API_KEYS` holds a JSON object mapping each bearer token to what it may do. The same object can be supplied through `QUIVR_API_KEYS_FILE` or the legacy `keys` field. Every request's key decides its Organization, its actions and its Corpora:
 
 ```json
-"keys": {
-  "<random token>": {"organization": "acme", "actions": ["corpora:read", "content:write", "search:query"], "corpora": ["*"]}
+{
+  "<random token>": {"organization": "example", "actions": ["corpora:read", "content:write", "search:query"], "corpora": ["*"]}
 }
 ```
 
@@ -331,7 +352,7 @@ The setting is part of each generation. Changing the recorded setting applies to
 | `organization` | The Organization whose Subscriptions may use it |
 | `url` | The receiver's URL. Private and loopback addresses are refused unless `delivery.allow_private_destinations` is set. |
 | `secret` | The Standard Webhooks signing secret, `whsec_` followed by base64 |
-| `secret_env` | The name of an environment variable holding the secret instead; prefer it in real deployments |
+| `secret_env` | The variable name for a secret binding. Use that variable for the value or add `_FILE` to supply a mounted file. |
 
 ## Delivery
 

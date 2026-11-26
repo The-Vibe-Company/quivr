@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,7 +30,12 @@ func TestEngineSignsDiscoveryAndEveryContribution(t *testing.T) {
 	secret := []byte("independent-fixture-key-32-bytes!!")
 	ring := plugins.SigningKeys{Active: "current", Keys: []plugins.SigningKey{{ID: "current", Secret: base64.RawURLEncoding.EncodeToString(secret)}}}
 	raw, _ := json.Marshal(map[string]plugins.SigningKeys{"test.calls": ring})
-	t.Setenv(plugins.EnvSigningKeys, string(raw))
+	path := filepath.Join(t.TempDir(), "engine-signing-rings")
+	if err := os.WriteFile(path, append(raw, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(plugins.EnvSigningKeys, "")
+	t.Setenv(plugins.EnvSigningKeys+"_FILE", path)
 	pin := policyPin()
 	pin.Manifest.Compatibility.PluginAPI = ">=0.14.0 <0.15.0"
 	var received atomic.Int64
@@ -77,7 +84,7 @@ func TestEngineSignsDiscoveryAndEveryContribution(t *testing.T) {
 	if received.Load() != int64(1+len(operations)) {
 		t.Errorf("received %d signed requests, want one discovery and %d Contribution calls", received.Load(), len(operations))
 	}
-	t.Setenv(plugins.EnvSigningKeys, "")
+	t.Setenv(plugins.EnvSigningKeys+"_FILE", "")
 	before := received.Load()
 	if _, err := call.Discover(context.Background(), pin); err == nil || received.Load() != before {
 		t.Fatal("missing key reached the peer or was accepted")

@@ -8,6 +8,7 @@ import sys
 from deploy.compose.infrastructure import Compose
 from deploy.reset_support import Checkpoint, terminate_workflows, vector_objects, require_local_vector
 from deploy.weaviate_client import WeaviateClient
+from scripts import local_secrets
 
 ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = {'postgres': ('data', '/var/lib/postgresql/data'),
@@ -63,7 +64,7 @@ class ComposeReset:
             raise RuntimeError('selected Stack private state is missing or unsafe')
         self.state = json.loads(statefile.read_text())
         check_tracked_processes(self.state, self.directory)
-        self.config = json.loads((self.directory / 'config.json').read_text())
+        self.config = local_secrets.read_dependencies(self.directory / 'config.json')
         # Prove this runtime points at the selected index before any destructive
         # work. Merely finding a local container does not establish that link.
         self.adapter.configured('weaviate')
@@ -160,7 +161,7 @@ class ComposeReset:
             stack.up()
             # Bootstrap may recreate index classes; documents and blob objects must be absent.
             from deploy.reset_storage import inventory
-            config = json.loads((stack.directory / 'config.json').read_text())
+            config = local_secrets.read_dependencies(stack.directory / 'config.json')
             storage = inventory(config['s3'])
             if storage['objects_at_least'] != 0 or storage['truncated']:
                 raise RuntimeError('new object store is not empty')
