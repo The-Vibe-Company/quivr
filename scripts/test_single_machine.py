@@ -52,7 +52,22 @@ class SingleMachineTest(unittest.TestCase):
             self.assertEqual((directory / '.env').stat().st_mode & 0o777, 0o600)
             compose = json.loads((directory / 'compose.yaml').read_text())
             self.assertEqual(compose['name'], 'example-evaluation')
-            self.assertEqual(len(compose['volumes']), 5)
+            self.assertEqual(len(compose['volumes']), 4)
+            self.assertNotIn('temporal-data', compose['volumes'])
+            temporal = compose['services']['temporal']
+            self.assertIn('temporalio/auto-setup:', temporal['image'])
+            self.assertEqual(temporal['environment']['DB'], 'postgres12')
+            self.assertEqual(temporal['environment']['DBNAME'], 'temporal')
+            self.assertEqual(temporal['environment']['VISIBILITY_DBNAME'], 'temporal_visibility')
+            self.assertEqual(temporal['environment']['POSTGRES_SEEDS'], 'postgres')
+            self.assertEqual(temporal['environment']['POSTGRES_PWD'], '${QUIVR_DB_PASSWORD:?}')
+            self.assertEqual(temporal['depends_on'], {'postgres': {'condition': 'service_healthy'}})
+            self.assertNotIn('volumes', temporal)
+            self.assertNotIn('command', temporal)
+            for rendered in ((directory / 'compose.yaml').read_text(),
+                             (ROOT / 'deploy/single-machine/compose.yaml').read_text()):
+                self.assertNotIn('start-dev', rendered)
+                self.assertNotIn('temporal.db', rendered)
             self.assertEqual(compose['services']['worker']['depends_on']['migrate']['condition'],
                              'service_completed_successfully')
             self.assertEqual(compose['services']['demo']['profiles'], ['demo'])

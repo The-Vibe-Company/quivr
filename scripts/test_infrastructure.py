@@ -172,6 +172,26 @@ class Infrastructure(unittest.TestCase):
         direct = yaml.safe_load((ROOT / 'deploy/compose/compose.yaml').read_text())
         self.assertEqual(direct['services']['postgres']['environment'].get('QUIVR_POSTGRES_AUTOPREWARM'),
                          '${QUIVR_POSTGRES_AUTOPREWARM:-}')
+        self.assertEqual(direct['services']['temporal']['extends'],
+                         {'file': '../infrastructure.json', 'service': 'temporal'})
+        self.assertEqual(direct['services']['temporal']['depends_on'],
+                         {'postgres': {'condition': 'service_healthy'}})
+        self.assertEqual(direct['services']['temporal']['environment']['POSTGRES_SEEDS'], 'postgres')
+        self.assertEqual(direct['services']['temporal']['environment']['POSTGRES_PWD'], '${QUIVR_DB_PASSWORD:?}')
+        self.assertNotIn('command', direct['services']['temporal'])
+        self.assertNotIn('volumes', direct['services']['temporal'])
+        self.assertNotIn('temporal-data', direct['volumes'])
+        self.assertEqual(small['temporal']['environment']['DB'], 'postgres12')
+        self.assertEqual(small['temporal']['environment']['DBNAME'], 'temporal')
+        self.assertEqual(small['temporal']['environment']['VISIBILITY_DBNAME'], 'temporal_visibility')
+        self.assertEqual(small['temporal']['environment']['NUM_HISTORY_SHARDS'], '4')
+        self.assertEqual(small['temporal']['environment']['SQL_MAX_CONNS'], '20')
+        self.assertEqual(small['temporal']['environment']['SQL_VIS_MAX_CONNS'], '10')
+        self.assertEqual(small['temporal']['environment']['DEFAULT_NAMESPACE'], 'default')
+        self.assertEqual(small['temporal']['environment']['DEFAULT_NAMESPACE_RETENTION'], '72h')
+        self.assertEqual(small['temporal']['environment']['SKIP_DB_CREATE'], 'false')
+        self.assertEqual(small['temporal']['environment']['SKIP_SCHEMA_SETUP'], 'false')
+        self.assertIn('temporalio/auto-setup:', small['temporal']['image'])
         self.assertEqual(small['weaviate']['environment']['GOMEMLIMIT'], '1700MiB')
         self.assertEqual(small['weaviate']['deploy']['resources']['limits']['memory'], '2147483648')
         self.assertEqual(small['weaviate']['environment']['ASYNC_INDEXING'], 'false')
@@ -187,11 +207,27 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(large['postgres']['x-quivr-storage-budget-bytes'], '500000000000')
         self.assertEqual(large['weaviate']['environment']['GOMEMLIMIT'], '16GiB')
         self.assertEqual(large['weaviate']['deploy']['resources']['limits'], {'memory': '64000000000', 'cpus': '32'})
+        self.assertEqual(large['temporal']['environment']['DB'], 'postgres12')
+        self.assertEqual(large['temporal']['environment']['NUM_HISTORY_SHARDS'], '4')
+        self.assertEqual(large['temporal']['environment']['SQL_MAX_CONNS'], '50')
+        self.assertEqual(large['temporal']['environment']['SQL_VIS_MAX_CONNS'], '20')
+        self.assertEqual(large['temporal']['deploy']['resources']['limits'], {'memory': '4000000000', 'cpus': '4'})
         from deploy.railway.provision import load_services
         for model in (infra.compose_model(large)['services']['weaviate'], load_services('large')['weaviate']):
             self.assertEqual(model.get('environment', model.get('variables'))['GOMEMLIMIT'], '16GiB')
             self.assertEqual(model.get('limits', model.get('deploy', {}).get('resources', {}).get('limits'))
                              ['memory'], '64000000000')
+        for model in (infra.compose_model(large)['services']['temporal'], load_services('large')['temporal']):
+            self.assertEqual(model.get('environment', model.get('variables'))['DB'], 'postgres12')
+            self.assertEqual(model.get('environment', model.get('variables'))['SQL_MAX_CONNS'], '50')
+            self.assertEqual(model.get('limits', model.get('deploy', {}).get('resources', {}).get('limits'))
+                             ['memory'], '4000000000')
+            self.assertEqual(model['image'], large['temporal']['image'])
+        railway_temporal = load_services('small')['temporal']
+        self.assertNotIn('dockerfile', railway_temporal)
+        self.assertNotIn('volume', railway_temporal)
+        self.assertEqual(railway_temporal['variables']['POSTGRES_SEEDS'], 'postgres.railway.internal')
+        self.assertEqual(railway_temporal['variables']['BIND_ON_IP'], '::')
         self.assertEqual(large['autoscaler']['environment']['QUIVR_AUTOSCALER_MIN'], '1')
         self.assertEqual(large['weaviate']['environment']['ASYNC_INDEXING'], 'true')
         self.assertEqual(large['weaviate']['environment']['PERSISTENCE_MEMTABLES_MAX_SIZE_MB'], '1024')
@@ -215,10 +251,26 @@ class Infrastructure(unittest.TestCase):
             override.write_text('{"services":{"weaviate":{"environment":{"API_KEY":"private"}}}}')
             with self.assertRaisesRegex(ValueError, 'unsupported infrastructure setting'):
                 infra.resolve(overrides=override)
-            for role in ('postgres', 'autoscaler'):
+            for role in ('postgres', 'temporal', 'autoscaler'):
                 override.write_text(json.dumps({'services': {role: {'image': 'registry/image@sha256:' + 'a' * 64}}}))
                 with self.assertRaisesRegex(ValueError, 'image overrides'):
                     infra.resolve(overrides=override)
+            # Valid PostgreSQL driver variants and bootstrap overrides are accepted.
+            override.write_text('{"services":{"temporal":{"environment":{"DB":"postgres12_pgx","SKIP_DB_CREATE":"true"}}}}')
+            pgx = infra.resolve(overrides=override)
+            self.assertEqual(pgx['temporal']['environment']['DB'], 'postgres12_pgx')
+            self.assertEqual(pgx['temporal']['environment']['SKIP_DB_CREATE'], 'true')
+            for key, value in (
+                ('DB', 'sqlite'), ('DB', 'cassandra'), ('DB', 'mysql8'),
+                ('DB_PORT', '0'), ('DB_PORT', '65536'),
+                ('DBNAME', 'quivr'), ('VISIBILITY_DBNAME', 'quivr'), ('VISIBILITY_DBNAME', 'temporal'),
+                ('NUM_HISTORY_SHARDS', '0'), ('SQL_MAX_CONNS', '0'),
+                ('SQL_MAX_IDLE_CONNS', '25'), ('SQL_VIS_MAX_IDLE_CONNS', '15'),
+                ('DEFAULT_NAMESPACE_RETENTION', '12h'), ('SKIP_SCHEMA_SETUP', 'yes')):
+                with self.subTest(temporal_key=key, value=value):
+                    override.write_text(json.dumps({'services': {'temporal': {'environment': {key: value}}}}))
+                    with self.assertRaisesRegex(ValueError, 'invalid infrastructure value'):
+                        infra.resolve(overrides=override)
             for key, value in (
                 ('QUIVR_POSTGRES_MEMORY_MB', '64'), ('QUIVR_POSTGRES_VOLUME_MB', '0'),
                 ('QUIVR_POSTGRES_MAX_CONNECTIONS', '262144'),
@@ -315,6 +367,37 @@ class Infrastructure(unittest.TestCase):
         self.assertFalse(any(args[0] == 'api' and args[1].startswith('mutation')
                              for args, _ in transport.calls))
 
+    def test_railway_temporal_switches_to_pinned_postgres_image_and_clears_dockerfile(self):
+        from deploy.railway.infrastructure import Railway
+        transport = RailwayTransport()
+        transport.dockerfile = 'deploy/railway/temporal.Dockerfile'
+        transport.image = None
+        transport.variables = {}
+        spec = infra.resolve('small')['temporal']
+        adapter = Railway('project', 'environment', run=transport)
+        adapter.select({'temporal': 'index-service'})
+        before = adapter.preview({'temporal': spec})
+        self.assertEqual(before['status'], 'drift')
+        rows = {(row['scope'], row['setting']): row['status'] for row in before['observations']}
+        self.assertEqual(rows['configured', 'dockerfile_cleared'], 'drift')
+        self.assertEqual(rows['configured', 'image'], 'unknown')
+        transport.calls.clear()
+        adapter.apply({'temporal': spec})
+        mutations = [json.loads(args[3]) for args, _ in transport.calls
+                     if args[0] == 'api' and args[1].startswith('mutation')]
+        self.assertIn({'serviceId': 'index-service', 'environmentId': 'environment',
+                       'input': {'source': {'image': spec['image']}, 'dockerfilePath': None}}, mutations)
+        written = {args[2]: stdin for args, stdin in transport.calls if args[:2] == ['variable', 'set']}
+        self.assertEqual(written['DB'], 'postgres12')
+        self.assertEqual(written['DBNAME'], 'temporal')
+        self.assertEqual(written['VISIBILITY_DBNAME'], 'temporal_visibility')
+        # Reapplying once variables, image and dockerfile match performs no writes.
+        transport.variables.update(written)
+        transport.calls.clear()
+        adapter.apply({'temporal': spec})
+        self.assertFalse(any(args[:2] == ['variable', 'set'] or (args[0] == 'api' and 'mutation' in args[1])
+                             for args, _ in transport.calls))
+
     def test_image_deployment_is_scoped_to_the_selected_environment(self):
         provision_spec = importlib.util.spec_from_file_location('provision', ROOT / 'deploy/railway/provision.py')
         provision = importlib.util.module_from_spec(provision_spec)
@@ -383,11 +466,18 @@ class Infrastructure(unittest.TestCase):
                 return {'postgres': 'database', 'temporal': 'workflow', 'seaweed': 'objects'}.get(args[-1].rsplit('=', 1)[1], '')
             if args[0] == 'inspect':
                 service = {'database': 'postgres', 'workflow': 'temporal', 'objects': 'seaweed'}[args[1]]
+                image = settings[service]['image'] if service in settings else settings['postgres']['image']
+                env = ['POSTGRES_PASSWORD=private']
+                if service == 'temporal':
+                    env += [f'{k}={v}' for k, v in settings['temporal']['environment'].items()] + ['POSTGRES_PWD=private']
                 return json.dumps([{'Config': {
-                    'Image': settings['postgres']['image'], 'Env': ['POSTGRES_PASSWORD=private'],
+                    'Image': image, 'Env': env,
                     'Labels': {'com.docker.compose.project': 'fixture', 'com.docker.compose.service': service}},
                     'State': {'Running': True}, 'HostConfig': {'Memory': 1073741824, 'NanoCpus': 1000000000}}])
             if args[0] == 'exec':
+                if args[1] == 'workflow':
+                    return ('\n'.join(f'{k}={v}' for k, v in settings['temporal']['environment'].items())
+                            + '\n__memory=4000000000\n__cpus=4\n')
                 return ('{"settings":{"random_page_cost":"1.1","effective_io_concurrency":"200","commit_delay":"100","commit_siblings":"6"},"pg_stat_statements":true,"statistics_preloaded":true}\n327680\n__memory=1073741824\n__cpus=1\n'
                         + '__storage=' + str(storage_bytes) + '\n')
             self.fail('unexpected mutating command')
@@ -399,13 +489,16 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(observed['postgres', 'effective_sql', 'commit_siblings']['status'], 'drift')
         self.assertEqual(observed['postgres', 'effective_sql', 'pg_stat_statements']['status'], 'match')
         self.assertEqual(observed['postgres', 'runtime_resources', 'memory']['observed'], '1073741824')
+        self.assertEqual(observed['temporal', 'configured', 'DB']['status'], 'match')
+        self.assertEqual(observed['temporal', 'startup_environment', 'DB']['status'], 'match')
+        self.assertEqual(observed['temporal', 'runtime_resources', 'memory']['status'], 'match')
         self.assertEqual(observed['weaviate', 'configured', 'image']['status'], 'unknown')
         self.assertEqual(observed['postgres', 'filesystem_capacity', 'minimum_bytes']['status'], 'drift')
         self.assertNotIn('private', json.dumps(result))
         self.assertEqual({args[0] for args in calls}, {'ps', 'inspect', 'exec'})
-        for service, identifier in (('temporal', 'workflow'), ('seaweed', 'objects')):
-            self.assertEqual(adapter.configured(service)['environment'], {})
-            self.assertEqual(adapter.containers[service], identifier)
+        self.assertEqual(adapter.configured('seaweed')['environment'], {})
+        self.assertEqual(adapter.containers['seaweed'], 'objects')
+        self.assertEqual(adapter.containers['temporal'], 'workflow')
         storage_bytes = 600000000000
         result = adapter.check(settings)
         capacity = next(row for row in result['observations']
@@ -428,10 +521,10 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(report['images'][-1], infra.resolve(environ={})['weaviate']['image'])
             self.assertEqual(report['result'], 'failed')
             declared = infra.resolve(environ={})
-            self.assertTrue({declared['postgres']['image'], declared['weaviate']['image']}.issubset(
+            self.assertTrue({declared['postgres']['image'], declared['temporal']['image'], declared['weaviate']['image']}.issubset(
                 {row['image'] for row in inventory.images()}))
             with patch.object(measure, 'output', return_value='local'), patch.dict(os.environ, {}, clear=True):
-                self.assertTrue({declared['postgres']['image'], declared['weaviate']['image']}.issubset(
+                self.assertTrue({declared['postgres']['image'], declared['temporal']['image'], declared['weaviate']['image']}.issubset(
                     set(measure.pins()['images'])))
             output = Path(directory) / 'load'
             with patch.object(load, 'read', return_value={'name': 'local', 'search': {'concurrency': 1}}), \
@@ -445,6 +538,7 @@ class Infrastructure(unittest.TestCase):
                     load.main(['--scenario', 'local.yaml', '--out', str(output)])
             services = json.loads((output / 'report.json').read_text())['versions']['services']
             self.assertEqual(services['postgres'], declared['postgres']['image'])
+            self.assertEqual(services['temporal'], declared['temporal']['image'])
             self.assertEqual(services['weaviate'], declared['weaviate']['image'])
 
     def test_v1_cpu_probe_reads_nested_combined_mount_and_parent_limits(self):
@@ -478,7 +572,7 @@ class Infrastructure(unittest.TestCase):
             self.assertEqual(environment['QUIVR_DB_PASSWORD'], 'fixture-password')
             self.assertEqual(environment['QUIVR_LOCAL_ROOT'], str(project))
             self.assertEqual(environment['QUIVR_MODEL_ROOT'], str(root / '.scratch/e5-model'))
-            self.assertEqual(run.call_args.args[0][-4:], ['up', '-d', 'postgres', 'weaviate'])
+            self.assertEqual(run.call_args.args[0][-5:], ['up', '-d', 'postgres', 'temporal', 'weaviate'])
             with patch.object(compose_module.infra, 'ROOT', root):
                 with self.assertRaisesRegex(RuntimeError, 'local project state'):
                     Compose('missing', run=run).apply(root / 'overlay.json')

@@ -85,7 +85,7 @@ class Compose:
 
     def check(self, services, runtime=True, external_host=None):
         rows = []
-        for name in ('postgres', 'weaviate'):
+        for name in ('postgres', 'temporal', 'weaviate'):
             spec = services[name]
             if name == 'weaviate' and external_host is not None:
                 rows.extend(infra.external_vector_report(spec, external_host)['observations'])
@@ -132,7 +132,7 @@ class Compose:
         environment.setdefault('QUIVR_MODEL_ROOT', str(infra.ROOT / '.scratch/e5-model'))
         # Only infrastructure services; never scale workers or alter unrelated services.
         self.run(['compose', '--project-name', self.project, '-f', str(infra.ROOT / 'deploy/compose/compose.yaml'),
-                  '-f', str(overlay), 'up', '-d', 'postgres', *([] if external else ['weaviate'])], environ=environment)
+                  '-f', str(overlay), 'up', '-d', 'postgres', 'temporal', *([] if external else ['weaviate'])], environ=environment)
 
     def initialize_monitoring(self):
         self.configured('postgres')

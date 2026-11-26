@@ -17,7 +17,6 @@ COMPONENTS = ('core', 'web', 'cpu-embeddings', 'postgres', 'seaweed', 'tei')
 SECRET_KEYS = ('QUIVR_DB_PASSWORD', 'QUIVR_API_KEY', 'QUIVR_OPERATOR_KEY',
                'QUIVR_CURSOR_KEY', 'QUIVR_CREDENTIAL_KEY', 'S3_ACCESS_KEY',
                'S3_SECRET_KEY', 'EMBED_API_KEY', 'DEMO_PASSWORD')
-TEMPORAL = 'temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d'
 
 
 def read_env(path):
@@ -106,10 +105,15 @@ def stack(images, settings, values, initialized=False):
             'POSTGRES_PASSWORD': '${QUIVR_DB_PASSWORD:?}'}, 'deploy': settings['postgres']['deploy'],
             'volumes': ['postgres-data:/var/lib/postgresql/data'],
             'healthcheck': health(['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'quivr', '-d', 'quivr'])},
-        'temporal': {'image': TEMPORAL,
-            'command': ['server', 'start-dev', '--ip', '0.0.0.0', '--headless', '--db-filename', '/home/temporal/temporal.db'],
-            'volumes': ['temporal-data:/home/temporal'],
-            'healthcheck': health(['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', '127.0.0.1:7233'])},
+        'temporal': {'image': settings['temporal']['image'], 'environment': {
+            **settings['temporal']['environment'], 'POSTGRES_SEEDS': 'postgres',
+            'POSTGRES_USER': 'quivr', 'POSTGRES_PWD': '${QUIVR_DB_PASSWORD:?}',
+            'BIND_ON_IP': '0.0.0.0', 'TEMPORAL_BROADCAST_ADDRESS': '127.0.0.1',
+            'TEMPORAL_ADDRESS': '127.0.0.1:7233'}, 'deploy': settings['temporal']['deploy'],
+            'depends_on': {'postgres': {'condition': 'service_healthy'}},
+            'healthcheck': health(['CMD', 'temporal', 'operator', 'namespace', 'describe',
+                                   '--address', '127.0.0.1:7233', '--namespace',
+                                   settings['temporal']['environment']['DEFAULT_NAMESPACE']], 90)},
         'seaweed': {'image': images['seaweed'], 'environment': {
             'S3_ACCESS_KEY': '${S3_ACCESS_KEY:?}', 'S3_SECRET_KEY': '${S3_SECRET_KEY:?}'},
             'volumes': ['seaweed-data:/data'], 'healthcheck': health([
@@ -154,7 +158,7 @@ def stack(images, settings, values, initialized=False):
             'x-quivr-initialized': initialized, 'services': services,
             'networks': {'stack': {'internal': values.get('QUIVR_OFFLINE', '0') == '1'}, 'access': {}},
             'volumes': {name: {'name': project + '-' + name} for name in
-                ('postgres-data', 'temporal-data', 'seaweed-data', 'weaviate-data', 'model-cache')}}
+                ('postgres-data', 'seaweed-data', 'weaviate-data', 'model-cache')}}
 
 
 def write_private(path, content):

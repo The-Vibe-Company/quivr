@@ -93,8 +93,8 @@ class RailwayIsolation(unittest.TestCase):
                     'mountPath': '/var/lib/weaviate' if role == 'weaviate' else '/data',
                     'sizeMB': 65536 if role == 'postgres' else 32768,
                     'region': 'us-west', 'state': 'READY', 'isPendingDeletion': False, 'deletedAt': None}
-                    for role in ('postgres', 'temporal', 'seaweed', 'weaviate')]
-                removed, redeployed, deleted, delays = [], {}, [], []
+                    for role in ('postgres', 'seaweed', 'weaviate')]
+                removed, redeployed, restore_order, deleted, delays = [], {}, [], [], []
                 clock = [0]
                 workflow_reads = [0]
                 pending, removing = [], {}
@@ -185,6 +185,7 @@ class RailwayIsolation(unittest.TestCase):
                         if role == 'web' and failure == 'restore':
                             raise RuntimeError('provider-secret-payload')
                         redeployed[role] = identifier
+                        restore_order.append(role)
                         current[role] = role + '-restored'
                         owners[current[role]] = role
                         deployments[current[role]] = {'id': current[role], 'status': 'SUCCESS',
@@ -256,10 +257,10 @@ class RailwayIsolation(unittest.TestCase):
                     self.assertEqual(result, 0, errors.getvalue())
                     self.assertEqual(state['phase'], 'complete')
                     self.assertEqual(redeployed, {role: role + '-original' for role in roles})
-                    self.assertEqual(len(deleted), 4)
+                    self.assertLess(restore_order.index('postgres'), restore_order.index('temporal'))
+                    self.assertEqual(len(deleted), 3)
                     self.assertEqual({v['serviceId']: v['mountPath'] for v in volumes},
-                        {'postgres': '/data', 'temporal': '/data', 'seaweed': '/data',
-                         'weaviate': '/var/lib/weaviate'})
+                        {'postgres': '/data', 'seaweed': '/data', 'weaviate': '/var/lib/weaviate'})
                     self.assertTrue(all(deployments[current[r]]['instances'][0]['status'] == 'RUNNING' for r in roles))
                     decoder = json.JSONDecoder()
                     preview, end = decoder.raw_decode(output.getvalue())
@@ -294,7 +295,7 @@ class RailwayIsolation(unittest.TestCase):
                         self.assertLessEqual(clock[0] - attached['postgres'], 180, 'attachment cleanup was unbounded')
                     if failure is None:
                         self.assertEqual({identifier for identifier, _ in removed if '-attach-' in identifier},
-                            {role + '-attach-' + str(number) for role in ('postgres', 'temporal', 'seaweed', 'weaviate')
+                            {role + '-attach-' + str(number) for role in ('postgres', 'seaweed', 'weaviate')
                              for number in range(1, len(attach_delays) + 1)})
                     self.assertTrue(delays)
                     self.assertTrue(all(delay >= 1 for delay in delays), delays)

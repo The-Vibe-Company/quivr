@@ -408,7 +408,7 @@ class Stack:
                 try: os.kill(pid,signal.SIGKILL)
                 except ProcessLookupError: pass
             s['pids']=[];self.save()
-            self.compose('start',dependency)
+            self.compose('up','-d','--wait','--wait-timeout','90',dependency)
             self.config()
             self.start_processes()
             replay=call('POST','/v0/records',command);assert replay['receipt_id']==rid

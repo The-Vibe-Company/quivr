@@ -65,7 +65,7 @@ describe these trade-offs. Restart PostgreSQL after changing budgets.
 The [shared infrastructure guide](../infrastructure.md) owns profiles, overrides and
 the Compose and Railway apply/check sequence. `make dev` resolves the selected profile,
 including on macOS; direct Compose uses a rendered overlay for non-default settings.
-The Compose adapter manages PostgreSQL and Weaviate only; API and worker processes stay
+The Compose adapter manages PostgreSQL, Temporal and Weaviate; API and worker processes stay
 native host processes.
 
 Use the Compose adapter to apply settings for an existing `make dev` project. Launch a fresh

@@ -21,11 +21,11 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 | worker-bulk | Bulk Go/Temporal processing, one to eight replicas with autoscaling | PostgreSQL/S3/Temporal |
 | postgres | Pinned PostgreSQL 17 | `/data/pgdata` on `/data` volume |
 | seaweed | Pinned SeaweedFS mini, authenticated S3 | `/data` volume |
-| temporal | Pinned Temporal dev server, headless | SQLite `/data/temporal.db` volume |
+| temporal | Pinned Temporal auto-setup server | PostgreSQL (`temporal`, `temporal_visibility`) |
 | weaviate | Pinned standalone search projection | `/var/lib/weaviate` volume |
 | tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
 
-This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
+This evaluation deployment uses single-replica dependencies without high availability.
 Applying or redeploying volume-backed PostgreSQL or Weaviate can interrupt requests; schedule maintenance and verify readiness before continuing. No public dependency domains are needed.
 
 ## Apply shared infrastructure settings
@@ -58,7 +58,7 @@ python3 deploy/railway/infrastructure.py check \
   --project-id ID --environment-id ENV_ID --profile large
 ```
 
-For `small`, the infrastructure adapter defaults to PostgreSQL and Weaviate. For `large`,
+For `small`, the infrastructure adapter defaults to PostgreSQL, Temporal and Weaviate. For `large`,
 it also selects API, worker and worker-bulk to apply their 32,000,000,000-byte/32-vCPU
 limits. Without `--service`, an existing uniquely named `autoscaler` is included; it is
 never created or replica-reset. Repeated `--service ROLE=NAME_OR_ID` replaces the defaults
@@ -390,7 +390,7 @@ python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID --environment-id Y
 
 The provisioner sets each Dockerfile path. Deploy in order:
 
-1. postgres, seaweed, temporal, weaviate and tei; inspect deployment status/logs.
+1. postgres first (wait until ready), then seaweed, temporal, weaviate and tei; inspect deployment status/logs.
 2. api; its startup migration bootstraps schema, bucket and projection, then readiness.
 3. worker, worker-bulk and web; verify readiness before publishing.
 

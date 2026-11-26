@@ -11,7 +11,6 @@ from deploy.weaviate_client import WeaviateClient
 
 ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = {'postgres': ('data', '/var/lib/postgresql/data'),
-           'temporal': ('temporal-data', '/home/temporal'),
            'seaweed': ('seaweed-data', '/data'),
            'weaviate': ('weaviate-data', '/var/lib/weaviate')}
 
@@ -91,6 +90,8 @@ class ComposeReset:
             if attached != [container]:
                 raise RuntimeError('data volume is attached outside the selected service')
             self.volumes[role] = name
+        if not self.adapter.configured('temporal'):
+            raise RuntimeError('reset requires the selected Stack dependencies running')
         # An archive used as a source must live outside the storage being reset.
         from deploy.reset_storage import inventory
         self.storage = inventory(self.config['s3'])
@@ -111,7 +112,7 @@ class ComposeReset:
             stack.save()
             stack.stop_processes()
             postgres = self.adapter.containers['postgres']
-            query = "SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' AND pid<>pg_backend_pid()"
+            query = "SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' AND datname=current_database() AND pid<>pg_backend_pid()"
             connections = self.adapter.run(['exec', postgres, 'sh', '-c',
                 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c ' + shlex.quote(query)])
             if connections.strip() != '0':
