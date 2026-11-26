@@ -34,7 +34,7 @@ func TestMetadataFiltersExcludeRoutesAndSurvivePluginRounds(t *testing.T) {
 	q.Metadata = []corpus.MetadataFilter{{Field: "absent", AnyOf: []any{true}}}
 	calls := len(p.searched)
 	got, err = s.Search(context.Background(), searchScope, q)
-	if err != nil || len(got.Hits) != 0 || len(got.ExcludedCorpora) != 2 || len(p.searched) != calls || got.Usage == nil {
+	if err != nil || len(got.Hits) != 0 || len(got.ExcludedCorpora) != 2 || len(p.searched) != calls || got.Usage == nil || got.Usage.Phases.Routing != got.Usage.Elapsed || got.Usage.Rounds != 0 {
 		t.Fatalf("all routes excluded: %+v %v, projection calls %d", got, err, len(p.searched))
 	}
 }

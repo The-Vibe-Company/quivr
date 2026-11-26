@@ -56,3 +56,11 @@ func TestServerTimingNamesEachPhase(t *testing.T) {
 		t.Fatalf("Server-Timing %q; want %q", got, want)
 	}
 }
+
+// A search that ranked nothing spent no round: the contract's usage needs at
+// least one, so the body omits it.
+func TestSearchUsageIsOmittedWithoutARound(t *testing.T) {
+	if got := usageToTransport(retrieval.Usage{Elapsed: time.Millisecond, Phases: retrieval.Phases{Routing: time.Millisecond}}); got != nil {
+		t.Fatalf("usage %+v; want none", got)
+	}
+}

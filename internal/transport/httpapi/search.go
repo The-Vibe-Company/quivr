@@ -125,6 +125,11 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 // usageToTransport is what a search spent, with each phase in whole
 // milliseconds, rounded down.
 func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
+	// A search that ranked nothing spent no round, and the contract requires
+	// at least one: its phases reach the Server-Timing header only.
+	if u.Rounds == 0 {
+		return nil
+	}
 	ph := u.Phases
 	profiles := make([]transport.SearchProfileUsage, 0, len(u.Profiles))
 	for _, p := range u.Profiles {
