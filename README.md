@@ -34,6 +34,8 @@ created by the Quivr team.
   rules are plugins: small HTTP services you can replace, in any language.
 - **Let AI agents use it.** `quivr mcp` lets an agent search Quivr and quote what it
   finds, with the source of every passage.
+- **Use your own database.** Quivr runs with a non-superuser login on
+  [DBA-managed PostgreSQL 17](https://docs.quivr.thevibecompany.co/run-quivr/deploy#use-dba-managed-postgresql).
 
 ## How it works
 

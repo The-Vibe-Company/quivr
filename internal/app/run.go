@@ -573,12 +573,13 @@ func Run(command string, args ...string) error {
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
+		var prerequisite *postgres.PrerequisiteError
 		if contract {
 			contractCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrMigrationBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
@@ -586,7 +587,7 @@ func Run(command string, args ...string) error {
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) || errors.As(err, &prerequisite) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
@@ -644,6 +645,18 @@ func Run(command string, args ...string) error {
 					err = projection.Ready(ctx)
 				}
 			}
+		}
+		return err
+	}
+	preflight, cancelPreflight := context.WithTimeout(ctx, 5*time.Second)
+	err = postgres.CheckPrerequisites(preflight, pool, false)
+	cancelPreflight()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return postgres.ErrPrerequisiteConnection
 		}
 		return err
 	}
