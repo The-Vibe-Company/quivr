@@ -11,7 +11,8 @@ func (s Store) Archive(ctx context.Context, org, id string, archived bool) (corp
 		return corpus.Corpus{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	if s.Projection != nil {
+	queueActivity := s.Projection != nil
+	if queueActivity {
 		// Lock even on a repeated request, so enqueue and reconciliation
 		// agree on the lock order.
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM corpora WHERE organization=$1 AND id=$2 FOR NO KEY UPDATE`, org, id); err != nil {
@@ -34,7 +35,7 @@ func (s Store) Archive(ctx context.Context, org, id string, archived bool) (corp
 	if err != nil {
 		return corpus.Corpus{}, err
 	}
-	if s.Projection != nil {
+	if queueActivity {
 		_, err = tx.Exec(ctx, `INSERT INTO projection_tenant_activity(organization,corpus_id) VALUES($1,$2)
  ON CONFLICT(organization,corpus_id) DO UPDATE SET due_at=now()`, org, id)
 		if err != nil {

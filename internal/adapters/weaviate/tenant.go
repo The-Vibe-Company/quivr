@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -93,7 +94,10 @@ func (s *Store) SetGenerationActive(ctx context.Context, collection, org, corpus
 	if active {
 		state = "ACTIVE"
 	}
-	_, err = s.call(ctx, "PUT", tenantsPath(collection), []tenantSpec{{Name: tenantFrom(ctx), ActivityStatus: state}}, nil)
+	status, err := s.call(ctx, "PUT", tenantsPath(collection), []tenantSpec{{Name: tenantFrom(ctx), ActivityStatus: state}}, nil)
+	if err != nil && status != 0 {
+		return fmt.Errorf("tenant activity update HTTP %d: %w", status, err)
+	}
 	return err
 }
 

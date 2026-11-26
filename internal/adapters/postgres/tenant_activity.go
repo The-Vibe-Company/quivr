@@ -24,7 +24,7 @@ func (s Store) RunTenantActivity(ctx context.Context) {
 		more, err := s.ReconcileTenantActivity(attempt)
 		cancel()
 		if err != nil && ctx.Err() == nil {
-			slog.Warn("tenant activity update failed; will retry")
+			slog.Warn("tenant activity update failed; will retry", "reason", err.Error())
 		}
 		if more {
 			continue

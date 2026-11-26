@@ -1,6 +1,7 @@
 package weaviate
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -57,7 +58,9 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 	if err != nil {
 		return nil, err
 	}
-	return fuseRouteRanks(results, q.K), nil
+	// Tenant-local scores only rank their own candidate lists. Use the
+	// same cross-corpus merge in every mode, including semantic search.
+	return fuseRouteRanks(results, cmp.Or(q.K, retrieval.CandidateLimit)), nil
 }
 
 func (s *Store) searchRoute(ctx context.Context, route retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {

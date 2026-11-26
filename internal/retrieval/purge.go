@@ -183,44 +183,44 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		if ctx.Err() != nil {
 			return completed, errors.Join(failure, ctx.Err())
 		}
-		var err error
+		var itemErr error
 		deleted, complete, remaining := 0, true, 0
 		for _, collection := range item.Collections {
-			if err = ctx.Err(); err != nil {
+			if itemErr = ctx.Err(); itemErr != nil {
 				break
 			}
 			var r PurgeResult
 			if item.Kind == PurgeGeneration {
-				r, err = p.Projection.PurgeGeneration(ctx, collection, item.Organization, item.CorpusID, item.GenerationID)
+				r, itemErr = p.Projection.PurgeGeneration(ctx, collection, item.Organization, item.CorpusID, item.GenerationID)
 			} else {
-				r, err = p.Projection.PurgeVersion(ctx, collection, item.Organization, item.VersionID)
+				r, itemErr = p.Projection.PurgeVersion(ctx, collection, item.Organization, item.VersionID)
 			}
 			deleted += r.Deleted
 			remaining += r.RemainingAtLeast
-			if err != nil {
+			if itemErr != nil {
 				break
 			}
 			complete = complete && r.Complete
 		}
 		for _, route := range item.VersionRoutes {
-			if err != nil {
+			if itemErr != nil {
 				break
 			}
 			var r PurgeResult
-			r, err = p.Store.WithTenantVersionPurge(ctx, item.Organization, route.CorpusID, func(archived bool) (PurgeResult, error) {
+			r, itemErr = p.Store.WithTenantVersionPurge(ctx, item.Organization, route.CorpusID, func(archived bool) (PurgeResult, error) {
 				return p.Projection.PurgeVersionInGeneration(ctx, route.Generation.Collection, item.Organization, route.CorpusID, route.Generation.ID, item.VersionID, archived)
 			})
 			deleted += r.Deleted
 			remaining += r.RemainingAtLeast
 			complete = complete && r.Complete
 		}
-		if err != nil {
+		if itemErr != nil {
 			complete = false
 			if p.Metrics != nil {
 				p.Metrics.Failures[item.Kind].Add(1)
 			}
-			failure = errors.Join(failure, err)
-			slog.Warn("projection purge batch failed", "kind", item.Kind, "reason", err.Error(), "objects_deleted", deleted)
+			failure = errors.Join(failure, itemErr)
+			slog.Warn("projection purge batch failed", "kind", item.Kind, "reason", itemErr.Error(), "objects_deleted", deleted)
 		}
 		// Save confirmed progress even on partial failure/cancellation. The bounded
 		// cleanup context retains the managed process shutdown budget.

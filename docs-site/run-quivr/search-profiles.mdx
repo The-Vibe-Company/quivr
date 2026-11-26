@@ -70,7 +70,7 @@ The manifest validates these settings and refuses unknown keys, wrong types and 
 - `candidate_count`: integer 1–100, default the search's limit. Each served space requests that many candidates; lexical mode makes one request. Final ranking returns at most the search limit, and a smaller depth can return a shorter page.
 - `hybrid_fusion`: `relative_score` (default) normalizes each side's scores before weighting them; `ranked` uses Weaviate reciprocal rank fusion (RRF, constant 60), based on positions in each list. See [Weaviate's fusion explanation](https://docs.weaviate.io/weaviate/concepts/search/hybrid-search).
 
-New corpora use a separate Weaviate tenant for each projection generation in `QuivrTextV5`. The profile's weight and fusion settings apply to keyword and vector scores within each corpus in hybrid mode.
+`QuivrTextV5` gives each projection generation its own Weaviate tenant. In hybrid mode, `dense_weight` and `hybrid_fusion` determine the ranking inside each corpus.
 
 When a search spans multiple corpora and includes a native tenant, Quivr combines the independently ranked corpus lists with reciprocal rank fusion (constant 60) in lexical, semantic, and hybrid modes. This step uses the rank positions, including for corpora on an older index layout. Tenant-local BM25 scores and independently built vector indexes can produce different score distributions, so the cross-corpus step uses one consistent combination in every mode.
 
