@@ -106,3 +106,35 @@ class SingleMachineTest(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('digest', result.stderr)
+
+    def test_upgrade_reports_exact_legacy_temporal_volume_without_deleting_it(self):
+        import io
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('single_machine_setup', SCRIPT)
+        setup = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(setup)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            manifest = {'version': '2.0.0', 'revision': 'b' * 40,
+                'models': {'gemma': 'c' * 40, 'e5': 'd' * 40}, 'images': {
+                name: {'reference': f'ghcr.io/example/quivr-{name}@sha256:' + 'a' * 64,
+                       'version': '2.0.0', 'revision': 'b' * 40}
+                for name in ('core', 'web', 'cpu-embeddings', 'postgres', 'seaweed', 'tei')}}
+            release = directory / 'release.json'
+            release.write_text(json.dumps(manifest))
+            setup.initialize(directory, release, 'custom-stack', 'gemma', 'small', {})
+            calls = []
+            def fake_docker(args):
+                calls.append(args)
+                if args[:2] == ['volume', 'ls']:
+                    return 'custom-stack-temporal-data\n'
+                return ''
+            output = io.StringIO()
+            with patch.object(setup, 'docker', side_effect=fake_docker), \
+                 patch.object(sys, 'argv', ['setup.py', 'upgrade', '--directory', str(directory), '--release', str(release)]), \
+                 patch('sys.stdout', output):
+                code = setup.main()
+            self.assertEqual(code, 0)
+            self.assertIn('docker volume rm custom-stack-temporal-data', output.getvalue())
+            self.assertNotIn('quivr-temporal-data', output.getvalue())
+            self.assertFalse(any(args[:2] == ['volume', 'rm'] for args in calls))

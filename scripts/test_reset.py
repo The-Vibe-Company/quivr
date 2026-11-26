@@ -445,3 +445,5 @@ class ComposeProcessScope(unittest.TestCase):
                             result = resetter.reset()
                         self.assertEqual(removed, ['legacy-stack_temporal-data'])
                         self.assertIn('legacy-stack_temporal-data', result['deleted_volumes'])
+                        checkpoint = json.loads((project_dir / 'reset-state.json').read_text())
+                        self.assertEqual(checkpoint['legacy_volumes'], {'temporal': 'legacy-stack_temporal-data'})

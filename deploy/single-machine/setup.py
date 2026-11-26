@@ -276,11 +276,15 @@ def main():
                 if key not in SECRET_KEYS or not path:
                     raise ValueError('unsupported secret file key')
                 files[key] = Path(path)
-            initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
+            values, _ = initialize(args.directory, args.release, args.project, args.embedding, args.profile, files)
             if args.command == 'upgrade':
                 docker(['compose', '--project-directory', str(args.directory), 'stop', 'api', 'worker', 'demo'])
                 docker(['compose', '--project-directory', str(args.directory), 'rm', '-f', 'migrate'])
                 docker(['compose', '--project-directory', str(args.directory), 'up', '-d'])
+                legacy_volume = values['COMPOSE_PROJECT_NAME'] + '-temporal-data'
+                if legacy_volume in docker(['volume', 'ls', '-q', '--filter', 'name=^' + legacy_volume + '$']).split():
+                    print(f'Notice: legacy SQLite Temporal volume {legacy_volume} is no longer mounted; '
+                          f'remove it after verifying the upgrade: docker volume rm {legacy_volume}')
         print('Ready: one Compose file and protected .env; model cache preparation is a separate install step.')
     except (ValueError, RuntimeError, KeyError, OSError) as error:
         # Do not echo exception values: paths and provider responses may contain secrets.

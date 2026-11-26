@@ -128,7 +128,8 @@ class ComposeReset:
         checkpoint = Checkpoint(self.directory / 'reset-state.json', self.spec)
         stack = None
         try:
-            checkpoint.save('stopping-writers', volumes=self.volumes)
+            legacy = {'legacy_volumes': self.legacy_volumes} if self.legacy_volumes else {}
+            checkpoint.save('stopping-writers', volumes=self.volumes, **legacy)
             sys.path.insert(0, str(ROOT / 'scripts'))
             from local import Stack
             stack = Stack(self.spec['project'])
@@ -143,7 +144,7 @@ class ComposeReset:
                 raise RuntimeError('untracked database clients remain; reset refused with writers stopped')
             workflows = terminate_workflows(lambda args: self.adapter.run(
                 ['exec', self.adapter.containers['temporal'], 'temporal', *args]))
-            checkpoint.save('deleting-volumes', terminated_workflows=workflows)
+            checkpoint.save('deleting-volumes', terminated_workflows=workflows, **legacy)
             check_tracked_processes(stack.state, self.directory, prune=True)
             stack.save()
             stack.down(True)
