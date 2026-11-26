@@ -109,22 +109,24 @@ Choose the diff command using the mode and refs from Step 1. Use `git --no-pager
 
 The diff commands disable external diff programs, text conversion, and color to produce plain patches.
 
+Pass repository-controlled file paths as argument-array values or shell-escaped single-quoted strings (`'...'`), never inside double quotes (`"..."`) where `$()` or backticks can be evaluated.
+
 **Range mode** (merge_base provided in preview output):
 ```bash
-git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- '<shell-escaped-path>'
 ```
 
 **Commit mode**:
 ```bash
-git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- '<shell-escaped-path>'
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"
-# New untracked files — read directly (entire file is new code)
-cat "<path>"
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- '<shell-escaped-path>'
+# New untracked files — read directly with the file-reading tool or shell-escaped path
+cat -- '<shell-escaped-path>'
 ```
 
 To read context:
@@ -241,7 +243,7 @@ condition aborts the command. When the command reports either limit:
 
 ### Troubleshooting CLI Version Compatibility
 
-If an OCR command fails with `command not found`, install the CLI with `npm install -g @alibaba-group/open-code-review` if your environment permits, then retry the same command. If installation is not permitted, explain the prerequisite and stop; do not substitute `ocr review` or ask for an API key.
+If the bundled wrapper (`python3 <skill_dir>/scripts/ocr.py ...`) fails, inspect and retry the wrapper (`ocr.py check` / `ocr.py version`) — do not install a global `ocr` on PATH to work around wrapper failures, because the wrapper executes its checksum-pinned binary. For standalone CLI usage outside the wrapper only, if `ocr` fails with `command not found`, install it with `npm install -g @alibaba-group/open-code-review` if your environment permits, then retry; never substitute `ocr review` or ask for an API key.
 
 The `--format` flag is available in `ocr` v1.9.0 and later. The Skill and the
 installed CLI can be updated independently. If a requested `preview` or `rule`

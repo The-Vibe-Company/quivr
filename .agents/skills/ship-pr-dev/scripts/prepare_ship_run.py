@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prepare a non-committable artifact directory for ship-pr-dev."""
+# Modified by Armada: reject symlinked artifact paths before any writes.
 
 from __future__ import annotations
 
@@ -63,6 +64,11 @@ def main() -> None:
         raise SystemExit("ship-pr-dev requires a Git repository")
 
     repo_root = Path(root_result.stdout.strip()).resolve()
+    current = repo_root
+    for part in ("plans", "ship-pr-dev", "runs"):
+        current = current / part
+        if current.is_symlink():
+            raise SystemExit(f"Artifact path is a symlink: {current}; refusing to write outside the checkout.")
     ensure_git_ignore(repo_root)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
