@@ -21,18 +21,16 @@ import (
 	"time"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/keywords"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
-
-// InitialCollection is shared by every logical Projection Generation; objects carry
-// their generation so PostgreSQL routing, not aliases, selects what a Corpus serves.
-const InitialCollection = "QuivrTextV4"
 
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
@@ -51,6 +49,7 @@ type Store struct {
 	LegacySpace string
 	// vectors remembers the named vectors known to exist, by collection.
 	vectors            *sync.Map
+	vectorSchema       *semaphore.Weighted
 	metadataMu         sync.Mutex
 	metadataProperties map[string]bool
 	metrics            atomic.Pointer[telemetry.DependencyMetrics]
@@ -157,14 +156,27 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 	if known == nil {
 		known = &sync.Map{}
 	}
-	missing := false
-	for _, sp := range g.Spaces {
-		if _, ok := known.Load(g.Collection + "/" + s.VectorName(g, sp.ID)); !ok {
-			missing = true
+	cached := func() bool {
+		for _, sp := range g.Spaces {
+			if _, ok := known.Load(g.Collection + "/" + s.VectorName(g, sp.ID)); !ok {
+				return false
+			}
 		}
+		return true
 	}
-	if !missing {
+	if cached() {
 		return nil
+	}
+	// Parallel tenant queries share named-vector definitions. Serialize
+	// cache misses so that one class PUT includes previous additions.
+	if s.vectorSchema != nil {
+		if err := s.vectorSchema.Acquire(ctx, 1); err != nil {
+			return err
+		}
+		defer s.vectorSchema.Release(1)
+		if cached() {
+			return nil
+		}
 	}
 	var class map[string]any
 	if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
@@ -231,7 +243,7 @@ func New(endpoint string, apiKey ...string) *Store {
 }
 
 func newStore(endpoint string, transport http.RoundTripper, apiKey []string) *Store {
-	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}}
+	store := &Store{Endpoint: strings.TrimRight(endpoint, "/"), vectors: &sync.Map{}, vectorSchema: semaphore.NewWeighted(1)}
 	store.Client = &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(store.countRequests(store.authenticate(transport, apiKey)), "weaviate.request")}
 	if store.apiKey != "" {
 		store.Client.CheckRedirect = outbound.CheckRedirect
@@ -285,12 +297,20 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	}
 	var existing struct {
 		VectorConfig map[string]any `json:"vectorConfig"`
-		Properties   []struct {
+		MultiTenancy struct {
+			Enabled              bool `json:"enabled"`
+			AutoTenantCreation   bool `json:"autoTenantCreation"`
+			AutoTenantActivation bool `json:"autoTenantActivation"`
+		} `json:"multiTenancyConfig"`
+		Properties []struct {
 			Name string `json:"name"`
 		} `json:"properties"`
 	}
 	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing)
 	if err == nil {
+		if collection == InitialCollection && (!existing.MultiTenancy.Enabled || existing.MultiTenancy.AutoTenantCreation || !existing.MultiTenancy.AutoTenantActivation) {
+			return errors.New("projection tenant configuration differs")
+		}
 		present := map[string]bool{}
 		for _, p := range existing.Properties {
 			present[p.Name] = true
@@ -346,12 +366,22 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	}
 	properties := []any{}
 	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty} {
-		properties = append(properties, filterable(name))
+		property := filterable(name)
+		if collection == InitialCollection && (name == "organization" || name == "corpusId" || name == "generationId") {
+			// Retain these values for canonical hydration and replay checks.
+			property["indexFilterable"] = false
+		}
+		properties = append(properties, property)
 	}
 	for _, name := range []string{"title", "body", lexicalProperty} {
 		properties = append(properties, searchable(name))
 	}
 	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine", nil)}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
+	if collection == InitialCollection {
+		// A read already admitted before archive may still reach its shard.
+		// Canonical routing rejects new reads while the Corpus is archived.
+		schema["multiTenancyConfig"] = map[string]bool{"enabled": true, "autoTenantCreation": false, "autoTenantActivation": true}
+	}
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
@@ -405,7 +435,7 @@ type storedObject struct {
 // object reads one object by identity; found is false only on a definite 404.
 func (s *Store) object(ctx context.Context, collection, id string) (storedObject, bool, error) {
 	var stored storedObject
-	status, err := s.call(ctx, "GET", "/v1/objects/"+collection+"/"+id+"?include=vector", nil, &stored)
+	status, err := s.call(ctx, "GET", tenantPath(ctx, "/v1/objects/"+collection+"/"+id+"?include=vector"), nil, &stored)
 	if status == http.StatusNotFound {
 		return stored, false, nil
 	}
@@ -437,6 +467,7 @@ const projectionBatch = 100
 
 type projectionObject struct {
 	Class      string               `json:"class"`
+	Tenant     string               `json:"tenant,omitempty"`
 	ID         string               `json:"id"`
 	Properties map[string]any       `json:"properties"`
 	Vectors    map[string][]float32 `json:"vectors,omitempty"`
@@ -473,7 +504,7 @@ func (s *Store) projectionRows(ctx context.Context, collection string, where fil
 		additional = "_additional{id creationTimeUnix}"
 	}
 	fields = append(fields, additional)
-	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d%s){%s}}}", collection, where, limit, sortClause, strings.Join(fields, " "))
+	query := fmt.Sprintf("{Get{%s(%s%s limit:%d%s){%s}}}", collection, tenantArgument(ctx), where.graphql(), limit, sortClause, strings.Join(fields, " "))
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`
@@ -534,6 +565,9 @@ func (s *Store) verifyBatch(ctx context.Context, objects []projectionObject) err
 func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) error {
 	if len(objects) == 0 {
 		return nil
+	}
+	for i := range objects {
+		objects[i].Tenant = tenantFrom(ctx)
 	}
 	if s.grpc != nil {
 		return s.grpcInsertBatch(ctx, objects)
@@ -597,7 +631,7 @@ func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org st
 	}
 	snapshots := map[string]projectionRow{}
 	if len(segments) > 0 {
-		scope := and(equal("organization", org), equal("generationId", g.ID), equal(itemKind, segmentKind))
+		scope := and(generationFilter(ctx, org, g.ID), equal(itemKind, segmentKind))
 		rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
 			embeddingInventoryLimit, searchOrder{}, []string{"segmentId", embeddingRevision}, true)
 		if err != nil {
@@ -675,6 +709,10 @@ func (s *Store) publishAnchors(ctx context.Context, g content.Generation, org st
 // immutable BM25 anchor for the Version. Older generations serve BM25 from
 // immutable passage anchors, so their vectors remain in separate objects.
 func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error {
+	ctx, err := tenantContext(ctx, g.Collection, org, corpusID, g.ID)
+	if err != nil {
+		return err
+	}
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
 	}
@@ -787,7 +825,12 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) filter
 		ids = append(ids, owner)
 	}
 	sort.Strings(ids)
-	legacy := []filter{equal("generationId", g.ID)}
+	var legacy []filter
+	if g.Collection != InitialCollection {
+		legacy = append(legacy, equal("generationId", g.ID))
+	} else if len(ids) == 0 {
+		return filter{}
+	}
 	for _, owner := range ids {
 		legacy = append(legacy, notEqual(projectionPluginProperty, owner))
 	}
@@ -840,7 +883,10 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		routeFilters := []filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		routeFilters := []filter{projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		if tenantFrom(ctx) == "" {
+			routeFilters = append([]filter{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}, routeFilters...)
+		}
 		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
 		if err != nil {
 			return nil, err
@@ -866,7 +912,10 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	if len(filters) == 0 {
 		return []content.Candidate{}, nil
 	}
-	operands := []filter{equal("organization", scope.Organization), or(filters...)}
+	operands := []filter{or(filters...)}
+	if tenantFrom(ctx) == "" {
+		operands = append([]filter{equal("organization", scope.Organization)}, operands...)
+	}
 	// The source filter is part of the candidate query, so ranking and the
 	// candidate limit apply within it in every mode.
 	if len(q.SourceNamespaces) > 0 {
@@ -970,6 +1019,19 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	if len(order) == 0 {
 		return nil
 	}
+	if g.Collection == InitialCollection {
+		corpusID := data[0].Artifact.CorpusID
+		for _, d := range data {
+			if d.Artifact.CorpusID != corpusID {
+				return errors.New("embedding projection spans tenants")
+			}
+		}
+		var err error
+		ctx, err = tenantContext(ctx, g.Collection, org, corpusID, g.ID)
+		if err != nil {
+			return err
+		}
+	}
 	if !g.ItemKeywordsProjected {
 		if err := s.ensureProperties(ctx, g.Collection, []map[string]any{embeddingRevisionProperty()}); err != nil {
 			return err
@@ -1031,7 +1093,7 @@ func (s *Store) embeddingRows(ctx context.Context, g content.Generation, where f
 }
 
 func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
-	scope := and(equal("organization", org), equal("generationId", g.ID))
+	scope := generationFilter(ctx, org, g.ID)
 	inventory := func(segments []string) ([]projectionRow, error) {
 		return s.embeddingRows(ctx, g, and(scope, containsAny("segmentId", segments)), searchOrder{})
 	}
@@ -1203,7 +1265,7 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 		}
 		// Delete observed identities. A filter excluding the winner's ID could
 		// match a concurrent insert before Weaviate indexes its ID.
-		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+		if status, err := s.call(ctx, "DELETE", tenantPath(ctx, "/v1/objects/"+g.Collection+"/"+id), nil, nil); err != nil && status != http.StatusNotFound {
 			return err
 		}
 	}
@@ -1227,7 +1289,7 @@ func (s *Store) removeSegmentSeeds(ctx context.Context, collection string, ids [
 	// The deployment may cap a batch below our write size. Delete the
 	// observed identities directly so truncation never leaves seeds behind.
 	for _, id := range ids {
-		if status, err := s.call(ctx, "DELETE", "/v1/objects/"+collection+"/"+id, nil, nil); err != nil && status != http.StatusNotFound {
+		if status, err := s.call(ctx, "DELETE", tenantPath(ctx, "/v1/objects/"+collection+"/"+id), nil, nil); err != nil && status != http.StatusNotFound {
 			return err
 		}
 	}
@@ -1261,7 +1323,7 @@ func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection
 	var response purgeResponse
 
 	scoped := Store{Endpoint: s.Endpoint, Client: client, apiKey: s.apiKey}
-	if err := scoped.purgeCall(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "verbose"}, &response); err != nil {
+	if err := scoped.purgeCall(ctx, "DELETE", tenantPath(ctx, "/v1/batch/objects"), map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "verbose"}, &response); err != nil {
 		return retrieval.PurgeResult{}, err
 	}
 	r := response.Results
@@ -1299,11 +1361,19 @@ func equalText(path, value string) map[string]any {
 	return map[string]any{"path": []string{path}, "operator": "Equal", "valueText": value}
 }
 
-// PurgeGeneration deletes every object of one Corpus in one logical
-// generation, lexical and enriched, by filter.
+// PurgeGeneration deletes a native tenant or drains the matching objects of
+// a legacy (Organization, Corpus, generation) route.
 func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
 	if org == "" || corpusID == "" || generationID == "" {
 		return retrieval.PurgeResult{}, errors.New("incomplete generation purge filter")
+	}
+	if collection == InitialCollection {
+		client := Store{Endpoint: s.Endpoint, Client: s.purgeClient(), apiKey: s.apiKey}
+		status, err := client.call(ctx, "DELETE", tenantsPath(collection), []string{tenantName(org, corpusID, generationID)}, nil)
+		if status == http.StatusNotFound {
+			return retrieval.PurgeResult{Complete: true}, nil
+		}
+		return retrieval.PurgeResult{Complete: err == nil}, err
 	}
 	return s.purgeGenerationWindow(ctx, collection, org, corpusID, generationID)
 }
@@ -1311,11 +1381,41 @@ func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, 
 // PurgeVersion deletes every object of one Record Version, lexical and
 // enriched, in every generation of the collection, by filter.
 func (s *Store) PurgeVersion(ctx context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {
-	if org == "" || versionID == "" {
+	if collection == InitialCollection || org == "" || versionID == "" {
 		return retrieval.PurgeResult{}, errors.New("incomplete version purge filter")
 	}
 	return s.deleteWhere(ctx, s.purgeClient(), collection, map[string]any{"operator": "And", "operands": []any{
 		equalText("organization", org), equalText("versionId", versionID)}})
+}
+
+// PurgeVersionInGeneration deletes one dead Version within a live tenant.
+// Generation retirement uses a separate whole-tenant operation.
+func (s *Store) PurgeVersionInGeneration(ctx context.Context, collection, org, corpusID, generationID, versionID string, archived bool) (retrieval.PurgeResult, error) {
+	if collection != InitialCollection || versionID == "" {
+		return retrieval.PurgeResult{}, errors.New("invalid tenant version purge")
+	}
+	ctx, err := tenantContext(ctx, collection, org, corpusID, generationID)
+	if err != nil {
+		return retrieval.PurgeResult{}, err
+	}
+	client := s.purgeClient()
+	result, err := s.deleteWhere(ctx, client, collection, equalText("versionId", versionID))
+	if archived {
+		// Batch delete can auto-activate a tenant even with no matches.
+		cleanup, cancel := lifecycle.CleanupContext(ctx, 5*time.Second)
+		err = errors.Join(err, s.SetGenerationActive(cleanup, collection, org, corpusID, generationID, false))
+		cancel()
+	}
+	if err != nil {
+		// A rebuild may have retired this route after the claim. Missing
+		// tenants already satisfy the deletion.
+		reader := &Store{Endpoint: s.Endpoint, Client: client, apiKey: s.apiKey}
+		if exists, check := reader.tenantExists(ctx, collection); check == nil && !exists {
+			result.Complete = true
+			return result, nil
+		}
+	}
+	return result, err
 }
 
 var _ retrieval.PurgeProjection = (*Store)(nil)

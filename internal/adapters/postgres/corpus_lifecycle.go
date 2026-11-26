@@ -11,6 +11,16 @@ func (s Store) Archive(ctx context.Context, org, id string, archived bool) (corp
 		return corpus.Corpus{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
+	if s.Projection != nil {
+		if err := lockProjectionRouting(ctx, tx); err != nil {
+			return corpus.Corpus{}, err
+		}
+		// Serialize even repeated transitions on the Corpus row. Weaviate
+		// must acknowledge activation before PostgreSQL admits new readers.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM corpora WHERE organization=$1 AND id=$2 FOR NO KEY UPDATE`, org, id); err != nil {
+			return corpus.Corpus{}, err
+		}
+	}
 	tag, err := tx.Exec(ctx, `UPDATE corpora SET archived=$3 WHERE organization=$1 AND id=$2 AND archived IS DISTINCT FROM $3`, org, id, archived)
 	if err != nil {
 		return corpus.Corpus{}, err
@@ -26,6 +36,15 @@ func (s Store) Archive(ctx context.Context, org, id string, archived bool) (corp
 	c, err := readCorpus(ctx, tx, org, id)
 	if err != nil {
 		return corpus.Corpus{}, err
+	}
+	if s.Projection != nil {
+		collection, generation, err := corpusProjectionRoute(ctx, tx, org, id)
+		if err != nil {
+			return corpus.Corpus{}, err
+		}
+		if err := s.Projection.SetGenerationActive(ctx, collection, org, id, generation, !archived); err != nil {
+			return corpus.Corpus{}, err
+		}
 	}
 	return c, tx.Commit(ctx)
 }

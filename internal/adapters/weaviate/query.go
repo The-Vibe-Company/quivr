@@ -1,6 +1,7 @@
 package weaviate
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -26,10 +27,24 @@ func notEqual(field, value string) filter {
 }
 
 func and(operands ...filter) filter {
-	return filter{operator: pb.Filters_OPERATOR_AND, children: operands}
+	children := make([]filter, 0, len(operands))
+	for _, operand := range operands {
+		if operand.operator != 0 {
+			children = append(children, operand)
+		}
+	}
+	if len(children) == 0 {
+		return filter{}
+	}
+	return filter{operator: pb.Filters_OPERATOR_AND, children: children}
 }
 
 func or(operands ...filter) filter {
+	for _, operand := range operands {
+		if operand.operator == 0 {
+			return filter{}
+		}
+	}
 	return filter{operator: pb.Filters_OPERATOR_OR, children: operands}
 }
 
@@ -56,7 +71,24 @@ func (f filter) String() string {
 	return "{path:[" + quote(f.field) + "],operator:" + operator + "," + f.jsonKey + ":" + encodeJSON(f.value) + "}"
 }
 
+func generationFilter(ctx context.Context, org, generationID string) filter {
+	if tenantFrom(ctx) != "" {
+		return filter{}
+	}
+	return and(equal("organization", org), equal("generationId", generationID))
+}
+
+func (f filter) graphql() string {
+	if f.operator == 0 {
+		return ""
+	}
+	return "where:" + f.String() + ","
+}
+
 func (f filter) proto() *pb.Filters {
+	if f.operator == 0 {
+		return nil
+	}
 	out := &pb.Filters{Operator: f.operator}
 	if f.field == "" {
 		for _, child := range f.children {

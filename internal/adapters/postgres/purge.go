@@ -17,11 +17,20 @@ import (
 // Operation with a new generation), and routes are never deleted, so a
 // routed Corpus never falls back to the default generation, nor to a former
 // default (default_until set): a Corpus served by one when the default moved
-// was routed to it, and a Corpus created later never followed it.
+// was routed to it, and a Corpus created later never followed it. A native
+// tenant has a Corpus-owned generation even when seeded at creation.
 var abandonedGenerationsSQL = `SELECT o.organization,o.corpus_id,o.target_generation_id FROM operations o
 WHERE o.state IN ('succeeded','failed','canceled') AND o.target_generation_id<>` + routedGenerationSQL("o.organization", "o.corpus_id") + `
 UNION
-SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN ` + effectiveGenerationsSQL + ` dg ON dg.active OR dg.default_until IS NOT NULL WHERE cr.generation_id<>dg.id`
+SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN ` + effectiveGenerationsSQL + ` dg ON (dg.active OR dg.default_until IS NOT NULL) AND dg.collection<>$2 WHERE cr.generation_id<>dg.id
+ AND NOT EXISTS(SELECT 1 FROM projection_generations seed
+   WHERE seed.organization=cr.organization AND seed.corpus_id=cr.corpus_id AND seed.collection=$2
+     AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.organization=seed.organization AND o.target_generation_id=seed.id))
+UNION
+SELECT g.organization,g.corpus_id,g.id FROM projection_generations g
+JOIN corpus_projection_routes cr ON (cr.organization,cr.corpus_id)=(g.organization,g.corpus_id)
+WHERE g.collection=$2 AND g.id<>cr.generation_id
+  AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.organization=g.organization AND o.target_generation_id=g.id)`
 
 // deadVersionSQL is true for a Version aliased v of Record r that can never be
 // served again: its Record is withdrawn or tombstoned (absorbing fences), or it
@@ -61,7 +70,7 @@ func (s PurgeStore) NoticePurges(ctx context.Context, limit int) (int, error) {
 	tag, err := s.Pool.Exec(ctx, `INSERT INTO projection_purges(organization,kind,corpus_id,generation_id)
 SELECT d.organization,'generation',d.corpus_id,d.target_generation_id FROM (`+abandonedGenerationsSQL+`) d
 WHERE NOT EXISTS(SELECT 1 FROM projection_purges p WHERE p.organization=d.organization AND p.kind='generation' AND p.corpus_id=d.corpus_id AND p.generation_id=d.target_generation_id AND p.version_id='')
-LIMIT $1 ON CONFLICT DO NOTHING`, limit)
+LIMIT $1 ON CONFLICT DO NOTHING`, limit, s.TenantCollection)
 	if err != nil {
 		return 0, err
 	}
@@ -112,7 +121,13 @@ RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id,p.notic
 		// former defaults use.
 		query, args := `SELECT collection FROM `+effectiveGenerationsSQL+` WHERE id=$1`, []any{it.GenerationID}
 		if it.Kind == retrieval.PurgeVersion {
-			query, args = `SELECT DISTINCT collection FROM `+effectiveGenerationsSQL+` WHERE active OR default_until IS NOT NULL OR organization=$1 ORDER BY collection`, []any{it.Organization}
+			query, args = `SELECT DISTINCT collection FROM `+effectiveGenerationsSQL+` WHERE (active OR default_until IS NOT NULL OR organization=$1) AND collection<>$2 ORDER BY collection`, []any{it.Organization, s.TenantCollection}
+			if s.TenantCollection != "" {
+				it.VersionRoutes, err = s.versionPurgeRoutes(ctx, it.Organization, it.VersionID)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 		cols, err := s.Pool.Query(ctx, query, args...)
 		if err != nil {
@@ -268,4 +283,50 @@ func purgeCoverageBatch(ctx context.Context, tx pgx.Tx, it retrieval.PurgeItem, 
 var _ retrieval.PurgeStore = PurgeStore{}
 
 // PurgeStore persists purge state.
-type PurgeStore struct{ Pool *pgxpool.Pool }
+type PurgeStore struct {
+	Pool             *pgxpool.Pool
+	TenantCollection string
+}
+
+func (s PurgeStore) WithTenantVersionPurge(ctx context.Context, org, corpusID string, purge func(bool) (retrieval.PurgeResult, error)) (retrieval.PurgeResult, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return retrieval.PurgeResult{}, err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived FROM corpora WHERE organization=$1 AND id=$2 FOR NO KEY UPDATE`, org, corpusID).Scan(&archived); err != nil {
+		return retrieval.PurgeResult{}, err
+	}
+	// The transaction holds only the corpus row lock. Read-only serving and
+	// other Corpora can continue while maintenance temporarily warms a shard.
+	return purge(archived)
+}
+
+func (s PurgeStore) versionPurgeRoutes(ctx context.Context, org, version string) ([]retrieval.Route, error) {
+	// Abandoned tenants are removed as a unit. Only the serving and
+	// in-progress rebuild targets need an individual Version delete.
+	rows, err := s.Pool.Query(ctx, `WITH owner AS (
+ SELECT r.corpus_id FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2
+), targets AS (
+ SELECT corpus_id,`+routedGenerationSQL("$1", "owner.corpus_id")+` AS generation_id FROM owner
+ UNION
+ SELECT o.corpus_id,o.target_generation_id FROM operations o JOIN owner USING(corpus_id)
+ WHERE o.organization=$1 AND o.state IN ('queued','running')
+)
+SELECT t.corpus_id,g.id,g.collection FROM targets t JOIN `+effectiveGenerationsSQL+` g ON g.id=t.generation_id WHERE g.collection=$3 ORDER BY g.id`, org, version, s.TenantCollection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var routes []retrieval.Route
+	for rows.Next() {
+		var r retrieval.Route
+		if err := rows.Scan(&r.CorpusID, &r.Generation.ID, &r.Generation.Collection); err != nil {
+			return nil, err
+		}
+		routes = append(routes, r)
+	}
+	return routes, rows.Err()
+}

@@ -111,6 +111,9 @@ type Request struct {
 	// Hybrid overrides the hybrid weight and fusion; nil keeps alpha 0.5 and
 	// relative score fusion.
 	Hybrid *HybridOptions
+	// RankAcrossRoutes preserves per-corpus ranks when another projection
+	// query supplies lexical candidates for routes without this vector.
+	RankAcrossRoutes bool
 }
 
 // Keyword fields and hybrid fusions a projection query may use.
@@ -172,6 +175,12 @@ type Projection interface {
 	PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error
 	Search(context.Context, []Route, corpus.Scope, Request) ([]content.Candidate, error)
 }
+
+// RouteRankFusion is implemented by projections with independent corpus indexes.
+type RouteRankFusion interface {
+	UsesRouteRankFusion([]Route) bool
+}
+
 type QueryEmbedder interface {
 	Embed(context.Context, string) ([]float32, error)
 	Space() content.VectorSpace

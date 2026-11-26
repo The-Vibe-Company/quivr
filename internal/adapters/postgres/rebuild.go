@@ -44,6 +44,9 @@ func (s RebuildStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 		result0, err = s.beginRebuildAttempt(ctx, org, id)
 		return err
 	})
+	if err == nil && s.Projection != nil && result0.Operation.State == operations.StateRunning {
+		err = s.Projection.EnsureGeneration(ctx, result0.Generation.Collection, org, result0.Operation.CorpusID, result0.Generation.ID)
+	}
 	return result0, err
 }
 
@@ -407,6 +410,22 @@ func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string
 	if err = markRoutingCorpus(ctx, tx, org, op.CorpusID); err != nil {
 		return false, err
 	}
+	if s.Projection != nil {
+		// Archive holds the shared routing fence, so the temperature can
+		// follow the canonical Corpus state before the route becomes visible.
+		var archived bool
+		var collection string
+		err = tx.QueryRow(ctx, `SELECT c.archived,g.collection FROM corpora c, projection_generations g
+ WHERE c.organization=$1 AND c.id=$2 AND g.id=$3`, org, op.CorpusID, op.TargetGenerationID).Scan(&archived, &collection)
+		if err != nil {
+			return false, err
+		}
+		if archived {
+			if err := s.Projection.SetGenerationActive(ctx, collection, org, op.CorpusID, op.TargetGenerationID, false); err != nil {
+				return false, err
+			}
+		}
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id,acceptance_seq) VALUES($1,$2,$3,$4)
 ON CONFLICT(organization,corpus_id) DO UPDATE SET generation_id=EXCLUDED.generation_id,acceptance_seq=EXCLUDED.acceptance_seq WHERE corpus_projection_routes.generation_id=$5`, org, op.CorpusID, op.TargetGenerationID, rank.sequence, rank.routed)
 	if err != nil {
@@ -506,7 +525,10 @@ func failOperation(ctx context.Context, tx pgx.Tx, op operations.Operation, fail
 var _ retrieval.RebuildStore = RebuildStore{}
 
 // RebuildStore persists rebuild state.
-type RebuildStore struct{ Pool *pgxpool.Pool }
+type RebuildStore struct {
+	Pool       *pgxpool.Pool
+	Projection CorpusProjection
+}
 
 // CheckpointRebuild persists an exclusive position below unfinished work.
 // A reconciliation scan may restart below the old cursor.

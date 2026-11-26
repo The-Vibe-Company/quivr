@@ -52,6 +52,10 @@ func (s *fakePurgeStore) RecordPurge(ctx context.Context, item retrieval.PurgeIt
 	return complete, nil
 }
 
+func (p *fakePurgeStore) WithTenantVersionPurge(_ context.Context, _, _ string, purge func(bool) (retrieval.PurgeResult, error)) (retrieval.PurgeResult, error) {
+	return purge(false)
+}
+
 type fakePurgeProjection struct {
 	calls       []string
 	results     map[string]retrieval.PurgeResult
@@ -62,6 +66,10 @@ type fakePurgeProjection struct {
 
 func (p *fakePurgeProjection) PurgeGeneration(_ context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
 	return p.call("generation/" + collection + "/" + org + "/" + corpusID + "/" + generationID)
+}
+
+func (p *fakePurgeProjection) PurgeVersionInGeneration(ctx context.Context, collection, org, _, _, versionID string, _ bool) (retrieval.PurgeResult, error) {
+	return p.PurgeVersion(ctx, collection, org, versionID)
 }
 
 func (p *fakePurgeProjection) PurgeVersion(_ context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {

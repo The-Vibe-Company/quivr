@@ -47,7 +47,7 @@ func vectorMessage(name string, vector []float32) (*pb.Vectors, error) {
 
 func batchObject(object projectionObject) (*pb.BatchObject, error) {
 	props := maps.Clone(object.Properties)
-	out := &pb.BatchObject{Collection: object.Class, Uuid: object.ID, Properties: &pb.BatchObject_Properties{}}
+	out := &pb.BatchObject{Collection: object.Class, Tenant: object.Tenant, Uuid: object.ID, Properties: &pb.BatchObject_Properties{}}
 	for name, value := range props {
 		if values, ok := value.([]string); ok {
 			if len(values) == 0 {
@@ -139,6 +139,7 @@ func searchRequest(collection string, branch searchBranch, where filter, order s
 }
 
 func (s *Store) grpcSearch(ctx context.Context, request *pb.SearchRequest, operation string, responseLimit int, callerDeadline bool) ([]*pb.SearchResult, error) {
+	request.Tenant = tenantFrom(ctx)
 	rpcCtx, cancel := s.rpcContext(ctx, operation, callerDeadline)
 	defer cancel()
 	reply, err := s.grpc.Search(rpcCtx, request, grpc.MaxCallRecvMsgSize(responseLimit))

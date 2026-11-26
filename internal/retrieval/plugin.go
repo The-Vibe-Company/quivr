@@ -616,6 +616,9 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			pq.Vector = vector
 		}
 	}
+	if fusion, ok := sv.s.Projection.(RouteRankFusion); ok && len(fallback) > 0 {
+		pq.RankAcrossRoutes = fusion.UsesRouteRankFusion(sv.routes)
+	}
 	search := func(routes []Route, request Request) ([]content.Candidate, error) {
 		phase := time.Now()
 		defer func() { sv.timing.IndexQuery += time.Since(phase) }()
@@ -659,7 +662,10 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			}
 			sv.keywordCandidates[string(key)] = more
 		}
-		found = append(NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)...)
+		if !pq.RankAcrossRoutes {
+			found, more = NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)
+		}
+		found = append(found, more...)
 		if sv.chain.degraded == nil {
 			sv.chain.degraded = map[string]bool{}
 		}
