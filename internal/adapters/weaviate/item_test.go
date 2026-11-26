@@ -379,6 +379,9 @@ func TestItemPassageResponseBudget(t *testing.T) {
 			out[i] = itemSearchRow{Segment: fmt.Sprintf("passage-%03d", i), Version: "version"}
 			if withText {
 				out[i].Text = text
+				if i == 0 {
+					out[i].Text = strings.Repeat("other ", 1<<17)
+				}
 			}
 		}
 		return out
