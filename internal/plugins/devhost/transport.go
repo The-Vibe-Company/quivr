@@ -10,6 +10,12 @@ import (
 
 var configuredClient atomic.Pointer[http.Client]
 
+// TransportError reports a Contribution POST send or response body read failure.
+type TransportError struct{ err error }
+
+func (e *TransportError) Error() string { return e.err.Error() }
+func (e *TransportError) Unwrap() error { return e.err }
+
 // SetTransport installs deployment trust for all plugin endpoints, including
 // plugins registered after startup and work pinned to earlier plans. Call once
 // before serving. A nil transport restores the default. Redirects stay refused.

@@ -75,10 +75,12 @@ equivalent copies under other names out of both contracts.
 
 ## Manifest digest on Contribution responses
 
+<!-- manifest-digest: published in the generated protocol reference -->
 A plugin may include `X-Quivr-Manifest-Digest` on a Contribution POST response.
 Use the same digest of the exact manifest bytes as in discovery's `manifest_digest`.
 If the header differs from the pinned digest, the engine discards the response,
 invalidates cached discovery, and reports plugin unavailability.
+<!-- /manifest-digest -->
 
 ## Trace context
 

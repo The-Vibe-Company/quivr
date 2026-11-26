@@ -168,7 +168,10 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 		return nil, fmt.Errorf("unknown plugin operation %q", operation)
 	}
 	if err != nil {
-		invalidate()
+		var transportErr *devhost.TransportError
+		if errors.As(err, &transportErr) {
+			invalidate()
+		}
 		return result, invocationFailure(ctx, invoke, operation, err)
 	}
 	if err := guard(invoke, pin); err != nil {

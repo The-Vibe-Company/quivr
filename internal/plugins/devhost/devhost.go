@@ -212,7 +212,7 @@ func (p *Process) Stop(grace time.Duration) error {
 // address. A 3xx answer carries no error envelope, so it counts as plugin
 // unavailability, for the engine and the Contract Runner alike.
 var client = &http.Client{
-	Transport:     outbound.Transport(nil),
+	Transport:     outbound.DefaultTransport(),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
@@ -550,7 +550,7 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 	}
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("POST %s: %w", route, err)
+		return nil, &TransportError{fmt.Errorf("POST %s: %w", route, err)}
 	}
 	defer resp.Body.Close()
 	if checkResponse, ok := ctx.Value(responseCheckKey{}).(func(int, http.Header) error); ok {
@@ -560,7 +560,7 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %s response: %w", route, err)
+		return nil, &TransportError{fmt.Errorf("read %s response: %w", route, err)}
 	}
 	result := &Result{Status: resp.StatusCode, Body: body}
 	if len(body) > maxResponseBytes {

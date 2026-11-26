@@ -219,7 +219,7 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 }
 
 func New(endpoint string, apiKey ...string) *Store {
-	return newStore(endpoint, outbound.Transport(nil), apiKey)
+	return newStore(endpoint, outbound.DefaultTransport(), apiKey)
 }
 
 func newStore(endpoint string, transport http.RoundTripper, apiKey []string) *Store {

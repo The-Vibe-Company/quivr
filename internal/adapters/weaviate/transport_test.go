@@ -1,7 +1,9 @@
 package weaviate_test
 
 import (
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,3 +20,24 @@ func TestDefaultClientRetainsConnectionsForConcurrentIndexRequests(t *testing.T)
 		t.Fatalf("idle pool total=%d per host=%d timeout=%s, want 512, 128, 90s", pool.MaxIdleConns, pool.MaxIdleConnsPerHost, pool.IdleConnTimeout)
 	}
 }
+
+func TestDefaultClientUsesCustomRoundTripper(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	requests := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.Method != http.MethodGet || req.URL.Path != "/v1/.well-known/ready" {
+			t.Errorf("readiness request = %s %s", req.Method, req.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})
+	store := weaviate.New("http://index.test")
+	if err := store.Ready(t.Context()); err != nil || requests != 1 {
+		t.Fatalf("ready error=%v custom transport requests=%d, want one successful request", err, requests)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

@@ -124,6 +124,13 @@ altered identities, targets, methods, bodies, timestamps, algorithms and encodin
 `fixtures/authentication/cases.json`, then signs its ordinary Contribution
 fixtures. Their report check id is `authentication`.
 
+## Manifest digest on Contribution responses
+
+A plugin may include `X-Quivr-Manifest-Digest` on a Contribution POST response.
+Use the same digest of the exact manifest bytes as in discovery's `manifest_digest`.
+If the header differs from the pinned digest, the engine discards the response,
+invalidates cached discovery, and reports plugin unavailability.
+
 ## Discovery and health
 
 ### `GET /v0/discovery`

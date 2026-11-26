@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 	"time"
 
@@ -65,6 +66,7 @@ func TestDiscoveryCacheSharesVerificationUntilExpiry(t *testing.T) {
 }
 
 func TestDiscoveryCacheWaiterKeepsItsOwnDeadline(t *testing.T) {
+	t.Setenv("QUIVR_PLUGIN_DISCOVERY_TTL", "")
 	synctest.Test(t, func(t *testing.T) {
 		pin := policyPin()
 		pin.Endpoint = freshEndpoint()
@@ -162,15 +164,18 @@ func TestDiscoveryTransportFailureIsNotCached(t *testing.T) {
 }
 
 func TestContributionResponseInvalidatesDiscovery(t *testing.T) {
+	t.Setenv("QUIVR_PLUGIN_DISCOVERY_TTL", "")
 	for _, tc := range []struct {
 		name       string
 		status     int
 		digest     []string
 		fail       bool
+		failRead   bool
 		invalidate bool
 		refuse     bool
 	}{
 		{name: "transport", fail: true, invalidate: true, refuse: true},
+		{name: "read", status: 200, failRead: true, invalidate: true, refuse: true},
 		{name: "unauthorized", status: 401, invalidate: true},
 		{name: "not-found", status: 404, invalidate: true},
 		{name: "server-error", status: 503, invalidate: true},
@@ -199,6 +204,9 @@ func TestContributionResponseInvalidatesDiscovery(t *testing.T) {
 					return nil, io.ErrUnexpectedEOF
 				}
 				resp := wireResponse(tc.status, `{"code":"busy","message":"try again","retryable":true}`)
+				if tc.failRead {
+					resp.Body = io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))
+				}
 				for _, digest := range tc.digest {
 					resp.Header.Add("X-Quivr-Manifest-Digest", digest)
 				}
