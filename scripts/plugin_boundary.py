@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 ENGINE = "github.com/The-Vibe-Company/quivr"
-TREES = ("plugins", "sdks/go")
+TREES = ("plugins", "sdks/go", "deploy/plugins")
 SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", "testdata"}
 
 _BLOCK = re.compile(r"^\s*import\s*\((.*?)\)", re.S | re.M)

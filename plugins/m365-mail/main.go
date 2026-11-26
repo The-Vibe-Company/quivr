@@ -1,26 +1,6 @@
-// Command m365-mail is the connector.m365_mail plugin: the m365_mail
-// connector kind, which collects one Microsoft 365 mailbox folder through
-// Microsoft Graph with an app-only (client credentials) registration. Each
-// page of the folder's message delta becomes items; the delta link is the
-// checkpoint, which the core advances only after the page's items were
-// accepted. Attachments are uploaded through core-issued grants.
+// Command quivr-m365-mail runs the first-party connector.m365_mail plugin.
 package main
 
-import (
-	"fmt"
-	"os"
+import "github.com/The-Vibe-Company/quivr/plugins/m365-mail/plugin"
 
-	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
-)
-
-func main() {
-	p, err := quivrplugin.New("")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if err := p.MustConnector(Kind, New(nil)).Serve(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
+func main() { plugin.Main() }

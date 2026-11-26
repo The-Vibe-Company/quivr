@@ -548,6 +548,19 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])
 
+    def test_image_role_guard_matches_slim_targets_and_services(self):
+        services = json.loads((ROOT / 'deploy' / 'railway' / 'services.json').read_text())
+        self.assertEqual(services['api']['variables']['QUIVR_IMAGE_ROLE'], 'api')
+        self.assertEqual(services['worker']['variables']['QUIVR_IMAGE_ROLE'], 'worker')
+        self.assertEqual(services['worker-bulk']['variables']['QUIVR_IMAGE_ROLE'], 'worker')
+        for image_role, mode in [('', 'api'), ('', 'worker'), ('core', 'api'), ('core', 'worker'), ('core', 'migrate'),
+                                 ('api', 'api'), ('api', 'migrate'), ('worker', 'worker'), ('worker', 'migrate')]:
+            with self.subTest(image_role=image_role, mode=mode):
+                core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
+        for image_role, mode in [('api', 'worker'), ('worker', 'api'), ('other', 'api')]:
+            with self.subTest(rejected=(image_role, mode)), self.assertRaises(ValueError):
+                core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
+
 
 class SuperviseTest(unittest.TestCase):
     def command(self, name, code):

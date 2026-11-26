@@ -30,7 +30,7 @@ else
 fi
 
 if [ "${GITHUB_ACTIONS:-}" = true ]; then
-  for module in "$root" "$root/sdks/go"; do
+  for module in "$root" "$root/sdks/go" "$root/deploy/plugins"; do
     python3 "$root/scripts/ci_dependencies.py" --cwd "$module" -- "$GO" mod download
   done
   for mod in "$root"/plugins/*/go.mod; do
@@ -114,3 +114,6 @@ for mod in "$root"/plugins/*/go.mod; do
   if grep -q "^    attachments:" quivr-plugin.yaml; then grep -q "PASS  attachments" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }; fi
   echo "quivr plugin test certified the $id connector plugin: $work/$id-contract-report.json"
 done
+
+# Multi-call Go plugins bundle (deploy/plugins): vet and test role dispatch/builds.
+(cd "$root/deploy/plugins" && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")

@@ -104,7 +104,7 @@ def lineage():
                  'normalizer_plugin.py', 'subscription_plugin.py', 'prepare_tokenizer.py', 'prepare_embeddings.py')]
     sources += ['deploy/mlflow/eval-control.sql']
     sources += ['plugins/core-ingest/profile.json', 'plugins/core-retrieve/quivr-plugin.yaml',
-                'plugins/hosted-embed/configuration.go', 'deploy/compose/compose.yaml',
+                'plugins/hosted-embed/plugin/configuration.go', 'deploy/compose/compose.yaml',
                 'third_party/e5/model-lock.json', 'third_party/tokenizer/requirements-linux-x86_64.txt',
                 'third_party/tokenizer/requirements-macos-arm64.txt', 'go.mod', 'go.sum']
     # Bind the complete actual engine/SDK/plugin source, not just a manifest.

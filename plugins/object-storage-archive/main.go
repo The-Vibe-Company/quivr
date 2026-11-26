@@ -1,22 +1,6 @@
+// Command quivr-object-storage-archive runs the first-party connector.object_storage_archive plugin.
 package main
 
-import (
-	"fmt"
-	"os"
+import "github.com/The-Vibe-Company/quivr/plugins/object-storage-archive/plugin"
 
-	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
-)
-
-func main() {
-	p, err := quivrplugin.New("")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	connector := NewArchiveConnector()
-	defer connector.Close()
-	if err = p.MustConnector(Kind, connector).Serve(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
+func main() { plugin.Main() }
