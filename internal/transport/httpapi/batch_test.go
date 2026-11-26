@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/contracts"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
@@ -578,6 +580,14 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 }
 
 func TestBatchKeepsReceiptsWhenRefusalAuditFails(t *testing.T) {
+	var logs bytes.Buffer
+	logger, err := logging.New(&logs, logging.Options{Level: "warn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	handler := newAPI(t, &acceptancePort{}, httpapi.WithAudit(&auditSink{fail: true}))
 	first := inline("first", "first", "Example")
 	denied := inline("denied", "denied", "Example")
@@ -599,7 +609,23 @@ func TestBatchKeepsReceiptsWhenRefusalAuditFails(t *testing.T) {
 			t.Fatalf("entry %d: want receipt %s, got %v", index, id, items[index])
 		}
 	}
-	if failure := entryError(t, items[1]); failure["code"] != "storage_unavailable" || failure["retryable"] != true {
+	failure := entryError(t, items[1])
+	if failure["code"] != "storage_unavailable" || failure["retryable"] != true {
 		t.Fatalf("want a retryable audit failure for the denied entry, got %v", failure)
+	}
+	var finding struct {
+		Message     string `json:"msg"`
+		RequestID   string `json:"request_id"`
+		EntryIndex  int    `json:"entry_index"`
+		RefusalCode string `json:"refusal_code"`
+		Error       string `json:"error"`
+	}
+	if err := json.NewDecoder(&logs).Decode(&finding); err != nil {
+		t.Fatalf("missing audit failure warning: %v", err)
+	}
+	if finding.Message != "batch refusal audit write failed" || finding.RequestID == "" ||
+		finding.RequestID != failure["request_id"] || finding.EntryIndex != 1 ||
+		finding.RefusalCode != "not_found" || finding.Error != "[REDACTED]" {
+		t.Fatalf("audit failure warning=%+v, response error=%v", finding, failure)
 	}
 }

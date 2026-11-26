@@ -130,6 +130,9 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 				receipts++
 			} else {
 				if err := a.auditEmbeddedRefusal(r.Context(), status, item.Error.Code); err != nil {
+					slog.WarnContext(r.Context(), "batch refusal audit write failed",
+						"request_id", w.Header().Get("X-Request-ID"), "entry_index", i,
+						"refusal_code", item.Error.Code, "error", err)
 					_, failure := errorResponse(publicerr.StorageUnavailable, nil)
 					correlateError(r.Context(), &failure)
 					item.Error = &failure
