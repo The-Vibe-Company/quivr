@@ -293,9 +293,11 @@ func (l *SearchAdmission) observeLocked(rtt time.Duration, peak int, overload bo
 	now := l.now()
 	target := l.targetLatency
 	baselineEligible := true
-	if targetOverride > l.targetLatency {
+	if targetOverride > 0 {
 		target = targetOverride
-		baselineEligible = false
+		if targetOverride > l.targetLatency {
+			baselineEligible = false
+		}
 	}
 	if baselineEligible {
 		if l.smoothedRTT == 0 {

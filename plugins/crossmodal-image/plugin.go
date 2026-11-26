@@ -65,7 +65,7 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 			return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url must not contain whitespace or control characters")
 		}
 		u, err := url.Parse(cfg.BaseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
 			return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url must be a valid http or https URL without userinfo")
 		}
 	}

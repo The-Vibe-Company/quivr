@@ -62,9 +62,9 @@ configuration:
         description: Embedding backend. builtin serves crossmodal.image.vision locally; http serves crossmodal.image.external via an external cross-modal embedding endpoint.
       base_url:
         type: string
-        pattern: '^https?://.+'
+        pattern: '^https?://[^\s/@]+(:[0-9]+)?(/[^\s]*)?$'
         maxLength: 2048
-        description: Required when backend is http. Endpoint accepting POST requests for image-region and text-query embeddings.
+        description: Required when backend is http. Valid http or https URL with a hostname, no userinfo, and no whitespace or control characters.
       auth:
         type: string
         enum: [none, bearer, api-key]

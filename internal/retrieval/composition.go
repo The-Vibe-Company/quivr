@@ -22,6 +22,7 @@ type profileSpend struct {
 type searchChain struct {
 	profiles  []*profileSpend
 	paidCalls int
+	totalCost plugins.SearchCost
 	costCents float64
 	enforce   bool
 	degraded  map[string]bool
@@ -84,13 +85,14 @@ func (c *searchChain) record(frames []*profileSpend, u *plugins.SearchUsage) err
 	own.ownCost.Add(u.CostCents)
 	own.usage.CostCents = own.ownCost.Cents()
 	c.paidCalls += u.PaidCalls
+	c.totalCost.Add(u.CostCents)
 	for _, f := range frames {
 		f.cost.Add(u.CostCents)
 		if c.enforce && f.cost.Exceeds(f.max) {
 			return fmt.Errorf("%w: %s for %s", ErrPluginInvalid, plugins.CodeOverBudget, f.usage.Profile)
 		}
 	}
-	c.costCents = frames[0].cost.Cents()
+	c.costCents = c.totalCost.Cents()
 	return nil
 }
 
@@ -109,6 +111,8 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 		}
 	}
 	origQuery := q.Query
+	origMode := q.Mode
+	origLimit := q.Limit
 	origNamespaces := q.SourceNamespaces
 	q.Profile, q.Limit = local, c.Profile.Limit
 	if c.Profile.Query != "" {
@@ -145,9 +149,11 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	}
 	defaultRanker, defaultLocal, hasDefault := sv.s.resolveProfile(DefaultProfile)
 	sameQuery := c.Profile.Query == "" || c.Profile.Query == origQuery
+	sameMode := c.Profile.Mode == "" || c.Profile.Mode == origMode || c.Profile.Mode == "hybrid"
+	enoughLimit := c.Profile.Limit >= origLimit
 	sameNamespaces := c.Filter == nil || len(c.Filter.SourceNamespaces) == 0 || slices.Equal(c.Filter.SourceNamespaces, origNamespaces)
 	if hasDefault && len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) &&
-		sameQuery && sameNamespaces &&
+		sameQuery && sameMode && enoughLimit && sameNamespaces &&
 		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal && sv.fallback == nil {
 		saved := result
 		saved.Hits = slices.Clone(result.Hits)

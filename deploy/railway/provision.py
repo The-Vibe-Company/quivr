@@ -158,6 +158,9 @@ def main():
             variables.update(api_admin)
         elif name in ('worker', 'worker-bulk'):
             variables.update(common)
+            # Explicitly clear legacy admin keys on existing worker services.
+            variables['QUIVR_ADMIN_KEY'] = ''
+            variables['QUIVR_DEMO_ADMIN_KEY'] = ''
         elif name == 'web':
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
             if 'QUIVR_ADMIN_URL' in variables:

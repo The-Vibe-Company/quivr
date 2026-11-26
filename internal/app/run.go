@@ -296,15 +296,15 @@ func Run(command string, args ...string) error {
 			cfg.Telemetry.ResourceAttributes[key] = value
 		}
 	}
+	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
+	if err != nil {
+		return err
+	}
 	telemetryRuntime, err := telemetry.Init(context.Background(), cfg.Telemetry)
 	if err != nil {
 		return invalidConfig("telemetry", "invalid telemetry settings", err)
 	}
 
-	adminSeparated, shareProbeAdmin, err := cfg.validateAdminListener()
-	if err != nil {
-		return err
-	}
 	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
 	graceExpired := false
 	defer func() {

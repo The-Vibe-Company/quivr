@@ -56,7 +56,10 @@ def index_name(parts):
 
 def _pg_default_fkey_name(table, cols):
     raw = f'{table}_{"_".join(cols)}_fkey'
-    return raw[:63]
+    # Require explicit constraint names when the default would exceed PostgreSQL's 63-byte NAMEDATALEN limit.
+    if len(raw.encode('utf-8')) > 63:
+        return None
+    return raw
 
 
 def foreign_key_history(sql, known, is_contract=False, is_legacy=False):
@@ -81,13 +84,15 @@ def foreign_key_history(sql, known, is_contract=False, is_legacy=False):
                     if el['@'] == 'Constraint' and el['contype']['name'] == 'CONSTR_FOREIGN':
                         cols = [a['sval'] for a in (el.get('fk_attrs') or ())]
                         name = el.get('conname') or _pg_default_fkey_name(table, cols)
-                        known.add((schema, table, name))
+                        if name:
+                            known.add((schema, table, name))
                     elif el['@'] == 'ColumnDef':
                         col = el['colname']
                         for c in el.get('constraints') or ():
                             if c['contype']['name'] == 'CONSTR_FOREIGN':
                                 name = c.get('conname') or _pg_default_fkey_name(table, [col])
-                                known.add((schema, table, name))
+                                if name:
+                                    known.add((schema, table, name))
             elif kind == 'AlterTableStmt' and stmt['objtype']['name'] == 'OBJECT_TABLE':
                 rel = stmt['relation']
                 schema = rel.get('schemaname') or 'public'
@@ -105,7 +110,8 @@ def foreign_key_history(sql, known, is_contract=False, is_legacy=False):
                             if c.get('contype', {}).get('name') == 'CONSTR_FOREIGN':
                                 cols = [a['sval'] for a in (c.get('fk_attrs') or ())]
                                 name = c.get('conname') or _pg_default_fkey_name(table, cols)
-                                known.add((schema, table, name))
+                                if name:
+                                    known.add((schema, table, name))
                     elif op in ('AT_AddColumn', 'AT_SetRelOptions', 'AT_DropNotNull', 'AT_SetNotNull', 'AT_ColumnDefault'):
                         continue
                     else:

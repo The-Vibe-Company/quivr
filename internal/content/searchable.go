@@ -476,7 +476,7 @@ type HydrationBlobCacheStats struct {
 }
 
 // HydrationBlobCache is a concurrency-safe, memory-budgeted LRU cache of
-// immutable canonical text blobs keyed by (organization, blob_key, sha256).
+// immutable canonical text blobs keyed by (organization, blob_key, sha256, size).
 // It stores verified immutable bytes only; Postgres authorization,
 // current-version, quarantine, ACL, and Tombstone checks always run per request.
 type HydrationBlobCache struct {
