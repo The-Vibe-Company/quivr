@@ -35,6 +35,7 @@ Own delivery from the current branch to a PR that is ready for human review. The
 7. Never bypass checks, use `--no-verify`, weaken validation, or claim success while CI is pending, stale, partially inspected, failed, cancelled, or attached to another SHA.
 8. Never expose secrets. Stop push/PR work, redact values, and give rotation guidance if one is found.
 9. Write artifacts only under ignored `plans/ship-pr-dev/runs/<timestamp>-<repo-slug>/`.
+10. **OpenBoard task mandatory (when configured in repo)**: never open or hand off a PR without an OpenBoard task (`OpenBoard #<id>` in the PR body, never `Closes #<id>`). Never call `ob tasks complete` before merge; once CI is green and review comments (including Cubic) are resolved, label `pr=<N> ci=green cubic=0`, reply with the PR URL, and hold via `ob tasks block <id> "PR #<N> ready for review & merge — <URL>" --kind pr_review`.
 
 ## References
 
