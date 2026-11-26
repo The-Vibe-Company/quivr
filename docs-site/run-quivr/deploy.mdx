@@ -80,6 +80,38 @@ worker-bulk and, if present, autoscaler with the explicit commands in the shared
 replica counts remain unchanged. Then initialize monitoring and check active values;
 startup command-line settings take precedence over existing `ALTER SYSTEM` values after restart.
 
+## Use DBA-managed PostgreSQL
+
+Point `database_url` at the writable primary of a dedicated PostgreSQL 17 database.
+Use the same non-superuser login for `quivr migrate`, `quivr api` and `quivr worker`.
+Manage the login, its credential, network access and the following grants in your
+database provisioning code. In this example, the DBA has already created the
+`quivr` database and `quivr_engine` login. Apply the schema and language grants
+while connected to `quivr`.
+
+```sql
+GRANT CONNECT ON DATABASE quivr TO quivr_engine;
+GRANT USAGE, CREATE ON SCHEMA public TO quivr_engine;
+GRANT USAGE ON LANGUAGE plpgsql TO quivr_engine;
+ALTER ROLE quivr_engine IN DATABASE quivr SET search_path = public;
+```
+
+Keep Quivr's objects in `public`. The login must own the objects it creates so
+future migrations and background index maintenance can modify them. For an
+existing database, have the DBA verify ownership of the Quivr objects before
+switching the login. Stock PostgreSQL includes `plpgsql` by default. If the DBA
+removed it from the database template, provision it with `CREATE EXTENSION IF NOT EXISTS plpgsql`
+before applying its language grant.
+
+Startup checks the writable session and schema access. Migrations also check
+schema creation and language privileges. A `postgres_prerequisite` startup
+diagnostic gives the provisioning change to make. Run `quivr migrate` with the
+ordinary Quivr login after provisioning, then start the API and worker.
+
+Quivr's ingestion and search rollups work with stock PostgreSQL settings. The
+DBA can enable [`pg_stat_statements`](https://www.postgresql.org/docs/17/pgstatstatements.html)
+separately for SQL performance analysis.
+
 ## The configuration file
 
 `QUIVR_CONFIG` holds the path of a JSON file. Give `api`, `worker` and `migrate` the same file, except for addresses such as `probe_listen`. It must set:

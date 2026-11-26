@@ -165,6 +165,15 @@ jobs:
     - paths-filter
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    services:
+      external-postgres:
+        image: postgres:17.12-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+        env:
+          POSTGRES_DB: quivr
+          POSTGRES_PASSWORD: external-dba-test
+        ports:
+        - 5432/tcp
+        options: --health-cmd "pg_isready -h 127.0.0.1 -d quivr -U postgres" --health-interval 2s --health-retries 30
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -184,6 +193,17 @@ jobs:
           scripts/ci-requirements-*.txt
           scripts/ci-constraints.txt
     - run: make adapter-postgres args=-v
+    - name: Verify external PostgreSQL with a restricted login
+      env:
+        QUIVR_EXTERNAL_POSTGRES: '1'
+        QUIVR_ADAPTER_POSTGRES_ONLY: '1'
+        QUIVR_ADAPTER_CONFIG: ${{ runner.temp }}/external-postgres.json
+        EXTERNAL_POSTGRES_PORT: ${{ job.services['external-postgres'].ports[5432] }}
+        EXTERNAL_POSTGRES_CONTAINER: ${{ job.services['external-postgres'].id }}
+      run: |
+        docker exec -i "$EXTERNAL_POSTGRES_CONTAINER" psql -X -U postgres -d quivr -v ON_ERROR_STOP=1 < scripts/fixtures/external-postgres.sql
+        printf '{"database_url":"postgres://quivr_engine:external-adapter-test@127.0.0.1:%s/quivr?sslmode=disable&transaction_timeout=30000"}\n' "$EXTERNAL_POSTGRES_PORT" > "$QUIVR_ADAPTER_CONFIG"
+        go test -race -count=1 -v ./internal/adapters/postgres -run '^(TestExternalPostgresPrerequisites|TestBaselinePromotionRollbackAndHydrationFences|TestStepTimesAreWrittenOnceByTheirStep|TestObservabilityRollupsMergeAndPrune)$'
     - name: Pack bounded failure evidence
       if: failure()
       run: python3 scripts/ci_artifacts.py .scratch vulnerabilities.json --output "${{ runner.temp }}/failure.tar.gz"
