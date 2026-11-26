@@ -227,10 +227,10 @@ def apply(settings, args):
     if args.command == 'prepare':
         return result
 
-    if changed:
-        run(['systemctl', 'restart', FIREWALL_UNIT])
-    else:
-        run(['systemctl', 'start', FIREWALL_UNIT])
+    run(['systemctl', 'start', FIREWALL_UNIT])
+    # Starting an active oneshot does not load new rules, including after an
+    # interrupted apply. Replace the owned table atomically without stopping it.
+    run(['/bin/sh', str(CONFIG / 'firewall.sh')])
     # A previous apply can have written the desired files before restarting,
     # or someone can have recreated the live container with different settings.
     if changed or observe(settings, probe=False)['status'] == 'drift':

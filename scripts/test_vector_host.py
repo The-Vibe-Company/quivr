@@ -107,6 +107,7 @@ class VectorHost(unittest.TestCase):
             live = {'image': 'registry.example/weaviate:1.39.10@sha256:' + 'a' * 64,
                     'version': '1.39.10', 'ready': True, 'environment': {'ASYNC_INDEXING': 'true'}}
             restarts = []
+            firewall_loads = []
 
             class IndexHTTP:
                 def __init__(self, address, port, timeout):
@@ -139,6 +140,9 @@ class VectorHost(unittest.TestCase):
                         'NetworkSettings': {'Networks': {'quivr-vector-host_index': {'IPAddress': '172.30.0.2'}}}}])
                 if command[0] == 'findmnt':
                     return uuid
+                if command == ['/bin/sh', str(config / 'firewall.sh')]:
+                    firewall_loads.append(command)
+                    return ''
                 if command == ['systemctl', 'restart', host.HOST_UNIT]:
                     restarts.append(command)
                     index = json.loads((config / 'compose.json').read_text())['services']['weaviate']
@@ -178,6 +182,7 @@ class VectorHost(unittest.TestCase):
                 self.assertEqual((code, result['status'], result['check']['status']), (0, 'changed', 'match'))
                 self.assertEqual(cli('apply')[1]['status'], 'unchanged')
                 self.assertEqual(len(restarts), 1)
+                self.assertEqual(len(firewall_loads), 2)
                 del live['environment']['GOMEMLIMIT']
                 self.assertEqual(cli('apply')[0], 0)
                 self.assertEqual(len(restarts), 2)
