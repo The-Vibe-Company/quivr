@@ -163,6 +163,9 @@ type RetrievalConfig struct {
 	Profiles map[string]string `json:"profiles"`
 	// CoverageRefresh paces background snapshots (Go duration, default 10s).
 	CoverageRefresh string `json:"coverage_refresh"`
+	// HydrationBlobCacheBytes bounds the API's in-memory content-addressed text
+	// blob LRU cache in bytes (default 64 MiB; 0 disables; at most 1 GiB).
+	HydrationBlobCacheBytes *int64 `json:"hydration_blob_cache_bytes,omitempty"`
 }
 
 func (cfg Config) purgeTimeout() (time.Duration, error) {
@@ -385,6 +388,10 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	hydrationBlobCacheBytes, err := cfg.Retrieval.hydrationBlobCacheBytes()
+	if err != nil {
+		return err
+	}
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
 		return err
@@ -568,7 +575,11 @@ func Run(command string, args ...string) error {
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
-	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Stats: postgres.CorpusStatsStore{Pool: pool}, Facets: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
+	var hydrationBlobCache *content.HydrationBlobCache
+	if command == "api" {
+		hydrationBlobCache = content.NewHydrationBlobCache(hydrationBlobCacheBytes)
+	}
+	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Stats: postgres.CorpusStatsStore{Pool: pool}, Facets: records, Blobs: blobs, BlobCache: hydrationBlobCache, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection, err := weaviate.NewWithTLS(cfg.WeaviateURL, cfg.TLS.Weaviate, cfg.WeaviateAPIKey)
@@ -951,6 +962,7 @@ func Run(command string, args ...string) error {
 		// and how much of it still waits for the worker.
 		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, func(w io.Writer) {
 			recorder.WriteMetrics(w)
+			hydrationBlobCache.WriteMetrics(w)
 			search.QueryVectors.WriteMetrics(w)
 		})), queueSnapshots), loadMetrics, poolMetrics))
 	}

@@ -286,6 +286,8 @@ The search protocol carries at most 16 enabled vector spaces, counting served an
 
 `retrieval.coverage_refresh` is a positive Go duration, default `10s`, between background coverage refresh attempts after the previous count finishes. Shorter intervals update informational counts sooner and perform more database work. At most one count runs per process, with a one-minute bound. See [Search profiles](/run-quivr/search-profiles) for unknown and stale coverage.
 
+`retrieval.hydration_blob_cache_bytes` bounds the API's in-memory content-addressed LRU cache for immutable canonical text blobs during hydration, in bytes. Omitting it selects the `64 MiB` (`67108864`) default; `0` disables caching; values above `1 GiB` (`1073741824`) or negative values refuse startup. `QUIVR_HYDRATION_BLOB_CACHE_BYTES` overrides this setting from the environment. Cached bytes never bypass PostgreSQL authorization, current-version, quarantine, or Tombstone checks.
+
 `retrieval.profiles` maps deployment short names to full `plugin_id/profile` names. Pin several retrieval plugins in `plugins`, then choose which profile serves each short name. An explicit map must contain `default`; every target must be declared by an installed retrieval plugin. Short names cannot contain `/` or surrounding whitespace.
 
 This illustrative configuration selects profiles from two installed retrieval plugins:
