@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // Segmentation is an immutable derivation; offsets address canonical Part text.
@@ -365,12 +367,264 @@ func (s Service) Promote(ctx context.Context, org string, seg Segmentation, g Ge
 	return s.Baseline.Promote(ctx, org, seg, g)
 }
 
+// DefaultHydrationBlobCacheBytes is the default in-memory budget for the
+// content-addressed immutable text blob cache used during hydration (64 MiB).
+const DefaultHydrationBlobCacheBytes int64 = 64 << 20
+
+// MaxHydrationBlobCacheBytes bounds operator-configured hydration blob cache
+// budgets (1 GiB).
+const MaxHydrationBlobCacheBytes int64 = 1 << 30
+
+// blobCacheEntryOverhead approximates the per-entry map bucket, doubly-linked
+// list node, and string header footprint so tiny blobs cannot bypass maxBytes.
+const blobCacheEntryOverhead int64 = 160
+
+type blobCacheKey struct {
+	organization string
+	key          string
+	sha256       string
+}
+
+func (k blobCacheKey) cacheable() bool {
+	return k.organization != "" && k.key != "" && k.sha256 != ""
+}
+
+type blobCacheEntry struct {
+	key        blobCacheKey
+	text       string
+	bytes      int64
+	prev, next *blobCacheEntry
+}
+
+// HydrationBlobCacheStats is a point-in-time snapshot of hydration cache usage.
+type HydrationBlobCacheStats struct {
+	Bytes    int64
+	MaxBytes int64
+	Entries  int
+}
+
+// HydrationBlobCache is a concurrency-safe, memory-budgeted LRU cache of
+// immutable canonical text blobs keyed by (organization, blob_key, sha256).
+// It stores verified immutable bytes only; Postgres authorization,
+// current-version, quarantine, ACL, and Tombstone checks always run per request.
+type HydrationBlobCache struct {
+	maxBytes  int64
+	mu        sync.Mutex
+	entries   map[blobCacheKey]*blobCacheEntry
+	head      *blobCacheEntry
+	tail      *blobCacheEntry
+	usedBytes int64
+
+	lookups   *telemetry.Counter
+	evictions *telemetry.Counter
+}
+
+var hydrationBlobCacheGauges = []telemetry.GaugeDefinition{
+	{Name: "quivr_hydration_blob_cache_bytes", Help: "Current estimated bytes held in the hydration immutable text blob LRU cache.", Unit: "By"},
+	{Name: "quivr_hydration_blob_cache_max_bytes", Help: "Configured maximum byte budget of the hydration immutable text blob LRU cache.", Unit: "By"},
+	{Name: "quivr_hydration_blob_cache_entries", Help: "Current number of immutable text blobs held in the hydration LRU cache.", Unit: "{entry}"},
+}
+
+// NewHydrationBlobCache constructs a bounded content-addressed LRU cache for
+// canonical text blobs and registers its Prometheus/OTel metrics. A non-positive
+// maxBytes disables caching and returns nil.
+func NewHydrationBlobCache(maxBytes int64) *HydrationBlobCache {
+	if maxBytes <= 0 {
+		return nil
+	}
+	c := &HydrationBlobCache{
+		maxBytes:  maxBytes,
+		entries:   map[blobCacheKey]*blobCacheEntry{},
+		lookups:   telemetry.NewCounter("quivr_hydration_blob_cache_lookups_total", "Hydration immutable text blob cache lookups by result.", []string{"result"}, []string{"hit"}, []string{"miss"}),
+		evictions: telemetry.NewCounter("quivr_hydration_blob_cache_evictions_total", "Hydration immutable text blob cache entries evicted to enforce the memory budget.", nil, nil),
+	}
+	telemetry.RegisterGauges(hydrationBlobCacheGauges, func(context.Context) ([]float64, error) {
+		return c.gaugeValues(), nil
+	})
+	return c
+}
+
+// Stats returns the current estimated byte usage, configured cap, and entry count.
+func (c *HydrationBlobCache) Stats() HydrationBlobCacheStats {
+	if c == nil {
+		return HydrationBlobCacheStats{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return HydrationBlobCacheStats{
+		Bytes:    c.usedBytes,
+		MaxBytes: c.maxBytes,
+		Entries:  len(c.entries),
+	}
+}
+
+func (c *HydrationBlobCache) gaugeValues() []float64 {
+	s := c.Stats()
+	return []float64{float64(s.Bytes), float64(s.MaxBytes), float64(s.Entries)}
+}
+
+// WriteMetrics renders the cache's Prometheus text metrics. A nil cache writes nothing.
+func (c *HydrationBlobCache) WriteMetrics(w io.Writer) {
+	if c == nil {
+		return
+	}
+	c.lookups.Write(w)
+	c.evictions.Write(w)
+	values := c.gaugeValues()
+	for i, g := range hydrationBlobCacheGauges {
+		telemetry.Gauge(w, g.Name, g.Help, values[i])
+	}
+}
+
+func blobEntryCost(key blobCacheKey, text string) int64 {
+	return int64(len(text)) + int64(len(key.organization)+len(key.key)+len(key.sha256)) + blobCacheEntryOverhead
+}
+
+func (c *HydrationBlobCache) getBatch(keys []blobCacheKey) (map[blobCacheKey]string, int) {
+	if c == nil || len(keys) == 0 {
+		return nil, 0
+	}
+	var hits map[blobCacheKey]string
+	hitCount, missCount := 0, 0
+	c.mu.Lock()
+	for _, key := range keys {
+		if !key.cacheable() {
+			continue
+		}
+		if e, ok := c.entries[key]; ok {
+			c.moveToFront(e)
+			if hits == nil {
+				hits = make(map[blobCacheKey]string, len(keys))
+			}
+			hits[key] = e.text
+			hitCount++
+		} else {
+			missCount++
+		}
+	}
+	c.mu.Unlock()
+	if hitCount > 0 {
+		c.lookups.Add(hitCount, "hit")
+	}
+	if missCount > 0 {
+		c.lookups.Add(missCount, "miss")
+	}
+	return hits, hitCount
+}
+
+func (c *HydrationBlobCache) put(key blobCacheKey, text string) {
+	if c == nil || !key.cacheable() {
+		return
+	}
+	cost := blobEntryCost(key, text)
+	if cost > c.maxBytes {
+		return
+	}
+	evicted := 0
+	c.mu.Lock()
+	if existing, ok := c.entries[key]; ok {
+		c.moveToFront(existing)
+		c.mu.Unlock()
+		return
+	}
+	for c.usedBytes+cost > c.maxBytes && c.tail != nil {
+		victim := c.tail
+		c.unlink(victim)
+		delete(c.entries, victim.key)
+		c.usedBytes -= victim.bytes
+		evicted++
+	}
+	e := &blobCacheEntry{key: key, text: text, bytes: cost}
+	c.entries[key] = e
+	c.pushFront(e)
+	c.usedBytes += cost
+	c.mu.Unlock()
+	if evicted > 0 {
+		c.evictions.Add(evicted)
+	}
+}
+
+func (c *HydrationBlobCache) moveToFront(e *blobCacheEntry) {
+	if c.head == e {
+		return
+	}
+	c.unlink(e)
+	c.pushFront(e)
+}
+
+func (c *HydrationBlobCache) pushFront(e *blobCacheEntry) {
+	e.prev = nil
+	e.next = c.head
+	if c.head != nil {
+		c.head.prev = e
+	} else {
+		c.tail = e
+	}
+	c.head = e
+}
+
+func (c *HydrationBlobCache) unlink(e *blobCacheEntry) {
+	if e.prev != nil {
+		e.prev.next = e.next
+	} else {
+		c.head = e.next
+	}
+	if e.next != nil {
+		e.next.prev = e.prev
+	} else {
+		c.tail = e.prev
+	}
+	e.prev = nil
+	e.next = nil
+}
+
+// sliceRunes extracts Unicode code-point slice [start, end) from text as an
+// independent string so excerpts never pin an evicted cache entry's backing memory.
+func sliceRunes(text string, start, end int) (string, bool) {
+	if start < 0 || end < start {
+		return "", false
+	}
+	if start == end {
+		if start == 0 {
+			return "", true
+		}
+		if start > len(text) {
+			return "", false
+		}
+		return "", start <= utf8.RuneCountInString(text)
+	}
+	byteStart := -1
+	runeIdx := 0
+	for i, r := range text {
+		if r == utf8.RuneError {
+			if _, size := utf8.DecodeRuneInString(text[i:]); size == 1 {
+				runes := []rune(text)
+				if end > len(runes) {
+					return "", false
+				}
+				return string(runes[start:end]), true
+			}
+		}
+		if runeIdx == start {
+			byteStart = i
+		}
+		if runeIdx == end {
+			return strings.Clone(text[byteStart:i]), true
+		}
+		runeIdx++
+	}
+	if runeIdx == end && byteStart >= 0 {
+		return strings.Clone(text[byteStart:]), true
+	}
+	return "", false
+}
+
 // blobReadParallelism bounds the concurrent canonical blob reads of one
 // hydration batch.
 const blobReadParallelism = 16
 
 // Hydrate rechecks candidates and reads their excerpts from canonical storage
-// as one batch: one lookup, one read per distinct blob, then one recheck,
+// as one batch: one lookup, one read per distinct uncached blob, then one recheck,
 // since access and currentness may change while the immutable bytes are read.
 // The result holds, at each candidate's index, its hydration, or nothing when
 // the caller may not read it or it is no longer current.
@@ -386,7 +640,7 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	if err != nil {
 		return nil, err
 	}
-	excerpts, err := s.excerpts(ctx, located)
+	excerpts, err := s.excerpts(ctx, scope.Organization, located)
 	if err != nil {
 		return nil, err
 	}
@@ -428,22 +682,23 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	return out, nil
 }
 
-// excerpts reads each distinct blob of a batch once, a few at a time, and
-// cuts from it the excerpts of its candidates, each checked against the
-// segment's checksum. Only the excerpts outlive a read.
-func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int]string, error) {
+// excerpts reads each distinct blob of a batch once, serving verified immutable
+// blobs from BlobCache when present and reading only misses concurrently from
+// canonical storage, then cuts and checksum-verifies each candidate's excerpt.
+func (s Service) excerpts(ctx context.Context, org string, located map[int]Located) (map[int]string, error) {
 	type request struct {
 		candidate, index int
 		source           LocatedSource
 	}
-	byBlob := map[string][]request{}
+	byBlob := map[blobCacheKey][]request{}
 	for i, l := range located {
 		sources := l.Sources
 		if len(sources) == 0 {
 			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob}}
 		}
 		for k, source := range sources {
-			byBlob[source.Blob.Key] = append(byBlob[source.Blob.Key], request{i, k, source})
+			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256}
+			byBlob[key] = append(byBlob[key], request{i, k, source})
 		}
 	}
 	slices := map[int][]SourceExcerpt{}
@@ -454,41 +709,78 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		}
 		slices[i] = make([]SourceExcerpt, n)
 	}
-	var mu sync.Mutex
-	var failure error
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, blobReadParallelism)
-	for _, requests := range byBlob {
-		wg.Add(1)
-		slots <- struct{}{}
-		go func(requests []request) {
-			defer func() { <-slots; wg.Done() }()
-			data, err := s.Blobs.Read(ctx, requests[0].source.Blob)
-			if err != nil {
-				mu.Lock()
-				failure = err
-				mu.Unlock()
-				return
-			}
-			runes := []rune(string(data))
+	type miss struct {
+		key      blobCacheKey
+		requests []request
+	}
+	var misses []miss
+	var cached map[blobCacheKey]string
+	if s.BlobCache != nil {
+		keys := make([]blobCacheKey, 0, len(byBlob))
+		for key := range byBlob {
+			keys = append(keys, key)
+		}
+		cached, _ = s.BlobCache.getBatch(keys)
+	}
+	for key, requests := range byBlob {
+		if text, ok := cached[key]; ok {
 			for _, req := range requests {
 				r := req.source.Range
-				if r.Start < 0 || r.End < r.Start || r.End > len(runes) {
+				cut, valid := sliceRunes(text, r.Start, r.End)
+				if !valid {
+					return nil, errors.New("invalid canonical excerpt")
+				}
+				slices[req.candidate][req.index] = SourceExcerpt{SourceRange: r, Text: cut}
+			}
+			continue
+		}
+		misses = append(misses, miss{key: key, requests: requests})
+	}
+	if len(misses) > 0 {
+		var mu sync.Mutex
+		var failure error
+		var wg sync.WaitGroup
+		slots := make(chan struct{}, blobReadParallelism)
+		for _, item := range misses {
+			wg.Add(1)
+			slots <- struct{}{}
+			go func(item miss) {
+				defer func() { <-slots; wg.Done() }()
+				data, err := s.Blobs.Read(ctx, item.requests[0].source.Blob)
+				if err != nil {
 					mu.Lock()
-					failure = errors.New("invalid canonical excerpt")
+					if failure == nil {
+						failure = err
+					}
 					mu.Unlock()
 					return
 				}
-				excerpt := SourceExcerpt{SourceRange: r, Text: string(runes[r.Start:r.End])}
-				mu.Lock()
-				slices[req.candidate][req.index] = excerpt
-				mu.Unlock()
-			}
-		}(requests)
-	}
-	wg.Wait()
-	if failure != nil {
-		return nil, failure
+				text := string(data)
+				if s.BlobCache != nil && item.key.cacheable() && Hash(data) == item.key.sha256 {
+					s.BlobCache.put(item.key, text)
+				}
+				for _, req := range item.requests {
+					r := req.source.Range
+					cut, valid := sliceRunes(text, r.Start, r.End)
+					if !valid {
+						mu.Lock()
+						if failure == nil {
+							failure = errors.New("invalid canonical excerpt")
+						}
+						mu.Unlock()
+						return
+					}
+					excerpt := SourceExcerpt{SourceRange: r, Text: cut}
+					mu.Lock()
+					slices[req.candidate][req.index] = excerpt
+					mu.Unlock()
+				}
+			}(item)
+		}
+		wg.Wait()
+		if failure != nil {
+			return nil, failure
+		}
 	}
 	out := map[int]string{}
 	for i, pieces := range slices {

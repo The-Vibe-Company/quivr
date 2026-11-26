@@ -424,4 +424,84 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 			}
 		}
 	}
+	// Packed multi-part segments must resolve their source_ranges in the same
+	// hydrateSQL round-trip (two statements total: one lookup + one fence).
+	packedCmd := content.Command{
+		Key:    "packed-record",
+		Source: content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: "packed-record"},
+		Content: content.Text{
+			Kind: "manifest",
+		},
+		Manifest: &content.Manifest{
+			Kind: "manifest",
+			Parts: []content.Part{
+				{Key: "p1", Role: "body", Content: content.Text{Kind: "text", Text: "één 🌌"}},
+				{Key: "p2", Role: "body", Content: content.Text{Kind: "text", Text: "second paragraph"}},
+				{Key: "p3", Role: "body", Content: content.Text{Kind: "text", Text: "第二段"}},
+			},
+		},
+	}
+	pr, err := service.Accept(ctx, scope, packedCmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw, _, err := store.Work(ctx, org, pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var partBlobs []content.PartBlob
+	var ranges []content.SourceRange
+	for _, p := range packedCmd.Manifest.Parts {
+		blob, err := store.objects.Put(ctx, org, []byte(p.Content.Text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		partBlobs = append(partBlobs, content.PartBlob{Key: p.Key, Role: p.Role, Blob: blob})
+		ranges = append(ranges, content.SourceRange{PartKey: p.Key, Start: 0, End: len([]rune(p.Content.Text))})
+	}
+	if err = store.Publish(ctx, pw, content.Publication{Normalized: partBlobs[0].Blob, Manifest: content.Blob{Key: "fixture/manifest-packed", SHA256: "manifest-packed", Size: 2}, Parts: partBlobs}); err != nil {
+		t.Fatal(err)
+	}
+	pv := content.Version{ID: pw.VersionID, RecordID: pw.RecordID, Manifest: *packedCmd.Manifest}
+	pseg, err := content.PluginSegmentation(org, pv, "plugin:adapter.fixture@1", json.RawMessage(`{"plugin_id":"adapter.fixture"}`), []content.SegmentInput{{
+		PartKey:         ranges[0].PartKey,
+		Start:           ranges[0].Start,
+		End:             ranges[0].End,
+		SourceRanges:    ranges,
+		SourceSeparator: "\n\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SaveSegmentation(ctx, org, pv, pseg); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Promote(ctx, org, pseg, g); err != nil {
+		t.Fatal(err)
+	}
+	// Copy the new packed rows into pg_temp so auto_explain observes the merged SQL.
+	for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "accepted_revisions"} {
+		if _, err := explained.Exec(ctx, "TRUNCATE pg_temp."+table+"; INSERT INTO pg_temp."+table+" SELECT * FROM public."+table+" WHERE organization=$1", org); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plans = nil
+	packedCandidate := content.Candidate{SegmentID: pseg.Segments[0].ID, GenerationID: g.ID}
+	packedReader := content.Service{Baseline: postgres.ProjectionStore{Pool: explained}, Blobs: store.objects, BlobCache: content.NewHydrationBlobCache(1 << 20)}
+	packedGot, err := packedReader.Hydrate(ctx, scope, []content.Candidate{packedCandidate})
+	if err != nil || len(packedGot) != 1 {
+		t.Fatalf("packed hydrate = %+v, %v", packedGot, err)
+	}
+	wantPacked := "één 🌌\n\nsecond paragraph\n\n第二段"
+	if packedGot[0].Segment.Text != wantPacked || len(packedGot[0].Segment.SourceExcerpts) != 3 {
+		t.Fatalf("packed segment = %+v; want text %q with 3 source excerpts", packedGot[0].Segment, wantPacked)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("packed hydration reported %d statements, want 2 (merged lookup + serving fence)", len(plans))
+	}
+	ungranted := scope
+	ungranted.Corpora = []string{"other-corpus"}
+	if denied, err := packedReader.Hydrate(ctx, ungranted, []content.Candidate{packedCandidate}); err != nil || len(denied) != 0 {
+		t.Fatalf("ungranted packed hydrate = %+v, %v; want empty", denied, err)
+	}
 }

@@ -310,6 +310,11 @@ type Service struct {
 	Stats           CorpusStatsReader
 	Facets          FacetReader
 	Blobs           Blobs
+	// BlobCache optionally caches verified immutable canonical text blobs in
+	// memory during hydration, keyed by (organization, blob_key, sha256).
+	// Authorization, current-version, quarantine, ACL, and Tombstone checks
+	// always run in canonical storage regardless of cache hits.
+	BlobCache       *HydrationBlobCache
 	Baseline        BaselineRepository
 	Embeddings      EmbeddingRepository
 	BlobSource      BlobSource
