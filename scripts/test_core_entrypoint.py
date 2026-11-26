@@ -557,7 +557,7 @@ class CoreEntrypointTest(unittest.TestCase):
                                  ('api', 'api'), ('api', 'migrate'), ('worker', 'worker'), ('worker', 'migrate')]:
             with self.subTest(image_role=image_role, mode=mode):
                 core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
-        for image_role, mode in [('api', 'worker'), ('worker', 'api'), ('other', 'api')]:
+        for image_role, mode in [('api', 'worker'), ('worker', 'api'), ('other', 'api'), (' ', 'api'), (' api ', 'api')]:
             with self.subTest(rejected=(image_role, mode)), self.assertRaises(ValueError):
                 core_entrypoint.validate_image_role({'QUIVR_IMAGE_ROLE': image_role}, mode)
 

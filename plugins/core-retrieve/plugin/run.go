@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"sort"
 
@@ -42,7 +41,7 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			}
 		}
 	}
-	if req.Round == 1 || len(pending) > 0 {
+	if req.Round == 1 || (req.Round < 3 && len(pending) > 0) {
 		c, err := request(req)
 		if err != nil {
 			return nil, err
@@ -58,8 +57,7 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 		}
 		return quivrplugin.Ask(requests...), nil
 	}
-	// The served order is the ranking: the index ranked it, and the engine
-	// kept each segment's first object, as the engine's own search did.
+	// Served candidates rank by score, then segment id; the Record dedupe below keeps the first in that order.
 	hits := []quivrplugin.RankedHit{}
 	segmentRecords := map[string]string{}
 	for _, s := range req.Served {
@@ -149,16 +147,10 @@ func Main() {
 	}
 	if err == nil {
 		m := plugin.Manifest()
-		host, port := os.Getenv(quivrplugin.EnvHost), os.Getenv(quivrplugin.EnvPort)
-		if host == "" {
-			host = "127.0.0.1"
-		}
-		if port == "" {
-			port = "8080"
-		}
-		// One startup line, so an operator sees the sidecar came up and what it serves.
-		fmt.Fprintf(os.Stderr, "quivr-core-retrieve: serving %s@%s (retrieval) on %s\n", m.ID, m.Version, net.JoinHostPort(host, port))
-		err = plugin.Serve()
+		err = plugin.ServeReady(func(addr string) {
+			// One startup line after bind succeeds, so an operator sees the sidecar came up and what it serves.
+			fmt.Fprintf(os.Stderr, "quivr-core-retrieve: serving %s@%s (retrieval) on %s\n", m.ID, m.Version, addr)
+		})
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "quivr-core-retrieve:", err)

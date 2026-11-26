@@ -26,7 +26,7 @@ func Run(args []string, runCommand []string) error {
 	if len(args) == 2 && args[0] == "configure" {
 		raw, err := os.ReadFile(args[1])
 		if err != nil {
-			return fmt.Errorf("cannot read configuration file")
+			return fmt.Errorf("cannot read configuration file: %w", err)
 		}
 		c, err := parseConfiguration(raw)
 		if err != nil {

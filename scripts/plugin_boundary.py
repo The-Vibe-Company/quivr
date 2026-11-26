@@ -1,7 +1,8 @@
 """Fail when plugin code reaches into the engine's private packages.
 
-Plugins under plugins/ and the public SDKs under sdks/go/ may import only
-public packages. Go's own internal rule does not protect the engine here:
+Plugins under plugins/, the multi-call bundle under deploy/plugins/, and the
+public SDKs under sdks/go/ may import only public packages. Go's own internal
+rule does not protect the engine here:
 the SDK's module path sits under the engine's module path, so Go would let it
 import github.com/The-Vibe-Company/quivr/internal/... once its go.mod
 requires the engine. This check fails on:
@@ -79,7 +80,8 @@ def main(argv: list[str]) -> int:
     if found:
         print(f"plugin boundary: {len(found)} violation(s)", file=sys.stderr)
         return 1
-    print("plugin boundary: plugins/ and sdks/go/ import no engine internal/ package")
+    trees = ", ".join(tree + "/" for tree in TREES)
+    print(f"plugin boundary: {trees} import no engine internal/ package")
     return 0
 
 

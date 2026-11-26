@@ -16,11 +16,11 @@ import (
 func Main() {
 	p, err := quivrplugin.New("")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "m365-mail:", err)
 		os.Exit(2)
 	}
 	if err := p.MustConnector(Kind, New(nil)).Serve(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "m365-mail:", err)
 		os.Exit(1)
 	}
 }

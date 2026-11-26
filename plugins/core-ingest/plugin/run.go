@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"sync"
 	"time"
@@ -142,16 +141,10 @@ func Main() {
 	}
 	if err == nil {
 		m := plugin.Manifest()
-		host, port := os.Getenv(quivrplugin.EnvHost), os.Getenv(quivrplugin.EnvPort)
-		if host == "" {
-			host = "127.0.0.1"
-		}
-		if port == "" {
-			port = "8080"
-		}
-		// One startup line, so an operator sees the sidecar came up and what it serves.
-		fmt.Fprintf(os.Stderr, "quivr-core-ingest: serving %s@%s (ingestion) on %s\n", m.ID, m.Version, net.JoinHostPort(host, port))
-		err = plugin.Serve()
+		err = plugin.ServeReady(func(addr string) {
+			// One startup line after bind succeeds, so an operator sees the sidecar came up and what it serves.
+			fmt.Fprintf(os.Stderr, "quivr-core-ingest: serving %s@%s (ingestion) on %s\n", m.ID, m.Version, addr)
+		})
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "quivr-core-ingest:", err)

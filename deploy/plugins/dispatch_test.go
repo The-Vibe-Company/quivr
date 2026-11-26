@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -78,11 +79,12 @@ func TestRoleBinariesListExpectedPluginsAndConfigureHostedEmbed(t *testing.T) {
 		{pkg: "./cmd/quivr-plugins-worker", want: []string{"core-ingest", "hosted-embed", "m365-mail", "object-storage-archive", "rss", "x-list"}},
 	}
 
+	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
 	example := filepath.Join("..", "..", "plugins", "hosted-embed", "examples", "tei.json")
 	for _, target := range targets {
 		name := filepath.Base(target.pkg)
 		bin := filepath.Join(dir, name)
-		build := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", bin, target.pkg)
+		build := exec.Command(goBin, "build", "-trimpath", "-ldflags", "-s -w", "-o", bin, target.pkg)
 		build.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("go build %s: %v\n%s", target.pkg, err, out)

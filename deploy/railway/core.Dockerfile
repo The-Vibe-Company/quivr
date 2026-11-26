@@ -38,21 +38,24 @@ RUN mkdir -p /out/manifests \
 FROM connectors AS connectors-core
 RUN mkdir -p /out/bin \
  && (cd deploy/plugins && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/bin/quivr-plugins ./cmd/quivr-plugins) \
- && for id in $(/out/bin/quivr-plugins --list); do \
+ && ids="$(/out/bin/quivr-plugins --list)" \
+ && for id in $ids; do \
       ln -s quivr-plugins "/out/bin/quivr-$id"; \
     done
 
 FROM connectors AS connectors-api
 RUN mkdir -p /out/bin \
  && (cd deploy/plugins && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/bin/quivr-plugins ./cmd/quivr-plugins-api) \
- && for id in $(/out/bin/quivr-plugins --list); do \
+ && ids="$(/out/bin/quivr-plugins --list)" \
+ && for id in $ids; do \
       ln -s quivr-plugins "/out/bin/quivr-$id"; \
     done
 
 FROM connectors AS connectors-worker
 RUN mkdir -p /out/bin \
  && (cd deploy/plugins && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/bin/quivr-plugins ./cmd/quivr-plugins-worker) \
- && for id in $(/out/bin/quivr-plugins --list); do \
+ && ids="$(/out/bin/quivr-plugins --list)" \
+ && for id in $ids; do \
       ln -s quivr-plugins "/out/bin/quivr-$id"; \
     done
 

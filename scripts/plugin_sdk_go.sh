@@ -13,7 +13,9 @@
 #     (plugins/x-list) has scripts/plugin_<id>_fixtures.py, which serves the
 #     fake and writes the fixtures to certify with. plugins/core-ingest needs
 #     TEI and the pinned tokenizer: the verify stack certifies it
-#     (scripts/core_ingest_plugin.py), so here it is vetted, tested and inspected.
+#     (scripts/core_ingest_plugin.py), so here it is vetted, tested and inspected;
+#  5. the multi-call Go plugins bundle (deploy/plugins) passes go vet and its
+#     dispatch and role-build tests.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"

@@ -207,4 +207,10 @@ func TestSearchesTheFullSpaceBoundary(t *testing.T) {
 	if err != nil || len(answer.Requests) != 0 || len(answer.Ranking) != 16 || len(seen) != 16 {
 		t.Fatalf("final ranking: %+v (%v), want all 16 owners", answer, err)
 	}
+	// Even with >16 served spaces leaving unrequested spaces at round 3, round 3 must rank rather than ask.
+	req.Spaces = append(req.Spaces, quivrplugin.SearchSpace{ID: "space16@1", Role: "served"})
+	answer, err = (retriever{}).Search(t.Context(), req)
+	if err != nil || len(answer.Requests) != 0 || len(answer.Ranking) != 16 {
+		t.Fatalf("round 3 with >16 spaces: %+v (%v), want ranking with zero requests", answer, err)
+	}
 }

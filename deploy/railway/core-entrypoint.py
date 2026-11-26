@@ -505,7 +505,7 @@ def supervise(commands, grace=10.0, poll=0.2, readiness=None):
 
 
 def validate_image_role(env, mode):
-    image_role = env.get('QUIVR_IMAGE_ROLE', '').strip()
+    image_role = env.get('QUIVR_IMAGE_ROLE', '')
     if not image_role:
         return
     if image_role not in ('core', 'api', 'worker'):
