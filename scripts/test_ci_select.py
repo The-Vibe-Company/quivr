@@ -13,33 +13,19 @@ import ci_select
 
 
 class Selection(unittest.TestCase):
-    def test_scan_database_survives_failed_only_rerun_and_isolates_runs(self):
-        producer = yaml.safe_load((ci_select.ROOT / '.github/actions/grype-database/action.yml').read_text())
-        consumer = yaml.safe_load((ci_select.ROOT / '.github/actions/grype-database-restore/action.yml').read_text())
-        save = next(step['with'] for step in producer['runs']['steps'] if step.get('uses', '').startswith('actions/cache/save@'))
-        restore = next(step['with'] for step in consumer['runs']['steps'] if step.get('uses', '').startswith('actions/cache/restore@'))
-
-        def key(template, run, attempt):
-            values = {'github.run_id': str(run), 'github.run_attempt': str(attempt)}
-            return re.sub(r'\$\{\{\s*(.*?)\s*\}\}', lambda match: values[match.group(1)], template)
-
-        # The successful database producer is skipped during a failed-only rerun.
-        saved = {key(save['key'], 41, 1): 'verified database'}
-        for attempt in [1, 2, 3]:
-            with self.subTest(attempt=attempt):
-                self.assertEqual(saved.get(key(restore['key'], 41, attempt)), 'verified database')
-        self.assertNotIn(key(restore['key'], 42, 1), saved)
-        self.assertTrue(restore['fail-on-cache-miss'])
-        self.assertNotIn('restore-keys', restore)
-
     def test_docs_front_eval_and_plugin_select_only_affected_expensive_lanes(self):
         cases = [
             (['docs-site/guides/search.mdx'], [], [], True),
             (['contracts/http/v0/README.md'], [], [], True),
             (['third_party/README.md'], [], [], True),
             (['conformance/README.md'], [], [], True),
-            (['scripts/eval/README.md'], [], [], True),
+            (['scripts/docs.py'], [], [], True),
+            (['scripts/mintlify_site.py'], [], [], True),
+            (['scripts/test_ci_select.py'], [], [], False),
+            (['scripts/denylist.sha256'], [], [], False),
+            (['.agents/skills/example/README.md'], [], [], False),
             (['quivr-search/src/App.tsx'], ['demo'], [], False),
+            (['scripts/denylist.py', 'docs/start/contributor.md'], [], [], True),
             (['scripts/eval/campaign.py'], [], ['eval-1', 'eval-2', 'eval-3'], False),
             (['plugins/rss/connector.go'], ['connectors'], ['sdk-go'], False),
         ]
@@ -66,17 +52,43 @@ class Selection(unittest.TestCase):
         self.assertEqual([i.get('component', i['plugin']) for i in ci_select.select(['plugins/rss/connector.go'])['images']], ['rss', 'core'])
         self.assertTrue(ci_select.select(['tests/fixtures/runtime.md'])['full'])
 
-    def test_engine_shared_inputs_and_unknown_paths_fail_closed(self):
-        for path in ['internal/retrieval/retrieval.go', 'scripts/local.py', 'go.sum', 'unclassified/new-input.bin']:
+    def test_engine_sources_and_root_go_dependencies_select_engine_and_core_images(self):
+        for path in ['internal/retrieval/retrieval.go', 'go.mod', 'go.sum']:
             with self.subTest(path=path):
                 selected = ci_select.select([path])
                 self.assertEqual(selected['parts'], ['core', 'monitoring', 'plugins', 'connectors', 'demo'])
-                self.assertTrue(selected['images'])
-        for full in [True]:
-            selected = ci_select.select(['README.md'], full=full)
-            self.assertIn('eval-3', selected['groups'])
-            self.assertTrue(selected['site'])
-            self.assertTrue(selected['migration-compatibility'])
+                self.assertEqual([i.get('component', i['plugin']) for i in selected['images']], ['', 'core'])
+                self.assertTrue(selected['vulnerabilities'])
+                self.assertFalse(selected['full'])
+                if path in {'go.mod', 'go.sum'}:
+                    self.assertIn('contracts', selected['groups'])
+                    self.assertTrue(selected['migration-compatibility'])
+
+    def test_sdk_sources_select_images_using_that_language(self):
+        for path, group, included, excluded in [
+            ('sdks/go/go.sum', 'sdk-go', {'rss', 'core-ingest', 'hosted-embed'}, {'pdf-text', 'jev-rerank'}),
+            ('sdks/python/README.md', 'sdk-python', {'pdf-text', 'jev-rerank'}, {'rss', 'core-ingest', 'hosted-embed'}),
+        ]:
+            with self.subTest(path=path):
+                selected = ci_select.select([path])
+                images = {i.get('component', i['plugin']) for i in selected['images']}
+                self.assertTrue(included | {'core'} <= images)
+                self.assertFalse(images & (excluded | {'', 'web', 'postgres'}))
+                self.assertIn(group, selected['groups'])
+                self.assertEqual(selected['site'], path.endswith('README.md'))
+
+    def test_shared_inputs_and_missing_diff_fail_closed(self):
+        for paths in [None, ['scripts/local.py'], ['scripts/prepare_tokenizer.py'],
+                      ['tools/cosign/go.sum'], ['.github/workflows/verify.yml'],
+                      ['unclassified/README.md'], ['plugins/new-plugin/main.go']]:
+            with self.subTest(paths=paths):
+                selected = ci_select.select(paths)
+                self.assertTrue(selected['full'])
+                self.assertTrue(selected['site'])
+                self.assertTrue(selected['migration-compatibility'])
+                self.assertTrue(selected['vulnerabilities'])
+                self.assertIn('eval-3', selected['groups'])
+                self.assertIn('postgres', {image.get('component') for image in selected['images']})
 
     def test_git_diff_covers_deleted_and_both_rename_paths_and_missing_base(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -118,6 +130,10 @@ class Selection(unittest.TestCase):
                 self.assertEqual(json.loads(values['parts'])['part'], ['core', 'monitoring', 'plugins', 'connectors', 'demo'])
                 self.assertEqual(values['site'], 'true')
                 self.assertEqual(values['full'], 'true')
+                self.assertEqual(values['vulnerabilities'], 'true')
+                self.assertEqual(values['migration-compatibility'], 'true')
+                images = json.loads(values['images'])['include']
+                self.assertTrue({'postgres', 'web', 'tei'} <= {i.get('component') for i in images})
 
 
 class Aggregation(unittest.TestCase):
@@ -151,6 +167,24 @@ class Aggregation(unittest.TestCase):
 
 
 class Workflow(unittest.TestCase):
+    def test_image_scans_use_their_producer_output_on_reruns(self):
+        prefixes = set()
+        for file, producer, consumer in [
+            ('verify.yml', 'image-inventory', 'image-vulnerabilities'),
+            ('release-images.yml', 'prepare', 'build'),
+        ]:
+            with self.subTest(file=file):
+                jobs = yaml.safe_load((ci_select.ROOT / '.github/workflows' / file).read_text())['jobs']
+                build = next(s for s in jobs[producer]['steps'] if s.get('uses') == './.github/actions/grype-database')
+                self.assertEqual(jobs[producer]['outputs']['artifact-id'], '${{ steps.' + build['id'] + '.outputs.artifact-id }}')
+                prefixes.add(build['with']['artifact-prefix'])
+                restore = next(s for s in jobs[consumer]['steps'] if s.get('uses') == './.github/actions/grype-database-restore')
+                self.assertIn(producer, jobs[consumer]['needs'])
+                # A failed-only rerun retains the successful producer's job outputs.
+                self.assertEqual(restore['with']['artifact-id'], '${{ needs.' + producer + '.outputs.artifact-id }}')
+                self.assertIs(jobs[consumer]['env']['GRYPE_DB_VALIDATE_AGE'], True)
+        self.assertEqual(len(prefixes), 2, 'release publishing and verification share a workflow run')
+
     def test_metadata_events_cannot_emit_verification_check_names(self):
         workflow = yaml.safe_load((ci_select.ROOT / '.github/workflows/verify.yml').read_text())
         self.assertEqual(set(workflow['on']['pull_request']['types']),
@@ -173,7 +207,7 @@ class Workflow(unittest.TestCase):
                     for key in match.group().split('.'):
                         current = current.get(key, '') if isinstance(current, dict) else ''
                     return repr(current)
-                source = re.sub(r'\b(?:github|inputs|needs)\.[\w.-]+', reference, match.group(1))
+                source = re.sub(r'\b(?:github|inputs|needs|matrix)\.[\w.-]+', reference, match.group(1))
                 return eval(source.replace('&&', ' and ').replace('||', ' or '), {'__builtins__': {}, 'format': lambda template, *args: template.format(*args)})
             if condition and not value.strip().startswith('${{'):
                 value = '${{ ' + value + ' }}'
@@ -215,6 +249,21 @@ class Workflow(unittest.TestCase):
                 context = {'github': {'event_name': event, 'run_attempt': attempt, 'sha': 'original-merge',
                                      'event': {'pull_request': {'number': 42}}}, 'inputs': inputs}
                 self.assertEqual(evaluate(checkout_ref, context), expected)
+
+        build = next(step['with'] for step in workflow['jobs']['image-vulnerabilities']['steps']
+                     if step.get('uses', '').startswith('docker/build-push-action@'))
+        for event, ref, exports in [
+            ('push', 'refs/heads/main', True),
+            ('push', 'refs/heads/topic', False),
+            ('pull_request', 'refs/pull/42/merge', False),
+            ('release', 'refs/tags/v2.0.0', False),
+            ('workflow_dispatch', 'refs/heads/main', False),
+        ]:
+            with self.subTest(cache_event=event, ref=ref):
+                context = {'github': {'event_name': event, 'ref': ref}, 'matrix': {'component': 'core'}}
+                self.assertEqual(evaluate(build['cache-from'], context), 'type=gha,scope=scan-core')
+                self.assertEqual(evaluate(build['cache-to'], context),
+                                 'type=gha,mode=max,scope=scan-core' if exports else '')
 
         migration_command = next(step['run'] for step in workflow['jobs']['migration-compatibility']['steps']
                                  if step.get('run', '').startswith('make migration-compatibility'))
@@ -309,7 +358,7 @@ class Workflow(unittest.TestCase):
             git('merge', '--no-edit', 'feature')
             merge = git('rev-parse', 'HEAD')
             checkout = root / 'checkout'
-            git('clone', '-q', root.as_uri(), str(checkout))
+            git('clone', '-q', '--depth', '2', root.as_uri(), str(checkout))
             resolver = next(step for step in workflow['jobs']['paths-filter']['steps'] if step.get('id') == 'resolve')
             for target, expected in [(head, 0), (base, 1)]:
                 with self.subTest(target=target):

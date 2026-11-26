@@ -1,37 +1,48 @@
-name: Prepare the vulnerability database
-description: Update once per workflow and distribute the same database to every image job
+name: Prepare image security inputs
+description: Verify the scan and signing tools and publish them with a fresh vulnerability database
+inputs:
+  artifact-prefix:
+    description: Distinguishes verification and publishing bundles in the same release run
+    required: true
+outputs:
+  artifact-id:
+    description: Immutable bundle ID kept in the producer job outputs across failed-only reruns
+    value: ${{ steps.upload.outputs.artifact-id }}
 runs:
   using: composite
   steps:
-  - name: Install checksum-verified scanner
+  - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    with:
+      go-version-file: tools/cosign/go.mod
+      cache-dependency-path: tools/cosign/go.sum
+  - name: Install checksum-verified Syft and Grype
     shell: bash
     run: |
-      timeout --kill-after=5s 45s bash scripts/security_tools.sh grype "$RUNNER_TEMP/security-tools"
-      echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
-  - id: day
-    shell: bash
-    run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-  - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-    with:
-      path: ${{ runner.temp }}/grype-database
-      key: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-${{ steps.day.outputs.day }}
-      restore-keys: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-
-  - name: Check upstream for a fresh database
+      tools_dir="$RUNNER_TEMP/image-security/tools"
+      bash scripts/security_tools.sh syft "$tools_dir"
+      bash scripts/security_tools.sh grype "$tools_dir"
+  - name: Verify Cosign and prepare the current Grype database
     shell: bash
     env:
-      GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
-      GRYPE_CHECK_FOR_APP_UPDATE: false
+      GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/image-security/grype-db
+      GRYPE_DB_VALIDATE_AGE: 'true'
+      GRYPE_CHECK_FOR_APP_UPDATE: 'false'
     run: |
-      if [ -f "$RUNNER_TEMP/grype-database/grype-db.tar.zst" ]; then
-        mkdir -p "$GRYPE_DB_CACHE_DIR"
-        tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR"
-      fi
-      timeout --kill-after=5s 120s grype db update
-      grype db status
-      mkdir -p "$RUNNER_TEMP/grype-database"
-      tar --zstd -cf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR" .
-  - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      tools_dir="$RUNNER_TEMP/image-security/tools"
+      # Overlap the database download with the pinned Go build and recovery test.
+      timeout --kill-after=5s 120s "$tools_dir/grype" db update &
+      database_update=$!
+      timeout --kill-after=5s 10m bash scripts/install_cosign.sh "$tools_dir"
+      wait "$database_update"
+      "$tools_dir/grype" db status
+  - name: Pack the checked inputs with executable modes
+    shell: bash
+    run: tar --zstd -cf "$RUNNER_TEMP/image-security.tar.zst" -C "$RUNNER_TEMP/image-security" tools grype-db
+  - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+    id: upload
     with:
-      path: ${{ runner.temp }}/grype-database
-      # Failed-only reruns skip this successful producer; keep its database available.
-      key: grype-run-${{ github.run_id }}
+      name: ${{ inputs.artifact-prefix }}-image-security-${{ github.run_attempt }}
+      path: ${{ runner.temp }}/image-security.tar.zst
+      if-no-files-found: error
+      retention-days: 1
+      compression-level: 0

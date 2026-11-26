@@ -26,10 +26,11 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: 3.12.16
+          cache: pip
+          cache-dependency-path: scripts/ci-requirements-base.txt
       - run: python3 scripts/ci_fetch.py -- pip install --require-hashes -r scripts/ci-requirements-base.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         if: inputs.mode == 'published'
@@ -42,8 +43,6 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
       - name: Build immutable release candidates into the isolated registry
         if: inputs.mode == 'candidate'
-        env:
-          REF: ${{ inputs.ref }}
         run: |
           python3 - <<'PY'
           import pathlib, subprocess, sys

@@ -17,8 +17,9 @@ jobs:
   prepare:
     if: startsWith(github.event.release.tag_name, 'v2.')
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
+      artifact-id: ${{ steps.security.outputs.artifact-id }}
       matrix: ${{ steps.release.outputs.matrix }}
       version: ${{ steps.release.outputs.version }}
       revision: ${{ steps.release.outputs.revision }}
@@ -32,6 +33,9 @@ jobs:
         python-version: 3.12.16
     - run: python3 scripts/ci_fetch.py -- pip install --require-hashes -r scripts/ci-requirements-base.txt
     - uses: ./.github/actions/grype-database
+      id: security
+      with:
+        artifact-prefix: release
     - id: release
       env:
         RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -44,7 +48,6 @@ jobs:
   build:
     needs: prepare
     runs-on: ubuntu-24.04
-    # Allow the pinned source build; signing retains its separate five-minute cap.
     timeout-minutes: 20
     permissions:
       contents: read
@@ -98,13 +101,9 @@ jobs:
         VERSION: ${{ needs.prepare.outputs.version }}
         REVISION: ${{ needs.prepare.outputs.revision }}
       run: python3 scripts/image_smoke.py "$IMAGE" --plugin "$PLUGIN" --plugin-id "$PLUGIN_ID" --component "$COMPONENT" --version "$VERSION" --revision "$REVISION"
-    - name: Install checksum-verified inventory and scan tools
-      env:
-        TOOLS_DIR: ${{ runner.temp }}/security-tools
-      run: |
-        bash scripts/security_tools.sh syft "$TOOLS_DIR"
-        bash scripts/security_tools.sh grype "$TOOLS_DIR"
-        echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+    - uses: ./.github/actions/grype-database-restore
+      with:
+        artifact-id: ${{ needs.prepare.outputs.artifact-id }}
     - name: Inventory the immutable image
       env:
         IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -113,7 +112,6 @@ jobs:
       run: |
         mkdir -p sboms
         syft "registry:$IMAGE" --output "spdx-json=$SBOM"
-    - uses: ./.github/actions/grype-database-restore
     - name: Reject critical vulnerabilities with an available fix
       env:
         IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -130,15 +128,6 @@ jobs:
         if-no-files-found: warn
         retention-days: 3
         compression-level: 0
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-      with:
-        go-version-file: tools/cosign/go.mod
-        cache-dependency-path: tools/cosign/go.sum
-    - name: Build checksum-verified Cosign with existing-entry recovery
-      timeout-minutes: 10
-      run: |
-        bash scripts/install_cosign.sh "$RUNNER_TEMP/signing-tools"
-        echo "$RUNNER_TEMP/signing-tools" >> "$GITHUB_PATH"
     - name: Sign, attest and verify the immutable image
       timeout-minutes: 5
       env:
