@@ -8523,7 +8523,7 @@ components:
       - y
       - width
       - height
-      description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+      description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
     SearchResponse:
       type: object
       additionalProperties: false

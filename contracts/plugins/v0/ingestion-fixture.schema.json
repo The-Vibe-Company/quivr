@@ -65,7 +65,19 @@
               },
               "path": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "pattern": "^[^/\\\\]",
+                "not": {
+                  "anyOf": [
+                    {
+                      "pattern": "^[A-Za-z]:"
+                    },
+                    {
+                      "pattern": "(^|/|\\\\)\\.\\.(/|\\\\|$)"
+                    }
+                  ]
+                },
+                "description": "Relative path from the fixture file without parent-directory traversal."
               },
               "media_type": {
                 "type": "string",
@@ -99,7 +111,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Queries to encode in every requested space; default the first 200 code points of the first non-empty Part."
+          "description": "Queries to encode in every requested space; default the first 200 code points of the first non-empty text Part, or the first Blob Part's role when no text Part is present."
         },
         "expect": {
           "type": "object",

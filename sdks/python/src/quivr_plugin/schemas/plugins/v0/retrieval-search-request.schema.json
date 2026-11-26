@@ -662,8 +662,8 @@
           "description": "Optional Unicode separator used between source_ranges; missing and empty are equivalent."
         },
         "region": {
-          "$ref": "ingestion-segment-and-embed-response.schema.json#/$defs/ImageRegion",
-          "description": "Since Plugin API 0.20. Optional image region provenance when the candidate comes from a Blob Part."
+          "$ref": "plugin-manifest.schema.json#/$defs/ImageRegion",
+          "description": "Since Plugin API 0.20. Optional image region provenance when the candidate comes from a Blob Part (0 <= x, y <= 1, 0 < width, height <= 1, x + width <= 1 and y + height <= 1)."
         },
         "explanation": {
           "type": "string",

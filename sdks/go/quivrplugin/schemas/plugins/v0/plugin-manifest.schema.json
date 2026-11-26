@@ -847,6 +847,57 @@
         }
       },
       "description": "Since Plugin API 0.12: provider signature header, optional signed Unix-seconds timestamp header, and replay window. The plugin verifies the cryptographic signature. GET challenges bypass POST freshness/replay checks."
+    },
+    "ImageRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate_system",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "description": "Normalized bounding-box provenance for an image segment: origin at top-left, coordinates in [0, 1], with x + width <= 1 and y + height <= 1.",
+      "properties": {
+        "coordinate_system": {
+          "const": "normalized_bbox"
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "image_width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\x00]*$"
+        }
+      }
     }
   },
   "allOf": [

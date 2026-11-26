@@ -164,7 +164,10 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 			}
 			blob, err := i.BlobSource.VerifiedBlob(ctx, org, p.Content.BlobID)
 			if err != nil {
-				return nil, i.refused("Blob Part %q (%s) is not a verified Blob: %v", p.Key, p.Content.BlobID, err)
+				if errors.Is(err, content.ErrUnverifiedBlob) {
+					return nil, i.refused("Blob Part %q (%s) is not a verified Blob: %v", p.Key, p.Content.BlobID, err)
+				}
+				return nil, fmt.Errorf("%w: verify blob part %q: %v", ErrUnavailable, p.Key, err)
 			}
 			signedURL, expiresAt, err := i.Signer.PresignGet(ctx, blob.Blob.Key, signTTL)
 			if err != nil {

@@ -25,10 +25,12 @@ type fakeObj struct {
 }
 
 type fakeS3 struct {
-	mu      sync.Mutex
-	objects map[string]fakeObj
-	deny    bool
-	getHits map[string]int
+	mu       sync.Mutex
+	objects  map[string]fakeObj
+	deny     bool
+	listHits int
+	getHits  map[string]int
+	onGet    func(key string)
 }
 
 func newFakeS3(objs ...fakeObj) *fakeS3 {
@@ -50,6 +52,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	if q.Get("list-type") == "2" {
+		f.listHits++
 		prefix := q.Get("prefix")
 		startAfter := q.Get("start-after")
 		keys := make([]string, 0, len(f.objects))
@@ -79,6 +82,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
+	}
+	if f.onGet != nil {
+		f.onGet(key)
 	}
 	o, exists := f.objects[key]
 	if !exists {
@@ -174,7 +180,10 @@ func TestKeyCheckpointStreamsAndResumesAcrossModalities(t *testing.T) {
 		t.Fatalf("concurrency = %d, want 4", p1.SubmissionConcurrency)
 	}
 
-	// OpenAttachment hits warm cache first, then falls back to cold S3 read.
+	// OpenAttachment hits warm cache first (no second S3 GET), then falls back to cold S3 read.
+	if s3srv.getHits["inbox/a.txt"] != 1 {
+		t.Fatalf("expected 1 S3 GET during Fetch, got %d", s3srv.getHits["inbox/a.txt"])
+	}
 	attReq := &quivrplugin.AttachmentRequest{OrganizationID: "org-1", Credential: cred}
 	attReq.Connector.ID = "inst-1"
 	attReq.Connector.Config = cfg
@@ -188,7 +197,9 @@ func TestKeyCheckpointStreamsAndResumesAcrossModalities(t *testing.T) {
 	if string(got) != "plain note" {
 		t.Fatalf("warm bytes = %q", string(got))
 	}
-	hitsBeforeCold := s3srv.getHits["inbox/a.txt"]
+	if s3srv.getHits["inbox/a.txt"] != 1 {
+		t.Fatalf("warm OpenAttachment should hit cache without S3 GET, got %d hits", s3srv.getHits["inbox/a.txt"])
+	}
 
 	// Evict session cache and confirm cold S3 fallback succeeds.
 	conn.Close()
@@ -198,7 +209,7 @@ func TestKeyCheckpointStreamsAndResumesAcrossModalities(t *testing.T) {
 	}
 	got, _ = io.ReadAll(rc)
 	rc.Close()
-	if string(got) != "plain note" || s3srv.getHits["inbox/a.txt"] != hitsBeforeCold+1 {
+	if string(got) != "plain note" || s3srv.getHits["inbox/a.txt"] != 2 {
 		t.Fatalf("cold fallback failed: bytes=%q hits=%d", string(got), s3srv.getHits["inbox/a.txt"])
 	}
 
@@ -266,6 +277,7 @@ func TestTimestampCheckpointOrderingTieBreakAndOverwrite(t *testing.T) {
 
 	cp1, _ := json.Marshal(p1.Checkpoint)
 	req.Checkpoint = cp1
+	req.PageInRun = 1
 	p2, err := conn.Fetch(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ts page 2: %v", err)
@@ -273,8 +285,11 @@ func TestTimestampCheckpointOrderingTieBreakAndOverwrite(t *testing.T) {
 	if len(p2.Items) != 1 || p2.More || p2.Items[0].RecordKey != "b-tie.txt" {
 		t.Fatalf("ts page 2 = %+v", p2)
 	}
+	if s3srv.listHits != 1 {
+		t.Fatalf("timestamp mode should reuse bounded snapshot across pages in one run, got %d ListObjectsV2 calls", s3srv.listHits)
+	}
 
-	// Overwrite z-old.txt with a newer timestamp and confirm incremental pickup.
+	// Overwrite z-old.txt with a newer timestamp and confirm incremental pickup on next run.
 	s3srv.mu.Lock()
 	s3srv.objects["feed/z-old.txt"] = fakeObj{
 		Key:          "feed/z-old.txt",
@@ -286,6 +301,7 @@ func TestTimestampCheckpointOrderingTieBreakAndOverwrite(t *testing.T) {
 
 	cp2, _ := json.Marshal(p2.Checkpoint)
 	req.Checkpoint = cp2
+	req.PageInRun = 0
 	p3, err := conn.Fetch(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ts page 3: %v", err)
@@ -342,4 +358,136 @@ func TestAllowedMediaTypesOversizedAndAccessErrors(t *testing.T) {
 	if strings.Contains(err.Error(), srv.URL) || strings.Contains(err.Error(), "test-secret") {
 		t.Fatalf("error leaked secret/endpoint: %v", err)
 	}
+}
+
+func TestLiteralPercentKeysCheckpointValidationChurnAndSessionCap(t *testing.T) {
+	t0 := time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+
+	t.Run("literal percent keys preserve exact identity", func(t *testing.T) {
+		s3srv := newFakeS3(
+			fakeObj{Key: "inbox/Q3 100%.txt", ETag: `"e1"`, LastModified: t0, Body: []byte("quarter")},
+			fakeObj{Key: "inbox/a%2Fb.txt", ETag: `"e2"`, LastModified: t0.Add(time.Minute), Body: []byte("encoded")},
+		)
+		srv := httptest.NewServer(s3srv)
+		defer srv.Close()
+		conn := NewPrefixConnector()
+		defer conn.Close()
+		cfg := makeConfig(t, map[string]any{
+			"bucket":   "demo",
+			"prefix":   "inbox/",
+			"region":   "us-east-1",
+			"endpoint": srv.URL,
+		})
+		req := &quivrplugin.FetchRequest{OrganizationID: "org-1", Credential: makeCred(t), Checkpoint: json.RawMessage("null")}
+		req.Connector.ID = "inst-pct"
+		req.Connector.Config = cfg
+		page, err := conn.Fetch(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Fetch with literal %% keys failed: %v", err)
+		}
+		if len(page.Items) != 2 || page.Items[0].RecordKey != "Q3 100%.txt" || page.Items[1].RecordKey != "a%2Fb.txt" {
+			t.Fatalf("unexpected record keys: %+v", page.Items)
+		}
+	})
+
+	t.Run("out-of-prefix checkpoint rejected", func(t *testing.T) {
+		s3srv := newFakeS3()
+		srv := httptest.NewServer(s3srv)
+		defer srv.Close()
+		conn := NewPrefixConnector()
+		defer conn.Close()
+		cfg := makeConfig(t, map[string]any{
+			"bucket":   "demo",
+			"prefix":   "inbox/",
+			"region":   "us-east-1",
+			"endpoint": srv.URL,
+		})
+		req := &quivrplugin.FetchRequest{
+			OrganizationID: "org-1",
+			Credential:     makeCred(t),
+			Checkpoint:     json.RawMessage(`{"mode":"key","last_key":"other/z.txt","objects_done":1}`),
+		}
+		req.Connector.ID = "inst-bad-cp"
+		req.Connector.Config = cfg
+		_, err := conn.Fetch(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "invalid_checkpoint") {
+			t.Fatalf("expected invalid_checkpoint error, got %v", err)
+		}
+	})
+
+	t.Run("mid-fetch delete skipped and overwrite returns transient error", func(t *testing.T) {
+		s3srv := newFakeS3(
+			fakeObj{Key: "inbox/a-deleted.txt", ETag: `"e1"`, LastModified: t0, Body: []byte("gone")},
+			fakeObj{Key: "inbox/b-kept.txt", ETag: `"e2"`, LastModified: t0.Add(time.Minute), Body: []byte("kept")},
+		)
+		s3srv.onGet = func(key string) {
+			if key == "inbox/a-deleted.txt" {
+				delete(s3srv.objects, key)
+			}
+		}
+		srv := httptest.NewServer(s3srv)
+		defer srv.Close()
+		conn := NewPrefixConnector()
+		defer conn.Close()
+		cfg := makeConfig(t, map[string]any{
+			"bucket":   "demo",
+			"prefix":   "inbox/",
+			"region":   "us-east-1",
+			"endpoint": srv.URL,
+		})
+		req := &quivrplugin.FetchRequest{OrganizationID: "org-1", Credential: makeCred(t), Checkpoint: json.RawMessage("null")}
+		req.Connector.ID = "inst-churn"
+		req.Connector.Config = cfg
+		page, err := conn.Fetch(context.Background(), req)
+		if err != nil {
+			t.Fatalf("delete churn should skip object, got %v", err)
+		}
+		if len(page.Items) != 1 || page.Items[0].RecordKey != "b-kept.txt" {
+			t.Fatalf("expected only b-kept.txt, got %+v", page.Items)
+		}
+
+		// Now mutate ETag before GetObject to trigger PreconditionFailed -> transient error.
+		s3srv2 := newFakeS3(
+			fakeObj{Key: "inbox/c-changed.txt", ETag: `"e1"`, LastModified: t0, Body: []byte("v1")},
+		)
+		s3srv2.onGet = func(key string) {
+			o := s3srv2.objects[key]
+			o.ETag = `"e2"`
+			s3srv2.objects[key] = o
+		}
+		srv2 := httptest.NewServer(s3srv2)
+		defer srv2.Close()
+		req.Connector.Config = makeConfig(t, map[string]any{
+			"bucket":   "demo",
+			"prefix":   "inbox/",
+			"region":   "us-east-1",
+			"endpoint": srv2.URL,
+		})
+		_, err = conn.Fetch(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "object_changed") {
+			t.Fatalf("expected object_changed error, got %v", err)
+		}
+	})
+
+	t.Run("maxSessions enforced when all sessions are locked", func(t *testing.T) {
+		conn := NewPrefixConnector()
+		locked := make([]*prefixSession, 0, maxSessions)
+		for i := 0; i < maxSessions; i++ {
+			s, err := conn.session(fmt.Sprintf("k-%d", i))
+			if err != nil {
+				t.Fatalf("session %d: %v", i, err)
+			}
+			s.mu.Lock()
+			s.expires = time.Now().Add(time.Minute)
+			locked = append(locked, s)
+		}
+		_, err := conn.session("overflow")
+		for _, s := range locked {
+			s.mu.Unlock()
+		}
+		conn.Close()
+		if err == nil || !strings.Contains(err.Error(), "prefix_capacity") {
+			t.Fatalf("expected prefix_capacity error, got %v", err)
+		}
+	})
 }

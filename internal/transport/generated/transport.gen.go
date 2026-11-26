@@ -2416,7 +2416,7 @@ type FieldMappingRoles string
 // FieldMappingType defines model for FieldMapping.Type.
 type FieldMappingType string
 
-// ImageRegion Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+// ImageRegion Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 type ImageRegion struct {
 	CoordinateSystem ImageRegionCoordinateSystem `json:"coordinate_system"`
 	Height           float32                     `json:"height"`
@@ -3233,7 +3233,7 @@ type SearchHit struct {
 	Rank                   int     `json:"rank"`
 	RecordId               string  `json:"record_id"`
 
-	// Region Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+	// Region Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 	Region         *ImageRegion `json:"region,omitempty"`
 	SegmentId      string       `json:"segment_id"`
 	SegmentationId string       `json:"segmentation_id"`

@@ -21,13 +21,16 @@ import (
 )
 
 const (
-	visionSpaceID  = "crossmodal.image.vision"
-	vectorDims     = 512
-	colorSubspace  = 0  // 0..31: color & hue semantics
-	toneSubspace   = 32 // 32..47: luminance, saturation, contrast
-	layoutSubspace = 48 // 48..63: aspect ratio & spatial region geometry
-	hashSubspace   = 64 // 64..511: shared signed feature hashing (448 dims)
-	hashDims       = vectorDims - hashSubspace
+	visionSpaceID   = "crossmodal.image.vision"
+	externalSpaceID = "crossmodal.image.external"
+	builtinModelID  = "crossmodal/builtin-vision-512"
+	httpModelID     = "crossmodal/http-vision-512"
+	vectorDims      = 512
+	colorSubspace   = 0  // 0..31: color & hue semantics
+	toneSubspace    = 32 // 32..47: luminance, saturation, contrast
+	layoutSubspace  = 48 // 48..63: aspect ratio & spatial region geometry
+	hashSubspace    = 64 // 64..511: shared signed feature hashing (448 dims)
+	hashDims        = vectorDims - hashSubspace
 )
 
 type crossModalEncoder interface {
@@ -35,29 +38,45 @@ type crossModalEncoder interface {
 	embedQuery(ctx context.Context, text string) ([]float32, error)
 }
 
-func newEncoder(cfg pluginConfig) (crossModalEncoder, error) {
-	if cfg.Backend == "http" {
+func newEncoderForSpace(cfg pluginConfig, spaceID string) (crossModalEncoder, string, error) {
+	switch spaceID {
+	case visionSpaceID:
+		if cfg.Backend != "builtin" {
+			return nil, "", quivrplugin.TerminalIngestError("space_backend_mismatch", "crossmodal.image.vision requires backend=builtin")
+		}
+		if cfg.Model != "" && cfg.Model != builtinModelID {
+			return nil, "", quivrplugin.TerminalIngestError("space_model_mismatch", "model does not match crossmodal.image.vision")
+		}
+		return builtinEncoder{}, builtinModelID, nil
+	case externalSpaceID:
+		if cfg.Backend != "http" {
+			return nil, "", quivrplugin.TerminalIngestError("space_backend_mismatch", "crossmodal.image.external requires backend=http")
+		}
+		if cfg.Model != "" && cfg.Model != httpModelID {
+			return nil, "", quivrplugin.TerminalIngestError("space_model_mismatch", "model does not match crossmodal.image.external")
+		}
 		if cfg.BaseURL == "" {
-			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "base_url is required when backend is http")
+			return nil, "", quivrplugin.TerminalIngestError("invalid_configuration", "base_url is required when backend is http")
 		}
 		apiKey := os.Getenv("CROSSMODAL_API_KEY")
 		if (cfg.Auth == "bearer" || cfg.Auth == "api-key") && apiKey == "" {
-			return nil, quivrplugin.RetryableIngestError("missing_secret", "CROSSMODAL_API_KEY must be set when auth is bearer or api-key")
+			return nil, "", quivrplugin.RetryableIngestError("missing_secret", "CROSSMODAL_API_KEY must be set when auth is bearer or api-key")
 		}
 		return &httpEncoder{
 			baseURL: cfg.BaseURL,
 			auth:    cfg.Auth,
 			apiKey:  apiKey,
-			model:   cfg.Model,
+			model:   httpModelID,
 			client: &http.Client{
 				Timeout: time.Duration(cfg.RequestTimeoutMS) * time.Millisecond,
 				CheckRedirect: func(*http.Request, []*http.Request) error {
 					return http.ErrUseLastResponse
 				},
 			},
-		}, nil
+		}, httpModelID, nil
+	default:
+		return nil, "", quivrplugin.TerminalIngestError("unknown_space", fmt.Sprintf("unsupported cross-modal space %q", spaceID))
 	}
-	return builtinEncoder{}, nil
 }
 
 // builtinEncoder projects visual region features and natural-language queries
@@ -560,8 +579,21 @@ func (e *httpEncoder) call(ctx context.Context, body map[string]any) ([]float32,
 	if err != nil {
 		return nil, quivrplugin.TerminalIngestError("encode_request", "cannot serialize embedding request")
 	}
+	backoffs := [...]time.Duration{50 * time.Millisecond, 150 * time.Millisecond}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
+		if ctx.Err() != nil {
+			return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
+		}
+		if attempt > 0 {
+			timer := time.NewTimer(backoffs[attempt-1])
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
+			case <-timer.C:
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL, bytes.NewReader(raw))
 		if err != nil {
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid embedding backend URL")
@@ -575,12 +607,18 @@ func (e *httpEncoder) call(ctx context.Context, body map[string]any) ([]float32,
 		}
 		resp, err := e.client.Do(req)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
+			}
 			lastErr = quivrplugin.RetryableIngestError("backend_unavailable", "embedding backend request failed")
 			continue
 		}
 		respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		resp.Body.Close()
 		if readErr != nil {
+			if ctx.Err() != nil {
+				return nil, quivrplugin.RetryableIngestError("request_cancelled", "embedding backend request cancelled or timed out")
+			}
 			lastErr = quivrplugin.RetryableIngestError("backend_unavailable", "embedding backend response unreadable")
 			continue
 		}

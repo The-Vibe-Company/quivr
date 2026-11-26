@@ -9,6 +9,8 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
+const maxSegments = 256
+
 type pluginConfig struct {
 	Backend          string `json:"backend"`
 	BaseURL          string `json:"base_url"`
@@ -21,16 +23,25 @@ type pluginConfig struct {
 	RequestTimeoutMS int    `json:"request_timeout_ms"`
 }
 
+func (c pluginConfig) resolvedModel() string {
+	if c.Model != "" {
+		return c.Model
+	}
+	if c.Backend == "http" {
+		return httpModelID
+	}
+	return builtinModelID
+}
+
 func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	cfg := pluginConfig{
 		Backend:          "builtin",
 		Auth:             "none",
-		Model:            "crossmodal/vision-text-512",
 		RegionMode:       "full",
 		GridRows:         2,
 		GridCols:         2,
 		MaxImageBytes:    25 << 20,
-		RequestTimeoutMS: 15000,
+		RequestTimeoutMS: 4000,
 	}
 	if len(raw) > 0 && string(raw) != "{}" {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -40,6 +51,12 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	if cfg.Backend != "builtin" && cfg.Backend != "http" {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "backend must be builtin or http")
 	}
+	if cfg.Backend == "http" && cfg.BaseURL == "" {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "base_url is required when backend is http")
+	}
+	if cfg.Auth != "none" && cfg.Auth != "bearer" && cfg.Auth != "api-key" {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "auth must be none, bearer, or api-key")
+	}
 	if cfg.RegionMode != "full" && cfg.RegionMode != "grid" {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "region_mode must be full or grid")
 	}
@@ -48,6 +65,9 @@ func decodePluginConfig(raw json.RawMessage) (pluginConfig, error) {
 	}
 	if cfg.MaxImageBytes < 1024 || cfg.MaxImageBytes > 25<<20 {
 		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "max_image_bytes out of bounds")
+	}
+	if cfg.RequestTimeoutMS < 500 || cfg.RequestTimeoutMS > 10000 {
+		return cfg, quivrplugin.TerminalIngestError("invalid_configuration", "request_timeout_ms must be in 500..10000")
 	}
 	return cfg, nil
 }
@@ -66,6 +86,9 @@ func (crossModalPlugin) Normalize(ctx context.Context, req *quivrplugin.Normaliz
 	}
 	data, err := req.ReadInput(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, quivrplugin.RetryableError("input_unavailable", "image read cancelled or timed out")
+		}
 		return nil, err
 	}
 	decoded, err := decodeImage(data, req.Input.MediaType)
@@ -116,12 +139,15 @@ func (crossModalPlugin) SegmentAndEmbed(ctx context.Context, req *quivrplugin.In
 	if len(req.BlobParts) == 0 {
 		return nil, quivrplugin.TerminalIngestError("no_image_part", "crossmodal.image requires at least one image Blob Part")
 	}
-	var enc crossModalEncoder
-	if len(req.Spaces) > 0 {
-		enc, err = newEncoder(cfg)
+	encoders := make(map[string]crossModalEncoder, len(req.Spaces))
+	provenanceModel := cfg.resolvedModel()
+	for _, space := range req.Spaces {
+		enc, modelID, err := newEncoderForSpace(cfg, space)
 		if err != nil {
 			return nil, err
 		}
+		encoders[space] = enc
+		provenanceModel = modelID
 	}
 
 	var segments []quivrplugin.Segment
@@ -131,6 +157,9 @@ func (crossModalPlugin) SegmentAndEmbed(ctx context.Context, req *quivrplugin.In
 		}
 		data, err := bp.ReadBlob(ctx, cfg.MaxImageBytes)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, quivrplugin.RetryableIngestError("input_unavailable", "image read cancelled or timed out")
+			}
 			return nil, err
 		}
 		decoded, err := decodeImage(data, bp.MediaType)
@@ -138,10 +167,13 @@ func (crossModalPlugin) SegmentAndEmbed(ctx context.Context, req *quivrplugin.In
 			return nil, err
 		}
 		regions := planRegions(decoded.width, decoded.height, cfg)
+		if len(segments)+len(regions) > maxSegments {
+			return nil, quivrplugin.TerminalIngestError("too_many_segments", fmt.Sprintf("image regions exceed max_segments (%d)", maxSegments))
+		}
 		for _, pr := range regions {
 			vectors := make(map[string][]float32, len(req.Spaces))
 			for _, space := range req.Spaces {
-				vec, err := enc.embedRegion(ctx, decoded, data, pr)
+				vec, err := encoders[space].embedRegion(ctx, decoded, data, pr)
 				if err != nil {
 					return nil, err
 				}
@@ -156,7 +188,7 @@ func (crossModalPlugin) SegmentAndEmbed(ctx context.Context, req *quivrplugin.In
 				Vectors: vectors,
 				Provenance: map[string]any{
 					"backend":      cfg.Backend,
-					"model":        cfg.Model,
+					"model":        provenanceModel,
 					"region_mode":  cfg.RegionMode,
 					"media_type":   bp.MediaType,
 					"format":       decoded.format,
@@ -182,7 +214,7 @@ func (crossModalPlugin) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRe
 	if strings.TrimSpace(req.Query.Text) == "" {
 		return nil, quivrplugin.TerminalIngestError("empty_query", "query text must be non-empty")
 	}
-	enc, err := newEncoder(cfg)
+	enc, _, err := newEncoderForSpace(cfg, req.Space)
 	if err != nil {
 		return nil, err
 	}

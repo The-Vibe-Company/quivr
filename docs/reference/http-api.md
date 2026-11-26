@@ -11255,7 +11255,7 @@ else:
 
 ### `ImageRegion`
 
-Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -11312,7 +11312,7 @@ required:
   - y
   - width
   - height
-description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1].
+description: Normalized bounding-box provenance for an image hit, origin at top-left in [0, 1], with x + width <= 1 and y + height <= 1.
 ```
 
 </details>

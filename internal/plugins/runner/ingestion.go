@@ -41,7 +41,7 @@ type ingestionRun struct {
 func (r *run) ingestion(ctx context.Context, own []ownFixture) {
 	runs := r.ingestionFixtures(own)
 	for _, ir := range runs {
-		if r.m.Contributions.Ingestion.Paging && r.api.Speaks(plugins.FeatureIngestionPages) {
+		if r.m.Contributions.Ingestion.Paging && r.api.Speaks(plugins.FeatureIngestionPages) && len(ir.run.View.BlobParts) == 0 && len(ir.run.View.Parts) > 0 {
 			r.ingestionPages(ctx, ir)
 		} else {
 			r.invokeIngestion(ctx, ir)
@@ -109,8 +109,11 @@ func (r *run) ingestionFixtures(own []ownFixture) []ingestionRun {
 		}
 	}
 	if len(out) == 0 && len(check.Issues) == 0 {
-		check.Issues = []plugins.Issue{{Code: CodeNoFixture, Path: "/fixtures",
-			Message: "no ingestion fixture applies: the normative ones need a configuration your schema rejects; add fixtures/<name>.json with Parts and a configuration (contracts/plugins/v0/ingestion-fixture.schema.json)"}}
+		msg := "no ingestion fixture applies: the normative ones need a configuration your schema rejects; add fixtures/<name>.json with Parts and a configuration (contracts/plugins/v0/ingestion-fixture.schema.json)"
+		if !indexesText {
+			msg = "no ingestion fixture applies: declared spaces index no text Parts; add fixtures/<name>.json with blob_parts (contracts/plugins/v0/ingestion-fixture.schema.json)"
+		}
+		check.Issues = []plugins.Issue{{Code: CodeNoFixture, Path: "/fixtures", Message: msg}}
 	}
 	labels := make([]string, 0, len(out))
 	for _, ir := range out {

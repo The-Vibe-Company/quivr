@@ -9,9 +9,10 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
-// SegmentInput is one segment an ingestion plugin cut from a Version: Unicode
-// code point offsets into a text Part, and the lexical text and provenance
-// the plugin returned for it.
+// SegmentInput is one segment an ingestion plugin cut from a Version: either
+// Unicode code point offsets [Start, End) into a text Part, or a region-only
+// segment on a Blob Part (Start and End are 0 with Region set), plus the
+// lexical text and provenance the plugin returned for it.
 type SegmentInput struct {
 	PartKey         string
 	Start, End      int

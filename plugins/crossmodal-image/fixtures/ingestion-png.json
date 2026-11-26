@@ -1,6 +1,9 @@
 {
   "description": "Synthetic PNG image embedded into the crossmodal.image.vision Cross-modal Vector Space with natural-language queries.",
   "ingestion": {
+    "spaces": [
+      "crossmodal.image.vision"
+    ],
     "blob_parts": [
       {
         "key": "image",

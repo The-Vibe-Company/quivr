@@ -250,8 +250,14 @@ func TestHTTPBackendAuthAndErrorScrubbing(t *testing.T) {
 	t.Setenv("CROSSMODAL_API_KEY", "super-secret-token")
 	var gotAuth string
 	var modalities []string
+	failStatus := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		if failStatus != 0 {
+			w.WriteHeader(failStatus)
+			_, _ = w.Write([]byte("backend rejected super-secret-token at " + r.Host))
+			return
+		}
 		var body struct {
 			Input struct {
 				Modality string `json:"modality"`
@@ -273,7 +279,7 @@ func TestHTTPBackendAuthAndErrorScrubbing(t *testing.T) {
 	segs, err := pl.SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
 		Configuration: cfg,
 		BlobParts:     []quivrplugin.IngestBlobPart{writeTempBlob(t, "http.png", pngData)},
-		Spaces:        []string{visionSpaceID},
+		Spaces:        []string{externalSpaceID},
 	})
 	if err != nil {
 		t.Fatalf("http SegmentAndEmbed: %v", err)
@@ -283,7 +289,7 @@ func TestHTTPBackendAuthAndErrorScrubbing(t *testing.T) {
 	}
 	qVec, err := pl.EmbedQuery(context.Background(), &quivrplugin.QueryRequest{
 		Configuration: cfg,
-		Space:         visionSpaceID,
+		Space:         externalSpaceID,
 		Query: struct {
 			Modality string `json:"modality"`
 			Text     string `json:"text"`
@@ -295,16 +301,95 @@ func TestHTTPBackendAuthAndErrorScrubbing(t *testing.T) {
 	if strings.Join(modalities, ",") != "image,text" {
 		t.Fatalf("modalities = %v, want [image text]", modalities)
 	}
+
+	// Verify backend error responses never leak secret tokens or backend URLs.
+	for _, status := range []int{http.StatusUnauthorized, http.StatusInternalServerError} {
+		failStatus = status
+		_, err = pl.EmbedQuery(context.Background(), &quivrplugin.QueryRequest{
+			Configuration: cfg,
+			Space:         externalSpaceID,
+			Query: struct {
+				Modality string `json:"modality"`
+				Text     string `json:"text"`
+			}{Modality: "text", Text: "blue sky"},
+		})
+		if err == nil {
+			t.Fatalf("status %d: expected error", status)
+		}
+		if strings.Contains(err.Error(), "super-secret-token") || strings.Contains(err.Error(), srv.URL) {
+			t.Fatalf("status %d leaked secret or URL: %v", status, err)
+		}
+	}
 }
 
-func TestInvalidImageRejectedDeterministically(t *testing.T) {
-	bp := writeTempBlob(t, "bad.png", []byte("not-a-valid-image"))
-	_, err := (crossModalPlugin{}).SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
-		Configuration: json.RawMessage(`{}`),
-		BlobParts:     []quivrplugin.IngestBlobPart{bp},
-		Spaces:        []string{visionSpaceID},
+func TestInvalidImageSpaceBindingDecompressionBombAndSegmentLimit(t *testing.T) {
+	pl := crossModalPlugin{}
+
+	t.Run("invalid image bytes rejected", func(t *testing.T) {
+		bp := writeTempBlob(t, "bad.png", []byte("not-a-valid-image"))
+		_, err := pl.SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
+			Configuration: json.RawMessage(`{}`),
+			BlobParts:     []quivrplugin.IngestBlobPart{bp},
+			Spaces:        []string{visionSpaceID},
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid_image") {
+			t.Fatalf("expected invalid_image terminal error, got %v", err)
+		}
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid_image") {
-		t.Fatalf("expected invalid_image terminal error, got %v", err)
-	}
+
+	t.Run("decompression bomb rejected by header check before decode", func(t *testing.T) {
+		// Minimal PNG header declaring 20000x20000 pixels (400MP > 64MP cap).
+		var hdr bytes.Buffer
+		hdr.WriteString("\x89PNG\r\n\x1a\n")
+		var ihdr [13]byte
+		binary.BigEndian.PutUint32(ihdr[0:4], 20000)
+		binary.BigEndian.PutUint32(ihdr[4:8], 20000)
+		ihdr[8] = 8 // bit depth
+		ihdr[9] = 2 // truecolor
+		var lenBuf [4]byte
+		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(ihdr)))
+		hdr.Write(lenBuf[:])
+		hdr.WriteString("IHDR")
+		hdr.Write(ihdr[:])
+		var crcBuf [4]byte
+		binary.BigEndian.PutUint32(crcBuf[:], crc32.ChecksumIEEE(append([]byte("IHDR"), ihdr[:]...)))
+		hdr.Write(crcBuf[:])
+
+		_, err := decodeImage(hdr.Bytes(), "image/png")
+		if err == nil || !strings.Contains(err.Error(), "image_too_large") {
+			t.Fatalf("expected image_too_large for oversized PNG header, got %v", err)
+		}
+	})
+
+	t.Run("space and backend binding enforced", func(t *testing.T) {
+		pngData := makePNG(t, 4, 4, func(x, y int) color.NRGBA { return color.NRGBA{R: 10, G: 20, B: 30, A: 255} }, nil)
+		bp := writeTempBlob(t, "bind.png", pngData)
+		_, err := pl.SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
+			Configuration: json.RawMessage(`{"backend":"builtin"}`),
+			BlobParts:     []quivrplugin.IngestBlobPart{bp},
+			Spaces:        []string{externalSpaceID},
+		})
+		if err == nil || !strings.Contains(err.Error(), "space_backend_mismatch") {
+			t.Fatalf("expected space_backend_mismatch, got %v", err)
+		}
+	})
+
+	t.Run("aggregate max_segments enforced across blob parts", func(t *testing.T) {
+		pngData := makePNG(t, 8, 8, func(x, y int) color.NRGBA { return color.NRGBA{R: 10, G: 20, B: 30, A: 255} }, nil)
+		bp := writeTempBlob(t, "many.png", pngData)
+		// 16 blob parts x (1 + 4*4 = 17 regions) = 272 > 256.
+		parts := make([]quivrplugin.IngestBlobPart, 16)
+		for i := range parts {
+			parts[i] = bp
+			parts[i].Key = "img-" + string(rune('a'+i))
+		}
+		_, err := pl.SegmentAndEmbed(context.Background(), &quivrplugin.IngestRequest{
+			Configuration: json.RawMessage(`{"region_mode":"grid","grid_rows":4,"grid_cols":4}`),
+			BlobParts:     parts,
+			Spaces:        []string{},
+		})
+		if err == nil || !strings.Contains(err.Error(), "too_many_segments") {
+			t.Fatalf("expected too_many_segments error, got %v", err)
+		}
+	})
 }

@@ -39,7 +39,7 @@ def main(out):
         {
             'key': 'inbox/03-photo.png',
             'etag': '"etag-img-3"',
-            'mtime': '2026-01-10T10:10:00Z',
+            'mtime': '2026-01-10T09:55:00Z',
             'content_type': 'image/png',
             'body': PNG_BYTES,
         },
@@ -152,8 +152,8 @@ def main(out):
         'max_pages': 5,
         'expect': {
             'pages': [
-                {'record_keys': ['01-note.txt', '02-record.xml'], 'more': True},
-                {'record_keys': ['03-photo.png'], 'more': False},
+                {'record_keys': ['03-photo.png', '01-note.txt'], 'more': True},
+                {'record_keys': ['02-record.xml'], 'more': False},
             ],
         },
     }) + '\n')

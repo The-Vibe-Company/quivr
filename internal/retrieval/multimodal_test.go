@@ -290,13 +290,18 @@ func TestCrossModalImageSearchAndTextOnlyIsolation(t *testing.T) {
 		}
 	})
 
-	// Sanity guard: text segment with missing blob key still fails closed (cannot bypass S3 read).
-	t.Run("text segment without region fails closed on missing blob", func(t *testing.T) {
+	// Sanity guard: text segment with missing blob key still attempts a blob read
+	// and fails closed rather than taking the region-only shortcut.
+	t.Run("text segment without region fails closed on missing blob key", func(t *testing.T) {
 		missingBlob := missingBlobBaseline{}
-		svc := content.Service{Baseline: missingBlob, Blobs: errBlobs{}}
+		blobs := &missingKeyBlobs{}
+		svc := content.Service{Baseline: missingBlob, Blobs: blobs}
 		_, err := svc.Hydrate(context.Background(), searchScope, []content.Candidate{{SegmentID: "txt-1", GenerationID: "gen"}})
 		if err == nil {
 			t.Fatal("expected error reading missing text blob")
+		}
+		if !blobs.sawEmptyKey {
+			t.Fatal("expected Blobs.Read to be called with empty key")
 		}
 	})
 }
@@ -309,8 +314,15 @@ func (missingBlobBaseline) Hydrate(_ context.Context, _ corpus.Scope, _ []conten
 	}, nil
 }
 
-type errBlobs struct{ content.Blobs }
+type missingKeyBlobs struct {
+	content.Blobs
+	sawEmptyKey bool
+}
 
-func (errBlobs) Read(context.Context, content.Blob) ([]byte, error) {
-	return nil, errors.New("s3 read failed")
+func (b *missingKeyBlobs) Read(_ context.Context, blob content.Blob) ([]byte, error) {
+	if blob.Key == "" {
+		b.sawEmptyKey = true
+		return nil, errors.New("missing blob key")
+	}
+	return []byte("text"), nil
 }

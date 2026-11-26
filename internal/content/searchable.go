@@ -115,7 +115,7 @@ func (r *ImageRegion) Valid() bool {
 	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
 		return false
 	}
-	if r.X+r.Width > 1+1e-6 || r.Y+r.Height > 1+1e-6 {
+	if r.X+r.Width > 1 || r.Y+r.Height > 1 {
 		return false
 	}
 	if r.ImageWidth < 0 || r.ImageHeight < 0 {

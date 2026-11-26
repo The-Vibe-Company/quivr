@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
@@ -92,9 +95,10 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 // bytes (dev-invocation-…, dev-record-…, dev-version-…), with Corpus
 // dev-corpus, Organization dev-organization and idempotency key
 // dev:<sha256>. Spaces default to every declared space; queries default to
-// the first 200 code points of the first non-empty Part. Issues report an
-// invalid fixture, a configuration the manifest rejects, an undeclared space
-// or duplicate Part keys.
+// the first 200 code points of the first non-empty text Part, or the first
+// Blob Part's role when no text Part is present. Issues report an invalid
+// fixture, a configuration the manifest rejects, an undeclared space,
+// duplicate Part keys, or an invalid/unreadable Blob Part path.
 func BuildIngestionRunAt(raw []byte, baseDir string, m *plugins.Manifest) (*IngestionRun, []plugins.Issue) {
 	if issues := plugins.ValidateDocument("ingestion-fixture.schema.json", raw); len(issues) > 0 {
 		return nil, issues
@@ -128,17 +132,34 @@ func BuildIngestionRunAt(raw []byte, baseDir string, m *plugins.Manifest) (*Inge
 				Message: fmt.Sprintf("duplicate Part key %q; the Parts of a Record Version have unique keys", bp.Key)})
 		}
 		seen[bp.Key] = true
-		inputPath := filepath.FromSlash(bp.Path)
-		if !filepath.IsAbs(inputPath) && baseDir != "" {
+		slashed := filepath.ToSlash(bp.Path)
+		if filepath.IsAbs(bp.Path) || strings.HasPrefix(slashed, "/") || slices.Contains(strings.Split(slashed, "/"), "..") {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/path", i),
+				Message: fmt.Sprintf("blob part path %q must be relative to the fixture file without .. traversal", bp.Path)})
+			continue
+		}
+		inputPath := filepath.FromSlash(slashed)
+		if baseDir != "" {
 			inputPath = filepath.Join(baseDir, inputPath)
 		}
 		if resolved, err := filepath.EvalSymlinks(inputPath); err == nil {
 			inputPath = resolved
 		}
-		data, err := os.ReadFile(inputPath)
+		file, err := os.Open(inputPath)
 		if err != nil {
 			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/path", i),
 				Message: fmt.Sprintf("cannot read blob part %q: %v", bp.Path, err)})
+			continue
+		}
+		hasher := sha256.New()
+		sizeBytes, copyErr := io.Copy(hasher, file)
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			if copyErr == nil {
+				copyErr = closeErr
+			}
+			issues = append(issues, plugins.Issue{Code: plugins.CodeSchema, Path: fmt.Sprintf("/ingestion/blob_parts/%d/path", i),
+				Message: fmt.Sprintf("cannot read blob part %q: %v", bp.Path, copyErr)})
 			continue
 		}
 		fileURL, err := FileURL(inputPath)
@@ -147,11 +168,10 @@ func BuildIngestionRunAt(raw []byte, baseDir string, m *plugins.Manifest) (*Inge
 				Message: err.Error()})
 			continue
 		}
-		blobSum := sha256.Sum256(data)
-		blobDigest := hex.EncodeToString(blobSum[:])
+		blobDigest := hex.EncodeToString(hasher.Sum(nil))
 		blobParts = append(blobParts, plugins.IngestionBlobPart{
 			Key: bp.Key, Role: bp.Role, BlobID: "dev-blob-" + blobDigest[:16], MediaType: bp.MediaType,
-			SizeBytes: int64(len(data)), SHA256: blobDigest,
+			SizeBytes: sizeBytes, SHA256: blobDigest,
 			Reference: plugins.NormalizerReference{Kind: "file", URL: fileURL},
 		})
 	}

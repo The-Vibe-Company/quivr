@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -364,8 +365,6 @@ func sourceFieldsPresent(segments []map[string]json.RawMessage, index int) (rang
 	return rangesPresent, separatorPresent, regionPresent
 }
 
-const regionBoundEpsilon = 1e-6
-
 func regionIssues(path string, r *ImageRegion) []Issue {
 	var issues []Issue
 	if r.CoordinateSystem != "normalized_bbox" {
@@ -384,7 +383,7 @@ func regionIssues(path string, r *ImageRegion) []Issue {
 	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
 		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path,
 			Message: "region coordinates must satisfy 0 <= x,y <= 1 and 0 < width,height <= 1"})
-	} else if r.X+r.Width > 1+regionBoundEpsilon || r.Y+r.Height > 1+regionBoundEpsilon {
+	} else if r.X+r.Width > 1 || r.Y+r.Height > 1 {
 		issues = append(issues, Issue{Code: CodeInvalidRegion, Path: path,
 			Message: fmt.Sprintf("region extends outside the normalized [0, 1] image frame (x+width=%g, y+height=%g)", r.X+r.Width, r.Y+r.Height)})
 	}
@@ -393,6 +392,13 @@ func regionIssues(path string, r *ImageRegion) []Issue {
 			Message: "region label must be valid UTF-8 without NUL and at most 128 code points"})
 	}
 	return issues
+}
+
+func canonicalFloat(v float64) string {
+	if v == 0 {
+		v = 0
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 func manifestSpeaks(m *Manifest, feature Feature) bool {
@@ -409,8 +415,11 @@ func manifestSpeaks(m *Manifest, feature Feature) bool {
 
 func sourceSegmentIdentity(s IngestionSegment) string {
 	if s.Region != nil {
-		return fmt.Sprintf("%s\x00region\x00%s\x00%.6f\x00%.6f\x00%.6f\x00%.6f\x00%s",
-			s.PartKey, s.Region.CoordinateSystem, s.Region.X, s.Region.Y, s.Region.Width, s.Region.Height, s.Region.Label)
+		return fmt.Sprintf("%s\x00region\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
+			s.PartKey, s.Region.CoordinateSystem,
+			canonicalFloat(s.Region.X), canonicalFloat(s.Region.Y),
+			canonicalFloat(s.Region.Width), canonicalFloat(s.Region.Height),
+			s.Region.Label)
 	}
 	if len(s.SourceRanges) == 0 {
 		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)

@@ -237,13 +237,12 @@ func (c prefixConfig) allowsMediaType(mt string) bool {
 }
 
 func (c prefixConfig) identity(key string, ordinal int64) (string, string, error) {
-	decoded, err := url.PathUnescape(key)
-	if err != nil || !utf8.ValidString(decoded) || strings.ContainsRune(decoded, 0) {
-		return "", "", quivrplugin.SourceError("invalid_object_key", "object key must decode to valid UTF-8 without NUL")
+	if !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+		return "", "", quivrplugin.SourceError("invalid_object_key", "object key must be valid UTF-8 without NUL")
 	}
-	recordKey := strings.TrimPrefix(strings.TrimPrefix(decoded, c.Prefix), "/")
+	recordKey := strings.TrimPrefix(strings.TrimPrefix(key, c.Prefix), "/")
 	if recordKey == "" {
-		recordKey = decoded
+		recordKey = key
 	}
 	pos := strconv.FormatInt(ordinal, 10)
 	for _, row := range []struct {
@@ -251,7 +250,7 @@ func (c prefixConfig) identity(key string, ordinal int64) (string, string, error
 		out *string
 	}{{c.keyRe, &recordKey}, {c.posRe, &pos}} {
 		if row.re != nil {
-			m := row.re.FindStringSubmatch(decoded)
+			m := row.re.FindStringSubmatch(key)
 			if len(m) != 2 || m[1] == "" {
 				return "", "", quivrplugin.SourceError("object_identity_mismatch", "object key does not match an identity capture")
 			}

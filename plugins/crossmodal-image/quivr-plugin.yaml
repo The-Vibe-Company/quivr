@@ -9,7 +9,6 @@ contributions:
     media_types:
       - image/png
       - image/jpeg
-      - image/webp
       - image/gif
     timeout_ms: 30000
     retry:
@@ -21,14 +20,22 @@ contributions:
     spaces:
       crossmodal.image.vision:
         version: "1"
-        model: crossmodal/vision-text-512
+        model: crossmodal/builtin-vision-512
         dimensions: 512
         metric: cosine
         indexes: [image]
         query_modalities: [text]
-        description: Shared 512-dimensional cross-modal vector space aligning image regions and natural-language text queries.
+        description: Shared 512-dimensional cross-modal vector space computed by the deterministic builtin visual/text encoder.
+      crossmodal.image.external:
+        version: "1"
+        model: crossmodal/http-vision-512
+        dimensions: 512
+        metric: cosine
+        indexes: [image]
+        query_modalities: [text]
+        description: Shared 512-dimensional cross-modal vector space computed by an external HTTP cross-modal embedding endpoint.
     timeout_ms: 60000
-    query_timeout_ms: 5000
+    query_timeout_ms: 10000
     limits:
       max_segments: 256
       max_response_bytes: 16777216
@@ -36,12 +43,20 @@ configuration:
   schema:
     type: object
     additionalProperties: false
+    allOf:
+      - if:
+          properties:
+            backend:
+              const: http
+          required: [backend]
+        then:
+          required: [base_url]
     properties:
       backend:
         type: string
         enum: [builtin, http]
         default: builtin
-        description: Embedding backend. builtin computes deterministic cross-modal visual/text vectors locally; http delegates to an external cross-modal embedding endpoint.
+        description: Embedding backend. builtin serves crossmodal.image.vision locally; http serves crossmodal.image.external via an external cross-modal embedding endpoint.
       base_url:
         type: string
         pattern: '^https?://.+'
@@ -56,8 +71,7 @@ configuration:
         type: string
         minLength: 1
         maxLength: 256
-        default: crossmodal/vision-text-512
-        description: Model identifier sent to the http backend and recorded in provenance.
+        description: Optional model identifier override; must match the requested space's declared model (crossmodal/builtin-vision-512 or crossmodal/http-vision-512).
       region_mode:
         type: string
         enum: [full, grid]
@@ -81,8 +95,9 @@ configuration:
       request_timeout_ms:
         type: integer
         minimum: 500
-        maximum: 60000
-        default: 15000
+        maximum: 10000
+        default: 4000
+        description: Per-request HTTP timeout in milliseconds (bounded by query_timeout_ms 10000ms and timeout_ms 60000ms).
 secrets:
   - name: CROSSMODAL_API_KEY
     required: false

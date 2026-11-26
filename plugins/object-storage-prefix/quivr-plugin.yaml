@@ -42,7 +42,7 @@ contributions:
               enum: [key, timestamp]
               default: key
               title: Checkpoint mode
-              description: key streams objects in lexicographic key order using StartAfter; timestamp streams objects ordered by LastModified and key so updated objects are picked up incrementally.
+              description: key streams objects in lexicographic key order using StartAfter (recommended for large prefixes); timestamp scans the prefix and orders objects by LastModified and key so updated objects are picked up incrementally.
             media_type:
               type: string
               pattern: "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
@@ -76,13 +76,13 @@ contributions:
               minLength: 1
               maxLength: 2048
               title: Record Key capture
-              description: Go regular expression with exactly one capture group on the URL-decoded object key. Defaults to the object key relative to prefix.
+              description: Go regular expression with exactly one capture group on the object key. Defaults to the object key relative to prefix.
             source_position_pattern:
               type: string
               minLength: 1
               maxLength: 2048
               title: Revision number capture
-              description: Go regular expression with exactly one capture group of non-negative decimal digits on the URL-decoded object key.
+              description: Go regular expression with exactly one capture group of non-negative decimal digits on the object key.
             batch_size: {type: integer, minimum: 1, maximum: 1000, default: 100, title: Objects per batch}
             concurrency: {type: integer, minimum: 1, maximum: 32, default: 1, title: Concurrent submissions}
             max_object_bytes: {type: integer, minimum: 1, maximum: 26214400, default: 26214400, title: Maximum object size in bytes}

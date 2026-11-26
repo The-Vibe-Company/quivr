@@ -1030,7 +1030,7 @@ class SegmentAndEmbedResponseSegmentsItemSourceRangesItem(Model):
 
 @dataclass(kw_only=True)
 class ImageRegion(Model):
-    "Normalized bounding-box provenance for an image segment: origin at top-left, coordinates in [0, 1], x + width <= 1, y + height <= 1."
+    "Normalized bounding-box provenance for an image segment: origin at top-left, coordinates in [0, 1], with x + width <= 1 and y + height <= 1."
 
     coordinate_system: Literal["normalized_bbox"] = "normalized_bbox"
     x: float

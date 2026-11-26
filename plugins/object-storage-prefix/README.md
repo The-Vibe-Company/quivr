@@ -4,8 +4,8 @@ Streams individual objects (text, XML, documents, images) under an S3-compatible
 
 ## Modes
 
-- `key` (default): streams objects in lexicographic key order using `ListObjectsV2` `StartAfter`. Best for append-only or backfilled prefixes.
-- `timestamp`: orders objects by `(LastModified, Key)` and resumes strictly after `(last_modified, last_key)`. Picks up newly uploaded and overwritten objects incrementally.
+- `key` (default): streams objects in lexicographic key order using `ListObjectsV2` `StartAfter`. Best for append-only, backfilled, or large prefixes.
+- `timestamp`: orders objects by `(LastModified, Key)` and resumes strictly after `(last_modified, last_key)` so newly uploaded and overwritten objects are picked up incrementally. Because S3 `ListObjectsV2` does not order by `LastModified`, `timestamp` mode scans the prefix into a bounded top-K snapshot (reused across pages within a run); prefer `key` mode for very large prefixes.
 
 ## Configuration
 
@@ -21,7 +21,7 @@ Streams individual objects (text, XML, documents, images) under an S3-compatible
 | `media_type` | No | Fixed media type override for every matched object. |
 | `media_type_by_extension` | No | Map of lowercase file extension (for example `.xml`, `.png`) to media type. |
 | `allowed_media_types` | No | Optional allowlist of resolved media types. |
-| `record_key_pattern` | No | Go regexp with one capture group on the URL-decoded key. Defaults to the key relative to `prefix`. |
+| `record_key_pattern` | No | Go regexp with one capture group on the object key. Defaults to the key relative to `prefix`. |
 | `source_position_pattern` | No | Go regexp with one capture group of decimal digits for revision ordering. |
 | `batch_size` | No | Objects per page (`1..1000`, default `100`). |
 | `concurrency` | No | Concurrent item submissions (`1..32`, default `1`). |

@@ -16,6 +16,11 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
+const (
+	maxImageDimension = 16384
+	maxImagePixels    = 64_000_000
+)
+
 type decodedImage struct {
 	img        image.Image
 	width      int
@@ -34,13 +39,15 @@ func decodeImage(data []byte, mediaType string) (decodedImage, error) {
 	if len(data) == 0 {
 		return decodedImage{}, quivrplugin.TerminalIngestError("invalid_image", "image payload is empty")
 	}
-	if w, h, ok := parseWebPDimensions(data); ok {
-		return decodedImage{
-			width:     w,
-			height:    h,
-			format:    "webp",
-			mediaType: mediaType,
-		}, nil
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return decodedImage{}, quivrplugin.TerminalIngestError("invalid_image", "cannot decode image header")
+	}
+	if cfg.Width < 1 || cfg.Height < 1 {
+		return decodedImage{}, quivrplugin.TerminalIngestError("invalid_image", "image dimensions must be positive")
+	}
+	if cfg.Width > maxImageDimension || cfg.Height > maxImageDimension || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
+		return decodedImage{}, quivrplugin.TerminalIngestError("image_too_large", "image dimensions exceed the decoded pixel limit")
 	}
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -62,40 +69,6 @@ func decodeImage(data []byte, mediaType string) (decodedImage, error) {
 		out.textChunks = parsePNGTextChunks(data)
 	}
 	return out, nil
-}
-
-// parseWebPDimensions extracts image width and height from RIFF WEBP headers
-// (VP8, VP8L, VP8X) without external codecs.
-func parseWebPDimensions(data []byte) (int, int, bool) {
-	if len(data) < 30 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
-		return 0, 0, false
-	}
-	chunk := string(data[12:16])
-	switch chunk {
-	case "VP8X":
-		if len(data) < 30 {
-			return 0, 0, false
-		}
-		w := 1 + int(data[24]) | (int(data[25]) << 8) | (int(data[26]) << 16)
-		h := 1 + int(data[27]) | (int(data[28]) << 8) | (int(data[29]) << 16)
-		return w, h, w > 0 && h > 0
-	case "VP8L":
-		if len(data) < 25 || data[20] != 0x2f {
-			return 0, 0, false
-		}
-		bits := binary.LittleEndian.Uint32(data[21:25])
-		w := int(bits&0x3fff) + 1
-		h := int((bits>>14)&0x3fff) + 1
-		return w, h, w > 0 && h > 0
-	case "VP8 ":
-		if len(data) < 30 || data[23] != 0x9d || data[24] != 0x01 || data[25] != 0x2a {
-			return 0, 0, false
-		}
-		w := int(binary.LittleEndian.Uint16(data[26:28]) & 0x3fff)
-		h := int(binary.LittleEndian.Uint16(data[28:30]) & 0x3fff)
-		return w, h, w > 0 && h > 0
-	}
-	return 0, 0, false
 }
 
 // parsePNGTextChunks extracts standard uncompressed PNG tEXt metadata chunks
@@ -161,10 +134,7 @@ func planRegions(width, height int, cfg pluginConfig) []plannedRegion {
 			continue
 		}
 		ny := round6(float64(y0) / float64(height))
-		nh := round6(float64(y1-y0) / float64(height))
-		if ny+nh > 1 {
-			nh = round6(1 - ny)
-		}
+		nh := clampSpan(ny, round6(float64(y1-y0)/float64(height)))
 		if nh <= 0 {
 			continue
 		}
@@ -175,10 +145,7 @@ func planRegions(width, height int, cfg pluginConfig) []plannedRegion {
 				continue
 			}
 			nx := round6(float64(x0) / float64(width))
-			nw := round6(float64(x1-x0) / float64(width))
-			if nx+nw > 1 {
-				nw = round6(1 - nx)
-			}
+			nw := clampSpan(nx, round6(float64(x1-x0)/float64(width)))
 			if nw <= 0 {
 				continue
 			}
@@ -198,6 +165,16 @@ func planRegions(width, height int, cfg pluginConfig) []plannedRegion {
 		}
 	}
 	return out
+}
+
+func clampSpan(origin, span float64) float64 {
+	if origin+span > 1 {
+		span = round6(1 - origin)
+		for origin+span > 1 && span > 0 {
+			span = math.Nextafter(span, 0)
+		}
+	}
+	return span
 }
 
 func cropToPNG(img image.Image, rect image.Rectangle) ([]byte, error) {

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -120,10 +121,10 @@ func (p IngestBlobPart) ReadBlob(ctx context.Context, maxBytes int64) ([]byte, e
 	}
 	defer reader.Close()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, RetryableIngestError("input_unavailable", "blob part read cancelled")
 	}
 	limit := p.SizeBytes + 1
-	if maxBytes > 0 && maxBytes+1 < limit {
+	if maxBytes > 0 && maxBytes < limit-1 {
 		limit = maxBytes + 1
 	}
 	b, err := io.ReadAll(io.LimitReader(reader, limit))
@@ -528,7 +529,7 @@ func imageRegionProblem(r *ImageRegion) string {
 	if r.X < 0 || r.X > 1 || r.Y < 0 || r.Y > 1 || r.Width <= 0 || r.Width > 1 || r.Height <= 0 || r.Height > 1 {
 		return "coordinates must satisfy 0 <= x,y <= 1 and 0 < width,height <= 1"
 	}
-	if r.X+r.Width > 1+1e-6 || r.Y+r.Height > 1+1e-6 {
+	if r.X+r.Width > 1 || r.Y+r.Height > 1 {
 		return "region extends outside normalized [0, 1] image frame"
 	}
 	if r.Label != "" && (!utf8.ValidString(r.Label) || strings.ContainsRune(r.Label, 0) || utf8.RuneCountInString(r.Label) > 128) {
@@ -537,10 +538,20 @@ func imageRegionProblem(r *ImageRegion) string {
 	return ""
 }
 
+func canonicalFloat(v float64) string {
+	if v == 0 {
+		v = 0
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
+}
+
 func sourceSegmentIdentity(s Segment) string {
 	if s.Region != nil {
-		return fmt.Sprintf("%s\x00region\x00%s\x00%.6f\x00%.6f\x00%.6f\x00%.6f\x00%s",
-			s.PartKey, s.Region.CoordinateSystem, s.Region.X, s.Region.Y, s.Region.Width, s.Region.Height, s.Region.Label)
+		return fmt.Sprintf("%s\x00region\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
+			s.PartKey, s.Region.CoordinateSystem,
+			canonicalFloat(s.Region.X), canonicalFloat(s.Region.Y),
+			canonicalFloat(s.Region.Width), canonicalFloat(s.Region.Height),
+			s.Region.Label)
 	}
 	if len(s.SourceRanges) == 0 {
 		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)

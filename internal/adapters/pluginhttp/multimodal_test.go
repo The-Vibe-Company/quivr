@@ -34,12 +34,16 @@ contributions:
 
 type stubBlobSource struct {
 	blobs map[string]content.VerifiedBlob
+	err   error
 }
 
 func (s stubBlobSource) VerifiedBlob(_ context.Context, _, blobID string) (content.VerifiedBlob, error) {
+	if s.err != nil {
+		return content.VerifiedBlob{}, s.err
+	}
 	b, ok := s.blobs[blobID]
 	if !ok {
-		return content.VerifiedBlob{}, errors.New("blob not found")
+		return content.VerifiedBlob{}, content.ErrUnverifiedBlob
 	}
 	return b, nil
 }
@@ -172,5 +176,15 @@ func TestMultimodalIngestionSignsBlobPartsAndMapsRegions(t *testing.T) {
 	_, err = (pluginhttp.Ingestor{Pin: textPin, BlobSource: ingestor.BlobSource, Signer: signer}).SegmentAndEmbed(context.Background(), "org-1", "corpus-1", v, []string{"acme.embedder.small@1"})
 	if !errors.Is(err, content.ErrIngestionRefused) {
 		t.Fatalf("text-only plugin on blob-only version: got %v, want ErrIngestionRefused", err)
+	}
+
+	// Unverified Blob refuses ingestion; transient BlobSource errors remain retryable ErrUnavailable.
+	_, err = (pluginhttp.Ingestor{Pin: pin, BlobSource: stubBlobSource{}, Signer: signer}).SegmentAndEmbed(context.Background(), "org-1", "corpus-1", v, []string{"example.vision.image@1"})
+	if !errors.Is(err, content.ErrIngestionRefused) {
+		t.Fatalf("unverified blob: got %v, want ErrIngestionRefused", err)
+	}
+	_, err = (pluginhttp.Ingestor{Pin: pin, BlobSource: stubBlobSource{err: errors.New("db timeout")}, Signer: signer}).SegmentAndEmbed(context.Background(), "org-1", "corpus-1", v, []string{"example.vision.image@1"})
+	if !errors.Is(err, pluginhttp.ErrUnavailable) {
+		t.Fatalf("transient blob store error: got %v, want ErrUnavailable", err)
 	}
 }
