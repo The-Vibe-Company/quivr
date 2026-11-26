@@ -446,14 +446,26 @@ class DevProfile(unittest.TestCase):
         self.assertEqual(hash_pin['spaces'], {'example.hash_embedder.small': 'served'})
         self.assertFalse((stack.directory / 'tokenizer-provenance.json').exists())
 
-        # start_dependencies stops tei (in case an existing full stack switched to fast)
-        # and starts only core services.
+        # start_dependencies stops and removes tei (in case an existing full stack switched to fast)
+        # before starting only core services, and scopes exited-service retry checks to CORE_SERVICES.
         with mock.patch.object(stack, 'compose') as compose:
             stack.start_dependencies()
         self.assertEqual(compose.call_args_list, [
-            mock.call('stop', 'tei'),
+            mock.call('rm', '-s', '-f', 'tei'),
             mock.call('up', '-d', '--wait', '--wait-timeout', '180', *local.CORE_SERVICES),
         ])
+        ps_calls = []
+        def fail_up(*args, **kwargs):
+            if args[0] == 'up':
+                raise local.subprocess.CalledProcessError(1, 'compose')
+            if args[0] == 'ps':
+                ps_calls.append(args)
+                return mock.Mock(stdout='')
+            return mock.Mock(stdout='')
+        with mock.patch.object(stack, 'compose', side_effect=fail_up):
+            with self.assertRaisesRegex(RuntimeError, r'after 1 bounded attempt\(s\) \(exited: none\)'):
+                stack.start_dependencies()
+        self.assertEqual(ps_calls, [('ps', '--all', '--status', 'exited', '--format', '{{.Service}}', *local.CORE_SERVICES)])
 
         # up() skips prepare_tokenizer/prepare_embeddings, fixture/push start, and double migrate.
         with mock.patch.object(stack, 'check_disk'), \

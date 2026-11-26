@@ -415,14 +415,18 @@ class Stack:
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
         more bounded attempt; every retry is recorded in readiness.json, never hidden."""
-        services=() if self.uses_tei() else CORE_SERVICES
-        if not self.uses_tei():
-            self.compose('stop','tei')
+        if self.uses_tei():
+            services=()
+        else:
+            # Switching an existing full stack to fast stops and removes any TEI container so it
+            # neither consumes resources nor shows up as exited during retry checks.
+            self.compose('rm','-s','-f','tei')
+            services=CORE_SERVICES
         for attempt in range(1,attempts+1):
             try:
                 self.compose('up','-d','--wait','--wait-timeout','180',*services);return
             except subprocess.CalledProcessError as error:
-                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',capture_output=True,text=True).stdout.split()
+                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',*services,capture_output=True,text=True).stdout.split()
                 self.readiness.setdefault('dependency_start_retries',[]).append({'attempt':attempt,'exited':crashed})
                 self.save_readiness()
                 # Only a crashed dependency is retried; a healthcheck timeout fails at once.
