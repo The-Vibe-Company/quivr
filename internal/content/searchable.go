@@ -3,13 +3,13 @@ package content
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"golang.org/x/sync/errgroup"
 )
 
 // Segmentation is an immutable derivation; offsets address canonical Part text.
@@ -278,11 +278,13 @@ type HydrationRechecker interface {
 type Located struct {
 	Hydrated
 	Blob    Blob
+	Pack    PackRange
 	Sources []LocatedSource
 }
 type LocatedSource struct {
 	Range SourceRange
 	Blob  Blob
+	Pack  PackRange
 }
 
 func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (Version, error) {
@@ -440,10 +442,14 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 	for i, l := range located {
 		sources := l.Sources
 		if len(sources) == 0 {
-			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob}}
+			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob, Pack: l.Pack}}
 		}
 		for k, source := range sources {
-			byBlob[source.Blob.Key] = append(byBlob[source.Blob.Key], request{i, k, source})
+			requests := byBlob[source.Blob.Key]
+			if len(requests) > 0 && requests[0].source.Blob != source.Blob {
+				return nil, ErrArtifactCorrupt
+			}
+			byBlob[source.Blob.Key] = append(requests, request{i, k, source})
 		}
 	}
 	slices := map[int][]SourceExcerpt{}
@@ -454,41 +460,41 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		}
 		slices[i] = make([]SourceExcerpt, n)
 	}
-	var mu sync.Mutex
-	var failure error
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, blobReadParallelism)
+	group, readCtx := errgroup.WithContext(ctx)
+	group.SetLimit(blobReadParallelism)
 	for _, requests := range byBlob {
-		wg.Add(1)
-		slots <- struct{}{}
-		go func(requests []request) {
-			defer func() { <-slots; wg.Done() }()
-			data, err := s.Blobs.Read(ctx, requests[0].source.Blob)
+		group.Go(func() error {
+			// Verify the whole shared object once through Read before slicing Parts.
+			data, err := s.Blobs.Read(readCtx, requests[0].source.Blob)
 			if err != nil {
-				mu.Lock()
-				failure = err
-				mu.Unlock()
-				return
+				return err
 			}
-			runes := []rune(string(data))
+			parts := map[[2]int64][]rune{}
 			for _, req := range requests {
+				bounds, err := req.source.Pack.bounds(int64(len(data)))
+				if err != nil {
+					return err
+				}
+				runes, ok := parts[bounds]
+				if !ok {
+					text := string(data[bounds[0]:bounds[1]])
+					if !ValidText(text) {
+						return ErrArtifactCorrupt
+					}
+					runes = []rune(text)
+					parts[bounds] = runes
+				}
 				r := req.source.Range
 				if r.Start < 0 || r.End < r.Start || r.End > len(runes) {
-					mu.Lock()
-					failure = errors.New("invalid canonical excerpt")
-					mu.Unlock()
-					return
+					return ErrArtifactCorrupt
 				}
-				excerpt := SourceExcerpt{SourceRange: r, Text: string(runes[r.Start:r.End])}
-				mu.Lock()
-				slices[req.candidate][req.index] = excerpt
-				mu.Unlock()
+				slices[req.candidate][req.index] = SourceExcerpt{SourceRange: r, Text: string(runes[r.Start:r.End])}
 			}
-		}(requests)
+			return nil
+		})
 	}
-	wg.Wait()
-	if failure != nil {
-		return nil, failure
+	if err := group.Wait(); err != nil {
+		return nil, err
 	}
 	out := map[int]string{}
 	for i, pieces := range slices {
@@ -498,7 +504,7 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		}
 		text := strings.Join(texts, located[i].Segment.Derivation.SourceSeparator)
 		if Hash([]byte(text)) != located[i].TextSHA256 {
-			return nil, errors.New("canonical excerpt mismatch")
+			return nil, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = text
 		l := located[i]
@@ -508,6 +514,22 @@ func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int
 		}
 	}
 	return out, nil
+}
+
+// bounds returns a half-open byte interval. Check the length with subtraction
+// first so corrupt BIGINT offsets cannot overflow during addition.
+func (p PackRange) bounds(size int64) ([2]int64, error) {
+	if p.Offset == nil && p.Length == nil {
+		return [2]int64{0, size}, nil
+	}
+	if p.Offset == nil || p.Length == nil {
+		return [2]int64{}, ErrArtifactCorrupt
+	}
+	offset, length := *p.Offset, *p.Length
+	if offset < 0 || offset > size || length <= 0 || length > size-offset {
+		return [2]int64{}, ErrArtifactCorrupt
+	}
+	return [2]int64{offset, offset + length}, nil
 }
 
 func SegmentID(org, segmentation string, p Segment) string {

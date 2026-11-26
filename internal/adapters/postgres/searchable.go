@@ -497,10 +497,10 @@ CROSS JOIN LATERAL (SELECT pc.organization,pc.version_id,pc.plugin_id FROM proje
 var hydrationFenceSQL = `
 WHERE c.generation_id=route.generation_id AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT route.archived`
 
-var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),
+var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,b.object_key,b.sha256,b.byte_length,p.pack_offset,p.pack_length,coalesce(e.id,''),coalesce(e.space_id,''),
  jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator')
 ` + hydrationCandidatesSQL + `
-JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id FROM version_parts p
+JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id,p.pack_offset,p.pack_length FROM version_parts p
  WHERE (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
  ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
 JOIN LATERAL (SELECT b.organization,b.blob_id,b.object_key,b.sha256,b.byte_length FROM content_blobs b
@@ -563,7 +563,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		var derivation []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID, &derivation); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &h.EmbeddingID, &h.SpaceID, &derivation); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {
@@ -593,7 +593,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		}
 	}
 	if len(ids) > 0 {
-		sourceRows, err := database(ctx, s.Pool).Query(ctx, `SELECT sg.id,r.part_key,r.start,r.end,b.object_key,b.sha256,b.byte_length
+		sourceRows, err := database(ctx, s.Pool).Query(ctx, `SELECT sg.id,r.part_key,r.start,r.end,b.object_key,b.sha256,b.byte_length,p.pack_offset,p.pack_length
 FROM unnest($2::text[]) AS selected(id)
 JOIN segments sg ON sg.organization=$1 AND sg.id=selected.id
 CROSS JOIN LATERAL jsonb_array_elements(sg.derivation->'source_ranges') WITH ORDINALITY AS item(value,ordinality)
@@ -608,7 +608,7 @@ ORDER BY sg.id,r.ordinality`, scope.Organization, ids)
 		for sourceRows.Next() {
 			var id string
 			var source content.LocatedSource
-			if err = sourceRows.Scan(&id, &source.Range.PartKey, &source.Range.Start, &source.Range.End, &source.Blob.Key, &source.Blob.SHA256, &source.Blob.Size); err != nil {
+			if err = sourceRows.Scan(&id, &source.Range.PartKey, &source.Range.Start, &source.Range.End, &source.Blob.Key, &source.Blob.SHA256, &source.Blob.Size, &source.Pack.Offset, &source.Pack.Length); err != nil {
 				return nil, err
 			}
 			for _, n := range at[id] {
