@@ -163,8 +163,24 @@ func TestCollectionUpgradeKeepsExistingRoutes(t *testing.T) {
 	if c, err := corpora.Archive(ctx, f.org, fresh.ID, true); err != nil || !c.Archived {
 		t.Fatalf("archive: %+v (%v)", c, err)
 	}
+	projection.failNextActivity = true
+	if worked, err := corpora.ReconcileTenantActivity(ctx); !worked || err == nil {
+		t.Fatalf("expected temporary provider failure after archive commit, got %v (%v)", worked, err)
+	}
+	if c, err := corpora.Read(ctx, f.org, fresh.ID); err != nil || !c.Archived {
+		t.Fatalf("provider outage changed committed archive: %+v (%v)", c, err)
+	}
+	if worked, err := corpora.ReconcileTenantActivity(ctx); worked || err != nil {
+		t.Fatalf("provider failure did not back off: %v (%v)", worked, err)
+	}
 	if c, err := corpora.Archive(ctx, f.org, fresh.ID, false); err != nil || c.Archived {
 		t.Fatalf("unarchive: %+v (%v)", c, err)
+	}
+	if worked, err := corpora.ReconcileTenantActivity(ctx); !worked || err != nil {
+		t.Fatalf("unarchive should supersede the pending archive retry: %v (%v)", worked, err)
+	}
+	if worked, err := corpora.ReconcileTenantActivity(ctx); worked || err != nil {
+		t.Fatalf("activity remained queued after successful reconciliation: %v (%v)", worked, err)
 	}
 	ensure := "ensure/QuivrTextV5/" + f.org + "/" + fresh.ID + "/" + route.ID
 	want := []string{
@@ -190,8 +206,22 @@ func TestCollectionUpgradeKeepsExistingRoutes(t *testing.T) {
 	if err != nil || target.Generation.Collection != "QuivrTextV5" || projection.calls[len(projection.calls)-1] != wantEnsure {
 		t.Fatalf("rebuild must provision its target before coverage work: %+v, calls %v (%v)", target, projection.calls, err)
 	}
-	if done, err := f.activate(op.ID); err != nil || !done {
+	if _, err := corpora.Archive(ctx, f.org, old, true); err != nil {
+		t.Fatal(err)
+	}
+	projection.failNextActivity = true
+	if done, err := rebuilder.ActivateRebuild(ctx, f.org, op.ID); err == nil || done {
+		t.Fatalf("failed temperature acknowledgement should defer cutover: %v (%v)", done, err)
+	}
+	if _, err := corpora.Archive(ctx, f.org, old, false); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := rebuilder.ActivateRebuild(ctx, f.org, op.ID); err != nil || !done {
 		t.Fatalf("activate rebuild: %v (%v)", done, err)
+	}
+	wantActive := "true/QuivrTextV5/" + f.org + "/" + old + "/" + op.TargetGenerationID
+	if projection.calls[len(projection.calls)-1] != wantActive {
+		t.Fatalf("activation retry must warm the target of an unarchived Corpus: %v", projection.calls)
 	}
 	if rebuilt, err := store.Generation(ctx, f.org, old); err != nil || rebuilt.ID != op.TargetGenerationID || rebuilt.Collection != "QuivrTextV5" {
 		t.Fatalf("activated rebuild route: %+v (%v)", rebuilt, err)
@@ -216,8 +246,9 @@ func TestCollectionUpgradeKeepsExistingRoutes(t *testing.T) {
 }
 
 type recordedCorpusProjection struct {
-	calls          []string
-	failNextEnsure bool
+	calls            []string
+	failNextEnsure   bool
+	failNextActivity bool
 }
 
 func (p *recordedCorpusProjection) EnsureGeneration(_ context.Context, collection, org, corpusID, generation string) error {
@@ -231,5 +262,9 @@ func (p *recordedCorpusProjection) EnsureGeneration(_ context.Context, collectio
 
 func (p *recordedCorpusProjection) SetGenerationActive(_ context.Context, collection, org, corpusID, generation string, active bool) error {
 	p.calls = append(p.calls, strings.Join([]string{strconv.FormatBool(active), collection, org, corpusID, generation}, "/"))
+	if p.failNextActivity {
+		p.failNextActivity = false
+		return errors.New("tenant activity unavailable")
+	}
 	return nil
 }

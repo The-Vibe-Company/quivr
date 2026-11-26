@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -65,10 +66,29 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 	mono, native := g, g
 	mono.Collection, native.Collection = "QuivrRelevanceItems"+strings.TrimPrefix(org, "relevance-item-"), weaviate.InitialCollection
 	mono.ItemKeywordsProjected, native.ItemKeywordsProjected = true, true
-	for _, item := range []content.Generation{mono, native} {
-		if err := projection.Bootstrap(ctx, item.Collection); err != nil {
-			t.Fatal(err)
+	if err := projection.Bootstrap(ctx, mono.Collection); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		req, err := http.NewRequestWithContext(cleanup, http.MethodDelete, projection.Endpoint+"/v1/schema/"+mono.Collection, nil)
+		if err != nil {
+			t.Error(err)
+			return
 		}
+		reply, err := projection.Client.Do(req)
+		if err != nil {
+			t.Errorf("remove fixture collection %s: %v", mono.Collection, err)
+			return
+		}
+		defer reply.Body.Close()
+		if reply.StatusCode != http.StatusOK && reply.StatusCode != http.StatusNoContent {
+			t.Errorf("remove fixture collection %s: HTTP %d", mono.Collection, reply.StatusCode)
+		}
+	}()
+	if err := projection.Bootstrap(ctx, native.Collection); err != nil {
+		t.Fatal(err)
 	}
 	if err := projection.EnsureGeneration(ctx, native.Collection, org, "fixture", native.ID); err != nil {
 		t.Fatal(err)
@@ -76,7 +96,9 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
-		_, _ = projection.PurgeGeneration(cleanup, native.Collection, org, "fixture", native.ID)
+		if r, err := projection.PurgeGeneration(cleanup, native.Collection, org, "fixture", native.ID); err != nil || !r.Complete {
+			t.Errorf("remove fixture tenant %s: %+v (%v)", org, r, err)
+		}
 	}()
 	var rows [][]string
 	if err = json.Unmarshal(fixture, &rows); err != nil {
@@ -142,7 +164,7 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 			itemScope := corpus.Scope{Organization: org, Corpora: []string{"fixture"}}
 			baseline, baselineErr := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: mono}}, itemScope, itemQuery)
 			tenant, tenantErr := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: native}}, itemScope, itemQuery)
-			if baselineErr != nil || tenantErr != nil || !slices.EqualFunc(baseline, tenant, func(a, b content.Candidate) bool {
+			if baselineErr != nil || tenantErr != nil || len(baseline) == 0 || !slices.EqualFunc(baseline, tenant, func(a, b content.Candidate) bool {
 				return a.SegmentID == b.SegmentID && a.VersionID == b.VersionID && math.Abs(a.Score-b.Score) <= 1e-6
 			}) {
 				t.Fatalf("%s %s item parity: legacy %v (%v), tenant %v (%v)", mode, r[0], baseline, baselineErr, tenant, tenantErr)

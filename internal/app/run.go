@@ -605,6 +605,7 @@ func Run(command string, args ...string) error {
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
 	rebuilds.Projection = projection
+	corpusStore := postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}
 	if command == "migrate" {
 		var prerequisite *postgres.PrerequisiteError
 		if contract {
@@ -1018,7 +1019,7 @@ func Run(command string, args ...string) error {
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents, Protection: connectorStore, PushConfig: pushConfig, Replays: connectorStore}),
 		}
 		if adminSeparated {
-			publicHandler, adminHandler, err := httpapi.NewSplit(postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}, contents, search, uploadService, cfg.Keys, cfg.AdminKeys, []byte(cfg.CursorKey), apiOptions...)
+			publicHandler, adminHandler, err := httpapi.NewSplit(corpusStore, contents, search, uploadService, cfg.Keys, cfg.AdminKeys, []byte(cfg.CursorKey), apiOptions...)
 			if err != nil {
 				return fmt.Errorf("compile public request schema: %w", err)
 			}
@@ -1032,7 +1033,7 @@ func Run(command string, args ...string) error {
 				)
 			}
 		} else {
-			handler, err := httpapi.New(postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), apiOptions...)
+			handler, err := httpapi.New(corpusStore, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), apiOptions...)
 			if err != nil {
 				return fmt.Errorf("compile public request schema: %w", err)
 			}
@@ -1063,6 +1064,7 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) {
 			processing.IngestionPageSweeper{Store: baseline, Content: contents, Batch: 100}.Run(ctx)
 		})
+		loops.Go(corpusStore.RunTenantActivity)
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
 		loops.Go(func(ctx context.Context) {

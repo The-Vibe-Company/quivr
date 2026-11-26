@@ -411,8 +411,8 @@ func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string
 		return false, err
 	}
 	if s.Projection != nil {
-		// Archive holds the shared routing fence, so the temperature can
-		// follow the canonical Corpus state before the route becomes visible.
+		// Tenant activity reconciliation waits for this cutover, then
+		// applies any archive request that committed concurrently.
 		var archived bool
 		var collection string
 		err = tx.QueryRow(ctx, `SELECT c.archived,g.collection FROM corpora c, projection_generations g
@@ -420,10 +420,8 @@ func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string
 		if err != nil {
 			return false, err
 		}
-		if archived {
-			if err := s.Projection.SetGenerationActive(ctx, collection, org, op.CorpusID, op.TargetGenerationID, false); err != nil {
-				return false, err
-			}
+		if err := s.Projection.SetGenerationActive(ctx, collection, org, op.CorpusID, op.TargetGenerationID, !archived); err != nil {
+			return false, err
 		}
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id,acceptance_seq) VALUES($1,$2,$3,$4)

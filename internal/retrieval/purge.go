@@ -183,6 +183,7 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		if ctx.Err() != nil {
 			return completed, errors.Join(failure, ctx.Err())
 		}
+		var err error
 		deleted, complete, remaining := 0, true, 0
 		for _, collection := range item.Collections {
 			if err = ctx.Err(); err != nil {

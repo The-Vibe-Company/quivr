@@ -52,7 +52,9 @@ func TestTenantIsolationUnderProjection(t *testing.T) {
 		t.Cleanup(func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			_, _ = httpStore.PurgeGeneration(cleanup, g.Collection, org, r.CorpusID, g.ID)
+			if result, err := httpStore.PurgeGeneration(cleanup, g.Collection, org, r.CorpusID, g.ID); err != nil || !result.Complete {
+				t.Errorf("cleanup purge of %s/%s incomplete: %+v (%v)", org, r.CorpusID, result, err)
+			}
 		})
 	}
 	needle := []float32{1, 0, 0, 0}

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -25,6 +28,7 @@ type fakePurgeStore struct {
 	budget, lease           time.Duration
 	items                   []retrieval.PurgeItem
 	records                 []recorded
+	archived                map[string]bool
 }
 
 func (s *fakePurgeStore) NoticePurges(_ context.Context, limit int) (int, error) {
@@ -52,8 +56,8 @@ func (s *fakePurgeStore) RecordPurge(ctx context.Context, item retrieval.PurgeIt
 	return complete, nil
 }
 
-func (p *fakePurgeStore) WithTenantVersionPurge(_ context.Context, _, _ string, purge func(bool) (retrieval.PurgeResult, error)) (retrieval.PurgeResult, error) {
-	return purge(false)
+func (p *fakePurgeStore) WithTenantVersionPurge(_ context.Context, org, corpusID string, purge func(bool) (retrieval.PurgeResult, error)) (retrieval.PurgeResult, error) {
+	return purge(p.archived[org+"/"+corpusID])
 }
 
 type fakePurgeProjection struct {
@@ -68,8 +72,8 @@ func (p *fakePurgeProjection) PurgeGeneration(_ context.Context, collection, org
 	return p.call("generation/" + collection + "/" + org + "/" + corpusID + "/" + generationID)
 }
 
-func (p *fakePurgeProjection) PurgeVersionInGeneration(ctx context.Context, collection, org, _, _, versionID string, _ bool) (retrieval.PurgeResult, error) {
-	return p.PurgeVersion(ctx, collection, org, versionID)
+func (p *fakePurgeProjection) PurgeVersionInGeneration(_ context.Context, collection, org, corpusID, generationID, versionID string, archived bool) (retrieval.PurgeResult, error) {
+	return p.call(strings.Join([]string{"tenant-version", collection, org, corpusID, generationID, versionID, strconv.FormatBool(archived)}, "/"))
 }
 
 func (p *fakePurgeProjection) PurgeVersion(_ context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {
@@ -91,6 +95,27 @@ func (p *fakePurgeProjection) call(key string) (retrieval.PurgeResult, error) {
 		return r, nil
 	}
 	return retrieval.PurgeResult{Deleted: 2, Complete: true}, nil
+}
+
+func TestPurgerContinuesWithTenantOnlyVersionAfterFailure(t *testing.T) {
+	store := &fakePurgeStore{
+		archived: map[string]bool{"org/corpus": true},
+		items: []retrieval.PurgeItem{
+			{Organization: "org", Kind: retrieval.PurgeVersion, VersionID: "failed", Collections: []string{"V4"}},
+			{Organization: "org", Kind: retrieval.PurgeVersion, VersionID: "next", VersionRoutes: []retrieval.Route{
+				{CorpusID: "corpus", Generation: content.Generation{Collection: "V5", ID: "generation"}},
+			}},
+		},
+	}
+	projection := &fakePurgeProjection{fail: "version/V4/org/failed"}
+	done, err := (retrieval.Purger{Store: store, Projection: projection}).Sweep(t.Context())
+	want := []string{projection.fail, "tenant-version/V5/org/corpus/generation/next/true"}
+	if err == nil || done != 1 || !slices.Equal(projection.calls, want) {
+		t.Fatalf("sweep completed %d (%v), calls %v, want %v", done, err, projection.calls, want)
+	}
+	if len(store.records) != 2 || store.records[0].complete || !store.records[1].complete || store.records[1].deleted != 2 {
+		t.Fatalf("claim outcomes: %+v", store.records)
+	}
 }
 
 func TestPurgerSweepIsBoundedAndRecordsOutcomes(t *testing.T) {

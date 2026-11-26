@@ -27,7 +27,9 @@ Start each new API instance and wait for `/readyz` to return HTTP 204 before rou
 
 ## Move corpora to the tenant-backed index
 
-The migration prepares `QuivrTextV5` alongside the previous search collection. Existing corpora keep their recorded routes. After the previous workers and API instances have drained, new corpus creation uses V5, and you can move an existing corpus by requesting `POST /v0/corpora/{id}/rebuilds`. During the rollout, send corpus creation and rebuild requests to the new API only once the previous workers have stopped. Keep all reads of V5 corpora on the new API. Previous binaries cannot read V5 corpora, so keep corpus creation and rebuilds paused if you need full application rollback during the rollout.
+The migration prepares `QuivrTextV5` alongside the older collections. Wait for every previous worker and API instance to drain and stop before creating V5 corpora or starting rebuilds. Previous binaries cannot serve V5 corpora, so defer both operations while you need application rollback.
+
+New corpora use V5 automatically. To move an existing corpus, request `POST /v0/corpora/{id}/rebuilds` and follow the returned Operation. The previous generation keeps serving until validation passes and Quivr switches the route.
 
 ## Initialize document totals
 
