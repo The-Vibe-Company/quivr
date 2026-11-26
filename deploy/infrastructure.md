@@ -1,7 +1,7 @@
 # Shared infrastructure settings
 
 `deploy/infrastructure.json` is the source of truth for portable Compose and Railway settings. It contains no credentials or deployment selectors.
-`small` is the conservative default. `large` is an unbenchmarked starting point for object-heavy imports. For a separate index VM, follow [Run the vector index on a dedicated host](../docs-site/run-quivr/dedicated-vector-host.mdx). Use `deploy/vector-host/azure.py --reconcile` to apply the current declaration on an existing host. Adapter `check --vector-host [SSH_TARGET]` compares the running image, version and settings against the checkout's resolved declaration. Without a reachable observer, external settings are unknown. Reset refuses external or unverifiable endpoints before mutations.
+`small` is the conservative default. `large` is an unbenchmarked starting point for object-heavy imports. For a separate index VM, follow [Run the vector index on a dedicated host](../docs-site/run-quivr/dedicated-vector-host.mdx). Use `python3 deploy/vector-host/azure.py --reconcile` with the existing host's deployment arguments to apply the current declaration. Adapter `check --vector-host [SSH_TARGET]` compares the running image, version and settings against the checkout's resolved declaration. Without a reachable observer, external settings are unknown. Reset refuses external or unverifiable endpoints before mutations.
 
 ## Profiles
 

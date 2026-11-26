@@ -384,8 +384,11 @@ class VectorHost(unittest.TestCase):
                 # revision. Only explicit reconciliation may reuse that intent.
                 for resource in resources.values():
                     resource['tags']['quivr-vector-intent'] = 'a' * 64
+                calls.clear()
                 with redirect_stderr(io.StringIO()):
                     self.assertEqual(azure.main(), 2)
+                self.assertFalse(any(command[0] == 'ssh' or
+                                     {'create', 'update', 'attach'}.intersection(command) for command in calls))
                 calls.clear()
                 with patch.object(sys, 'argv', [*argv, '--reconcile']):
                     self.assertEqual(azure.main(), 0)
