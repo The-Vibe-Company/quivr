@@ -26,8 +26,8 @@ On an existing installation with `ingestion.evaluation` configured, add `--evalu
 ## Reuse a Corpus, pick profiles, or pin a retrieval plugin
 
 - `--corpus-id <id>` with `--api-url` and exactly one set reuses that Corpus instead of ingesting; it must hold exactly one active Record per document of the set. `--corpus-state <file>` saves the Corpus id and Record map on the first run and reuses them later; a different API URL, Corpus id or sample fingerprint fails the run.
-- `--corpus-config <json>` is the `retrieval` configuration for newly created Corpora, so it excludes reuse.
-- `--profiles <names>` (comma-separated or repeated) measures only those advertised profiles, by full name or unambiguous alias.
+- `--corpus-config <file.json>` holds the `retrieval` configuration for newly created Corpora, so it excludes reuse.
+- `--profiles <names>` (comma-separated or repeated) measures only those advertised profiles, by full name or unambiguous alias; an evaluation plugin comparison still measures the default profile.
 - `--retrieval-config <pin.json>` adds a candidate retrieval plugin to the local stack, for example [`http.rerank`](../../plugins/http-rerank/README.md); it excludes `--api-url`. The pin holds `manifest` (relative to the JSON), `endpoint`, `configuration` and `secret_names`, as above.
 
 ## The public sets
