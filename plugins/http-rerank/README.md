@@ -19,10 +19,11 @@ scope. Both profiles use the same plugin configuration.
 | `timeout_ms` | 2500 | HTTP deadline, from 100 to 10000 ms, bounded by the search budget with time reserved for the response. |
 | `fallback_on_error` | true | Keep base order and scores on HTTP, timeout, or response errors. Set false to report a retryable search error. |
 
-Set the optional `RERANKER_API_KEY` secret in the plugin environment for
-Bearer authentication over HTTPS. The plugin sends authorized candidate text
-and the query to the configured endpoint. Use a trusted service that returns
-one valid indexed score per document.
+The plugin sends authorized candidate text and the query to the configured
+endpoint. Use HTTPS for every remote endpoint. Use plain HTTP only for a
+trusted local service without credentials. Set the optional `RERANKER_API_KEY`
+secret in the plugin environment for Bearer authentication over HTTPS.
+The service must return one valid indexed score per document.
 
 Run `quivr plugin inspect plugins/http-rerank` and
 `quivr plugin test plugins/http-rerank` from the repository root.
