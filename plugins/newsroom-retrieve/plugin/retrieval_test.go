@@ -74,7 +74,7 @@ func TestFirstPMaxPRatioDoesNotPenalizeSinglePassage(t *testing.T) {
 		{SegmentID: "floor_seg", RecordID: "rec_other", PartKey: "body", Start: 0, End: 500, Text: "Autre dépêche.", Score: 0.40},
 	}
 
-	bundles := fuseAndScore(req, cfg, denseGrouped, nil, nil, denseUngrouped)
+	bundles := fuseAndScore(req, cfg, []denseViewLeg{{Name: "full", Weight: 1.0, Cands: denseGrouped}}, nil, nil, nil, denseUngrouped)
 	if len(bundles) < 2 {
 		t.Fatalf("expected >= 2 bundles, got %d", len(bundles))
 	}
@@ -146,6 +146,128 @@ func TestBuildInvertedPyramidSurrogate(t *testing.T) {
 	surDeep := buildSurrogate(bDeepOnly, "inverted_pyramid", 2000)
 	if !strings.Contains(surDeep, "[DEEP BODY EXCERPT") {
 		t.Fatalf("expected deep-only marker when lead absent, got %q", surDeep)
+	}
+}
+
+func TestMultiQueryDecomposition(t *testing.T) {
+	q := "Crise budgétaire en France — Quelles mesures fiscales le ministre Eric Lombard a-t-il annoncées pour le budget 2025 ?"
+	subj, ok := extractCoreQuery(q, "subject")
+	if !ok || subj != "Crise budgétaire en France" {
+		t.Fatalf("expected subject clause, got (%q, %v)", subj, ok)
+	}
+	quest, ok := extractCoreQuery(q, "question")
+	if !ok || !strings.Contains(quest, "mesures fiscales") || strings.HasPrefix(strings.ToLower(quest), "quelles") {
+		t.Fatalf("expected boilerplate-stripped question clause, got (%q, %v)", quest, ok)
+	}
+	stripped, ok := extractCoreQuery(q, "stripped")
+	if !ok || strings.Contains(stripped, "—") || strings.Contains(strings.ToLower(stripped), "quelles") {
+		t.Fatalf("expected stripped combined query, got (%q, %v)", stripped, ok)
+	}
+	a, b, ok := extractClausePair(q)
+	if !ok || a == "" || b == "" || a == b {
+		t.Fatalf("expected distinct clause pair, got (%q, %q, %v)", a, b, ok)
+	}
+	entQ, ok := extractDenseEntityQuery(q, 8)
+	if !ok || !strings.Contains(entQ, "2025") || !strings.Contains(entQ, "Lombard") {
+		t.Fatalf("expected dense entity query with 2025 & Lombard, got (%q, %v)", entQ, ok)
+	}
+}
+
+func TestCombineDenseViewsConjunction(t *testing.T) {
+	views := []denseViewLeg{
+		{Name: "full", Weight: 1.0, Cands: []quivrplugin.Candidate{
+			{RecordID: "both", Score: 0.90},
+			{RecordID: "one_only", Score: 0.95},
+			{RecordID: "floor", Score: 0.20},
+		}},
+		{Name: "clause_b", Weight: 1.0, Cands: []quivrplugin.Candidate{
+			{RecordID: "both", Score: 0.88},
+			{RecordID: "floor", Score: 0.20},
+		}},
+	}
+	stats := []legStats{computeLegStats(views[0].Cands), computeLegStats(views[1].Cands)}
+	bBoth := &recordBundle{RecordID: "both", DenseViewScores: []float64{0.90, 0.88}, DenseViewRanks: []int{2, 1}, HasDenseView: []bool{true, true}}
+	bOne := &recordBundle{RecordID: "one_only", DenseViewScores: []float64{0.95, 0}, DenseViewRanks: []int{1, 0}, HasDenseView: []bool{true, false}}
+
+	cfgSoftMin := configuration{Fusion: "convex", DenseViewFusion: "soft_min", DenseSoftMinLambda: 0.40}
+	sBoth, _ := combineDenseViews(bBoth, views, stats, cfgSoftMin)
+	sOne, _ := combineDenseViews(bOne, views, stats, cfgSoftMin)
+	if sBoth <= sOne {
+		t.Fatalf("soft_min should rank dual-view doc (%.3f) above single-view doc (%.3f)", sBoth, sOne)
+	}
+
+	cfgGeom := configuration{Fusion: "convex", DenseViewFusion: "geom"}
+	gBoth, _ := combineDenseViews(bBoth, views, stats, cfgGeom)
+	gOne, _ := combineDenseViews(bOne, views, stats, cfgGeom)
+	if gBoth <= gOne {
+		t.Fatalf("geom should rank dual-view doc (%.3f) above single-view doc (%.3f)", gBoth, gOne)
+	}
+}
+
+func TestRound2ConsensusQuery(t *testing.T) {
+	q := "Accord commercial agricole — Quelles réactions des syndicats européens ?"
+	cfg := configuration{Round2ConsensusTopN: 10, Round2ConsensusDocs: 2, Round2MaxTerms: 3, Round2QueryBase: "core"}
+	c1 := quivrplugin.Candidate{RecordID: "r1", PartKey: "body", Start: 0, Text: "BRUXELLES - L'accord commercial Mercosur suscite la colère des syndicats agricoles européens et de la Commission européenne."}
+	c2 := quivrplugin.Candidate{RecordID: "r2", PartKey: "body", Start: 0, Text: "PARIS - Face à l'accord commercial Mercosur, les syndicats agricoles dénoncent la position de la Commission européenne."}
+	r2Q, terms, ok := buildRound2ConsensusQuery(q, cfg, []quivrplugin.Candidate{c1, c2}, []quivrplugin.Candidate{c2, c1})
+	if !ok || len(terms) == 0 {
+		t.Fatalf("expected consensus expansion terms, got (%q, %v, %v)", r2Q, terms, ok)
+	}
+	if !strings.Contains(strings.ToLower(r2Q), "mercosur") {
+		t.Fatalf("expected shared entity Mercosur in Round-2 query %q (terms=%v)", r2Q, terms)
+	}
+	// Single consensus doc should NOT trigger Round-2 expansion.
+	_, _, okSingle := buildRound2ConsensusQuery(q, cfg, []quivrplugin.Candidate{c1}, []quivrplugin.Candidate{c1})
+	if okSingle {
+		t.Fatalf("expected Round-2 expansion to skip when fewer than 2 consensus docs exist")
+	}
+}
+
+func TestTemporalAlignmentAndDatelineEntity(t *testing.T) {
+	qYears, qNums := extractYearsAndNumbers("Sommet climatique COP29 en 2024 à Bakou")
+	if len(qYears) != 1 || qYears[0] != "2024" {
+		t.Fatalf("expected year 2024, got %v", qYears)
+	}
+	if len(qNums) == 0 {
+		t.Fatalf("expected numeric token cop29, got %v", qNums)
+	}
+	segMatch := quivrplugin.Candidate{SegmentID: "s1", RecordID: "r1", PartKey: "body", Start: 0, Text: "BAKOU (Wire) - La conférence COP29 s'est ouverte en novembre 2024 sur le financement climatique."}
+	segOld := quivrplugin.Candidate{SegmentID: "s2", RecordID: "r2", PartKey: "body", Start: 0, Text: "DUBAÏ (Wire) - La conférence climatique de décembre 2023 s'était conclue sur un texte de transition."}
+	bMatch := &recordBundle{RecordID: "r1", BestSeg: segMatch, HasBestSeg: true, LeadSeg: &segMatch}
+	bOld := &recordBundle{RecordID: "r2", BestSeg: segOld, HasBestSeg: true, LeadSeg: &segOld}
+
+	a1, c1 := scoreTemporalAlignment(qYears, qNums, bMatch, 300)
+	a2, c2 := scoreTemporalAlignment(qYears, qNums, bOld, 300)
+	if a1 <= a2 || c1 != 0 || c2 <= 0 {
+		t.Fatalf("expected matching doc align=%.2f>%.2f and old doc conflict=%.2f>0 (match conflict=%.2f)", a1, a2, c2, c1)
+	}
+
+	qEnts := extractQueryEntityStems("Sommet climatique COP29 en 2024 à Bakou")
+	d1 := scoreDatelineEntityBoost(qEnts, bMatch)
+	d2 := scoreDatelineEntityBoost(qEnts, bOld)
+	if d1 <= d2 {
+		t.Fatalf("expected dateline entity boost (%.2f) > non-matching dateline (%.2f)", d1, d2)
+	}
+}
+
+func TestRound1MultiViewDenseFanOut(t *testing.T) {
+	r := New()
+	req := &quivrplugin.SearchRequest{
+		Profile:       "default",
+		Round:         1,
+		Limit:         10,
+		Configuration: json.RawMessage(`{"dense_core_view":true,"dense_core_mode":"subject","dense_core_weight":0.5,"dense_entity_view":true,"dense_entity_weight":0.4,"entity_leg":true,"passage_ratio_weight":0.15}`),
+		Spaces:        []quivrplugin.SearchSpace{{ID: "sp1", Role: "served"}},
+	}
+	req.Query.Text = "Budget 2025 — Quelles annonces du ministre Eric Lombard pour la France ?"
+	req.Query.Mode = "hybrid"
+
+	ans, err := r.Search(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ans.Requests) != 6 {
+		t.Fatalf("expected 6 Round-1 requests (3 dense views + 2 bm25 + 1 ungrouped dense), got %d", len(ans.Requests))
 	}
 }
 

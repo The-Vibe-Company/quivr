@@ -9,33 +9,126 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
+// denseViewLeg represents one grouped dense near_vector query view (e.g., full
+// query, core subject/clause, or entity/key-facet compact noun phrase).
+type denseViewLeg struct {
+	Name   string
+	Weight float64
+	Cands  []quivrplugin.Candidate
+}
+
 // recordBundle aggregates all evidence retrieved for one Record across
 // retrieval legs and ungrouped dense passages.
 type recordBundle struct {
-	RecordID      string
-	BestSeg       quivrplugin.Candidate
-	HasBestSeg    bool
-	LeadSeg       *quivrplugin.Candidate
-	DeepBestSeg   *quivrplugin.Candidate
-	SecondSeg     *quivrplugin.Candidate
-	DenseScore    float64
-	HasDense      bool
-	DenseRank     int
-	LexicalScore  float64
-	HasLexical    bool
-	LexicalRank   int
-	EntityScore   float64
-	HasEntity     bool
-	EntityRank    int
-	FirstP        float64
-	HasFirstP     bool
-	MaxP          float64
-	HasUngrouped  bool
-	PassageCount  int
-	Stage1Score   float64
-	FinalScore    float64
-	LegsMatched   int
-	Explanation   string
+	RecordID        string
+	BestSeg         quivrplugin.Candidate
+	HasBestSeg      bool
+	LeadSeg         *quivrplugin.Candidate
+	DeepBestSeg     *quivrplugin.Candidate
+	SecondSeg       *quivrplugin.Candidate
+	DenseScore      float64
+	HasDense        bool
+	DenseRank       int
+	DenseViewScores []float64
+	DenseViewRanks  []int
+	HasDenseView    []bool
+	DenseR2Score    float64
+	HasDenseR2      bool
+	DenseR2Rank     int
+	LexicalScore    float64
+	HasLexical      bool
+	LexicalRank     int
+	EntityScore     float64
+	HasEntity       bool
+	EntityRank      int
+	FirstP          float64
+	HasFirstP       bool
+	MaxP            float64
+	HasUngrouped    bool
+	PassageCount    int
+	Stage1Score     float64
+	FinalScore      float64
+	LegsMatched     int
+	Explanation     string
+}
+
+// combineDenseViews aggregates normalized scores across 1..N dense query views
+// for a single candidate record using the configured multi-view operator.
+func combineDenseViews(
+	b *recordBundle,
+	views []denseViewLeg,
+	viewStats []legStats,
+	cfg configuration,
+) (float64, int) {
+	n := len(views)
+	if n == 0 {
+		return 0, 0
+	}
+	if n == 1 {
+		if len(b.HasDenseView) > 0 && b.HasDenseView[0] {
+			return normalizeLegScore(b.DenseViewScores[0], b.DenseViewRanks[0], viewStats[0], cfg.Fusion, cfg.RRFK), 1
+		}
+		return 0, 0
+	}
+
+	vals := make([]float64, n)
+	matched := 0
+	weightSum := 0.0
+	weightedSum := 0.0
+	maxV := 0.0
+	minV := 1.0
+	for i := 0; i < n; i++ {
+		w := views[i].Weight
+		if w <= 0 {
+			w = 1.0
+		}
+		v := 0.0
+		if i < len(b.HasDenseView) && b.HasDenseView[i] {
+			v = normalizeLegScore(b.DenseViewScores[i], b.DenseViewRanks[i], viewStats[i], cfg.Fusion, cfg.RRFK)
+			matched++
+		}
+		vals[i] = v
+		weightSum += w
+		weightedSum += w * v
+		if v > maxV {
+			maxV = v
+		}
+		if v < minV {
+			minV = v
+		}
+	}
+	if matched == 0 || weightSum <= 0 {
+		return 0, 0
+	}
+	weighted := weightedSum / weightSum
+
+	switch cfg.DenseViewFusion {
+	case "max":
+		return maxV, matched
+	case "geom":
+		// Weighted geometric mean with small floor epsilon=0.05 rescaled to [0, 1]
+		// so all-absent stays 0 while partial-view misses are smoothly penalized.
+		const eps = 0.05
+		logSum := 0.0
+		for i := 0; i < n; i++ {
+			w := views[i].Weight
+			if w <= 0 {
+				w = 1.0
+			}
+			v := vals[i]
+			if v < eps {
+				v = eps
+			}
+			logSum += w * math.Log(v)
+		}
+		g := math.Exp(logSum / weightSum)
+		return clamp01((g - eps) / (1.0 - eps)), matched
+	case "soft_min":
+		lam := clamp01(cfg.DenseSoftMinLambda)
+		return (1.0-lam)*weighted + lam*minV, matched
+	default: // "weighted"
+		return weighted, matched
+	}
 }
 
 type legStats struct {

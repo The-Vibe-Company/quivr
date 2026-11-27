@@ -23,6 +23,23 @@ type configuration struct {
 	Fusion                  string  `json:"fusion"`
 	RRFK                    float64 `json:"rrf_k"`
 	DenseWeight             float64 `json:"dense_weight"`
+	DenseCoreView           bool    `json:"dense_core_view"`
+	DenseCoreMode           string  `json:"dense_core_mode"`
+	DenseCoreWeight         float64 `json:"dense_core_weight"`
+	DenseClauseSplitView    bool    `json:"dense_clause_split_view"`
+	DenseEntityView         bool    `json:"dense_entity_view"`
+	DenseEntityWeight       float64 `json:"dense_entity_weight"`
+	DenseEntityMaxTerms     int     `json:"dense_entity_max_terms"`
+	DenseViewFusion         string  `json:"dense_view_fusion"`
+	DenseSoftMinLambda      float64 `json:"dense_soft_min_lambda"`
+	Round2ConsensusWeight   float64 `json:"round2_consensus_weight"`
+	Round2ConsensusTopN     int     `json:"round2_consensus_top_n"`
+	Round2ConsensusDocs     int     `json:"round2_consensus_docs"`
+	Round2MaxTerms          int     `json:"round2_max_terms"`
+	Round2QueryBase         string  `json:"round2_query_base"`
+	TemporalAlignWeight     float64 `json:"temporal_align_weight"`
+	TemporalConflictPenalty float64 `json:"temporal_conflict_penalty"`
+	DatelineEntityWeight    float64 `json:"dateline_entity_weight"`
 	QueryAdaptiveAlpha      bool    `json:"query_adaptive_alpha"`
 	LexicalWeight           float64 `json:"lexical_weight"`
 	EntityLeg               bool    `json:"entity_leg"`
@@ -65,6 +82,23 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		Fusion:                  "dbsf",
 		RRFK:                    60,
 		DenseWeight:             0.65,
+		DenseCoreView:           false,
+		DenseCoreMode:           "subject",
+		DenseCoreWeight:         0,
+		DenseClauseSplitView:    false,
+		DenseEntityView:         false,
+		DenseEntityWeight:       0,
+		DenseEntityMaxTerms:     8,
+		DenseViewFusion:         "weighted",
+		DenseSoftMinLambda:      0.35,
+		Round2ConsensusWeight:   0,
+		Round2ConsensusTopN:     10,
+		Round2ConsensusDocs:     2,
+		Round2MaxTerms:          3,
+		Round2QueryBase:         "core",
+		TemporalAlignWeight:     0,
+		TemporalConflictPenalty: 0,
+		DatelineEntityWeight:    0,
 		LexicalWeight:           0.35,
 		EntityLeg:               false,
 		EntityWeight:            0.25,
@@ -125,6 +159,73 @@ func New() quivrplugin.Retriever {
 	}
 }
 
+type denseViewSpec struct {
+	Name   string
+	Query  string
+	Weight float64
+}
+
+func buildDenseViewSpecs(query string, cfg configuration) []denseViewSpec {
+	full := strings.TrimSpace(query)
+	specs := []denseViewSpec{{Name: "full", Query: full, Weight: 1.0}}
+	seen := map[string]bool{strings.ToLower(full): true}
+	addView := func(name, q string, w float64) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		key := strings.ToLower(q)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		specs = append(specs, denseViewSpec{Name: name, Query: q, Weight: w})
+	}
+
+	if cfg.DenseClauseSplitView {
+		if a, b, ok := extractClausePair(full); ok {
+			w := cfg.DenseCoreWeight
+			if w <= 0 {
+				w = 0.50
+			}
+			addView("clause_a", a, w)
+			addView("clause_b", b, w)
+		}
+	} else if cfg.DenseCoreView {
+		if coreQ, ok := extractCoreQuery(full, cfg.DenseCoreMode); ok {
+			w := cfg.DenseCoreWeight
+			if w <= 0 {
+				w = 0.50
+			}
+			addView("core", coreQ, w)
+		}
+	}
+	if cfg.DenseEntityView {
+		if entQ, ok := extractDenseEntityQuery(full, cfg.DenseEntityMaxTerms); ok {
+			w := cfg.DenseEntityWeight
+			if w <= 0 {
+				w = 0.45
+			}
+			addView("entity_dense", entQ, w)
+		}
+	}
+	return specs
+}
+
+func effectiveCandidateK(req *quivrplugin.SearchRequest, cfg configuration) int {
+	k := cfg.CandidateCount
+	if k <= 0 {
+		k = 100
+	}
+	if k < req.Limit {
+		k = req.Limit
+	}
+	if k > 100 {
+		k = 100
+	}
+	return k
+}
+
 func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
 	started := time.Now()
 	cfg, err := readConfig(req.Configuration)
@@ -140,16 +241,35 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		return quivrplugin.Ask(reqs...), nil
 	}
 
-	// Parse served candidate legs from Round 1.
-	var denseGrouped, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate
+	// Parse served candidate legs from Round 1 (and optional Round 2).
+	viewSpecs := buildDenseViewSpecs(req.Query.Text, cfg)
+	specByQuery := make(map[string]denseViewSpec, len(viewSpecs))
+	for _, sp := range viewSpecs {
+		specByQuery[strings.ToLower(strings.TrimSpace(sp.Query))] = sp
+	}
+
+	var denseViews []denseViewLeg
+	var denseFull, denseRound2, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate
 	for _, s := range req.Served {
+		if s.Round == 2 && s.Request.Primitive == quivrplugin.PrimitiveNearVector {
+			denseRound2 = append(denseRound2, s.Candidates...)
+			continue
+		}
 		if s.Round != 1 {
 			continue
 		}
 		switch s.Request.Primitive {
 		case quivrplugin.PrimitiveNearVector:
 			if s.Request.GroupBy == "record" {
-				denseGrouped = append(denseGrouped, s.Candidates...)
+				qKey := strings.ToLower(strings.TrimSpace(s.Request.QueryText))
+				sp, ok := specByQuery[qKey]
+				if !ok {
+					sp = denseViewSpec{Name: fmt.Sprintf("view_%d", len(denseViews)), Query: s.Request.QueryText, Weight: 1.0}
+				}
+				denseViews = append(denseViews, denseViewLeg{Name: sp.Name, Weight: sp.Weight, Cands: s.Candidates})
+				if sp.Name == "full" || len(denseFull) == 0 {
+					denseFull = s.Candidates
+				}
 			} else {
 				denseUngrouped = append(denseUngrouped, s.Candidates...)
 			}
@@ -162,18 +282,39 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		}
 	}
 
-	bundles := fuseAndScore(req, cfg, denseGrouped, lexicalFull, lexicalEntity, denseUngrouped)
+	// Optional Round-2 conservative consensus dense expansion (zero LLM, max_rounds=3).
+	if req.Round == 2 && cfg.Round2ConsensusWeight > 0 && req.Query.Mode != "lexical" {
+		if space := req.ServedSpace(); space != nil {
+			if r2Q, r2Terms, ok := buildRound2ConsensusQuery(req.Query.Text, cfg, denseFull, lexicalFull); ok {
+				if cfg.LogDiagnostics {
+					fmt.Fprintf(os.Stderr, "[newsroom-diag] round2_consensus terms=%v query=%q\n", r2Terms, r2Q)
+				}
+				return quivrplugin.Ask(quivrplugin.CandidateRequest{
+					Primitive: quivrplugin.PrimitiveNearVector,
+					QueryText: r2Q,
+					Space:     space.ID,
+					K:         effectiveCandidateK(req, cfg),
+					GroupBy:   "record",
+				}), nil
+			}
+		}
+	}
+
+	bundles := fuseAndScore(req, cfg, denseViews, denseRound2, lexicalFull, lexicalEntity, denseUngrouped)
 	if len(bundles) == 0 {
 		return quivrplugin.Rank(), nil
 	}
 
-	conf := computeStage1Confidence(denseGrouped, lexicalFull, bundles)
+	conf := computeStage1Confidence(denseFull, lexicalFull, bundles)
 	if cfg.LogDiagnostics {
-		entityQ, _ := extractEntityQuery(req.Query.Text, cfg.EntityMaxTerms)
+		viewSummary := make([]string, len(viewSpecs))
+		for i, sp := range viewSpecs {
+			viewSummary[i] = fmt.Sprintf("%s=%q", sp.Name, sp.Query)
+		}
 		fmt.Fprintf(os.Stderr,
-			"[newsroom-diag] profile=%s mode=%s pool=%d dense=%d lex=%d ent=%d ungrp=%d jaccard10=%.3f margin=%.3f dgap=%.2f lgap=%.2f lnqc=%.2f top5lead=%.2f entity_q=%q\n",
-			req.Profile, req.Query.Mode, len(bundles), len(denseGrouped), len(lexicalFull), len(lexicalEntity), len(denseUngrouped),
-			conf.Jaccard10, conf.ScoreMargin, conf.DenseGap, conf.LexGap, conf.LexNQC, conf.Top5LeadFrac, entityQ,
+			"[newsroom-diag] profile=%s mode=%s round=%d pool=%d dviews=%d r2=%d lex=%d ent=%d ungrp=%d jaccard10=%.3f margin=%.3f dgap=%.2f views=[%s]\n",
+			req.Profile, req.Query.Mode, req.Round, len(bundles), len(denseViews), len(denseRound2), len(lexicalFull), len(lexicalEntity), len(denseUngrouped),
+			conf.Jaccard10, conf.ScoreMargin, conf.DenseGap, strings.Join(viewSummary, "; "),
 		)
 	}
 
@@ -203,16 +344,7 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 }
 
 func buildRound1Requests(req *quivrplugin.SearchRequest, cfg configuration) ([]quivrplugin.CandidateRequest, error) {
-	k := cfg.CandidateCount
-	if k <= 0 {
-		k = 100
-	}
-	if k < req.Limit {
-		k = req.Limit
-	}
-	if k > 100 {
-		k = 100
-	}
+	k := effectiveCandidateK(req, cfg)
 
 	var reqs []quivrplugin.CandidateRequest
 	space := req.ServedSpace()
@@ -221,15 +353,17 @@ func buildRound1Requests(req *quivrplugin.SearchRequest, cfg configuration) ([]q
 		return nil, quivrplugin.TerminalSearchError("no_served_space", "the searched Corpora serve no vector space; search by keywords, or rebuild them")
 	}
 
-	// Leg A: Full-query dense near_vector (grouped by record)
+	// Leg A (+ optional Multi-Query Dense Views 2 & 3): grouped dense near_vector legs
 	if req.Query.Mode != "lexical" && space != nil {
-		reqs = append(reqs, quivrplugin.CandidateRequest{
-			Primitive: quivrplugin.PrimitiveNearVector,
-			QueryText: req.Query.Text,
-			Space:     space.ID,
-			K:         k,
-			GroupBy:   "record",
-		})
+		for _, sp := range buildDenseViewSpecs(req.Query.Text, cfg) {
+			reqs = append(reqs, quivrplugin.CandidateRequest{
+				Primitive: quivrplugin.PrimitiveNearVector,
+				QueryText: sp.Query,
+				Space:     space.ID,
+				K:         k,
+				GroupBy:   "record",
+			})
+		}
 	}
 
 	// Leg B: Full-query lexical BM25 (grouped by record)
@@ -275,14 +409,21 @@ func buildRound1Requests(req *quivrplugin.SearchRequest, cfg configuration) ([]q
 func fuseAndScore(
 	req *quivrplugin.SearchRequest,
 	cfg configuration,
-	denseGrouped, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate,
+	denseViews []denseViewLeg,
+	denseRound2, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate,
 ) []*recordBundle {
+	numViews := len(denseViews)
 	byRecord := map[string]*recordBundle{}
 	getBundle := func(c quivrplugin.Candidate) *recordBundle {
 		key := recordKey(c)
 		b, ok := byRecord[key]
 		if !ok {
-			b = &recordBundle{RecordID: key}
+			b = &recordBundle{
+				RecordID:        key,
+				DenseViewScores: make([]float64, numViews),
+				DenseViewRanks:  make([]int, numViews),
+				HasDenseView:    make([]bool, numViews),
+			}
 			byRecord[key] = b
 		}
 		if isLeadSegment(c) {
@@ -299,14 +440,46 @@ func fuseAndScore(
 		return b
 	}
 
-	// Ingest Leg A: grouped dense
-	denseStats := computeLegStats(denseGrouped)
-	for i, c := range denseGrouped {
+	// Ingest Multi-View Dense Legs (View 1 = full, optional View 2 = core/clause, View 3 = entity)
+	viewStats := make([]legStats, numViews)
+	anyDense := false
+	for vIdx, view := range denseViews {
+		viewStats[vIdx] = computeLegStats(view.Cands)
+		if len(view.Cands) > 0 {
+			anyDense = true
+		}
+		for i, c := range view.Cands {
+			b := getBundle(c)
+			if !b.HasDenseView[vIdx] || c.Score > b.DenseViewScores[vIdx] {
+				b.DenseViewScores[vIdx] = c.Score
+				b.DenseViewRanks[vIdx] = i + 1
+				b.HasDenseView[vIdx] = true
+			}
+			if vIdx == 0 {
+				if !b.HasDense || c.Score > b.DenseScore {
+					b.DenseScore = c.Score
+					b.DenseRank = i + 1
+					b.HasDense = true
+					b.BestSeg = c
+					b.HasBestSeg = true
+				}
+			} else if !b.HasBestSeg {
+				b.BestSeg = c
+				b.HasBestSeg = true
+			}
+		}
+	}
+
+	// Ingest optional Round-2 consensus dense leg
+	r2Stats := computeLegStats(denseRound2)
+	for i, c := range denseRound2 {
 		b := getBundle(c)
-		if !b.HasDense || c.Score > b.DenseScore {
-			b.DenseScore = c.Score
-			b.DenseRank = i + 1
-			b.HasDense = true
+		if !b.HasDenseR2 || c.Score > b.DenseR2Score {
+			b.DenseR2Score = c.Score
+			b.DenseR2Rank = i + 1
+			b.HasDenseR2 = true
+		}
+		if !b.HasBestSeg {
 			b.BestSeg = c
 			b.HasBestSeg = true
 		}
@@ -389,10 +562,11 @@ func fuseAndScore(
 		return bundles[i].RecordID < bundles[j].RecordID
 	})
 
-	// Stage 1: Multi-Leg Calibrated Fusion (DBSF / Convex / RRF + optional Query-Adaptive Alpha + CombMNZ)
+	// Stage 1: Multi-Leg Calibrated Fusion (Multi-View Dense + Round-2 Consensus + Lexical + Entity)
 	effDenseW := cfg.DenseWeight
 	effLexW := cfg.LexicalWeight
 	effEntW := cfg.EntityWeight
+	effR2W := cfg.Round2ConsensusWeight
 	if cfg.QueryAdaptiveAlpha {
 		ar := anchorRatio(req.Query.Text)
 		shift := 0.15 * ar
@@ -406,8 +580,11 @@ func fuseAndScore(
 	}
 
 	activeWeightSum := 0.0
-	if len(denseGrouped) > 0 {
+	if anyDense {
 		activeWeightSum += effDenseW
+	}
+	if len(denseRound2) > 0 && effR2W > 0 {
+		activeWeightSum += effR2W
 	}
 	if len(lexicalFull) > 0 {
 		activeWeightSum += effLexW
@@ -422,8 +599,13 @@ func fuseAndScore(
 	for _, b := range bundles {
 		fused := 0.0
 		legs := 0
-		if b.HasDense {
-			fused += effDenseW * normalizeLegScore(b.DenseScore, b.DenseRank, denseStats, cfg.Fusion, cfg.RRFK)
+		denseCombined, viewsMatched := combineDenseViews(b, denseViews, viewStats, cfg)
+		if viewsMatched > 0 {
+			fused += effDenseW * denseCombined
+			legs += viewsMatched
+		}
+		if b.HasDenseR2 && effR2W > 0 {
+			fused += effR2W * normalizeLegScore(b.DenseR2Score, b.DenseR2Rank, r2Stats, cfg.Fusion, cfg.RRFK)
 			legs++
 		}
 		if b.HasLexical {
@@ -438,9 +620,8 @@ func fuseAndScore(
 		if cfg.Fusion != "rrf" {
 			fused /= activeWeightSum
 		}
-		// Cross-modal CombMNZ: only reward consensus when dense AND lexical agree
-		// (prevents correlated BM25+entity legs from double-boosting lexical-only hits).
-		if cfg.CombMNZBonus > 0 && b.HasDense && (b.HasLexical || b.HasEntity) {
+		// Cross-modal CombMNZ: only reward consensus when dense AND lexical agree.
+		if cfg.CombMNZBonus > 0 && (viewsMatched > 0 || b.HasDenseR2) && (b.HasLexical || b.HasEntity) {
 			if b.HasLexical && b.HasEntity {
 				fused *= 1.0 + cfg.CombMNZBonus
 			} else {
@@ -515,6 +696,33 @@ func fuseAndScore(
 					if cfg.TailOnlyPenalty > 0 && tailOnly {
 						b.FinalScore -= cfg.TailOnlyPenalty
 					}
+				}
+			}
+		}
+	}
+
+	// Stage 2b: Generic Inline Wire Metadata ($0 Go) — Temporal/Numeric Exact Alignment & Wire Dateline/Opening Entity Boost
+	if cfg.TemporalAlignWeight > 0 || cfg.TemporalConflictPenalty > 0 {
+		qYears, qNums := extractYearsAndNumbers(req.Query.Text)
+		if len(qYears) > 0 || len(qNums) > 0 {
+			for _, b := range bundles {
+				align, conflict := scoreTemporalAlignment(qYears, qNums, b, cfg.LeadChars)
+				if cfg.TemporalAlignWeight > 0 && align > 0 {
+					b.FinalScore += cfg.TemporalAlignWeight * align
+				}
+				if cfg.TemporalConflictPenalty > 0 && conflict > 0 {
+					b.FinalScore -= cfg.TemporalConflictPenalty * conflict
+				}
+			}
+		}
+	}
+	if cfg.DatelineEntityWeight > 0 {
+		qEntities := extractQueryEntityStems(req.Query.Text)
+		if len(qEntities) > 0 {
+			for _, b := range bundles {
+				boost := scoreDatelineEntityBoost(qEntities, b)
+				if boost > 0 {
+					b.FinalScore += cfg.DatelineEntityWeight * boost
 				}
 			}
 		}

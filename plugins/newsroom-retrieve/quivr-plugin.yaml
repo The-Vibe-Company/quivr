@@ -50,7 +50,100 @@ configuration:
         minimum: 0
         maximum: 5
         default: 0.65
-        description: Weight for full-query dense near_vector leg.
+        description: Weight for full-query dense near_vector leg (or multi-view dense ensemble).
+      dense_core_view:
+        type: boolean
+        default: false
+        description: Enable View 2 dense near_vector using core-subject, stripped-question, or boilerplate-stripped query.
+      dense_core_mode:
+        type: string
+        enum: [subject, question, stripped]
+        default: subject
+        description: Query view extraction mode for View 2 dense near_vector.
+      dense_core_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Relative weight of View 2 (core/clause) dense view against View 1 (weight 1.0).
+      dense_clause_split_view:
+        type: boolean
+        default: false
+        description: Decompose structured or multi-clause queries into dual complementary dense views (subject + stripped question) for aspect-conjunction fusion.
+      dense_entity_view:
+        type: boolean
+        default: false
+        description: Enable View 3 dense near_vector using compact named-entity, acronym, year, and key-facet noun phrase.
+      dense_entity_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Relative weight of View 3 (entity/key-facet) dense view against View 1 (weight 1.0).
+      dense_entity_max_terms:
+        type: integer
+        minimum: 2
+        maximum: 20
+        default: 8
+        description: Maximum high-specificity terms in the View 3 entity/key-facet dense query.
+      dense_view_fusion:
+        type: string
+        enum: [weighted, max, geom, soft_min]
+        default: weighted
+        description: Multi-view dense aggregation operator (weighted convex sum, max-over-views, weighted geometric mean, or convex+min soft conjunction).
+      dense_soft_min_lambda:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.35
+        description: Conjunction weight lambda on min-over-views in soft_min multi-view dense fusion.
+      round2_consensus_weight:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Enable Round-2 conservative consensus dense expansion (top dense∩lexical consensus terms) fused softly at this weight.
+      round2_consensus_top_n:
+        type: integer
+        minimum: 3
+        maximum: 30
+        default: 10
+        description: Top-N rank cutoff for Round-1 dense and lexical intersection.
+      round2_consensus_docs:
+        type: integer
+        minimum: 2
+        maximum: 5
+        default: 2
+        description: Maximum high-consensus seed documents used to extract shared Round-2 expansion terms.
+      round2_max_terms:
+        type: integer
+        minimum: 1
+        maximum: 8
+        default: 3
+        description: Maximum shared co-occurring consensus terms appended to the Round-2 dense query.
+      round2_query_base:
+        type: string
+        enum: [full, core, entity]
+        default: core
+        description: Anchor query base prepended to Round-2 consensus expansion terms.
+      temporal_align_weight:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Boost for exact year/numeric alignment when the query explicitly specifies years or numbers.
+      temporal_conflict_penalty:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Soft penalty when the query specifies explicit year(s), a document mentions explicit year(s), and none match.
+      dateline_entity_weight:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Boost for query named entities appearing in inline wire datelines, titles, or opening lead sentences.
       query_adaptive_alpha:
         type: boolean
         default: false
