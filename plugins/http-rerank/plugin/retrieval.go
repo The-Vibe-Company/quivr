@@ -111,6 +111,9 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 			deadline = budgetDeadline
 		}
 	}
+	if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Add(-responseMargin).Before(deadline) {
+		deadline = parentDeadline.Add(-responseMargin)
+	}
 	var scores []float64
 	if time.Until(deadline) <= 0 {
 		err = errors.New("insufficient remaining search time for reranking")

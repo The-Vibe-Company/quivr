@@ -139,7 +139,7 @@ func TestServiceFailure(t *testing.T) {
 		{name: "duplicate index", cause: "one valid score", body: `[{"index":0,"score":0},{"index":0,"score":1},{"index":2,"score":2}]`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer "+key {
 					t.Error("missing expected Bearer authorization")
 				}
@@ -156,7 +156,9 @@ func TestServiceFailure(t *testing.T) {
 			defer server.Close()
 			req := searchRequest(server.URL+"/rerank", fmt.Sprintf(`,"timeout_ms":100,"fallback_on_error":%t`, test.fallback))
 			req.Limit = 1
-			answer, err := New().Search(context.Background(), req)
+			r := New().(retriever)
+			r.client.Transport = server.Client().Transport
+			answer, err := r.Search(context.Background(), req)
 			if test.fallback {
 				if err != nil || len(answer.Ranking) != 1 {
 					t.Fatalf("expected one fallback hit, got %+v, %v", answer, err)
@@ -234,5 +236,19 @@ func TestPreserveCanonicalPassage(t *testing.T) {
 	c.PassageText = c.Text
 	if got := document(c, cfg); got != "Headline" {
 		t.Errorf("title-only document = %q, want its only passage text preserved", got)
+	}
+}
+
+func TestBearerRequiresHTTPS(t *testing.T) {
+	t.Setenv("RERANKER_API_KEY", "test-api-key")
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("sent a request to a plain HTTP endpoint with authentication configured")
+	}))
+	defer server.Close()
+	req := searchRequest(server.URL+"/rerank", `,"fallback_on_error":false`)
+	_, err := New().Search(t.Context(), req)
+	searchErr, ok := err.(*quivrplugin.SearchError)
+	if !ok || !searchErr.Retryable || searchErr.Message != "reranker authentication requires HTTPS" {
+		t.Fatal("expected a safe error explaining the HTTPS requirement")
 	}
 }

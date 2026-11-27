@@ -47,6 +47,9 @@ func (r retriever) rerank(ctx context.Context, cfg configuration, query string, 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	if r.apiKey != "" {
+		if request.URL.Scheme != "https" {
+			return nil, errors.New("reranker authentication requires HTTPS")
+		}
 		request.Header.Set("Authorization", "Bearer "+r.apiKey)
 	}
 	response, err := r.client.Do(request)

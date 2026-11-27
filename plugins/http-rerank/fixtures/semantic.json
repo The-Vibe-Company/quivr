@@ -5,7 +5,7 @@
     "mode": "semantic",
     "limit": 1,
     "configuration": {
-      "endpoint": "http://127.0.0.1:1/rerank",
+      "endpoint": "https://127.0.0.1:0/rerank",
       "timeout_ms": 100
     },
     "candidates": [
