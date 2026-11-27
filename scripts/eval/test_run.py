@@ -44,6 +44,194 @@ class DatasetCLI(unittest.TestCase):
                 self.assertTrue(all(spec['tier'] == 'default' for spec in registry.values()))
 
 
+    def test_corpus_config_and_reuse_with_selected_plugins_and_judgment_sidecars(self):
+        profiles = {
+            'core.retrieve/default': ['default'],
+            'example.retrieve/default': [],
+            'example.retrieve/deep': ['deep'],
+            'other.retrieve/deep': [],
+        }
+        requests = []
+        coverage_checks = 0
+        extra_record = False
+
+        def call(client, method, path, body=None, **kwargs):
+            nonlocal coverage_checks
+            requests.append((method, path, body))
+            if path == '/v0/corpora/existing/vector-spaces':
+                coverage_checks += 1
+                ready = coverage_checks > 1
+                return 200, {'items': [{'role': 'served', 'query_modalities': ['text'],
+                                       'coverage': {'segments': 2 if ready else 1, 'total_segments': 2,
+                                                    'versions_covered': 2 if ready else 1}}]}
+            if path == '/v0/search/profiles':
+                return 200, {'items': [
+                    {'name': name.split('/')[1], 'full_name': name, 'aliases': aliases,
+                     'provider': {'plugin_id': name.split('/')[0]}}
+                    for name, aliases in profiles.items()]}
+            if path == '/v0/corpora':
+                return 201, {'corpus_id': 'existing'}
+            if path == '/v0/records/batch':
+                return 200, {'items': [{'receipt': {'receipt_id': 'receipt'}} for _ in body['items']]}
+            if path.startswith('/v0/changes?'):
+                return 200, {'next_cursor': 'cursor', 'has_more': False, 'items': [
+                    {'type': 'record.enrichment_available', 'resource': {'id': record}} for record in ('r1', 'r2')]}
+            if path.startswith('/v0/records?'):
+                if 'page_cursor=' not in path:
+                    return 200, {'items': [{'record_id': 'r1', 'source': {'record_key': 'd1'}}],
+                                 'next_page_cursor': 'second/page'}
+                self.assertIn('page_cursor=second%2Fpage', path)
+                records = [{'record_id': 'r2', 'source': {'record_key': 'd2'}}]
+                if extra_record:
+                    records.append({'record_id': 'r3', 'source': {'record_key': 'foreign'}})
+                return 200, {'items': records}
+            self.assertEqual((method, path), ('POST', '/v0/search'))
+            self.assertEqual(body['corpus_ids'], ['existing'])
+            if body['profile'] == 'example.retrieve/deep' and body['limit'] == 1 and body['mode'] == 'lexical':
+                return 422, {'code': 'unsupported_mode'}
+            return 200, {'retrieval_profile': {'version': body['profile']},
+                         'items': [{'record_id': 'r2'}, {'record_id': 'r1'}]}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            dataset = root / 'set'
+            trec.write(dataset, {doc: {'text': doc} for doc in ('d1', 'd2')},
+                       {'q1': 'find a record'}, {'q1': {'d1': 2, 'd2': 0}})
+            (dataset / 'qrels-extra.tsv').write_text('query-id\tcorpus-id\tscore\nq1\td1\t1\n')
+            (dataset / 'judgment-metadata.json').write_text('{"q1":{"d2":{"category":"wrong topic"}}}')
+            config = root / 'config.json'
+            config.write_text('{"fields":[{"name":"title","part_role":"title","type":"string",'
+                              '"roles":["search"],"analyzer":"french_light","boost":2}]}')
+            state = root / 'corpus-state.json'
+            output = root / 'output'
+            args = ['eval', '--sets', '', '--private', str(dataset), '--api-url', 'http://127.0.0.1',
+                    '--out', str(output), '--cache', str(root / 'cache'),
+                    '--profiles', 'default,example.retrieve/default', '--profiles', 'deep,other.retrieve/deep']
+            with mock.patch.dict('os.environ', {'QUIVR_EVAL_API_KEY': 'test-key'}, clear=True), \
+                 mock.patch.object(run.Client, 'call', autospec=True, side_effect=call), \
+                 mock.patch.object(run.time, 'sleep') as sleep, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with mock.patch('sys.argv', args + ['--corpus-config', str(config)]):
+                    run.main()
+                created = next(body for method, path, body in requests if path == '/v0/corpora')
+                self.assertEqual(created['retrieval']['fields'][0]['analyzer'], 'french_light')
+                self.assertEqual(created['retrieval']['fields'][0]['boost'], 2)
+
+                requests.clear()
+                with mock.patch('sys.argv', args + ['--corpus-id', 'existing', '--corpus-state', str(state)]):
+                    run.main()
+                self.assertEqual(sum(path.startswith('/v0/records?') for _, path, _ in requests), 2)
+                first_search = next(i for i, (_, path, _) in enumerate(requests) if path == '/v0/search')
+                self.assertEqual(sum(path.endswith('/vector-spaces') for _, path, _ in requests[:first_search]), 2)
+                sleep.assert_called_once()
+                self.assertFalse(any(path in ('/v0/corpora', '/v0/records/batch') for _, path, _ in requests))
+
+                requests.clear()
+                with mock.patch('sys.argv', args + ['--corpus-state', str(state)]):
+                    run.main()
+                self.assertTrue(all(path in ('/v0/search/profiles', '/v0/search', '/v0/corpora/existing/vector-spaces')
+                                    for _, path, _ in requests))
+                measured = {(body['profile'], body['mode'], body['limit']) for method, path, body in requests
+                            if path == '/v0/search' and body['query'] == 'find a record'}
+                self.assertEqual({profile for profile, _, _ in measured}, set(profiles))
+                self.assertIn(('example.retrieve/deep', 'semantic', 50), measured)
+                report = json.loads((output / 'report.json').read_text())
+                result = report['sets']['private']
+                self.assertTrue(result['ingestion']['reused'])
+                system = result['systems']['hybrid/example.retrieve/deep']
+                self.assertEqual(system['mean']['judged@10'], .2)
+                self.assertEqual(system['mean']['recall@50'], 1.)
+                self.assertEqual(system['auxiliary_qrels']['extra']['queries'], 1)
+                self.assertEqual(system['error_diagnostics']['categories'], {'wrong topic': 1})
+                markdown = (output / 'report.md').read_text()
+                for label in ('Judged@10', 'Recall@50', 'Auxiliary qrels', 'False-positive categories', 'wrong topic'):
+                    self.assertIn(label, markdown)
+
+                extra_record = True
+                with mock.patch('sys.argv', args + ['--corpus-id', 'existing']):
+                    with self.assertRaisesRegex(ValueError, 'exactly one active record'):
+                        run.main()
+
+                (dataset / 'topics.json').write_text('{}')
+                requests.clear()
+                with mock.patch('sys.argv', args + ['--corpus-state', str(state)]):
+                    with self.assertRaisesRegex(ValueError, 'fingerprint'):
+                        run.main()
+                self.assertFalse(any(path != '/v0/search/profiles' for _, path, _ in requests))
+
+
+class LocalStack(unittest.TestCase):
+    def test_ambient_reranker_key_requires_explicit_paid_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for sets, expected_key in [([], ''), (['--sets', 'miracl-fr'], 'test-key')]:
+                with self.subTest(sets=sets), \
+                     mock.patch('sys.argv', ['eval', '--out', directory, *sets]), \
+                     mock.patch.dict('os.environ', {'TYPESAFE_API_KEY': 'test-key'}, clear=True), \
+                     mock.patch.object(run, 'resolve_sets', return_value=[]), \
+                     mock.patch.object(run, 'start_stack', side_effect=RuntimeError('stop before starting')) as start, \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaisesRegex(RuntimeError, 'stop before starting'):
+                        run.main()
+                    self.assertEqual(start.call_args.kwargs['typesafe_key'], expected_key)
+
+    def test_candidate_pin_keeps_core_default_on_apple_silicon(self):
+        class Stack:
+            def __init__(self, name, source):
+                self.directory = directory
+                self.state = {'api_port': 1234, 'admin': 'test-key'}
+
+            def config(self):
+                for name in ('config.json', 'worker.json'):
+                    (self.directory / name).write_text(json.dumps({'plugins': [{'manifest': 'core.yaml'}],
+                                                                  'retrieval': {'coverage_refresh': '10s'}}))
+
+            def migrate(self):
+                self.config()
+
+            def compose(self, *args):
+                compose(*args)
+
+            def check_disk(self):
+                pass
+
+            def start_processes(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            (directory / 'candidate.yaml').touch()
+            pin_path = directory / 'pin.json'
+            pin_path.write_text('{"manifest":"candidate.yaml","endpoint":"http://127.0.0.1:1235",'
+                                '"configuration":{"weight":2}}')
+            compose = mock.Mock()
+            local = types.SimpleNamespace(Stack=Stack, GO='go', run=mock.Mock())
+            connector = types.SimpleNamespace(CORE=['core-ingest', 'core-retrieve'], select=mock.Mock(),
+                                              select_first_party=mock.Mock(), start_first_party=mock.Mock())
+            modules = {'local': local, 'connector_plugin': connector,
+                       'normalizer_plugin': types.SimpleNamespace(select=mock.Mock()),
+                       'subscription_plugin': types.SimpleNamespace(select=mock.Mock()),
+                       'prepare_embeddings': types.SimpleNamespace(prepare=mock.Mock()),
+                       'prepare_tokenizer': types.SimpleNamespace(prepare=lambda: {})}
+            with mock.patch.dict('sys.modules', modules), \
+                 mock.patch.object(run.platform, 'system', return_value='Darwin'), \
+                 mock.patch.object(run.platform, 'machine', return_value='arm64'), \
+                 mock.patch.object(run.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)) as docker:
+                run.start_stack({}, [], retrieval=run.load_retrieval_pin(pin_path))
+                docker.assert_called_once_with(['docker', 'info'], capture_output=True, timeout=15)
+                docker.side_effect = FileNotFoundError
+                with self.assertRaisesRegex(SystemExit, 'install and start Docker'):
+                    run.start_stack({}, [])
+            compose.assert_called_once_with('up', '-d', '--wait', '--wait-timeout', '300')
+            for name in ('config.json', 'worker.json'):
+                config = json.loads((directory / name).read_text())
+                self.assertEqual(config['retrieval'], {'coverage_refresh': '10s',
+                                                       'profiles': {'default': 'core.retrieve/default'}})
+                self.assertEqual(config['plugins'], [{'manifest': 'core.yaml'},
+                                                     {'manifest': str(directory / 'candidate.yaml'),
+                                                      'endpoint': 'http://127.0.0.1:1235',
+                                                      'configuration': {'weight': 2}}])
+
+
 class TimeSummary(unittest.TestCase):
     def test_encoding_share_is_over_the_searches_that_report_phases(self):
         older = {'client_ms': 500.0}  # an installation that reports no usage
@@ -145,8 +333,8 @@ class EvaluationSelection(unittest.TestCase):
                          'coverage': {'segments': int(clock[0] >= ready), 'versions_covered': int(clock[0] >= ready)}}
                         for owner, ready in [('plugin.eval', 2), ('plugin.other', 10)]]}
                 if path == '/v0/search/profiles':
-                    return 200, {'items': [{'name': 'default', 'full_name': 'core.retrieve/default', 'aliases': ['default'],
-                                            'provider': {'kind': 'plugin', 'plugin_id': 'core.retrieve', 'plugin_version': '0.1.0'}}]}
+                    return 200, {'items': [{'name': 'default', 'full_name': 'example.retrieve/default', 'aliases': ['default'],
+                                            'provider': {'kind': 'plugin', 'plugin_id': 'example.retrieve', 'plugin_version': '0.1.0'}}]}
                 return 200, {'retrieval_profile': {'name': 'default', 'version': 'engine/default'},
                              'items': [{'record_id': 'r1', 'version_id': 'v1', 'part_key': 'body', 'segment_id': 's1',
                                         'segmentation_id': 'sg1', 'projection_generation_id': 'pg1', 'rank': 1,
@@ -173,11 +361,12 @@ class EvaluationSelection(unittest.TestCase):
                 return {'r1': 'd1'}, {'searchable_with_vectors_seconds': 10}
             with mock.patch.object(run, 'ingest', side_effect=ingested) as ingestion, \
                  mock.patch.object(run.time, 'monotonic', side_effect=lambda: clock[0]), \
-                 mock.patch.object(scoring, 'score', return_value={'mean': {}, 'per_query': {}}), \
+                 mock.patch.object(scoring, 'score_set', return_value={'mean': {}, 'per_query': {}}), \
                  mock.patch.object(run, 'compare_within'), contextlib.redirect_stdout(io.StringIO()):
                 result, = run.measure_set([client], 'tiny', directory, 'run', options)
 
         self.assertEqual(client.corpora, 1)
+        self.assertEqual(result['systems']['hybrid/default']['profile'], 'example.retrieve/default')
         self.assertEqual(ingestion.call_count, 1)
         self.assertEqual(result['evaluation_ingestion'], {
             'evaluation/plugin.eval/model@1': {'owner_vectors_seconds': 2},
@@ -200,6 +389,7 @@ class EvaluationSelection(unittest.TestCase):
         evaluation = [body for body in searches if 'evaluation_plugin' in body]
         self.assertTrue(served)
         self.assertTrue(evaluation)
+        self.assertTrue(all(body['profile'] == 'example.retrieve/default' for body in evaluation))
         self.assertTrue(all('evaluation_space' not in body for body in served))
         self.assertTrue(all(body['evaluation_plugin'] in {'plugin.eval', 'plugin.other'} and body['evaluation_space'] == 'model@1'
                             for body in evaluation))
@@ -262,10 +452,10 @@ class EvaluationSelection(unittest.TestCase):
 
             with mock.patch.object(run.urllib.request, 'urlopen', side_effect=received) as transport:
                 for index in range(27):
-                    clients[index % 2].call('POST', '/v0/search', {'profile': 'deep'})
+                    clients[index % 2].call('POST', '/v0/search', {'profile': 'jev.rerank/deep'})
                 for client in clients:
                     with self.assertRaisesRegex(RuntimeError, 'run input token budget exhausted'):
-                        client.call('POST', '/v0/search', {'profile': 'deep'})
+                        client.call('POST', '/v0/search', {'profile': 'jev.rerank/deep'})
                 self.assertEqual(transport.call_count, 27)
                 clients[0].call('POST', '/v0/search', {'profile': 'default'})
             totals = budget.summary()
@@ -278,9 +468,9 @@ class EvaluationSelection(unittest.TestCase):
             count, verified = 0, True
             with mock.patch.object(run.urllib.request, 'urlopen', side_effect=received) as transport:
                 for _ in range(150):
-                    clients[0].call('POST', '/v0/search', {'profile': 'deep'})
+                    clients[0].call('POST', '/v0/search', {'profile': 'jev.rerank/deep'})
                 with self.assertRaisesRegex(RuntimeError, 'run input token budget exhausted'):
-                    clients[0].call('POST', '/v0/search', {'profile': 'deep'})
+                    clients[0].call('POST', '/v0/search', {'profile': 'jev.rerank/deep'})
                 self.assertEqual(transport.call_count, 150)
             self.assertEqual(clients[0].budget.summary()['actual_input_tokens'], 150_000)
 
@@ -339,20 +529,19 @@ class EvaluationSelection(unittest.TestCase):
                     self.corpora += 1
                     return 201, {'corpus_id': 'corpus', 'name': 'Example corpus', 'effective_retrieval': {}}
                 if path == '/v0/search/profiles':
-                    provider = {'kind': 'plugin', 'plugin_id': 'jev.rerank', 'plugin_version': '0.1.0'}
-                    # The shape of SearchProfileDescription in contracts/http/v0/openapi.yaml: no version field.
-                    return 200, {'items': [{'name': name, 'full_name': 'jev.rerank/' + name,
-                                           'aliases': [name], 'provider': provider}
-                                          for name in ['deep', 'default']]}
+                    return 200, {'items': [
+                        {'name': name, 'full_name': f'{plugin}/{name}', 'aliases': [name],
+                         'provider': {'kind': 'plugin', 'plugin_id': plugin, 'plugin_version': '0.1.0'}}
+                        for plugin, name in [('jev.rerank', 'deep'), ('core.retrieve', 'default')]]}
                 config = dict(self.stack.active) if self.stack else {}
                 self.searches.append({**body, 'configuration': config})
-                usage = {'rounds': 1, 'elapsed_ms': 0, 'paid_calls': int(body['profile'] == 'deep'), 'cost_cents': .1 if body['profile'] == 'deep' else 0}
-                if body['profile'] == 'deep':
+                usage = {'rounds': 1, 'elapsed_ms': 0, 'paid_calls': int(body['profile'] == 'jev.rerank/deep'), 'cost_cents': .1 if body['profile'] == 'jev.rerank/deep' else 0}
+                if body['profile'] == 'jev.rerank/deep':
                     with self.jev_log.open('a') as output:
                         output.write(json.dumps({'event': 'jev_rerank', 'profile': 'deep', **usage,
                                                  'input_tokens': 100, 'pairs': config.get('candidate_count', 30),
                                                  'cache_hits': 0, 'fallback': False}) + '\n')
-                return 200, {'retrieval_profile': {'name': body['profile'], 'version': 'plugin:jev.rerank@0.1.0/' + body['profile']},
+                return 200, {'retrieval_profile': {'name': body['profile'].split('/')[-1], 'version': 'test-version'},
                              'items': [{'record_id': 'r1', 'version_id': 'v1', 'part_key': 'body', 'segment_id': 's1',
                                         'segmentation_id': 'sg1', 'projection_generation_id': 'pg1', 'rank': 1,
                                         'excerpt': {'text': 'a record', 'start': 0, 'end': 8, 'coordinate_system': 'unicode_codepoint'},
@@ -369,12 +558,12 @@ class EvaluationSelection(unittest.TestCase):
                 options = types.SimpleNamespace(ingest_timeout=1, stall=1, paid_calls=0, live_paid=enabled)
                 scores = []
 
-                def capture_scores(qrels, ranking):
+                def capture_scores(data, ranking):
                     scores.append(dict(ranking))
                     return {'mean': {}, 'per_query': {}}
 
                 with mock.patch.object(run, 'ingest', return_value=({'r1': 'd1'}, {})), \
-                     mock.patch.object(scoring, 'score', side_effect=capture_scores), \
+                     mock.patch.object(scoring, 'score_set', side_effect=capture_scores), \
                      mock.patch.object(jev, 'restart'), \
                      mock.patch.object(run, 'compare_within'), contextlib.redirect_stdout(io.StringIO()):
                     before, result = run.measure_set([baseline, current], 'miracl-fr', directory, 'run', options, allow_paid=allow_paid)
@@ -382,7 +571,7 @@ class EvaluationSelection(unittest.TestCase):
                 self.assertEqual((before['queries'], result['queries']), (len(selected), len(selected)))
                 self.assertEqual((baseline.corpora, current.corpora), (1, 1))
                 self.assertEqual(set(before['systems']), {'lexical/default', 'semantic/default', 'hybrid/default'})
-                self.assertTrue(all(search['profile'] == 'default' for search in baseline.searches))
+                self.assertTrue(all(search['profile'] == 'core.retrieve/default' for search in baseline.searches))
                 for value in before['systems'].values():
                     self.assertEqual(value['scored_limit'], 10 if enabled and allow_paid else 50)
                 for name, value in result['systems'].items():
@@ -390,18 +579,18 @@ class EvaluationSelection(unittest.TestCase):
                         self.assertEqual(value['scored_limit'], 10 if enabled and allow_paid else 50)
                 if not enabled or not allow_paid:
                     self.assertEqual(set(result['systems']), set(before['systems']))
-                    self.assertIn('TYPESAFE_API_KEY absent' if allow_paid else 'private', result['profiles']['refused']['deep'])
-                    self.assertTrue(all(search['profile'] == 'default' for search in current.searches))
+                    self.assertIn('TYPESAFE_API_KEY absent' if allow_paid else 'restricted', result['profiles']['refused']['jev.rerank/deep'])
+                    self.assertTrue(all(search['profile'] == 'core.retrieve/default' for search in current.searches))
                     self.assertEqual(stack.started, [])
                     continue
                 deep = [(name, value) for name, value in result['systems'].items() if name.startswith('hybrid/deep-')]
                 self.assertEqual(len(deep), 1)
                 self.assertEqual(len(stack.started), 1)
                 scored_searches = [search for search in current.searches if search['query'] in queries.values()]
-                first_deep = next(index for index, search in enumerate(scored_searches) if search['profile'] == 'deep')
-                self.assertTrue(all(search['profile'] == 'default' for search in scored_searches[:first_deep]))
+                first_deep = next(index for index, search in enumerate(scored_searches) if search['profile'] == 'jev.rerank/deep')
+                self.assertTrue(all(search['profile'] == 'core.retrieve/default' for search in scored_searches[:first_deep]))
                 matrix_searches = scored_searches[first_deep:]
-                self.assertTrue(all(search['profile'] == 'deep' and search['mode'] == 'hybrid' and search['limit'] == 10
+                self.assertTrue(all(search['profile'] == 'jev.rerank/deep' and search['mode'] == 'hybrid' and search['limit'] == 10
                                     for search in matrix_searches))
                 self.assertEqual(len(matrix_searches), len(selected))
                 self.assertTrue(all(search['configuration'] == stack.started[0] for search in matrix_searches))
