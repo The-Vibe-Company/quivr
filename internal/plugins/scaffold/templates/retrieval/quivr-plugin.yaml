@@ -1,0 +1,49 @@
+# A retrieval plugin written with the Quivr Go plugin SDK. Its default profile
+# asks for keyword and vector candidates and fuses them by reciprocal rank; its
+# composed profile ranks core.retrieve's default ranking again, putting hits
+# that contain every query word first. Check it with:
+#   quivr plugin inspect . && quivr plugin test .
+id: __PLUGIN_ID__
+version: 0.1.0
+description: Keyword and vector candidates fused by reciprocal rank, or core.retrieve's ranking with full query matches first.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  # Profile candidates (PrimitiveProfile) need Plugin API 0.12.0 or later and
+  # their mode override 0.13.0.
+  plugin_api: ">=0.13.0 <1.0.0"
+# The composed profile asks for core.retrieve's default profile; the engine
+# refuses a profile request this list does not declare.
+requires:
+  - plugin: core.retrieve
+    version: ">=1.2.0 <2.0.0"
+    profiles: [default]
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Keywords and the served vector space, fused by reciprocal rank.
+        max_latency_ms: 1000
+        max_cost_cents: 0
+      composed:
+        description: core.retrieve's default ranking, with hits that contain every query word first.
+        max_latency_ms: 1500
+        max_cost_cents: 0
+    limits:
+      # Round 1 asks for candidates; round 2 returns the ranking.
+      max_rounds: 2
+      # Keywords and vectors in the default profile; one profile request in composed.
+      max_requests: 2
+      max_candidates: 50
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      candidate_count:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+        description: Candidates asked per request; the ranking still returns at most the search limit.
+run:
+  command: [go, run, .]

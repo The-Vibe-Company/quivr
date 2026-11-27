@@ -1,6 +1,7 @@
-// Package scaffold writes the Python plugin templates embedded in the quivr
-// binary (`quivr plugin init`): normalizers, alert rules and connectors.
-// The templates depend only on the Quivr Plugin SDK (sdks/python).
+// Package scaffold writes the plugin templates embedded in the quivr binary
+// (`quivr plugin init`): Python normalizers, alert rules and connectors, which
+// depend only on the Quivr Plugin SDK (sdks/python), and Go retrieval plugins,
+// which depend only on the Go plugin SDK (sdks/go).
 package scaffold
 
 import (
@@ -22,15 +23,20 @@ var templates embed.FS
 const (
 	KindConnector    = "connector"
 	KindNormalizer   = "normalizer"
+	KindRetrieval    = "retrieval"
 	KindSubscription = "subscription"
 )
 
 // Kinds lists the template kinds; the first is the default.
-var Kinds = []string{KindNormalizer, KindSubscription, KindConnector}
+var Kinds = []string{KindNormalizer, KindSubscription, KindConnector, KindRetrieval}
 
 const (
 	placeholderID     = "__PLUGIN_ID__"
 	placeholderModule = "__PLUGIN_MODULE__"
+	// templateSuffix keeps Go sources and go.mod out of the quivr module: a
+	// template's go.mod would end the embedded tree, and its .go files would
+	// build as part of this module. Write drops the suffix.
+	templateSuffix = ".tmpl"
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
@@ -136,7 +142,7 @@ func write(dir, id, kind string, push bool) ([]string, error) {
 		if d.IsDir() || strings.HasSuffix(p, ".pyc") {
 			return nil
 		}
-		rel := replace.Replace(strings.TrimPrefix(p, root+"/"))
+		rel := strings.TrimSuffix(replace.Replace(strings.TrimPrefix(p, root+"/")), templateSuffix)
 		data, err := templates.ReadFile(p)
 		if err != nil {
 			return err

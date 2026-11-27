@@ -1,0 +1,3 @@
+# Binaries built with `go build`.
+/__PLUGIN_ID__
+*.test

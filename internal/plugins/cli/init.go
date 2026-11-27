@@ -83,6 +83,12 @@ func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintf(stdout, "Created %s plugin %s in %s (%d files).\n\nNext steps:\n", kind, name, dir, len(files))
 	fmt.Fprintf(stdout, "  cd %s\n", filepath.Clean(dir))
+	if kind == scaffold.KindRetrieval {
+		fmt.Fprintln(stdout, "  go test ./...")
+		fmt.Fprintln(stdout, "  quivr plugin inspect .")
+		fmt.Fprintln(stdout, "  quivr plugin test")
+		return ExitOK
+	}
 	fmt.Fprintln(stdout, "  python3 -m venv .venv && . .venv/bin/activate")
 	fmt.Fprintln(stdout, "  pip install -e <quivr checkout>/sdks/python   # the Quivr Plugin SDK")
 	fmt.Fprintln(stdout, "  python3 -m unittest discover -s tests")

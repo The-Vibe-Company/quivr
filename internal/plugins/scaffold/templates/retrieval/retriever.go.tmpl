@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"unicode"
+
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+)
+
+// rrfK damps the weight of the first ranks in reciprocal rank fusion.
+const rrfK = 60
+
+// baseProfile is the profile the composed profile ranks again. Its plugin and
+// profile must be declared under requires in quivr-plugin.yaml.
+const baseProfile = "core.retrieve/default"
+
+// configuration is validated against the manifest's schema before Search
+// runs; defaults are applied here.
+type configuration struct {
+	CandidateCount int `json:"candidate_count"`
+}
+
+// retriever answers a search in two rounds: round 1 asks the engine for
+// candidates, round 2 ranks the candidates it served. It is deterministic:
+// the same request yields the same answer.
+type retriever struct{}
+
+func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
+	config := configuration{CandidateCount: 20}
+	if len(req.Configuration) > 0 {
+		if err := json.Unmarshal(req.Configuration, &config); err != nil {
+			return nil, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+		}
+	}
+	if req.Round == 1 {
+		if req.Profile == "composed" {
+			// A profile request returns another plugin's full ranking as candidates.
+			return quivrplugin.Ask(quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveProfile,
+				Profile: &quivrplugin.ProfileCandidates{Name: baseProfile, Limit: config.CandidateCount}}), nil
+		}
+		return quivrplugin.Ask(firstRequests(req, config.CandidateCount)...), nil
+	}
+	if req.Profile == "composed" {
+		return quivrplugin.Rank(fullMatchesFirst(req)...), nil
+	}
+	return quivrplugin.Rank(fuse(req)...), nil
+}
+
+// firstRequests follows the search mode: keywords, vectors in the served
+// space, or both. Without a served space it asks for keywords only.
+func firstRequests(req *quivrplugin.SearchRequest, k int) []quivrplugin.CandidateRequest {
+	keywords := quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveBM25, Field: quivrplugin.FieldSource, QueryText: req.Query.Text, K: k}
+	space := req.ServedSpace()
+	if space == nil || req.Query.Mode == "lexical" {
+		return []quivrplugin.CandidateRequest{keywords}
+	}
+	vectors := quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveNearVector, Space: space.ID, QueryText: req.Query.Text, K: k}
+	if req.Query.Mode == "semantic" {
+		return []quivrplugin.CandidateRequest{vectors}
+	}
+	return []quivrplugin.CandidateRequest{keywords, vectors}
+}
+
+// fuse ranks every served candidate by the sum of 1/(rrfK+rank) over the
+// lists that served it; equal scores rank by segment id.
+func fuse(req *quivrplugin.SearchRequest) []quivrplugin.RankedHit {
+	scores := map[string]float64{}
+	ranks := map[string][]string{}
+	for _, s := range req.Served {
+		label := map[string]string{quivrplugin.PrimitiveBM25: "keywords", quivrplugin.PrimitiveNearVector: "vectors"}[s.Request.Primitive]
+		for i, c := range s.Candidates {
+			scores[c.SegmentID] += 1 / float64(rrfK+i+1)
+			ranks[c.SegmentID] = append(ranks[c.SegmentID], fmt.Sprintf("#%d by %s", i+1, label))
+		}
+	}
+	ids := make([]string, 0, len(scores))
+	for id := range scores {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if scores[ids[i]] != scores[ids[j]] {
+			return scores[ids[i]] > scores[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	hits := []quivrplugin.RankedHit{}
+	for _, id := range ids[:min(len(ids), req.Limit)] {
+		hits = append(hits, quivrplugin.RankedHit{SegmentID: id, Score: scores[id], Explanation: strings.Join(ranks[id], ", ")})
+	}
+	return hits
+}
+
+// fullMatchesFirst keeps the base profile's order, but moves the candidates
+// that contain every query word before the others.
+func fullMatchesFirst(req *quivrplugin.SearchRequest) []quivrplugin.RankedHit {
+	query := words(req.Query.Text)
+	var full, partial []quivrplugin.RankedHit
+	seen := map[string]bool{}
+	rank := 0
+	for _, s := range req.Served {
+		for _, c := range s.Candidates {
+			if seen[c.SegmentID] {
+				continue
+			}
+			seen[c.SegmentID] = true
+			rank++
+			text := words(c.Text)
+			matched := len(query) > 0
+			for w := range query {
+				matched = matched && text[w]
+			}
+			hit := quivrplugin.RankedHit{SegmentID: c.SegmentID, Explanation: fmt.Sprintf("#%d by %s", rank, baseProfile)}
+			if matched {
+				hit.Explanation = "every query word, " + hit.Explanation
+				full = append(full, hit)
+			} else {
+				partial = append(partial, hit)
+			}
+		}
+	}
+	hits := append(full, partial...)
+	hits = hits[:min(len(hits), req.Limit)]
+	for i := range hits {
+		hits[i].Score = 1 / float64(i+1)
+	}
+	return hits
+}
+
+// words is the set of lowercase words of a text.
+func words(text string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) }) {
+		out[w] = true
+	}
+	return out
+}
