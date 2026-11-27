@@ -1,0 +1,95 @@
+id: http.rerank
+version: 0.1.0
+description: Rerank retrieval candidates using an HTTP cross-encoder.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.21.0"
+requires:
+  - plugin: core.retrieve
+    version: ">=1.1.0 <2.0.0"
+    profiles: [default, deep]
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Rerank the base profile's shortlist with an HTTP cross-encoder.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+      deep:
+        description: Rerank the base profile's shortlist within the deep search budget.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      max_rounds: 3
+      max_requests: 8
+      max_candidates: 100
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    required: [endpoint]
+    properties:
+      endpoint:
+        type: string
+        format: uri
+        # The authority excludes user information. Ports are 0–65535 and
+        # percent escapes in the path or query must be complete.
+        pattern: '^https?://(?:\[[0-9A-Fa-f:.]+(?:%25[-A-Za-z0-9._~]+)?\]|[-A-Za-z0-9._~]+)(?::0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?](?:%[0-9A-Fa-f]{2}|[^%#\s])*)?$'
+        description: Full HTTP(S) URL of the rerank service.
+      protocol:
+        type: string
+        enum: [tei, cohere]
+        default: tei
+      model:
+        type: string
+        pattern: '\S'
+        description: Model name required by the Cohere-compatible protocol.
+      base_profile:
+        type: string
+        enum: [core.retrieve/default, core.retrieve/deep]
+        default: core.retrieve/default
+      candidate_count:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+        description: Shortlist depth, capped at the Plugin API profile request limit of 50.
+      ranking:
+        type: string
+        enum: [rerank_only, rrf, linear]
+        default: rerank_only
+      rerank_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.7
+      max_doc_chars:
+        type: integer
+        minimum: 200
+        maximum: 32000
+        default: 4000
+      include_title:
+        type: boolean
+        default: true
+        description: Prepend the title when the candidate has a title anchor and separate passage text.
+      timeout_ms:
+        type: integer
+        minimum: 100
+        maximum: 10000
+        default: 2500
+      fallback_on_error:
+        type: boolean
+        default: true
+    if:
+      properties:
+        protocol:
+          const: cohere
+      required: [protocol]
+    then:
+      required: [model]
+secrets:
+  - name: RERANKER_API_KEY
+    required: false
+    description: Optional Bearer token for an HTTPS rerank endpoint.
+run:
+  command: [go, run, .]
