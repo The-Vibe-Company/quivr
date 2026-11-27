@@ -3,7 +3,7 @@
 # configurable weight, depth and fusion. Every stack pins it unless another retrieval
 # plugin is pinned. Check it with: quivr plugin inspect . && quivr plugin test .
 id: core.retrieve
-version: 1.2.0
+version: 1.3.0
 description: Keywords (BM25F on title and body), the served vector space, or both with configurable weight, candidate depth and fusion; defaults to alpha 0.5 by relative score.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
@@ -45,8 +45,20 @@ configuration:
         description: Candidates requested per served space (one request for lexical); defaults to the search limit. Final ranking still returns at most the search limit.
       hybrid_fusion:
         type: string
-        enum: [relative_score, ranked]
+        enum: [relative_score, ranked, dbsf, min_max, theoretical_min_max, reciprocal_rank]
         default: relative_score
-        description: Weaviate hybrid fusion; relative_score normalizes each side's scores before weighting, ranked uses reciprocal rank fusion (RRF, constant 60). Used only in hybrid mode.
+        description: >-
+          Hybrid fusion. relative_score and ranked ask the index for one hybrid list (relative_score normalizes each side's
+          scores before weighting, ranked uses reciprocal rank fusion with constant 60). dbsf, min_max, theoretical_min_max
+          and reciprocal_rank ask for keywords and vectors separately and fuse them in the plugin: distribution-based score
+          fusion (mean plus or minus 3 standard deviations, clamped to 0-1), min-max convex combination, convex combination
+          normalized from the score's theoretical lower bound (0 for BM25, -1 for cosine), or weighted reciprocal rank fusion
+          with constant rrf_k. Used only in hybrid mode.
+      rrf_k:
+        type: number
+        minimum: 1
+        maximum: 1000
+        default: 60
+        description: Rank constant of the reciprocal_rank fusion; smaller values favour the top of each list. Used only with hybrid_fusion reciprocal_rank.
 run:
   command: [go, run, .]

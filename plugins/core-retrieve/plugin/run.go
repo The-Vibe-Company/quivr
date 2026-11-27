@@ -25,11 +25,49 @@ type configuration struct {
 	DenseWeight    float64 `json:"dense_weight"`
 	CandidateCount int     `json:"candidate_count"`
 	HybridFusion   string  `json:"hybrid_fusion"`
+	RRFK           float64 `json:"rrf_k"`
+}
+
+// Two-leg fusions: the plugin asks for keywords and vectors separately and
+// fuses the two lists itself, instead of asking the index for a hybrid list.
+const (
+	fusionDBSF              = "dbsf"
+	fusionMinMax            = "min_max"
+	fusionTheoreticalMinMax = "theoretical_min_max"
+	fusionRRF               = "reciprocal_rank"
+	defaultRRFK             = 60
+)
+
+func twoLeg(fusion string) bool {
+	switch fusion {
+	case fusionDBSF, fusionMinMax, fusionTheoreticalMinMax, fusionRRF:
+		return true
+	}
+	return false
+}
+
+func (c *configuration) load(req *quivrplugin.SearchRequest) error {
+	*c = configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score", RRFK: defaultRRFK}
+	if len(req.Configuration) > 0 {
+		if err := json.Unmarshal(req.Configuration, c); err != nil {
+			return quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+		}
+	}
+	return nil
 }
 
 type retriever struct{}
 
 func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
+	if req.Query.Mode == "hybrid" && req.ServedSpace() != nil {
+		var config configuration
+		if err := config.load(req); err != nil {
+			return nil, err
+		}
+		if twoLeg(config.HybridFusion) {
+			return searchTwoLeg(req, config), nil
+		}
+	}
 	pending := []quivrplugin.SearchSpace{}
 	if req.Query.Mode != "lexical" {
 		requested := map[string]bool{}
@@ -104,11 +142,9 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 // request is the one candidate request of a search: keywords on the title
 // and body for lexical, the served space for semantic, both for hybrid.
 func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, error) {
-	config := configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score"}
-	if len(req.Configuration) > 0 {
-		if err := json.Unmarshal(req.Configuration, &config); err != nil {
-			return quivrplugin.CandidateRequest{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
-		}
+	var config configuration
+	if err := config.load(req); err != nil {
+		return quivrplugin.CandidateRequest{}, err
 	}
 	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount, GroupBy: "record"}
 	if req.Query.Mode == "lexical" {

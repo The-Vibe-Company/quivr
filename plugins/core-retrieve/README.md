@@ -29,7 +29,8 @@ Set these keys in the plugin pin's `configuration`; both core profiles use them.
 | --- | --- |
 | `dense_weight` | Hybrid vector weight (Weaviate `alpha`), 0–1; default 0.5. Keyword weight is `1 - dense_weight`. |
 | `candidate_count` | Candidates per served space, or one lexical request, 1–100; default the search limit. A smaller value can return a shorter page. |
-| `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses reciprocal rank fusion with constant 60. |
+| `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses reciprocal rank fusion with constant 60. Both ask the index for one `hybrid` list. The two-leg fusions below ask instead for one `bm25` request and one `near_vector` request per served space in the same round, and fuse them in the plugin per Record (vector weight `dense_weight`, the best space counting once, a Record missing from a leg scoring 0 on it): `dbsf` (distribution-based score fusion: each list mapped from mean − 3 sd .. mean + 3 sd to 0..1, clamped), `min_max` (convex combination of min-max normalized scores), `theoretical_min_max` (convex combination normalized from the score's theoretical lower bound, 0 for BM25 and −1 for cosine, to the list maximum) and `reciprocal_rank` (weighted reciprocal rank fusion with constant `rrf_k`). |
+| `rrf_k` | Rank constant of `reciprocal_rank`, 1–1000; default 60. Smaller values favour the top of each list. |
 
 Weight and fusion affect hybrid mode only; ranking remains capped by the search limit.
 Omitting settings preserves default request bytes. See

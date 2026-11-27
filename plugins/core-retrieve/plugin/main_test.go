@@ -79,6 +79,10 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 		{`{"candidate_count":1.5}`, false, false}, {`{"candidate_count":"30"}`, false, false},
 		{`{"candidate_count":null}`, false, false}, {`{"hybrid_fusion":"rrf"}`, false, false},
 		{`{"hybrid_fusion":null}`, false, false}, {`{"alpha":0.5}`, false, false},
+		{`{"dense_weight":0.7,"candidate_count":100,"hybrid_fusion":"reciprocal_rank","rrf_k":10}`, true, false},
+		{`{"hybrid_fusion":"dbsf"}`, true, false}, {`{"hybrid_fusion":"min_max"}`, true, false},
+		{`{"hybrid_fusion":"theoretical_min_max"}`, true, false},
+		{`{"rrf_k":0}`, false, false}, {`{"rrf_k":1001}`, false, false}, {`{"rrf_k":"10"}`, false, false},
 	} {
 		var spaces []quivrplugin.SearchSpace
 		if err := json.Unmarshal(fixtureSpaces, &spaces); err != nil {
