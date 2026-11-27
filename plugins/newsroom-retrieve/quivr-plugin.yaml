@@ -1,0 +1,80 @@
+# Fast, zero-cost newsroom retrieval plugin combining two parallel index legs
+# (record-grouped BM25 + ungrouped dense near_vector) with Bruch min-max convex
+# fusion (plus optional DBSF/RRF) and two O(1) inverted-pyramid aboutness signals:
+#   1. Title + Lead (first 250 chars) in-pool IDF-weighted query-term coverage
+#   2. Multi-passage concentration (log-saturated count of distinct dense chunks)
+id: newsroom.retrieve
+version: 0.1.0
+description: Fast two-leg hybrid retrieval with Bruch convex fusion and O(1) inverted-pyramid editorial aboutness signals.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.21.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Two-leg BM25 + ungrouped dense fusion with title/lead IDF coverage and multi-passage concentration.
+        max_latency_ms: 500
+        max_cost_cents: 0
+    limits:
+      max_rounds: 3
+      max_requests: 8
+      max_candidates: 100
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      fusion:
+        type: string
+        enum: [convex, dbsf, rrf]
+        default: convex
+        description: Two-leg score fusion method (Bruch min-max convex, DBSF mean+/-3sigma, or weighted RRF).
+      dense_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.65
+        description: Weight alpha on the dense leg; lexical weight is 1 - alpha.
+      candidate_count:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 60
+        description: Candidates requested from the record-grouped lexical BM25 leg.
+      dense_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+        description: Passages requested from the ungrouped dense near_vector leg (supplies MaxP and multi-passage concentration in a single call).
+      dbsf_clamp:
+        type: boolean
+        default: false
+        description: Clamp DBSF scores 0.5 + (s - mu)/(6*sigma) to [0, 1].
+      rrf_k:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 60
+        description: Rank constant k for RRF fusion.
+      title_lead_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.12
+        description: Additive weight on in-pool IDF-weighted query content term coverage in headline and lead.
+      lead_chars:
+        type: integer
+        minimum: 50
+        maximum: 2000
+        default: 250
+        description: Number of leading body characters treated as the inverted-pyramid lead.
+      concentration_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.12
+        description: Additive weight on log-saturated multi-passage hit count in the ungrouped dense pool (zero penalty on single-chunk records).
+run:
+  command: [go, run, .]
