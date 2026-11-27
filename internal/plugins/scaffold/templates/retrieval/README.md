@@ -32,6 +32,10 @@ quivr plugin inspect .
 quivr plugin test .
 ```
 
+The module path is `example.com/__PLUGIN_ID__`, a placeholder that cannot
+clash with a standard library package; rename it to where you host the code
+(`go mod edit -module <path>`).
+
 `quivr plugin test` starts the plugin with `go run .`, replays the normative
 and own fixtures under every profile they name, and certifies the answers with
 the engine's rules. Change the SDK version with

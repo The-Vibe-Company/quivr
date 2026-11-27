@@ -144,8 +144,10 @@ func TestRetrievalTemplateIsCertified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(t.TempDir(), "my-retriever")
-	if _, err := scaffold.Write(dir, "my-retriever", scaffold.KindRetrieval); err != nil {
+	// Named after a standard library package: the plugin id must not become
+	// a module path the go command resolves to the standard library.
+	dir := filepath.Join(t.TempDir(), "sort")
+	if _, err := scaffold.Write(dir, "sort", scaffold.KindRetrieval); err != nil {
 		t.Fatal(err)
 	}
 	// The plugin process inherits this environment through `go run .`.

@@ -12,8 +12,9 @@ import (
 
 const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--push] [--dir <path>]"
 
-// initCommand writes an embedded Python plugin template: a normalizer (the
-// default) or an alert rule (--kind subscription).
+// initCommand writes an embedded plugin template: a Python normalizer (the
+// default), alert rule (--kind subscription) or connector (--kind connector),
+// or a Go retrieval plugin (--kind retrieval).
 func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	var name, dir string
 	var push bool
