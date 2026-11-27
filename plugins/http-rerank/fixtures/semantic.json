@@ -1,0 +1,35 @@
+{
+  "description": "semantic mode composes a base profile and preserves its ranking when the endpoint is unavailable.",
+  "retrieval": {
+    "query": "rail service",
+    "mode": "semantic",
+    "limit": 1,
+    "configuration": {
+      "endpoint": "http://127.0.0.1:1/rerank",
+      "timeout_ms": 100
+    },
+    "candidates": [
+      {
+        "segment_id": "a",
+        "record_id": "rail",
+        "text": "Rail service resumes."
+      },
+      {
+        "segment_id": "b",
+        "record_id": "station",
+        "text": "The station opens."
+      }
+    ],
+    "order": {
+      "profile": [
+        "a",
+        "b"
+      ]
+    },
+    "expect": {
+      "top": [
+        "a"
+      ]
+    }
+  }
+}
