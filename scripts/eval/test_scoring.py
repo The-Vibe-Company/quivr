@@ -34,6 +34,7 @@ class Score(unittest.TestCase):
         self.assertAlmostEqual(s['mean']['ndcg@10'], 0.8597 / 3, places=4)
         self.assertAlmostEqual(s['mean']['recall@10'], 1 / 3)
         self.assertAlmostEqual(s['mean']['mrr@10'], 1 / 3)
+        self.assertEqual(set(s['mean']), {'ndcg@10', 'recall@10', 'mrr@10'})
         # Independent oracle guards the fixed scorer's gain, cutoff, empty
         # results, unjudged hits and duplicate-document semantics.
         rng = random.Random(0)
@@ -62,6 +63,18 @@ class Score(unittest.TestCase):
         self.assertFalse(c['significant'])
         same = scoring.paired({'a': 0.5, 'b': 0.2}, {'a': 0.5, 'b': 0.2})
         self.assertEqual((same['delta'], same['p_value'], same['significant']), (0.0, 1.0, False))
+
+
+class DiagnosticScores(unittest.TestCase):
+    def test_recall_at_50_and_judged_at_10_use_distinct_cutoffs(self):
+        qrels = {'q1': {'zero': 0, 'early': 1, 'at-50': 2, 'at-51': 1}, 'q2': {'absent': 2}}
+        ranking = {'q1': ['zero', 'early'] + [f'x{i}' for i in range(47)] + ['at-50', 'at-51']}
+        result = scoring.score(qrels, ranking, diagnostics=True)
+        self.assertEqual(result['per_query']['recall@10'], {'q1': 1 / 3, 'q2': 0})
+        self.assertEqual(result['per_query']['recall@50'], {'q1': 2 / 3, 'q2': 0})
+        self.assertEqual(result['per_query']['judged@10'], {'q1': .2, 'q2': 0})
+        self.assertEqual(result['mean']['recall@50'], 1 / 3)
+        self.assertEqual(result['mean']['judged@10'], .1)
 
 
 if __name__ == '__main__':
