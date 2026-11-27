@@ -1,0 +1,32 @@
+{
+  "description": "Semantic mode ranks using the near_vector leg.",
+  "retrieval": {
+    "query": "harbour strike",
+    "mode": "semantic",
+    "limit": 2,
+    "candidates": [
+      {
+        "segment_id": "seg_harbour",
+        "record_id": "rec_harbour",
+        "text": "Dockers went on strike and the harbour stayed closed."
+      },
+      {
+        "segment_id": "seg_ferry",
+        "record_id": "rec_ferry",
+        "text": "Ferries stayed in the harbour all day."
+      }
+    ],
+    "order": {
+      "near_vector": [
+        "seg_harbour",
+        "seg_ferry"
+      ]
+    },
+    "expect": {
+      "top": [
+        "seg_harbour",
+        "seg_ferry"
+      ]
+    }
+  }
+}

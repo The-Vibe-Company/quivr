@@ -1,0 +1,42 @@
+{
+  "description": "Hybrid mode fuses near_vector and bm25 legs via DBSF.",
+  "retrieval": {
+    "query": "harbour strike",
+    "mode": "hybrid",
+    "limit": 3,
+    "candidates": [
+      {
+        "segment_id": "seg_harbour",
+        "record_id": "rec_harbour",
+        "text": "Dockers went on strike and the harbour stayed closed."
+      },
+      {
+        "segment_id": "seg_ferry",
+        "record_id": "rec_ferry",
+        "text": "Ferries stayed in the harbour all day."
+      },
+      {
+        "segment_id": "seg_rail",
+        "record_id": "rec_rail",
+        "text": "The strike spread to the rail network by noon."
+      }
+    ],
+    "order": {
+      "near_vector": [
+        "seg_harbour",
+        "seg_rail",
+        "seg_ferry"
+      ],
+      "bm25": [
+        "seg_harbour",
+        "seg_ferry",
+        "seg_rail"
+      ]
+    },
+    "expect": {
+      "top": [
+        "seg_harbour"
+      ]
+    }
+  }
+}
