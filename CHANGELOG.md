@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.0](https://github.com/The-Vibe-Company/quivr/compare/v2.1.1...v2.2.0) (2026-11-27)
+
+
+### Features
+
+* **eval:** add TREC scoring and judgment diagnostics ([#4036](https://github.com/The-Vibe-Company/quivr/issues/4036)) ([0acaf49](https://github.com/The-Vibe-Company/quivr/commit/0acaf492c1fe1dcffd69f01b8498e3101d7bce06))
+* **eval:** support corpus reuse, corpus config, and multi-plugin retrieval evaluation ([#4040](https://github.com/The-Vibe-Company/quivr/issues/4040)) ([066e78d](https://github.com/The-Vibe-Company/quivr/commit/066e78df719f25b195ccd069c2d232e71c1e0659))
+* **plugins:** add generic HTTP cross-encoder reranking retrieval plugin ([#4037](https://github.com/The-Vibe-Company/quivr/issues/4037)) ([85a2f02](https://github.com/The-Vibe-Company/quivr/commit/85a2f028a62357377c5c8d47c0488787bc8209c9))
+* **plugins:** add retrieval plugin scaffold template ([#4038](https://github.com/The-Vibe-Company/quivr/issues/4038)) ([0371d46](https://github.com/The-Vibe-Company/quivr/commit/0371d46dbbbc99911ab78c7a672c2df55cb03635))
+
 ## [2.1.1](https://github.com/The-Vibe-Company/quivr/compare/v2.1.0...v2.1.1) (2026-11-27)
 
 
