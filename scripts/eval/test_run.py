@@ -52,9 +52,18 @@ class DatasetCLI(unittest.TestCase):
             'other.retrieve/deep': [],
         }
         requests = []
+        coverage_checks = 0
+        extra_record = False
 
         def call(client, method, path, body=None, **kwargs):
+            nonlocal coverage_checks
             requests.append((method, path, body))
+            if path == '/v0/corpora/existing/vector-spaces':
+                coverage_checks += 1
+                ready = coverage_checks > 1
+                return 200, {'items': [{'role': 'served', 'query_modalities': ['text'],
+                                       'coverage': {'segments': 2 if ready else 1, 'total_segments': 2,
+                                                    'versions_covered': 2 if ready else 1}}]}
             if path == '/v0/search/profiles':
                 return 200, {'items': [
                     {'name': name.split('/')[1], 'full_name': name, 'aliases': aliases,
@@ -72,7 +81,10 @@ class DatasetCLI(unittest.TestCase):
                     return 200, {'items': [{'record_id': 'r1', 'source': {'record_key': 'd1'}}],
                                  'next_page_cursor': 'second/page'}
                 self.assertIn('page_cursor=second%2Fpage', path)
-                return 200, {'items': [{'record_id': 'r2', 'source': {'record_key': 'd2'}}]}
+                records = [{'record_id': 'r2', 'source': {'record_key': 'd2'}}]
+                if extra_record:
+                    records.append({'record_id': 'r3', 'source': {'record_key': 'foreign'}})
+                return 200, {'items': records}
             self.assertEqual((method, path), ('POST', '/v0/search'))
             self.assertEqual(body['corpus_ids'], ['existing'])
             if body['profile'] == 'example.retrieve/deep' and body['limit'] == 1 and body['mode'] == 'lexical':
@@ -97,6 +109,7 @@ class DatasetCLI(unittest.TestCase):
                     '--profiles', 'default,example.retrieve/default', '--profiles', 'deep,other.retrieve/deep']
             with mock.patch.dict('os.environ', {'QUIVR_EVAL_API_KEY': 'test-key'}, clear=True), \
                  mock.patch.object(run.Client, 'call', autospec=True, side_effect=call), \
+                 mock.patch.object(run.time, 'sleep') as sleep, \
                  contextlib.redirect_stdout(io.StringIO()):
                 with mock.patch('sys.argv', args + ['--corpus-config', str(config)]):
                     run.main()
@@ -108,12 +121,16 @@ class DatasetCLI(unittest.TestCase):
                 with mock.patch('sys.argv', args + ['--corpus-id', 'existing', '--corpus-state', str(state)]):
                     run.main()
                 self.assertEqual(sum(path.startswith('/v0/records?') for _, path, _ in requests), 2)
+                first_search = next(i for i, (_, path, _) in enumerate(requests) if path == '/v0/search')
+                self.assertEqual(sum(path.endswith('/vector-spaces') for _, path, _ in requests[:first_search]), 2)
+                sleep.assert_called_once()
                 self.assertFalse(any(path in ('/v0/corpora', '/v0/records/batch') for _, path, _ in requests))
 
                 requests.clear()
                 with mock.patch('sys.argv', args + ['--corpus-state', str(state)]):
                     run.main()
-                self.assertTrue(all(path in ('/v0/search/profiles', '/v0/search') for _, path, _ in requests))
+                self.assertTrue(all(path in ('/v0/search/profiles', '/v0/search', '/v0/corpora/existing/vector-spaces')
+                                    for _, path, _ in requests))
                 measured = {(body['profile'], body['mode'], body['limit']) for method, path, body in requests
                             if path == '/v0/search' and body['query'] == 'find a record'}
                 self.assertEqual({profile for profile, _, _ in measured}, set(profiles))
@@ -129,6 +146,11 @@ class DatasetCLI(unittest.TestCase):
                 markdown = (output / 'report.md').read_text()
                 for label in ('Judged@10', 'Recall@50', 'Auxiliary qrels', 'False-positive categories', 'wrong topic'):
                     self.assertIn(label, markdown)
+
+                extra_record = True
+                with mock.patch('sys.argv', args + ['--corpus-id', 'existing']):
+                    with self.assertRaisesRegex(ValueError, 'exactly one active record'):
+                        run.main()
 
                 (dataset / 'topics.json').write_text('{}')
                 requests.clear()
@@ -344,6 +366,7 @@ class EvaluationSelection(unittest.TestCase):
                 result, = run.measure_set([client], 'tiny', directory, 'run', options)
 
         self.assertEqual(client.corpora, 1)
+        self.assertEqual(result['systems']['hybrid/default']['profile'], 'example.retrieve/default')
         self.assertEqual(ingestion.call_count, 1)
         self.assertEqual(result['evaluation_ingestion'], {
             'evaluation/plugin.eval/model@1': {'owner_vectors_seconds': 2},
@@ -351,7 +374,7 @@ class EvaluationSelection(unittest.TestCase):
         self.assertTrue(all(value['paid_calls_per_query'] is None
                             for system, value in result['systems'].items() if '/evaluation/' in system))
         self.assertEqual(set(result['systems']), {
-            'lexical/example.retrieve/default', 'semantic/example.retrieve/default', 'hybrid/example.retrieve/default',
+            'lexical/default', 'semantic/default', 'hybrid/default',
             'lexical/evaluation/plugin.eval/model@1',
             'semantic/evaluation/plugin.eval/model@1',
             'hybrid/evaluation/plugin.eval/model@1',

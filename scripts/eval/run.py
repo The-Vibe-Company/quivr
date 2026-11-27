@@ -195,7 +195,7 @@ def measurements(sides, evaluation=None):
             for label, configuration in jev.matrix():
                 yield profile, label, configuration
         else:
-            yield profile, 'default' if profile == BASELINE_PROFILE else profile, None
+            yield profile, profile, None
     for selection in evaluation_selections(evaluation):
         defaults = dict.fromkeys(side['evaluation_default'] for side in sides if side['evaluation_default'] in side['served'])
         for profile in defaults:
@@ -307,24 +307,40 @@ def ingest(client, corpus, namespace, corpus_docs, timeout, stall, progress=None
     return records, {'records': len(records), 'accepted_seconds': round(accepted, 3), 'searchable_with_vectors_seconds': round(time.monotonic() - start, 3)}
 
 
-def list_records(client, corpus, deadline):
+def list_records(client, corpus, deadline, *, active_only=False):
     records = {}
     query = {'corpus_id': corpus, 'limit': 100}
     while True:
         _, page = client.poll('/v0/records?' + urllib.parse.urlencode(query), deadline=deadline)
-        records.update({record['record_id']: record['source']['record_key'] for record in page['items']})
+        records.update({record['record_id']: record['source']['record_key'] for record in page['items']
+                        if not active_only or not record.get('withdrawn', False)})
         if not page.get('next_page_cursor'):
             return records
         query['page_cursor'] = page['next_page_cursor']
 
 
+def wait_reused_vectors(client, corpus, records, deadline):
+    """Wait for the routed text space to cover the reused corpus."""
+    path = f'/v0/corpora/{urllib.parse.quote(corpus, safe="")}/vector-spaces'
+    while time.monotonic() < deadline:
+        _, result = client.poll(path, deadline=deadline)
+        for space in result['items']:
+            if space['role'] != 'served' or 'text' not in space['query_modalities']:
+                continue
+            coverage = space['coverage']
+            if (not coverage.get('unknown') and coverage.get('versions_covered') == records
+                    and coverage.get('total_segments') == coverage['segments']):
+                return
+        time.sleep(min(5, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f'corpus {corpus}: timed out waiting for served text vectors for {records} evaluation documents; '
+                       'verify corpus contents and use a key with corpus-wide coverage visibility')
+
+
 def reused_records(client, corpus, docs, deadline):
-    records = {record: doc for record, doc in list_records(client, corpus, deadline).items() if doc in docs}
+    records = list_records(client, corpus, deadline, active_only=True)
     found = set(records.values())
-    if len(found) != len(records):
-        raise ValueError(f'corpus {corpus} has duplicate evaluation records')
-    if found != docs.keys():
-        raise ValueError(f'corpus {corpus} is missing {len(docs.keys() - found)} evaluation documents')
+    if len(found) != len(records) or found != docs.keys():
+        raise ValueError(f'corpus {corpus} must contain exactly one active record per evaluation document')
     return records
 
 
@@ -515,6 +531,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                 if records is None:
                     records = reused_records(client, corpus, data['corpus'], index_started + options.ingest_timeout)
                 result['ingestion'] = {'records': len(records), 'reused': True}
+                if records and any(mode != 'lexical' for mode in modes):
+                    wait_reused_vectors(client, corpus, len(records), index_started + options.ingest_timeout)
             else:
                 records, result['ingestion'] = ingest(
                     client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall,
@@ -539,7 +557,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                      if name in selected_profiles or (evaluations and name == default_profile)}
         served, refused = serving_profiles(client, corpus, selection, deep_queries[0], allow_paid=allow_paid, modes=modes)
         result['profiles'] = {'advertised': list(profiles), 'served': served, 'refused': refused,
-                              'default': 'default' if default_profile == BASELINE_PROFILE else default_profile}
+                              'default': default_profile}
         wire_profiles = {name: profile.get('full_name', profile['name']) for name, profile in selection.items()}
         sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
                       'wire_profiles': wire_profiles, 'evaluation_default': default_profile, 'out': result})
@@ -596,29 +614,32 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                             side['embedding_scored'] = {key: after[key] - side['embedding_begin'][key]
                                                         for key in ('confirmed_input_tokens', 'reserved_input_tokens',
                                                                     'cost_upper_bound_usd', 'admitted_calls')}
-            system = f'{mode}/{label}'
-            print(f'[eval] {name}: {system} searched', flush=True)
+            print(f'[eval] {name}: {mode}/{label} searched', flush=True)
             for side in serving:
+                system_label = ('default' if label == profile == side['evaluation_default'] else label)
+                system = f'{mode}/{system_label}'
                 events = jev.records(side['client'].jev_log, side['log_begin'], side['log_end'], profile.rsplit('/', 1)[-1])
                 accounting = jev.summary(side['attempts'], events, unpaid=options.paid_calls == 0 and not deep)
                 latencies = [t['client_ms'] for t in side['timings'][scored_limit]]
-                side['out']['systems'][system] = {**scoring.score_set(data, side['ranking']), 'profile_version': side['served'][profile],
+                system_result = {**scoring.score_set(data, side['ranking']), 'profile': profile,
+                                                  'profile_version': side['served'][profile],
                                                   'scored_limit': scored_limit, 'reranker': jev.variant(label) if configuration is not None else None,
                                                   'accounting': {'scored': accounting},
                                                   'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
                                                   'time_by_limit': {str(limit): time_summary(t, side['failed'][limit]) for limit, t in side['timings'].items()},
                                                   'failures': len(side['errors']), 'errors': sorted(set(side['errors']))[:3],
                                                   'paid_calls_per_query': accounting['paid_calls_per_search']}
+                side['out']['systems'][system] = side['system_result'] = system_result
                 if configuration is not None:
-                    side['out']['systems'][system]['configuration_seconds'] = side['configuration_seconds']
+                    system_result['configuration_seconds'] = side['configuration_seconds']
                 if selected_evaluation is not None and 'embedding_scored' in side:
                     usage = side['embedding_scored']
-                    side['out']['systems'][system]['embedding_usage'] = usage
-                    side['out']['systems'][system]['paid_calls_per_query'] = usage['admitted_calls'] / len(queries) if queries else None
+                    system_result['embedding_usage'] = usage
+                    system_result['paid_calls_per_query'] = usage['admitted_calls'] / len(queries) if queries else None
                 elif selected_evaluation is not None:
                     # Engine retrieval usage does not include an unmanaged
                     # ingestion owner's provider attempts. Unknown is not zero.
-                    side['out']['systems'][system]['paid_calls_per_query'] = None
+                    system_result['paid_calls_per_query'] = None
             publish = getattr(options, 'publish_partial', None)
             if publish:
                 for side in serving:
@@ -637,7 +658,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                             side['warm_timings'].append(timing)
                 for side in serving:
                     events = jev.records(side['client'].jev_log, side['warm_begin'], jev.offset(side['client'].jev_log), profile.rsplit('/', 1)[-1])
-                    result = side['out']['systems'][system]
+                    result = side['system_result']
                     result['accounting']['warm_cache'] = jev.summary(side['warm_attempts'], events)
                     result['warm_cache_timing'] = time_summary(side['warm_timings'], side['warm_failures'])
     for side in sides:
@@ -662,8 +683,7 @@ def compare_within(result):
     result['against_served_mode'] = {}
     for system, value in result['systems'].items():
         mode, label = system.split('/', 1)
-        default = result.get('profiles', {}).get('default', 'default')
-        baseline = result['systems'].get(f'{mode}/{default}')
+        baseline = result['systems'].get(f'{mode}/default')
         if label.startswith('evaluation/') and baseline:
             result['against_served_mode'][system] = {
                 m: scoring.paired(value['per_query'][m], baseline['per_query'][m]) for m in scoring.METRICS}
@@ -679,6 +699,7 @@ def compare_runs(current, baseline):
             continue
         result['against_baseline_run'] = {s: {m: scoring.paired(v['per_query'][m], before['systems'][s]['per_query'][m]) for m in scoring.METRICS}
                                           for s, v in result['systems'].items() if s in before['systems']
+                                          and v.get('profile') == before['systems'][s].get('profile', v.get('profile'))
                                           and v.get('scored_limit', LIMIT) == before['systems'][s].get('scored_limit', LIMIT)}
 
 
@@ -815,8 +836,8 @@ def main():
     parser.add_argument('--private-name', default='private', help='name of the private set in the report')
     parser.add_argument('--baseline', help='report.json of an earlier run to compare each system with, per query')
     parser.add_argument('--api-url', help='measure this installation instead of a local stack; key in QUIVR_EVAL_API_KEY')
-    parser.add_argument('--corpus-id', help='reuse this corpus on --api-url for a single set')
-    parser.add_argument('--corpus-state', type=pathlib.Path, help='read or save a fingerprinted corpus mapping for one set on --api-url')
+    parser.add_argument('--corpus-id', help='reuse this corpus on --api-url for a single set with matching active records')
+    parser.add_argument('--corpus-state', type=pathlib.Path, help='read or save a fingerprinted mapping for an unchanged corpus on --api-url')
     parser.add_argument('--corpus-config', help='JSON retrieval configuration for newly created corpora')
     parser.add_argument('--profiles', action='append', help='select advertised full names or aliases, comma-separated or repeated')
     parser.add_argument('--retrieval-config', help='local candidate retrieval plugin pin with manifest, endpoint, configuration and secret_names')
@@ -904,7 +925,7 @@ def main():
         clients = []
         if options.api_url:
             if not os.environ.get('QUIVR_EVAL_API_KEY'):
-                sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, content:read, content:write, changes:read, search:query)')
+                sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, corpora:read, content:read, content:write, changes:read, search:query)')
             clients.append(Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']))
             clients[-1].evaluation = options.evaluation
             clients[-1].deep_enabled = False
