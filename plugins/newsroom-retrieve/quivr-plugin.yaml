@@ -33,11 +33,31 @@ configuration:
         minimum: 1
         maximum: 100
         default: 100
-        description: Candidates requested per retrieval leg.
+        description: Default candidates requested per retrieval leg.
+      lexical_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 60
+        description: Optional override for BM25 lexical leg candidate count (0 uses candidate_count).
+      dense_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 100
+        description: Optional override for ungrouped dense near_vector leg candidate count (0 uses candidate_count).
+      dense_grouped:
+        type: boolean
+        default: false
+        description: Issue an additional record-grouped dense near_vector leg (false uses a single ungrouped dense leg for lower latency and tighter MaxP floor).
+      clean_lexical_query:
+        type: boolean
+        default: true
+        description: Strip generic multilingual stopwords and elision prefixes from the BM25 leg query text so raw lexical branches do not mask analyzed stems.
       fusion:
         type: string
         enum: [dbsf, convex, rrf]
-        default: dbsf
+        default: convex
         description: Multi-leg score fusion method.
       rrf_k:
         type: number
@@ -83,6 +103,12 @@ configuration:
         maximum: 2
         default: 0
         description: Consensus multiplier bonus per additional independent leg matching a record (0 disables; 1 equals classic CombMNZ).
+      title_lead_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.12
+        description: Weight for pool-IDF-weighted query coverage in the record title and opening lead window.
       aspect_coverage_weight:
         type: number
         minimum: 0
@@ -146,7 +172,7 @@ configuration:
         type: integer
         minimum: 50
         maximum: 2000
-        default: 300
+        default: 250
         description: Character length of the inverted-pyramid lead zone at body offset 0.
       deep_chunk_penalty:
         type: number
@@ -158,14 +184,14 @@ configuration:
         type: number
         minimum: 0
         maximum: 5
-        default: 0
-        description: Enable ungrouped dense passage retrieval and weight the FirstP/MaxP lead-vs-body aboutness ratio.
+        default: 0.10
+        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages.
       passage_support_weight:
         type: number
         minimum: 0
         maximum: 5
-        default: 0
-        description: Optional bonus for multi-passage dense corroboration (never penalizes single-passage documents).
+        default: 0.12
+        description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents).
       rerank_endpoint:
         type: string
         format: uri
@@ -176,6 +202,9 @@ configuration:
         default: tei
       rerank_model:
         type: string
+      rerank_instruction:
+        type: string
+        description: Optional rubric/instruction forwarded to instruction-aware TEI rerankers (e.g. Qwen3-Reranker).
       rerank_top_k:
         type: integer
         minimum: 1
@@ -190,17 +219,21 @@ configuration:
         type: number
         minimum: 0
         maximum: 1
-        default: 0.85
+        default: 0.90
       rerank_max_doc_chars:
         type: integer
         minimum: 200
         maximum: 32000
-        default: 2500
+        default: 2000
       rerank_timeout_ms:
         type: integer
         minimum: 100
         maximum: 20000
-        default: 8000
+        default: 12000
+      fallback_on_error:
+        type: boolean
+        default: true
+        description: Gracefully return Stage-1 default ranking when the deep reranker times out or errors.
       surrogate_mode:
         type: string
         enum: [raw, inverted_pyramid]
@@ -224,7 +257,7 @@ configuration:
         type: number
         minimum: 0
         maximum: 10
-        default: 0
+        default: 2.25
         description: Optional Stage-1 dense distribution-shape Gap threshold (mean(1..5)-mean(25..50))/std for adaptive early-exit.
       log_diagnostics:
         type: boolean

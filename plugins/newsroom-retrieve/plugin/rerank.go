@@ -31,10 +31,11 @@ func (r retriever) callReranker(ctx context.Context, cfg configuration, query st
 		}{cfg.RerankModel, query, docs, len(docs)}
 	default:
 		payload = struct {
-			Query    string   `json:"query"`
-			Texts    []string `json:"texts"`
-			Truncate bool     `json:"truncate"`
-		}{query, docs, true}
+			Query       string   `json:"query"`
+			Texts       []string `json:"texts"`
+			Truncate    bool     `json:"truncate"`
+			Instruction string   `json:"instruction,omitempty"`
+		}{query, docs, true, cfg.RerankInstruction}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

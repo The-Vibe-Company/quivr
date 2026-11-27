@@ -423,3 +423,41 @@ func extractEntityQuery(query string, maxTerms int) (string, bool) {
 	}
 	return subQuery, true
 }
+
+// cleanLexicalQuery removes generic multilingual stopwords and French elision
+// prefixes (l', d', qu', etc.) from a BM25 query while preserving original
+// surface forms, accents, digits, and deduplicating repeated tokens.
+// Falls back to the original query if no content tokens remain.
+func cleanLexicalQuery(query string) string {
+	raw := strings.TrimSpace(query)
+	if raw == "" {
+		return raw
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-'
+	})
+	seen := make(map[string]bool, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, tok := range parts {
+		tok = strings.Trim(tok, "-–—")
+		if tok == "" {
+			continue
+		}
+		folded := foldWord(tok)
+		if folded == "" || stopwords[folded] {
+			continue
+		}
+		if utf8.RuneCountInString(folded) < 2 && !isAllDigits(folded) {
+			continue
+		}
+		if seen[folded] {
+			continue
+		}
+		seen[folded] = true
+		out = append(out, tok)
+	}
+	if len(out) == 0 {
+		return raw
+	}
+	return strings.Join(out, " ")
+}
