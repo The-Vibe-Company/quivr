@@ -246,3 +246,51 @@ func TestCrossModalImageSpaceUsesNearVectorWhileTextKeepsHybrid(t *testing.T) {
 		t.Fatalf("image space request = %+v, want pure near_vector", answer.Requests[2])
 	}
 }
+
+func TestTwoLegHybridFusion(t *testing.T) {
+	for _, fusion := range []string{"two_leg_minmax", "two_leg_dbsf", "two_leg_rrf"} {
+		t.Run(fusion, func(t *testing.T) {
+			req := &quivrplugin.SearchRequest{
+				Round:         1,
+				Limit:         2,
+				Configuration: json.RawMessage(fmt.Sprintf(`{"dense_weight":0.6,"candidate_count":50,"hybrid_fusion":%q}`, fusion)),
+				Spaces:        []quivrplugin.SearchSpace{{ID: "text@1", Role: "served"}},
+			}
+			req.Query.Text, req.Query.Mode = "harbour strike", "hybrid"
+			answer, err := (retriever{}).Search(t.Context(), req)
+			if err != nil || len(answer.Requests) != 2 {
+				t.Fatalf("round 1 = %+v (%v), want 2 requests (bm25 + near_vector)", answer, err)
+			}
+			if answer.Requests[0].Primitive != quivrplugin.PrimitiveBM25 || answer.Requests[1].Primitive != quivrplugin.PrimitiveNearVector {
+				t.Fatalf("primitives = %+v, want bm25 then near_vector", answer.Requests)
+			}
+			req.Round = 2
+			req.Served = []quivrplugin.ServedRequest{
+				{
+					Request: answer.Requests[0],
+					Candidates: []quivrplugin.Candidate{
+						{SegmentID: "lex-a", RecordID: "rec-a", Score: 10.0},
+						{SegmentID: "lex-b", RecordID: "rec-b", Score: 5.0},
+						{SegmentID: "lex-c", RecordID: "rec-c", Score: 1.0},
+					},
+				},
+				{
+					Request: answer.Requests[1],
+					Candidates: []quivrplugin.Candidate{
+						{SegmentID: "vec-b", RecordID: "rec-b", Score: 0.95},
+						{SegmentID: "vec-a", RecordID: "rec-a", Score: 0.70},
+						{SegmentID: "vec-d", RecordID: "rec-d", Score: 0.60},
+					},
+				},
+			}
+			answer, err = (retriever{}).Search(t.Context(), req)
+			if err != nil || len(answer.Ranking) != 2 {
+				t.Fatalf("round 2 = %+v (%v), want 2 ranked hits", answer, err)
+			}
+			// Both rec-a and rec-b appear in both legs; dense representative should be kept.
+			if answer.Ranking[0].SegmentID != "vec-b" && answer.Ranking[0].SegmentID != "vec-a" {
+				t.Fatalf("top hit = %+v, want dense segment representative", answer.Ranking[0])
+			}
+		})
+	}
+}

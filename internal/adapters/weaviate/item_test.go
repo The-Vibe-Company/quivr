@@ -1083,6 +1083,93 @@ func runItemSearch(ctx context.Context, transport http.RoundTripper, q retrieval
 	return store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, q)
 }
 
+func TestLexicalBranchModes(t *testing.T) {
+	t.Run("analyzed_only skips raw branch when analyzed query is non-empty and falls back on stopwords", func(t *testing.T) {
+		var queries []string
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			if strings.Contains(query, "bm25:") {
+				queries = append(queries, query)
+				return itemSearchResponse([]itemSearchRow{{Version: "v1", Score: "4.2"}}), nil
+			}
+			return itemSearchResponse([]itemSearchRow{{Segment: "s1", Version: "v1"}}), nil
+		})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		store.LexicalBranchMode = weaviate.LexicalBranchAnalyzedOnly
+		g := content.Generation{
+			ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+			Fields: []corpus.Field{
+				{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+				{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+			},
+		}
+		hits, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "c", Generation: g}}, corpus.Scope{Organization: "org"}, retrieval.Request{
+			Query: "les élections municipales", Mode: "lexical", GroupBy: "record", K: 5,
+		})
+		if err != nil || len(hits) != 1 {
+			t.Fatalf("analyzed_only search failed: %+v %v", hits, err)
+		}
+		if len(queries) != 1 || !strings.Contains(queries[0], "_fr^") {
+			t.Fatalf("expected 1 analyzed BM25 query, got %d: %v", len(queries), queries)
+		}
+		queries = nil
+		hits, err = store.Search(t.Context(), []retrieval.Route{{CorpusID: "c", Generation: g}}, corpus.Scope{Organization: "org"}, retrieval.Request{
+			Query: "de la le les", Mode: "lexical", GroupBy: "record", K: 5,
+		})
+		if err != nil || len(hits) != 1 {
+			t.Fatalf("stopword fallback search failed: %+v %v", hits, err)
+		}
+		if len(queries) != 1 || strings.Contains(queries[0], "_fr^") {
+			t.Fatalf("expected raw fallback query for stopword-only input, got %v", queries)
+		}
+	})
+
+	for _, mode := range []string{weaviate.LexicalBranchBlendMinMax, weaviate.LexicalBranchBlendZScore} {
+		t.Run(mode+" prevents raw scale from masking analyzed ranking", func(t *testing.T) {
+			transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+				if strings.Contains(query, "bm25:") {
+					if strings.Contains(query, "_fr^") {
+						// Analyzed branch strongly prefers v-analyzed, but on a smaller raw numeric scale.
+						return itemSearchResponse([]itemSearchRow{
+							{Version: "v-analyzed", Score: "3.0"},
+							{Version: "v-raw", Score: "1.0"},
+						}), nil
+					}
+					// Raw branch has huge stopword-inflated scores favoring v-raw.
+					return itemSearchResponse([]itemSearchRow{
+						{Version: "v-raw", Score: "25.0"},
+						{Version: "v-analyzed", Score: "15.0"},
+					}), nil
+				}
+				return itemSearchResponse([]itemSearchRow{
+					{Segment: "seg-analyzed", Version: "v-analyzed"},
+					{Segment: "seg-raw", Version: "v-raw"},
+				}), nil
+			})
+			store := weaviate.New("http://index.invalid")
+			store.Client.Transport = transport
+			store.LexicalBranchMode = mode
+			store.LexicalRawWeight = 0.1
+			g := content.Generation{
+				ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+				Fields: []corpus.Field{
+					{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+					{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+				},
+			}
+			hits, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "c", Generation: g}}, corpus.Scope{Organization: "org"}, retrieval.Request{
+				Query: "les élections municipales", Mode: "lexical", GroupBy: "record", K: 5,
+			})
+			if err != nil || len(hits) != 2 {
+				t.Fatalf("%s failed: %+v %v", mode, hits, err)
+			}
+			if hits[0].VersionID != "v-analyzed" {
+				t.Fatalf("%s top hit = %s, want v-analyzed (hits=%+v)", mode, hits[0].VersionID, hits)
+			}
+		})
+	}
+}
+
 func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 	f := newAttachFixture(t)
 	g := f.gen

@@ -45,8 +45,8 @@ configuration:
         description: Candidates requested per served space (one request for lexical); defaults to the search limit. Final ranking still returns at most the search limit.
       hybrid_fusion:
         type: string
-        enum: [relative_score, ranked]
+        enum: [relative_score, ranked, two_leg_minmax, two_leg_dbsf, two_leg_rrf]
         default: relative_score
-        description: Weaviate hybrid fusion; relative_score normalizes each side's scores before weighting, ranked uses reciprocal rank fusion (RRF, constant 60). Used only in hybrid mode.
+        description: Hybrid fusion mode; relative_score and ranked use single-request index fusion, while two_leg_minmax, two_leg_dbsf (distribution-based mean +/- 3 sigma), and two_leg_rrf issue separate bm25 and near_vector requests and fuse them in the plugin. Used only in hybrid mode.
 run:
   command: [go, run, .]

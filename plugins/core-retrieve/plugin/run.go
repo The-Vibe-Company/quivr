@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"sort"
@@ -19,6 +20,17 @@ import (
 // normalizes each side's scores before weighting them.
 const alpha = 0.5
 
+const (
+	fusionTwoLegMinMax = "two_leg_minmax"
+	fusionTwoLegDBSF   = "two_leg_dbsf"
+	fusionTwoLegRRF    = "two_leg_rrf"
+	rrfConstant        = 60.0
+)
+
+func isTwoLegFusion(fusion string) bool {
+	return fusion == fusionTwoLegMinMax || fusion == fusionTwoLegDBSF || fusion == fusionTwoLegRRF
+}
+
 // configuration is validated by the manifest schema at install and by the
 // SDK on each invocation. Defaults are applied here, not by JSON Schema.
 type configuration struct {
@@ -27,14 +39,30 @@ type configuration struct {
 	HybridFusion   string  `json:"hybrid_fusion"`
 }
 
+func parseConfig(req *quivrplugin.SearchRequest) (configuration, error) {
+	config := configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score"}
+	if len(req.Configuration) > 0 {
+		if err := json.Unmarshal(req.Configuration, &config); err != nil {
+			return configuration{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+		}
+	}
+	return config, nil
+}
+
 type retriever struct{}
 
 func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
+	config, err := parseConfig(req)
+	if err != nil {
+		return nil, err
+	}
 	pending := []quivrplugin.SearchSpace{}
 	if req.Query.Mode != "lexical" {
 		requested := map[string]bool{}
 		for _, served := range req.Served {
-			requested[served.Request.Space] = true
+			if served.Request.Space != "" {
+				requested[served.Request.Space] = true
+			}
 		}
 		for _, space := range req.Spaces {
 			if space.Role == "served" && !requested[space.ID] {
@@ -43,7 +71,10 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 		}
 	}
 	if req.Round == 1 || (req.Round < 3 && len(pending) > 0) {
-		c, err := request(req)
+		if req.Query.Mode == "hybrid" && isTwoLegFusion(config.HybridFusion) {
+			return askTwoLeg(req, config, pending), nil
+		}
+		c, err := request(req, config)
 		if err != nil {
 			return nil, err
 		}
@@ -66,6 +97,9 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			}
 		}
 		return quivrplugin.Ask(requests...), nil
+	}
+	if req.Query.Mode == "hybrid" && isTwoLegFusion(config.HybridFusion) {
+		return rankTwoLeg(req, config), nil
 	}
 	// Served candidates rank by score, then segment id; the Record dedupe below keeps the first in that order.
 	hits := []quivrplugin.RankedHit{}
@@ -101,15 +135,149 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 	return quivrplugin.Rank(unique[:min(len(unique), req.Limit)]...), nil
 }
 
-// request is the one candidate request of a search: keywords on the title
-// and body for lexical, the served space for semantic, both for hybrid.
-func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, error) {
-	config := configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score"}
-	if len(req.Configuration) > 0 {
-		if err := json.Unmarshal(req.Configuration, &config); err != nil {
-			return quivrplugin.CandidateRequest{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+func askTwoLeg(req *quivrplugin.SearchRequest, config configuration, pending []quivrplugin.SearchSpace) *quivrplugin.SearchAnswer {
+	requests := make([]quivrplugin.CandidateRequest, 0, min(8, len(pending)+1))
+	if req.Round == 1 {
+		requests = append(requests, quivrplugin.CandidateRequest{
+			Primitive: quivrplugin.PrimitiveBM25,
+			Field:     quivrplugin.FieldSource,
+			QueryText: req.Query.Text,
+			K:         config.CandidateCount,
+			GroupBy:   "record",
+		})
+	}
+	maxSpaces := 8 - len(requests)
+	for _, space := range pending[:min(maxSpaces, len(pending))] {
+		requests = append(requests, quivrplugin.CandidateRequest{
+			Primitive: quivrplugin.PrimitiveNearVector,
+			Space:     space.ID,
+			QueryText: req.Query.Text,
+			K:         config.CandidateCount,
+			GroupBy:   "record",
+		})
+	}
+	return quivrplugin.Ask(requests...)
+}
+
+func rankTwoLeg(req *quivrplugin.SearchRequest, config configuration) *quivrplugin.SearchAnswer {
+	lexByRecord := map[string]quivrplugin.Candidate{}
+	denseByRecord := map[string]quivrplugin.Candidate{}
+	for _, s := range req.Served {
+		target := denseByRecord
+		if s.Request.Primitive == quivrplugin.PrimitiveBM25 {
+			target = lexByRecord
+		}
+		for _, c := range s.Candidates {
+			key := c.RecordID
+			if key == "" {
+				key = c.SegmentID
+			}
+			prev, ok := target[key]
+			if !ok || c.Score > prev.Score || (c.Score == prev.Score && c.SegmentID < prev.SegmentID) {
+				target[key] = c
+			}
 		}
 	}
+	normLex := normalizeCandidates(lexByRecord, config.HybridFusion)
+	normDense := normalizeCandidates(denseByRecord, config.HybridFusion)
+	wDense := config.DenseWeight
+	wLex := 1 - wDense
+	explanation := fmt.Sprintf("two-leg keywords and vectors, alpha %g, %s", wDense, config.HybridFusion)
+	records := map[string]bool{}
+	for key := range lexByRecord {
+		records[key] = true
+	}
+	for key := range denseByRecord {
+		records[key] = true
+	}
+	hits := make([]quivrplugin.RankedHit, 0, len(records))
+	for key := range records {
+		score := wLex*normLex[key] + wDense*normDense[key]
+		// Prefer the dense passage representative when available, matching engine fusion.
+		cand, ok := denseByRecord[key]
+		if !ok {
+			cand = lexByRecord[key]
+		}
+		hits = append(hits, quivrplugin.RankedHit{
+			SegmentID:   cand.SegmentID,
+			Score:       score,
+			Explanation: explanation,
+		})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return hits[i].SegmentID < hits[j].SegmentID
+	})
+	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...)
+}
+
+func normalizeCandidates(pool map[string]quivrplugin.Candidate, fusion string) map[string]float64 {
+	out := make(map[string]float64, len(pool))
+	if len(pool) == 0 {
+		return out
+	}
+	type entry struct {
+		key  string
+		cand quivrplugin.Candidate
+	}
+	rows := make([]entry, 0, len(pool))
+	for k, c := range pool {
+		rows = append(rows, entry{key: k, cand: c})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].cand.Score != rows[j].cand.Score {
+			return rows[i].cand.Score > rows[j].cand.Score
+		}
+		return rows[i].cand.SegmentID < rows[j].cand.SegmentID
+	})
+	switch fusion {
+	case fusionTwoLegRRF:
+		for i, r := range rows {
+			out[r.key] = 1.0 / (rrfConstant + float64(i+1))
+		}
+	case fusionTwoLegDBSF:
+		if len(rows) == 1 {
+			out[rows[0].key] = 0.5
+			return out
+		}
+		sum := 0.0
+		for _, r := range rows {
+			sum += r.cand.Score
+		}
+		mu := sum / float64(len(rows))
+		variance := 0.0
+		for _, r := range rows {
+			d := r.cand.Score - mu
+			variance += d * d
+		}
+		sigma := math.Sqrt(variance / float64(len(rows)))
+		if sigma == 0 {
+			for _, r := range rows {
+				out[r.key] = 0.5
+			}
+			return out
+		}
+		for _, r := range rows {
+			out[r.key] = 0.5 + (r.cand.Score-mu)/(6*sigma)
+		}
+	default: // fusionTwoLegMinMax
+		lo, hi := rows[len(rows)-1].cand.Score, rows[0].cand.Score
+		for _, r := range rows {
+			if hi == lo {
+				out[r.key] = 1.0
+			} else {
+				out[r.key] = (r.cand.Score - lo) / (hi - lo)
+			}
+		}
+	}
+	return out
+}
+
+// request is the one candidate request of a search: keywords on the title
+// and body for lexical, the served space for semantic, both for hybrid.
+func request(req *quivrplugin.SearchRequest, config configuration) (quivrplugin.CandidateRequest, error) {
 	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount, GroupBy: "record"}
 	if req.Query.Mode == "lexical" {
 		c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource

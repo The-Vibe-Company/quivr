@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -168,6 +169,36 @@ type RetrievalConfig struct {
 	// HydrationBlobCacheBytes bounds the API's in-memory content-addressed text
 	// blob LRU cache in bytes (default 64 MiB; 0 disables; at most 1 GiB).
 	HydrationBlobCacheBytes *int64 `json:"hydration_blob_cache_bytes,omitempty"`
+	// LexicalBranchMode selects how raw and analyzed BM25 branches combine:
+	// "" / "max" (default), "analyzed_only", "blend_minmax", or "blend_zscore".
+	LexicalBranchMode string `json:"lexical_branch_mode,omitempty"`
+	// LexicalRawWeight is the raw-branch weight in [0, 1] for blend modes
+	// (default 0.1).
+	LexicalRawWeight *float64 `json:"lexical_raw_weight,omitempty"`
+}
+
+func (c RetrievalConfig) lexicalBranches() (string, float64, error) {
+	mode := strings.TrimSpace(override("QUIVR_LEXICAL_BRANCH_MODE", c.LexicalBranchMode))
+	switch mode {
+	case "", weaviate.LexicalBranchMax, weaviate.LexicalBranchAnalyzedOnly, weaviate.LexicalBranchBlendMinMax, weaviate.LexicalBranchBlendZScore:
+	default:
+		return "", 0, badConfig(configInvalid, "retrieval.lexical_branch_mode", "lexical_branch_mode must be max, analyzed_only, blend_minmax, or blend_zscore")
+	}
+	weight := 0.1
+	if c.LexicalRawWeight != nil {
+		weight = *c.LexicalRawWeight
+	}
+	if rawEnv := strings.TrimSpace(os.Getenv("QUIVR_LEXICAL_RAW_WEIGHT")); rawEnv != "" {
+		parsed, err := strconv.ParseFloat(rawEnv, 64)
+		if err != nil {
+			return "", 0, badConfig(configInvalid, "retrieval.lexical_raw_weight", "lexical_raw_weight must be a number in [0, 1]")
+		}
+		weight = parsed
+	}
+	if weight < 0 || weight > 1 {
+		return "", 0, badConfig(configInvalid, "retrieval.lexical_raw_weight", "lexical_raw_weight must be in [0, 1]")
+	}
+	return mode, weight, nil
 }
 
 func (cfg Config) purgeTimeout() (time.Duration, error) {
@@ -405,6 +436,10 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	lexicalBranchMode, lexicalRawWeight, err := cfg.Retrieval.lexicalBranches()
+	if err != nil {
+		return err
+	}
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
 		return err
@@ -606,6 +641,8 @@ func Run(command string, args ...string) error {
 	projection.Visibility = grants
 	projection.PurgeTimeout = purgeTimeout
 	projection.LegacySpace = tei.Space().ID
+	projection.LexicalBranchMode = lexicalBranchMode
+	projection.LexicalRawWeight = lexicalRawWeight
 	rebuilds.Projection = projection
 	corpusStore := postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}
 	if command == "migrate" {

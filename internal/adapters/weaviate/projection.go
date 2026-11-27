@@ -49,6 +49,14 @@ type Store struct {
 	// had before named spaces (legacyVector), so generations built before and
 	// after them stay searchable in one query.
 	LegacySpace string
+	// LexicalBranchMode controls how raw and analyzed BM25 branches combine
+	// when a Corpus configures field analyzers: "" / "max" (legacy unnormalized
+	// max), "analyzed_only" (skip raw when analyzed branches are non-empty),
+	// "blend_minmax" or "blend_zscore" (normalize each branch before blending).
+	LexicalBranchMode string
+	// LexicalRawWeight is the raw-branch weight in [0, 1] for blend modes
+	// (default 0.1 when unset or <= 0).
+	LexicalRawWeight float64
 	// vectors remembers the named vectors known to exist, by collection.
 	vectors            *sync.Map
 	vectorSchema       *semaphore.Weighted

@@ -742,22 +742,62 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	return fuseItems(sparse, dense, alpha, fusion, grouped), nil
 }
 
+const (
+	// LexicalBranchMax preserves the legacy unnormalized max(raw, analyzed) merge.
+	LexicalBranchMax = "max"
+	// LexicalBranchAnalyzedOnly runs only analyzed BM25 branches when non-empty,
+	// falling back to raw when no analyzers apply or the analyzed query is empty.
+	LexicalBranchAnalyzedOnly = "analyzed_only"
+	// LexicalBranchBlendMinMax min-max normalizes raw and analyzed branches
+	// independently before combining (1-w)*analyzed + w*raw.
+	LexicalBranchBlendMinMax = "blend_minmax"
+	// LexicalBranchBlendZScore applies distribution-based z-score normalization
+	// (0.5 + (s-mu)/(6*sigma)) per branch before combining (1-w)*analyzed + w*raw.
+	LexicalBranchBlendZScore = "blend_zscore"
+
+	defaultLexicalRawWeight = 0.1
+)
+
+type bm25Branch struct {
+	branch   searchBranch
+	analyzed bool
+}
+
+func (s *Store) effectiveLexicalBranchMode() string {
+	switch s.LexicalBranchMode {
+	case LexicalBranchAnalyzedOnly, LexicalBranchBlendMinMax, LexicalBranchBlendZScore:
+		return s.LexicalBranchMode
+	default:
+		return LexicalBranchMax
+	}
+}
+
+func (s *Store) effectiveLexicalRawWeight() float64 {
+	if s.LexicalRawWeight <= 0 {
+		return defaultLexicalRawWeight
+	}
+	if s.LexicalRawWeight > 1 {
+		return 1
+	}
+	return s.LexicalRawWeight
+}
+
 func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartition, scope corpus.Scope, q retrieval.Request, limit int, grouped bool, sparse map[string]content.Candidate, densePassages func() map[string]content.Candidate) error {
 	where, err := s.itemWhere(ctx, p.routes, scope, q, "item")
 	if err != nil || where.operator == 0 {
 		return err
 	}
-	requests := itemBM25(p, q.Query)
+	branchMode := s.effectiveLexicalBranchMode()
+	requests := itemBM25(p, q.Query, branchMode)
 	query := itemPassageTerms(q.Query, p.analyzers)
-	items := map[string]content.Candidate{}
 	// An ownerless item may not yet have passages from the selected
 	// ingestion owner. Allow one refill at twice the candidate depth.
 	for round, depth := 0, limit; round < 2; round, depth = round+1, min(maxItemPassages, depth*2) {
 		results := make([][]itemRow, len(requests))
 		copies, copyCtx := errgroup.WithContext(ctx)
-		for i, branch := range requests {
+		for i, req := range requests {
 			copies.Go(func() error {
-				rows, err := s.searchRows(copyCtx, collection, branch, where, searchOrder{}, depth, true, false)
+				rows, err := s.searchRows(copyCtx, collection, req.branch, where, searchOrder{}, depth, true, false)
 				results[i] = rows
 				return err
 			})
@@ -768,10 +808,8 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		more := false
 		for _, rows := range results {
 			more = more || len(rows) == depth
-			for _, row := range rows {
-				keepBest(items, row.candidate(false), true)
-			}
 		}
+		items := combineBM25Branches(requests, results, branchMode, s.effectiveLexicalRawWeight())
 		if len(items) == 0 {
 			break
 		}
@@ -983,30 +1021,148 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 	return selected, exhausted, nil
 }
 
-func itemBM25(p *itemPartition, query string) []searchBranch {
-	var branches []searchBranch
-	for _, a := range append([]keywords.Analyzer{{}}, p.analyzers...) {
-		text := query
-		if a.Name != "" {
-			text = a.Analyze(query)
-		}
+func itemBM25(p *itemPartition, query string, branchMode string) []bm25Branch {
+	var analyzed []bm25Branch
+	for _, a := range p.analyzers {
+		text := a.Analyze(query)
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		var props []string
 		for _, f := range p.fields {
-			property := itemProperty(f)
-			if a.Name != "" {
-				if f.Analyzer != a.Name {
-					continue
-				}
-				property = analyzedProperty(f, a)
+			if f.Analyzer != a.Name {
+				continue
 			}
-			props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
+			props = append(props, analyzedProperty(f, a)+"^"+strconv.Itoa(f.EffectiveBoost()))
 		}
-		branches = append(branches, searchBranch{mode: "lexical", query: text, properties: props})
+		if len(props) > 0 {
+			analyzed = append(analyzed, bm25Branch{
+				branch:   searchBranch{mode: "lexical", query: text, properties: props},
+				analyzed: true,
+			})
+		}
 	}
-	return branches
+	if branchMode == LexicalBranchAnalyzedOnly && len(analyzed) > 0 {
+		return analyzed
+	}
+	var branches []bm25Branch
+	if strings.TrimSpace(query) != "" {
+		var props []string
+		for _, f := range p.fields {
+			props = append(props, itemProperty(f)+"^"+strconv.Itoa(f.EffectiveBoost()))
+		}
+		if len(props) > 0 {
+			branches = append(branches, bm25Branch{
+				branch:   searchBranch{mode: "lexical", query: query, properties: props},
+				analyzed: false,
+			})
+		}
+	}
+	return append(branches, analyzed...)
+}
+
+func combineBM25Branches(requests []bm25Branch, results [][]itemRow, branchMode string, rawWeight float64) map[string]content.Candidate {
+	if branchMode != LexicalBranchBlendMinMax && branchMode != LexicalBranchBlendZScore {
+		items := map[string]content.Candidate{}
+		for _, rows := range results {
+			for _, row := range rows {
+				keepBest(items, row.candidate(false), true)
+			}
+		}
+		return items
+	}
+	rawPool := map[string]content.Candidate{}
+	analyzedPool := map[string]content.Candidate{}
+	for i, rows := range results {
+		target := rawPool
+		if requests[i].analyzed {
+			target = analyzedPool
+		}
+		for _, row := range rows {
+			keepBest(target, row.candidate(false), true)
+		}
+	}
+	if len(analyzedPool) == 0 {
+		return rawPool
+	}
+	if len(rawPool) == 0 {
+		return analyzedPool
+	}
+	normAnalyzed := normalizeBranchPool(analyzedPool, branchMode)
+	normRaw := normalizeBranchPool(rawPool, branchMode)
+	analyzedWeight := 1 - rawWeight
+	items := map[string]content.Candidate{}
+	for key, c := range analyzedPool {
+		c.Score = analyzedWeight*normAnalyzed[key] + rawWeight*normRaw[key]
+		items[key] = c
+	}
+	for key, c := range rawPool {
+		if _, ok := items[key]; ok {
+			continue
+		}
+		c.Score = rawWeight * normRaw[key]
+		items[key] = c
+	}
+	return items
+}
+
+func normalizeBranchPool(pool map[string]content.Candidate, branchMode string) map[string]float64 {
+	out := make(map[string]float64, len(pool))
+	if len(pool) == 0 {
+		return out
+	}
+	if branchMode == LexicalBranchBlendZScore {
+		if len(pool) == 1 {
+			for k := range pool {
+				out[k] = 0.5
+			}
+			return out
+		}
+		sum := 0.0
+		for _, c := range pool {
+			sum += c.Score
+		}
+		mu := sum / float64(len(pool))
+		variance := 0.0
+		for _, c := range pool {
+			d := c.Score - mu
+			variance += d * d
+		}
+		sigma := math.Sqrt(variance / float64(len(pool)))
+		if sigma == 0 {
+			for k := range pool {
+				out[k] = 0.5
+			}
+			return out
+		}
+		for k, c := range pool {
+			out[k] = 0.5 + (c.Score-mu)/(6*sigma)
+		}
+		return out
+	}
+	// Min-max normalization.
+	first := true
+	lo, hi := 0.0, 0.0
+	for _, c := range pool {
+		if first {
+			lo, hi, first = c.Score, c.Score, false
+			continue
+		}
+		if c.Score < lo {
+			lo = c.Score
+		}
+		if c.Score > hi {
+			hi = c.Score
+		}
+	}
+	for k, c := range pool {
+		if hi == lo {
+			out[k] = 1.0
+		} else {
+			out[k] = (c.Score - lo) / (hi - lo)
+		}
+	}
+	return out
 }
 
 func (s *Store) itemDense(ctx context.Context, collection string, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, limit int, grouped bool) (map[string]content.Candidate, error) {
