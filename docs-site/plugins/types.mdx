@@ -214,7 +214,7 @@ Any language that serves HTTP can implement the protocol. Two SDKs handle routin
 | Python (`sdks/python`) | All five, including push routes and attachments |
 | Go (`sdks/go`) | All five |
 
-`quivr plugin init` supplies Python normalizer, subscription and pull or push connector starters. There are no Go starters, and no Python ingestion or retrieval starters, because those need a language module setup or a chosen vector model or search strategy; use the SDKs directly.
+`quivr plugin init` supplies Python normalizer, subscription and pull or push connector starters, and a Go retrieval starter (`--kind retrieval`) with a hybrid-fusion profile, a composed profile and a fixture for each. There are no ingestion starters, and no other Go or Python retrieval starters, because those need a chosen vector model or search strategy; use the SDKs directly.
 
 ## Next
 
