@@ -52,6 +52,21 @@ class Selection(unittest.TestCase):
         self.assertEqual([i.get('component', i['plugin']) for i in ci_select.select(['plugins/rss/connector.go'])['images']], ['rss', 'core'])
         self.assertTrue(ci_select.select(['tests/fixtures/runtime.md'])['full'])
 
+    def test_go_retrieval_plugin_outside_evaluation_selects_its_own_lanes(self):
+        # plugins/http-rerank is a Go retrieval plugin that scripts/eval only reaches through a
+        # user-supplied --retrieval-config pin: sdk-go certifies it, without eval shards or the full stack.
+        for path in ['plugins/http-rerank/plugin/retrieval.go', 'plugins/http-rerank/go.sum']:
+            with self.subTest(path=path):
+                selected = ci_select.select([path])
+                self.assertFalse(selected['full'])
+                self.assertEqual(selected['groups'], ['guards', 'go', 'python', 'sdk-go'])
+                self.assertEqual(selected['parts'], ['plugins'])
+                self.assertEqual([i.get('component', i['plugin']) for i in selected['images']], ['http-rerank', 'core'])
+                self.assertTrue(selected['vulnerabilities'])
+                self.assertFalse(selected['migration-compatibility'])
+        manifest = ci_select.select(['plugins/http-rerank/quivr-plugin.yaml'])
+        self.assertEqual([i.get('component', i['plugin']) for i in manifest['images']], ['', 'http-rerank', 'core'])
+
     def test_engine_sources_and_root_go_dependencies_select_engine_and_core_images(self):
         for path in ['internal/retrieval/retrieval.go', 'go.mod', 'go.sum']:
             with self.subTest(path=path):

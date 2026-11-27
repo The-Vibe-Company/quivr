@@ -21,41 +21,22 @@ Reports go in `.scratch/eval/runs/<time>/` (`--out` overrides it); downloads in 
 
 ## Compare an evaluation plugin
 
-On an existing installation with `ingestion.evaluation` configured, add
-`--evaluation-plugin <plugin-id> --evaluation-space <space-id>` to `--api-url`.
-Both fields are required together. For a local stack, use `--ingestion-config <pin.json>`
-instead. That JSON holds `manifest` (relative to the JSON), `endpoint`, `configuration`,
-`plugin`, `space` and `secret_names` (environment names only). Run the plugin yourself
-with those secrets injected; the engine receives no secret values. The lane pins it beside
-`core.ingest` under `ingestion.evaluation.text/plain` before creating Corpora. Each owner's
-primary space keeps role `served`. This excludes `--api-url` and `--compare-to`.
-The lane waits for that space to cover every
-current document, then measures its default profile beside the served default
-in all three modes on the same Corpus. Systems carry the evaluation plugin and
-space ids; scoring deduplicates by Record, so different segmentation offsets
-compare at document level. All three metrics also get a paired comparison against
-core.ingest in the same mode. These options exclude live paid reranker evaluation.
+On an existing installation with `ingestion.evaluation` configured, add `--evaluation-plugin <plugin-id> --evaluation-space <space-id>` to `--api-url`. Both fields are required together. For a local stack, use `--ingestion-config <pin.json>` instead. That JSON holds `manifest` (relative to the JSON), `endpoint`, `configuration`, `plugin`, `space` and `secret_names` (environment names only). Run the plugin yourself with those secrets injected; the engine receives no secret values. The lane pins it beside `core.ingest` under `ingestion.evaluation.text/plain` before creating Corpora. Each owner's primary space keeps role `served`. This excludes `--api-url` and `--compare-to`. The lane waits for that space to cover every current document, then measures its default profile beside the served default in all three modes on the same Corpus. Systems carry the evaluation plugin and space ids; scoring deduplicates by Record, so different segmentation offsets compare at document level. All three metrics also get a paired comparison against core.ingest in the same mode. These options exclude live paid reranker evaluation.
+
+## Reuse a Corpus, pick profiles, or pin a retrieval plugin
+
+- `--corpus-id <id>` with `--api-url` and exactly one set reuses that Corpus instead of ingesting; it must hold exactly one active Record per document of the set. `--corpus-state <file>` saves the Corpus id and Record map on the first run and reuses them later; a different API URL, Corpus id or sample fingerprint fails the run.
+- `--corpus-config <file.json>` holds the `retrieval` configuration for newly created Corpora, so it excludes reuse.
+- `--profiles <names>` (comma-separated or repeated) measures only those advertised profiles, by full name or unambiguous alias; an evaluation plugin comparison still measures the default profile.
+- `--retrieval-config <pin.json>` adds a candidate retrieval plugin to the local stack, for example [`http.rerank`](../../plugins/http-rerank/README.md); it excludes `--api-url`. The pin holds `manifest` (relative to the JSON), `endpoint`, `configuration` and `secret_names`, as above.
 
 ## The public sets
 
-The default suite contains five French sets (`miracl-fr`, `mldr-fr`, `xpqa-fr`,
-`webfaq-fr`, `mkqa-fr`) and five English sets (`scifact`, `fiqa`, `trec-covid`,
-`arguana`, `scidocs`). Only default sets count toward promotion gates.
-`python3 scripts/eval/run.py --list-sets` prints pinned versions, licences and sizes offline.
-The [registry](../../scripts/eval/public_sets.json) records each licence check and SHA-256.
+The default suite contains five French sets (`miracl-fr`, `mldr-fr`, `xpqa-fr`, `webfaq-fr`, `mkqa-fr`) and five English sets (`scifact`, `fiqa`, `trec-covid`, `arguana`, `scidocs`). Only default sets count toward promotion gates. `python3 scripts/eval/run.py --list-sets` prints pinned versions, licences and sizes offline. The [registry](../../scripts/eval/public_sets.json) records each licence check and SHA-256.
 
-`--include-restricted` opts into Alloprof and BSARD (CC BY-NC-SA 4.0) and NFCorpus
-(academic-only). Use these only when your purpose meets their terms. Their reports have
-`promotion_eligible: false`; they are diagnostics and stay out of gates. Data downloads
-at run time into the ignored cache; never commit or redistribute restricted data.
-Syntec remains excluded because its licence is unknown; mMARCO's inherited terms remain unresolved.
+`--include-restricted` opts into Alloprof and BSARD (CC BY-NC-SA 4.0) and NFCorpus (academic-only). Use these only when your purpose meets their terms. Their reports have `promotion_eligible: false`; they are diagnostics and stay out of gates. Data downloads at run time into the ignored cache; never commit or redistribute restricted data. Syntec remains excluded because its licence is unknown; mMARCO's inherited terms remain unresolved.
 
-Every sample uses a fixed seed and retains all available judgments for its selected
-queries. Distractors come from listed hard negatives first, then a seeded random draw.
-Documents over `max_source_bytes` are excluded. Changing sources, size or seed changes
-the sample fingerprint. Sampled scores are usually higher than full-corpus scores;
-compare only runs with identical fingerprints. TREC-COVID samples five topics to keep
-its deep judgments within 10,000 documents; that alone cannot establish significance.
+Every sample uses a fixed seed and retains all available judgments for its selected queries. Distractors come from listed hard negatives first, then a seeded random draw. Documents over `max_source_bytes` are excluded. Changing sources, size or seed changes the sample fingerprint. Sampled scores are usually higher than full-corpus scores; compare only runs with identical fingerprints. TREC-COVID samples five topics to keep its deep judgments within 10,000 documents; that alone cannot establish significance.
 
 ## Add a set
 
@@ -67,6 +48,9 @@ or a `.zip` / `.tar.gz` archive:
 - `queries.jsonl`: `{"_id": "q1", "text": "…"}` per query;
 - `qrels.tsv`: `query-id`, `corpus-id`, `score` per judgement (grades 0, 1, 2…; a header
   line is optional), or the 4-column TREC form `q1 Q0 d1 1`.
+- optional `qrels-<tier>.tsv`: auxiliary judgments scored separately per tier; `judgment-metadata.json`:
+  `{"q1": {"d1": {"category": "…"}}}` labels hits for error categories; `topics.json` is kept as supplied.
+  Optional files count toward the fingerprint.
 
 Run it with `make eval args='--sets "" --private <dir|archive|URL> --private-sha256 <hex>'`;
 a URL needs its sha256. Set `QUIVR_EVAL_SET_AUTHORIZATION` for an authenticated download.
@@ -88,6 +72,10 @@ licence on its ticket.
   reliably detect only large differences (about 0.1 nDCG@10); 0.05 needs several hundred.
 - **Against the baseline run**: the same system in an earlier run, only for sets whose
   sample fingerprint is identical.
+- **Recall@50** and **Judged@10** (share of the top ten with any judgment) are diagnostics, without Δ or gates.
+  With auxiliary qrels, each tier reports its metrics on the primary queries it judges relevant, negative
+  grades scored as zero gain. With judgment metadata, top-ten hits are counted as relevant (grade ≥ 2),
+  partial (1), irrelevant (≤ 0) or unjudged, and labelled irrelevant or unjudged hits per category.
 - **Failures** are searches the API refused or could not answer; they score 0. Two `mldr-fr`
   queries are over the default profile's 256-token limit: they always fail, `query_too_long`.
 - **Latency** is client wall time per search (p50, p95), one search at a time.

@@ -190,8 +190,8 @@ return `TerminalError` or `RetryableError` to classify failures.
 ## Scaffold and version ownership
 
 `quivr plugin init` generates Python normalizer, subscription and connector
-starters, including a push source with `--kind connector --push`. Go starters and Python ingestion/retrieval starters are omitted:
-these need a chosen vector model or search strategy, or Go module setup.
+starters, including a push source with `--kind connector --push`, and a Go retrieval starter with `--kind retrieval`. Ingestion starters are omitted:
+they need a chosen vector model or segmentation strategy.
 Start from the SDK examples or register the operations above; both kits can
 serve every Contribution even when no starter exists.
 

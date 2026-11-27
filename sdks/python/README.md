@@ -148,7 +148,7 @@ Use `TerminalError` or `RetryableError` for classified failures.
 
 For bounded continuation, declare API `0.18.0` and `contributions.ingestion.paging: true`. Honor `request.page.start` and `max_segments`; return contiguous coverage with `next_start` until complete. Legacy handlers receive no `page`.
 
-`quivr plugin init` omits Go starters and Python ingestion/retrieval starters;
+`quivr plugin init` omits ingestion starters; its retrieval starter (`--kind retrieval`) is Go;
 see [scaffold coverage and version ownership](../go/README.md#scaffold-and-version-ownership).
 The Plugin API change author updates and versions both kits in that PR.
 

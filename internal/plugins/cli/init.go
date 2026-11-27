@@ -10,7 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins/scaffold"
 )
 
-const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--push] [--dir <path>]"
+const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector|retrieval] [--push] [--dir <path>]"
 
 // initCommand writes an embedded plugin template: a Python normalizer (the
 // default), alert rule (--kind subscription) or connector (--kind connector),
