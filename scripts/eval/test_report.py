@@ -36,7 +36,7 @@ class Markdown(unittest.TestCase):
                        {'q1': {'good': 2, 'partial': 1, 'bad': 0, 'late': 1}})
             ordinary = trec.fingerprint(directory)
             (directory / 'qrels-secondary.tsv').write_text('query-id\tcorpus-id\tscore\nq1\tunjudged\t2\nq1\tbad\t-1\nq2\tgood\t1\n')
-            (directory / 'qrels-negatives.tsv').write_text('qid Q0 docid rel\nq1 Q0 bad -1\n')
+            (directory / 'qrels-negatives.tsv').write_text('\nqid Q0 docid rel\nq1 Q0 bad -1\n')
             (directory / 'judgment-metadata.json').write_text(json.dumps({'q1': {
                 'bad': {'category': 'wrong | topic'}, 'unjudged': {'category': 'wrong | topic'},
                 'good': {'category': 'excluded'}, 'filler4': {}, 'late': {'category': 'outside cutoff'},

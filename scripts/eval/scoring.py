@@ -91,11 +91,13 @@ def score_set(data, ranking):
     if 'auxiliary_qrels' in data:
         tiers = {}
         for tier, judgments in data['auxiliary_qrels'].items():
-            judged = {query: {doc: max(grade, 0) for doc, grade in docs.items()}
-                      for query, docs in judgments.items()
+            judged = {query: docs for query, docs in judgments.items()
                       if query in qrels and any(grade > 0 for grade in docs.values())}
             if judged:
-                tiers[tier] = {'queries': len(judged), **score(judged, ranking, diagnostics=True)}
+                # Use zero gain for explicitly judged negatives in both DCG and IDCG.
+                nonnegative_qrels = {query: {doc: max(grade, 0) for doc, grade in docs.items()}
+                                     for query, docs in judged.items()}
+                tiers[tier] = {'queries': len(judged), **score(nonnegative_qrels, ranking, diagnostics=True)}
         result['auxiliary_qrels'] = tiers
     if 'judgment_metadata' in data:
         result['error_diagnostics'] = diagnose_errors(qrels, ranking, data['judgment_metadata'])

@@ -121,12 +121,14 @@ def read_qrels(path, *, strict_header=False):
 def parse_qrels(lines, path, *, strict_header=False):
     """{query_id: {doc_id: grade}} from 3-column BEIR or 4-column TREC rows; path names errors."""
     qrels = {}
+    first_row = True
     for number, line in enumerate(lines, 1):
         cols = line.split()
         if not cols:
             continue
-        if strict_header and number == 1 and cols in (
-                ['query-id', 'corpus-id', 'score'], ['qid', 'Q0', 'docid', 'rel']):
+        header = first_row and cols in (['query-id', 'corpus-id', 'score'], ['qid', 'Q0', 'docid', 'rel'])
+        first_row = False
+        if strict_header and header:
             continue
         if len(cols) == 4:
             cols = [cols[0], cols[2], cols[3]]
