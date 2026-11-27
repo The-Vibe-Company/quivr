@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/The-Vibe-Company/quivr/compare/v2.1.0...v2.1.1) (2026-11-27)
+
+
+### Performance Improvements
+
+* **postgres:** shard large hydration batches across pool connections ([#4034](https://github.com/The-Vibe-Company/quivr/issues/4034)) ([e9cbe98](https://github.com/The-Vibe-Company/quivr/commit/e9cbe98f36052a77679524819eefbac1c884b690))
+* **retrieval:** coalesce legacy multi-part hydration and back off failed coverage refreshes ([#4032](https://github.com/The-Vibe-Company/quivr/issues/4032)) ([1e5d28c](https://github.com/The-Vibe-Company/quivr/commit/1e5d28c054e615a787aa7d84c294c0622ed71064))
+
 ## [2.1.0](https://github.com/The-Vibe-Company/quivr/compare/v2.0.3...v2.1.0) (2026-11-26)
 
 
