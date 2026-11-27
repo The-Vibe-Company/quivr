@@ -208,12 +208,12 @@ configuration:
       rerank_top_k:
         type: integer
         minimum: 1
-        maximum: 50
+        maximum: 100
         default: 30
         description: Number of top Stage-1 candidates to send to the reranker while preserving the remaining tail.
       rerank_ranking:
         type: string
-        enum: [rerank_only, linear, rrf]
+        enum: [rerank_only, linear, rrf, zscore]
         default: linear
       rerank_weight:
         type: number
@@ -236,7 +236,7 @@ configuration:
         description: Gracefully return Stage-1 default ranking when the deep reranker times out or errors.
       surrogate_mode:
         type: string
-        enum: [raw, inverted_pyramid]
+        enum: [raw, inverted_pyramid, rich]
         default: inverted_pyramid
         description: Document surrogate representation sent to the deep reranker.
       adaptive_cascade:
@@ -259,6 +259,194 @@ configuration:
         maximum: 10
         default: 2.25
         description: Optional Stage-1 dense distribution-shape Gap threshold (mean(1..5)-mean(25..50))/std for adaptive early-exit.
+      dense_view_mode:
+        type: string
+        enum: [none, question, stripped, subject]
+        default: none
+        description: Wide-funnel boilerplate-stripped dense query view (question clause, stripped full query, or subject clause).
+      dense_view_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Convex weight of the stripped dense view leg (0 disables the request).
+      dense_view_grouped:
+        type: boolean
+        default: false
+        description: Group the stripped dense view by record (100 distinct records) instead of passages.
+      dense_view_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+      dense_recall_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Convex weight of an additional record-grouped full-query dense recall leg (0 disables the request).
+      dense_recall_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+      lexical_view_mode:
+        type: string
+        enum: [none, question, stripped, subject]
+        default: none
+        description: Wide-funnel boilerplate-stripped lexical query view.
+      lexical_view_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+      lexical_view_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 60
+      lexical_norm_depth:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: Compute lexical min-max calibration over the first N hits only so deeper admission lists do not loosen the head floor (0 uses all).
+      dense_norm_depth:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: Compute dense min-max calibration over the first N records only (0 uses all).
+      round2_consensus_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Convex weight of the zero-LLM Round-2 consensus pseudo-relevance dense leg (0 disables Round 2 dense).
+      round2_consensus_top_n:
+        type: integer
+        minimum: 2
+        maximum: 100
+        default: 10
+      round2_consensus_docs:
+        type: integer
+        minimum: 2
+        maximum: 20
+        default: 2
+      round2_max_terms:
+        type: integer
+        minimum: 1
+        maximum: 16
+        default: 3
+      round2_query_base:
+        type: string
+        enum: [core, full, entity]
+        default: core
+      round2_dense_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+      round2_lexical_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Convex weight of the Round-2 consensus-expanded BM25 leg (0 disables Round 2 lexical).
+      round2_lexical_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 60
+      dense_entity_max_terms:
+        type: integer
+        minimum: 2
+        maximum: 16
+        default: 8
+      dump_pool:
+        type: boolean
+        default: false
+        description: Emit the fused candidate pool with per-leg ranks to stderr (diagnostics only).
+      tail_fusion:
+        type: string
+        enum: [none, rrf]
+        default: none
+        description: Re-order positions after tail_start by weighted RRF over all leg ranks plus the convex position (recall-oriented tail, precision head untouched).
+      tail_start:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 10
+      tail_rrf_k:
+        type: number
+        minimum: 1
+        maximum: 1000
+        default: 60
+      tail_convex_weight:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 1
+      tail_extra_weight:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 1
+      rerank_score_space:
+        type: string
+        enum: [prob, logit]
+        default: prob
+        description: Calibrate reranker scores as raw probabilities or as log-odds before blending (log-odds preserve ordering among saturated top scores).
+      rerank_multi_passage_top_n:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: Score a separate title+lead view and title+best-body view for the top N reranked candidates and combine them (0 disables).
+      rerank_multi_passage_mode:
+        type: string
+        enum: [blend, max, lead_gated, maxmin]
+        default: blend
+      rerank_body_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.35
+        description: Weight of the best-body view in multi-passage blending.
+      rerank_lead_chars:
+        type: integer
+        minimum: 200
+        maximum: 8000
+        default: 1200
+        description: Character budget of the lead zone inside rich surrogates and lead views.
+      rerank_band_end:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: Also score Stage-1 ranks rerank_top_k+1..rerank_band_end with compact lead views and re-sort the region rerank_band_start..rerank_band_end that straddles the Recall@50 cut (0 disables).
+      rerank_band_start:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: First position (0-based) of the re-sorted recall region; head records ranked below it compete with band records (0 uses rerank_top_k).
+      rerank_band_max_chars:
+        type: integer
+        minimum: 200
+        maximum: 8000
+        default: 900
+      rerank_band_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.85
+      rerank_parallel_requests:
+        type: integer
+        minimum: 1
+        maximum: 8
+        default: 1
+        description: Split one rerank call into N interleaved concurrent requests (lets multi-container endpoints score shards on separate GPUs).
       log_diagnostics:
         type: boolean
         default: false

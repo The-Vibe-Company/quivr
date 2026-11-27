@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
@@ -64,6 +65,46 @@ type configuration struct {
 	CascadeMarginThreshold  float64 `json:"cascade_margin_threshold"`
 	CascadeDGapThreshold    float64 `json:"cascade_dgap_threshold"`
 	LogDiagnostics          bool    `json:"log_diagnostics"`
+
+	// Wide-funnel candidate generation (Wave 2C-A).
+	DenseViewMode         string  `json:"dense_view_mode"`
+	DenseViewWeight       float64 `json:"dense_view_weight"`
+	DenseViewGrouped      bool    `json:"dense_view_grouped"`
+	DenseViewK            int     `json:"dense_view_k"`
+	DenseRecallWeight     float64 `json:"dense_recall_weight"`
+	DenseRecallK          int     `json:"dense_recall_k"`
+	LexicalViewMode       string  `json:"lexical_view_mode"`
+	LexicalViewWeight     float64 `json:"lexical_view_weight"`
+	LexicalViewK          int     `json:"lexical_view_k"`
+	LexicalNormDepth      int     `json:"lexical_norm_depth"`
+	DenseNormDepth        int     `json:"dense_norm_depth"`
+	Round2ConsensusWeight float64 `json:"round2_consensus_weight"`
+	Round2ConsensusTopN   int     `json:"round2_consensus_top_n"`
+	Round2ConsensusDocs   int     `json:"round2_consensus_docs"`
+	Round2MaxTerms        int     `json:"round2_max_terms"`
+	Round2QueryBase       string  `json:"round2_query_base"`
+	Round2DenseK          int     `json:"round2_dense_k"`
+	Round2LexicalWeight   float64 `json:"round2_lexical_weight"`
+	Round2LexicalK        int     `json:"round2_lexical_k"`
+	DenseEntityMaxTerms   int     `json:"dense_entity_max_terms"`
+	DumpPool              bool    `json:"dump_pool"`
+	TailFusion            string  `json:"tail_fusion"`
+	TailStart             int     `json:"tail_start"`
+	TailRRFK              float64 `json:"tail_rrf_k"`
+	TailConvexWeight      float64 `json:"tail_convex_weight"`
+	TailExtraWeight       float64 `json:"tail_extra_weight"`
+
+	// Deep-tier calibration and multi-passage scoring (Wave 2C-A).
+	RerankScoreSpace       string  `json:"rerank_score_space"`
+	RerankMultiPassageTopN int     `json:"rerank_multi_passage_top_n"`
+	RerankMultiPassageMode string  `json:"rerank_multi_passage_mode"`
+	RerankBodyWeight       float64 `json:"rerank_body_weight"`
+	RerankLeadChars        int     `json:"rerank_lead_chars"`
+	RerankBandEnd          int     `json:"rerank_band_end"`
+	RerankBandStart        int     `json:"rerank_band_start"`
+	RerankBandMaxChars     int     `json:"rerank_band_max_chars"`
+	RerankBandWeight       float64 `json:"rerank_band_weight"`
+	RerankParallelRequests int     `json:"rerank_parallel_requests"`
 }
 
 func (c configuration) fallbackOnError() bool {
@@ -115,6 +156,32 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		CascadeMarginThreshold:  0.15,
 		CascadeDGapThreshold:    2.25,
 		LogDiagnostics:          false,
+		DenseViewMode:           "none",
+		DenseViewWeight:         0,
+		DenseViewK:              100,
+		DenseRecallK:            100,
+		LexicalViewMode:         "none",
+		LexicalViewK:            60,
+		Round2ConsensusTopN:     10,
+		Round2ConsensusDocs:     2,
+		Round2MaxTerms:          3,
+		Round2QueryBase:         "core",
+		Round2DenseK:            100,
+		Round2LexicalK:          60,
+		DenseEntityMaxTerms:     8,
+		TailFusion:              "none",
+		TailStart:               10,
+		TailRRFK:                60,
+		TailConvexWeight:        1.0,
+		TailExtraWeight:         1.0,
+		RerankScoreSpace:        "prob",
+		RerankMultiPassageMode:  "blend",
+		RerankBodyWeight:        0.35,
+		RerankLeadChars:         1200,
+		RerankBandEnd:           0,
+		RerankBandMaxChars:      900,
+		RerankBandWeight:        0.85,
+		RerankParallelRequests:  1,
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -160,35 +227,105 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		return quivrplugin.Ask(reqs...), nil
 	}
 
-	// Parse served candidate legs from Round 1.
+	// Attribute served Round-1 candidates to legs by request_index (the Round-1
+	// request list is a pure function of the query and configuration).
+	specs, _ := round1Specs(req, cfg)
 	var denseGrouped, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate
+	extraByName := map[string]*extraLeg{}
+	addExtra := func(name string, weight float64, depth int, cands []quivrplugin.Candidate) {
+		if weight <= 0 || len(cands) == 0 {
+			return
+		}
+		if el, ok := extraByName[name]; ok {
+			el.Cands = append(el.Cands, cands...)
+			return
+		}
+		extraByName[name] = &extraLeg{Name: name, Weight: weight, NormDepth: depth, Cands: cands}
+	}
 	for _, s := range req.Served {
+		if s.Round == 2 {
+			switch s.Request.Primitive {
+			case quivrplugin.PrimitiveNearVector:
+				addExtra(legR2Dense, cfg.Round2ConsensusWeight, 0, s.Candidates)
+			case quivrplugin.PrimitiveBM25:
+				addExtra(legR2Lex, cfg.Round2LexicalWeight, cfg.LexicalNormDepth, s.Candidates)
+			}
+			continue
+		}
 		if s.Round != 1 {
 			continue
 		}
-		switch s.Request.Primitive {
-		case quivrplugin.PrimitiveNearVector:
-			if s.Request.GroupBy == "record" {
-				denseGrouped = append(denseGrouped, s.Candidates...)
-			} else {
-				denseUngrouped = append(denseUngrouped, s.Candidates...)
-			}
-		case quivrplugin.PrimitiveBM25:
-			expectedLex := strings.TrimSpace(req.Query.Text)
-			if cfg.CleanLexicalQuery {
-				expectedLex = strings.TrimSpace(cleanLexicalQuery(req.Query.Text))
-			}
-			if len(lexicalFull) == 0 && strings.TrimSpace(s.Request.QueryText) == expectedLex {
-				lexicalFull = s.Candidates
-			} else if len(lexicalFull) == 0 && !cfg.EntityLeg {
-				lexicalFull = s.Candidates
-			} else {
-				lexicalEntity = s.Candidates
+		name := ""
+		if s.RequestIndex >= 0 && s.RequestIndex < len(specs) && specs[s.RequestIndex].Req.Primitive == s.Request.Primitive &&
+			strings.TrimSpace(specs[s.RequestIndex].Req.QueryText) == strings.TrimSpace(s.Request.QueryText) {
+			name = specs[s.RequestIndex].Name
+		}
+		switch name {
+		case legDense, legDenseAux:
+			denseUngrouped = append(denseUngrouped, s.Candidates...)
+		case legDenseGroup:
+			denseGrouped = append(denseGrouped, s.Candidates...)
+		case legLexical:
+			lexicalFull = s.Candidates
+		case legEntity:
+			lexicalEntity = s.Candidates
+		case legDenseView:
+			addExtra(legDenseView, cfg.DenseViewWeight, 0, s.Candidates)
+		case legDenseRecall:
+			addExtra(legDenseRecall, cfg.DenseRecallWeight, 0, s.Candidates)
+		case legLexView:
+			addExtra(legLexView, cfg.LexicalViewWeight, cfg.LexicalNormDepth, s.Candidates)
+		default:
+			// Unattributed request (e.g. a host that reorders served lists): fall back to primitive heuristics.
+			switch s.Request.Primitive {
+			case quivrplugin.PrimitiveNearVector:
+				if s.Request.GroupBy == "record" {
+					denseGrouped = append(denseGrouped, s.Candidates...)
+				} else {
+					denseUngrouped = append(denseUngrouped, s.Candidates...)
+				}
+			case quivrplugin.PrimitiveBM25:
+				if len(lexicalFull) == 0 {
+					lexicalFull = s.Candidates
+				} else {
+					lexicalEntity = s.Candidates
+				}
 			}
 		}
 	}
 
-	bundles, denseForQPP := fuseAndScoreWithQPP(req, cfg, denseGrouped, lexicalFull, lexicalEntity, denseUngrouped)
+	if cfg.DumpPool && req.Round == 2 {
+		for _, s := range req.Served {
+			if len(s.Candidates) > 0 {
+				c := s.Candidates[0]
+				fmt.Fprintf(os.Stderr, "[newsroom-shape] prim=%s group=%s part=%q start=%d end=%d ranges=%+v sep=%q text=%d passage=%d head=%q\n",
+					s.Request.Primitive, s.Request.GroupBy, c.PartKey, c.Start, c.End, c.SourceRanges, c.SourceSeparator,
+					len(c.Text), len(c.PassageText), truncateRunes(candidateBodyText(c), 160))
+			}
+		}
+	}
+
+	// Optional zero-LLM Round-2 consensus PRF (dense and/or lexical).
+	if req.Round == 2 {
+		denseRecords := denseGrouped
+		if len(denseRecords) == 0 {
+			denseRecords = dedupByRecord(denseUngrouped)
+		}
+		if r2, terms := buildRound2Requests(req, cfg, denseRecords, lexicalFull); len(r2) > 0 {
+			if cfg.LogDiagnostics {
+				fmt.Fprintf(os.Stderr, "[newsroom-diag] round2_consensus terms=%q requests=%d\n", terms, len(r2))
+			}
+			return quivrplugin.Ask(r2...), nil
+		}
+	}
+	extras := make([]extraLeg, 0, len(extraByName))
+	for _, name := range []string{legDenseView, legDenseRecall, legLexView, legR2Dense, legR2Lex} {
+		if el, ok := extraByName[name]; ok {
+			extras = append(extras, *el)
+		}
+	}
+
+	bundles, denseForQPP := fuseAndScoreExt(req, cfg, denseGrouped, lexicalFull, lexicalEntity, denseUngrouped, extras)
 	if len(bundles) == 0 {
 		return quivrplugin.Rank(), nil
 	}
@@ -220,6 +357,10 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		}
 	}
 
+	if cfg.DumpPool {
+		dumpPool(req.Query.Text, req.Round, bundles)
+	}
+
 	limit := min(len(bundles), req.Limit)
 	hits := make([]quivrplugin.RankedHit, limit)
 	for i := 0; i < limit; i++ {
@@ -246,6 +387,19 @@ func clampK(k, reqLimit int) int {
 }
 
 func buildRound1Requests(req *quivrplugin.SearchRequest, cfg configuration) ([]quivrplugin.CandidateRequest, error) {
+	specs, err := round1Specs(req, cfg)
+	if err != nil {
+		return nil, err
+	}
+	reqs := make([]quivrplugin.CandidateRequest, len(specs))
+	for i, sp := range specs {
+		reqs[i] = sp.Req
+	}
+	return reqs, nil
+}
+
+// round1Specs deterministically builds the named Round-1 candidate requests.
+func round1Specs(req *quivrplugin.SearchRequest, cfg configuration) ([]namedRequest, error) {
 	k := clampK(cfg.CandidateCount, req.Limit)
 	lexK := k
 	if cfg.LexicalK > 0 {
@@ -256,80 +410,123 @@ func buildRound1Requests(req *quivrplugin.SearchRequest, cfg configuration) ([]q
 		denseK = clampK(cfg.DenseK, req.Limit)
 	}
 
-	var reqs []quivrplugin.CandidateRequest
+	var specs []namedRequest
 	space := req.ServedSpace()
 
 	if req.Query.Mode == "semantic" && space == nil {
 		return nil, quivrplugin.TerminalSearchError("no_served_space", "the searched Corpora serve no vector space; search by keywords, or rebuild them")
 	}
+	useDense := req.Query.Mode != "lexical" && space != nil
+	useLex := req.Query.Mode != "semantic"
 
 	// Leg A: Full-query dense near_vector.
 	// When dense_grouped=false (default), a single ungrouped near_vector call provides
 	// MaxP, FirstP/MaxP ratio, multi-passage corroboration, and surrogate passages at half the latency.
-	if req.Query.Mode != "lexical" && space != nil {
+	if useDense {
 		if cfg.DenseGrouped {
-			reqs = append(reqs, quivrplugin.CandidateRequest{
+			specs = append(specs, namedRequest{legDenseGroup, quivrplugin.CandidateRequest{
 				Primitive: quivrplugin.PrimitiveNearVector,
 				QueryText: req.Query.Text,
 				Space:     space.ID,
 				K:         k,
 				GroupBy:   "record",
-			})
+			}})
 		} else {
-			reqs = append(reqs, quivrplugin.CandidateRequest{
+			specs = append(specs, namedRequest{legDense, quivrplugin.CandidateRequest{
 				Primitive: quivrplugin.PrimitiveNearVector,
 				QueryText: req.Query.Text,
 				Space:     space.ID,
 				K:         denseK,
 				GroupBy:   "",
-			})
+			}})
 		}
 	}
 
 	// Leg B: Full-query lexical BM25 (grouped by record)
-	if req.Query.Mode != "semantic" {
+	if useLex {
 		lexQuery := req.Query.Text
 		if cfg.CleanLexicalQuery {
 			lexQuery = cleanLexicalQuery(req.Query.Text)
 		}
-		reqs = append(reqs, quivrplugin.CandidateRequest{
+		specs = append(specs, namedRequest{legLexical, quivrplugin.CandidateRequest{
 			Primitive: quivrplugin.PrimitiveBM25,
 			QueryText: lexQuery,
 			Field:     quivrplugin.FieldSource,
 			K:         lexK,
 			GroupBy:   "record",
-		})
+		}})
 	}
 
 	// Leg C: Focused Entity / High-Specificity Sub-Query BM25
-	if cfg.EntityLeg && req.Query.Mode != "semantic" {
+	if cfg.EntityLeg && useLex {
 		if subQ, ok := extractEntityQuery(req.Query.Text, cfg.EntityMaxTerms); ok && subQ != "" {
-			reqs = append(reqs, quivrplugin.CandidateRequest{
+			specs = append(specs, namedRequest{legEntity, quivrplugin.CandidateRequest{
 				Primitive: quivrplugin.PrimitiveBM25,
 				QueryText: subQ,
 				Field:     quivrplugin.FieldSource,
 				K:         lexK,
 				GroupBy:   "record",
-			})
+			}})
 		}
 	}
 
 	// Extra ungrouped dense request only when dense_grouped=true AND passage/surrogate signals need it.
-	if cfg.DenseGrouped {
+	if cfg.DenseGrouped && useDense {
 		needUngrouped := cfg.PassageRatioWeight > 0 || cfg.PassageSupportWeight > 0 ||
-			(req.Profile == "deep" && cfg.RerankEndpoint != "" && cfg.SurrogateMode == "inverted_pyramid")
-		if needUngrouped && req.Query.Mode != "lexical" && space != nil {
-			reqs = append(reqs, quivrplugin.CandidateRequest{
+			(req.Profile == "deep" && cfg.RerankEndpoint != "" && cfg.SurrogateMode != "raw")
+		if needUngrouped {
+			specs = append(specs, namedRequest{legDenseAux, quivrplugin.CandidateRequest{
 				Primitive: quivrplugin.PrimitiveNearVector,
 				QueryText: req.Query.Text,
 				Space:     space.ID,
 				K:         denseK,
 				GroupBy:   "",
-			})
+			}})
 		}
 	}
 
-	return reqs, nil
+	// Wide-funnel leg D: boilerplate-stripped dense query view.
+	if useDense && cfg.DenseViewWeight > 0 {
+		if vq, ok := denseViewQuery(req.Query.Text, cfg); ok {
+			group := ""
+			if cfg.DenseViewGrouped {
+				group = "record"
+			}
+			specs = append(specs, namedRequest{legDenseView, quivrplugin.CandidateRequest{
+				Primitive: quivrplugin.PrimitiveNearVector,
+				QueryText: vq,
+				Space:     space.ID,
+				K:         clampK(cfg.DenseViewK, req.Limit),
+				GroupBy:   group,
+			}})
+		}
+	}
+
+	// Wide-funnel leg E: record-grouped full-query dense recall leg (100 distinct records).
+	if useDense && cfg.DenseRecallWeight > 0 && !cfg.DenseGrouped {
+		specs = append(specs, namedRequest{legDenseRecall, quivrplugin.CandidateRequest{
+			Primitive: quivrplugin.PrimitiveNearVector,
+			QueryText: req.Query.Text,
+			Space:     space.ID,
+			K:         clampK(cfg.DenseRecallK, req.Limit),
+			GroupBy:   "record",
+		}})
+	}
+
+	// Wide-funnel leg F: boilerplate-stripped lexical query view.
+	if useLex && cfg.LexicalViewWeight > 0 {
+		if lq, ok := lexicalViewQuery(req.Query.Text, cfg); ok {
+			specs = append(specs, namedRequest{legLexView, quivrplugin.CandidateRequest{
+				Primitive: quivrplugin.PrimitiveBM25,
+				QueryText: lq,
+				Field:     quivrplugin.FieldSource,
+				K:         clampK(cfg.LexicalViewK, req.Limit),
+				GroupBy:   "record",
+			}})
+		}
+	}
+
+	return specs, nil
 }
 
 func fuseAndScore(
@@ -345,6 +542,15 @@ func fuseAndScoreWithQPP(
 	req *quivrplugin.SearchRequest,
 	cfg configuration,
 	denseGrouped, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate,
+) ([]*recordBundle, []quivrplugin.Candidate) {
+	return fuseAndScoreExt(req, cfg, denseGrouped, lexicalFull, lexicalEntity, denseUngrouped, nil)
+}
+
+func fuseAndScoreExt(
+	req *quivrplugin.SearchRequest,
+	cfg configuration,
+	denseGrouped, lexicalFull, lexicalEntity, denseUngrouped []quivrplugin.Candidate,
+	extras []extraLeg,
 ) ([]*recordBundle, []quivrplugin.Candidate) {
 	byRecord := map[string]*recordBundle{}
 	getBundle := func(c quivrplugin.Candidate) *recordBundle {
@@ -448,10 +654,10 @@ func fuseAndScoreWithQPP(
 			densePrimary[i] = c
 		}
 	}
-	denseStats := computeLegStats(densePrimary)
+	denseStats := statsAtDepth(densePrimary, cfg.DenseNormDepth)
 
 	// Ingest Leg B: full-query BM25
-	lexStats := computeLegStats(lexicalFull)
+	lexStats := statsAtDepth(lexicalFull, cfg.LexicalNormDepth)
 	for i, c := range lexicalFull {
 		b := getBundle(c)
 		if !b.HasLexical || c.Score > b.LexicalScore {
@@ -477,6 +683,26 @@ func fuseAndScoreWithQPP(
 		if !b.HasBestSeg {
 			b.BestSeg = c
 			b.HasBestSeg = true
+		}
+	}
+
+	// Ingest wide-funnel extra legs (record-level ranks, calibrated per leg).
+	extraStats := make([]legStats, len(extras))
+	for li, el := range extras {
+		records := dedupByRecord(el.Cands)
+		extraStats[li] = statsAtDepth(records, el.NormDepth)
+		for i, c := range records {
+			b := getBundle(c)
+			if b.Extra == nil {
+				b.Extra = map[string]legHit{}
+			}
+			if h, ok := b.Extra[el.Name]; !ok || c.Score > h.Score {
+				b.Extra[el.Name] = legHit{Score: c.Score, Rank: i + 1}
+			}
+			if !b.HasBestSeg {
+				b.BestSeg = c
+				b.HasBestSeg = true
+			}
 		}
 	}
 
@@ -517,6 +743,11 @@ func fuseAndScoreWithQPP(
 	if len(lexicalEntity) > 0 {
 		activeWeightSum += effEntW
 	}
+	for _, el := range extras {
+		if len(el.Cands) > 0 && el.Weight > 0 {
+			activeWeightSum += el.Weight
+		}
+	}
 	if activeWeightSum <= 0 {
 		activeWeightSum = 1.0
 	}
@@ -535,6 +766,12 @@ func fuseAndScoreWithQPP(
 		if b.HasEntity {
 			fused += effEntW * normalizeLegScore(b.EntityScore, b.EntityRank, entStats, cfg.Fusion, cfg.RRFK)
 			legs++
+		}
+		for li, el := range extras {
+			if h, ok := b.Extra[el.Name]; ok && el.Weight > 0 {
+				fused += el.Weight * normalizeLegScore(h.Score, h.Rank, extraStats[li], cfg.Fusion, cfg.RRFK)
+				legs++
+			}
 		}
 		// Normalize fused score to comparable [0, ~1] scale across 2-leg vs 3-leg configs.
 		if cfg.Fusion != "rrf" {
@@ -688,6 +925,7 @@ func fuseAndScoreWithQPP(
 		b.Explanation = fmt.Sprintf("newsroom(%s,legs=%d)", cfg.Fusion, b.LegsMatched)
 	}
 	sortBundlesDeterministic(bundles)
+	applyTailFusion(bundles, cfg)
 	return bundles, densePrimary
 }
 
@@ -724,11 +962,50 @@ func (r retriever) applyDeepRerank(
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
+	preRerank := make(map[*recordBundle]float64, len(bundles))
+	for _, b := range bundles {
+		preRerank[b] = b.FinalScore
+	}
+
+	// Primary view per head record; optional multi-passage lead/body views.
+	nMP := min(cfg.RerankMultiPassageTopN, len(head))
 	docs := make([]string, len(head))
 	for i, b := range head {
-		docs[i] = buildSurrogate(b, cfg.SurrogateMode, cfg.RerankMaxDocChars)
+		if i < nMP {
+			docs[i] = buildLeadView(b, cfg.RerankMaxDocChars)
+		} else {
+			docs[i] = surrogateFor(b, cfg)
+		}
 	}
-	scores, err := r.callReranker(callCtx, cfg, req.Query.Text, docs)
+	bodyOf := map[int]int{} // head index -> doc index of its body view
+	for i := 0; i < nMP; i++ {
+		if bv, ok := buildBodyView(head[i], cfg.RerankMaxDocChars); ok {
+			bodyOf[i] = len(docs)
+			docs = append(docs, bv)
+		}
+	}
+	// Optional recall band: compact lead views for Stage-1 ranks topK+1..band_end so the
+	// cross-encoder can promote relevant records across the Recall@50 cut.
+	bandN := 0
+	if cfg.RerankBandEnd > topK {
+		bandN = min(cfg.RerankBandEnd-topK, len(tail))
+	}
+	bandStart := len(docs)
+	for i := 0; i < bandN; i++ {
+		docs = append(docs, buildLeadView(tail[i], cfg.RerankBandMaxChars))
+	}
+	if cfg.LogDiagnostics {
+		total, short := 0, 0
+		for _, d := range docs {
+			n := utf8.RuneCountInString(d)
+			total += n
+			if n < 400 {
+				short++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "[newsroom-diag] rerank_docs=%d chars=%d short=%d sample=%q\n", len(docs), total, short, truncateRunes(docs[0], 240))
+	}
+	rs, err := r.callRerankerSharded(callCtx, cfg, req.Query.Text, docs, cfg.RerankParallelRequests)
 	if err != nil {
 		if cfg.LogDiagnostics {
 			fmt.Fprintf(os.Stderr, "[newsroom-diag] deep_rerank_error=%v fallback=%v\n", err, cfg.fallbackOnError())
@@ -737,6 +1014,17 @@ func (r retriever) applyDeepRerank(
 			return bundles, nil
 		}
 		return nil, &quivrplugin.SearchError{Code: "reranker_unavailable", Message: err.Error(), Retryable: true}
+	}
+	all := rs.Prob
+	if cfg.RerankScoreSpace == "logit" {
+		all = rs.logitSpace()
+	}
+	scores := make([]float64, len(head))
+	for i := range head {
+		scores[i] = all[i]
+		if j, ok := bodyOf[i]; ok {
+			scores[i] = combineViews(all[i], all[j], cfg.RerankMultiPassageMode, cfg.RerankBodyWeight)
+		}
 	}
 
 	// Score head according to rerank_ranking mode, keeping strict monotonic separation above untouched tail.
@@ -757,6 +1045,17 @@ func (r retriever) applyDeepRerank(
 		for i, b := range reranked {
 			b.FinalScore = 1.0/float64(61+i) + 1.0/float64(60+rrank[i])
 			b.Explanation = "newsroom+deep(rrf," + cfg.SurrogateMode + ")"
+		}
+	case "zscore":
+		baseScores := make([]float64, len(reranked))
+		for i, b := range reranked {
+			baseScores[i] = b.FinalScore
+		}
+		zb := zScores(baseScores)
+		zr := zScores(scores)
+		for i, b := range reranked {
+			b.FinalScore = cfg.RerankWeight*zr[i] + (1.0-cfg.RerankWeight)*zb[i]
+			b.Explanation = "newsroom+deep(zscore," + cfg.SurrogateMode + ")"
 		}
 	case "linear":
 		baseScores := make([]float64, len(reranked))
@@ -788,7 +1087,53 @@ func (r retriever) applyDeepRerank(
 			}
 		}
 	}
-	return append(reranked, tail...), nil
+	out := append(reranked, tail...)
+	if bandN > 0 {
+		// Re-sort the region [band_start, topK+bandN) that straddles the Recall@50 cut:
+		// head records keep their full-view margin, band records use their compact-view
+		// margin; both are standardized together with the pre-rerank Stage-1 score.
+		bs := cfg.RerankBandStart
+		if bs <= 0 || bs > topK {
+			bs = topK
+		}
+		be := topK + bandN
+		logits := rs.logitSpace()
+		headLogit := make(map[*recordBundle]float64, len(head))
+		for i, b := range head {
+			v := logits[i]
+			if j, ok := bodyOf[i]; ok {
+				v = combineViews(logits[i], logits[j], cfg.RerankMultiPassageMode, cfg.RerankBodyWeight)
+			}
+			headLogit[b] = v
+		}
+		for i := 0; i < bandN; i++ {
+			headLogit[tail[i]] = logits[bandStart+i]
+		}
+		region := out[bs:be]
+		origScores := make([]float64, len(region))
+		rv := make([]float64, len(region))
+		sv := make([]float64, len(region))
+		for i, b := range region {
+			origScores[i] = b.FinalScore
+			rv[i] = headLogit[b]
+			sv[i] = preRerank[b]
+		}
+		zr, zs := zScores(rv), zScores(sv)
+		key := make(map[*recordBundle]float64, len(region))
+		for i, b := range region {
+			key[b] = cfg.RerankBandWeight*zr[i] + (1-cfg.RerankBandWeight)*zs[i]
+		}
+		sort.SliceStable(region, func(i, j int) bool {
+			if key[region[i]] != key[region[j]] {
+				return key[region[i]] > key[region[j]]
+			}
+			return region[i].RecordID < region[j].RecordID
+		})
+		for i, b := range region {
+			b.FinalScore = origScores[i]
+		}
+	}
+	return out, nil
 }
 
 func minMaxNormalize(vals []float64) []float64 {

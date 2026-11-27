@@ -331,5 +331,3 @@ func TestDefaultConfigMatchesUnifiedChampion(t *testing.T) {
 		t.Fatalf("unexpected deep rerank defaults: %+v", cfg)
 	}
 }
-
-

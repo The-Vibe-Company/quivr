@@ -12,30 +12,31 @@ import (
 // recordBundle aggregates all evidence retrieved for one Record across
 // retrieval legs and ungrouped dense passages.
 type recordBundle struct {
-	RecordID      string
-	BestSeg       quivrplugin.Candidate
-	HasBestSeg    bool
-	LeadSeg       *quivrplugin.Candidate
-	DeepBestSeg   *quivrplugin.Candidate
-	SecondSeg     *quivrplugin.Candidate
-	DenseScore    float64
-	HasDense      bool
-	DenseRank     int
-	LexicalScore  float64
-	HasLexical    bool
-	LexicalRank   int
-	EntityScore   float64
-	HasEntity     bool
-	EntityRank    int
-	FirstP        float64
-	HasFirstP     bool
-	MaxP          float64
-	HasUngrouped  bool
-	PassageCount  int
-	Stage1Score   float64
-	FinalScore    float64
-	LegsMatched   int
-	Explanation   string
+	RecordID     string
+	BestSeg      quivrplugin.Candidate
+	HasBestSeg   bool
+	LeadSeg      *quivrplugin.Candidate
+	DeepBestSeg  *quivrplugin.Candidate
+	SecondSeg    *quivrplugin.Candidate
+	DenseScore   float64
+	HasDense     bool
+	DenseRank    int
+	LexicalScore float64
+	HasLexical   bool
+	LexicalRank  int
+	EntityScore  float64
+	HasEntity    bool
+	EntityRank   int
+	FirstP       float64
+	HasFirstP    bool
+	MaxP         float64
+	HasUngrouped bool
+	PassageCount int
+	Extra        map[string]legHit
+	Stage1Score  float64
+	FinalScore   float64
+	LegsMatched  int
+	Explanation  string
 }
 
 type legStats struct {
@@ -636,7 +637,9 @@ func anchorRatio(query string) float64 {
 	fields := strings.Fields(query)
 	content, anchors := 0, 0
 	for i, f := range fields {
-		tok := strings.TrimFunc(f, func(r rune) bool { return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r > 127) })
+		tok := strings.TrimFunc(f, func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r > 127)
+		})
 		folded := foldWord(tok)
 		if folded == "" || stopwords[folded] {
 			continue
