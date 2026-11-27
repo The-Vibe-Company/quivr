@@ -48,5 +48,32 @@ configuration:
         enum: [relative_score, ranked]
         default: relative_score
         description: Weaviate hybrid fusion; relative_score normalizes each side's scores before weighting, ranked uses reciprocal rank fusion (RRF, constant 60). Used only in hybrid mode.
+      passage_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0
+        description: Weight of passage aggregation in the final score (0 turns it off). When set, one ungrouped near_vector request in the served space returns several passages per Record, scored by passage_max_weight, passage_top2_weight and passage_lead_weight.
+      passage_candidates:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+        description: Passages requested by the ungrouped passage request.
+      passage_max_weight:
+        type: number
+        minimum: 0
+        default: 1
+        description: Weight of a Record's best passage (MaxP) in passage aggregation.
+      passage_top2_weight:
+        type: number
+        minimum: 0
+        default: 0
+        description: Weight of the mean of a Record's two best passages (Top2Mean); a passage not served counts as the lowest served score.
+      passage_lead_weight:
+        type: number
+        minimum: 0
+        default: 0
+        description: Weight of a Record's first passage (FirstP, offset 0 of its part) when it is served.
 run:
   command: [go, run, .]

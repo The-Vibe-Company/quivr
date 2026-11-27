@@ -25,11 +25,35 @@ type configuration struct {
 	DenseWeight    float64 `json:"dense_weight"`
 	CandidateCount int     `json:"candidate_count"`
 	HybridFusion   string  `json:"hybrid_fusion"`
+
+	// Passage aggregation (passages.go); off while PassageWeight is 0.
+	PassageWeight     float64 `json:"passage_weight"`
+	PassageCandidates int     `json:"passage_candidates"`
+	PassageMaxWeight  float64 `json:"passage_max_weight"`
+	PassageTop2Weight float64 `json:"passage_top2_weight"`
+	PassageLeadWeight float64 `json:"passage_lead_weight"`
+}
+
+func parseConfiguration(req *quivrplugin.SearchRequest) (configuration, error) {
+	config := configuration{
+		DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score",
+		PassageCandidates: defaultPassageCandidates, PassageMaxWeight: 1,
+	}
+	if len(req.Configuration) > 0 {
+		if err := json.Unmarshal(req.Configuration, &config); err != nil {
+			return config, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+		}
+	}
+	return config, nil
 }
 
 type retriever struct{}
 
 func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
+	config, err := parseConfiguration(req)
+	if err != nil {
+		return nil, err
+	}
 	pending := []quivrplugin.SearchSpace{}
 	if req.Query.Mode != "lexical" {
 		requested := map[string]bool{}
@@ -43,7 +67,7 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 		}
 	}
 	if req.Round == 1 || (req.Round < 3 && len(pending) > 0) {
-		c, err := request(req)
+		c, err := request(req, config)
 		if err != nil {
 			return nil, err
 		}
@@ -65,12 +89,20 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 				requests = append(requests, next)
 			}
 		}
+		// Passage aggregation adds one ungrouped request in the served space,
+		// so several passages of a Record can be served.
+		if served := req.ServedSpace(); req.Round == 1 && config.PassageWeight > 0 && c.Primitive != quivrplugin.PrimitiveBM25 && served != nil && !isImageOnlySpace(served.Indexes) && len(requests) < 8 {
+			requests = append(requests, quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveNearVector, QueryText: req.Query.Text, Space: served.ID, K: config.PassageCandidates})
+		}
 		return quivrplugin.Ask(requests...), nil
 	}
 	// Served candidates rank by score, then segment id; the Record dedupe below keeps the first in that order.
 	hits := []quivrplugin.RankedHit{}
 	segmentRecords := map[string]string{}
 	for _, s := range req.Served {
+		if isPassageRequest(s.Request) {
+			continue
+		}
 		explanation := explain(s.Request)
 		for _, c := range s.Candidates {
 			segmentRecords[c.SegmentID] = c.RecordID
@@ -98,18 +130,46 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 			unique = append(unique, h)
 		}
 	}
-	return quivrplugin.Rank(unique[:min(len(unique), req.Limit)]...), nil
+	if config.PassageWeight == 0 {
+		return quivrplugin.Rank(unique[:min(len(unique), req.Limit)]...), nil
+	}
+	return quivrplugin.Rank(blend(req, config, unique, segmentRecords)[:min(len(unique), req.Limit)]...), nil
+}
+
+// blend re-scores the first-round ranking: each Record's min-max normalized
+// first-round score is interpolated with its passage aggregate, which is 0
+// for a Record none of whose passages was served.
+func blend(req *quivrplugin.SearchRequest, config configuration, unique []quivrplugin.RankedHit, segmentRecords map[string]string) []quivrplugin.RankedHit {
+	recordOf := func(h quivrplugin.RankedHit) string {
+		if key := segmentRecords[h.SegmentID]; key != "" {
+			return key
+		}
+		return h.SegmentID
+	}
+	firstRound := make(map[string]scored, len(unique))
+	for _, h := range unique {
+		firstRound[recordOf(h)] = scored{h.SegmentID, h.Score}
+	}
+	base := minMax(firstRound)
+	passages := passageScores(req.Served, config)
+	out := make([]quivrplugin.RankedHit, 0, len(unique))
+	for _, h := range unique {
+		key := recordOf(h)
+		h.Score = (1-config.PassageWeight)*base[key] + config.PassageWeight*passages[key]
+		out = append(out, h)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].SegmentID < out[j].SegmentID
+	})
+	return out
 }
 
 // request is the one candidate request of a search: keywords on the title
 // and body for lexical, the served space for semantic, both for hybrid.
-func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, error) {
-	config := configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score"}
-	if len(req.Configuration) > 0 {
-		if err := json.Unmarshal(req.Configuration, &config); err != nil {
-			return quivrplugin.CandidateRequest{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
-		}
-	}
+func request(req *quivrplugin.SearchRequest, config configuration) (quivrplugin.CandidateRequest, error) {
 	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount, GroupBy: "record"}
 	if req.Query.Mode == "lexical" {
 		c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource

@@ -13,6 +13,11 @@ Up to two rounds of candidates, then the ranking:
   Without a served space, hybrid asks for `bm25`; explicit semantic returns `422 unsupported_search`.
   The engine keeps affected Corpora's keywords alongside hybrid candidates,
   reporting their ids in `retrieval_profile.degraded` (`vectors_unavailable`).
+- **Passage aggregation** (optional, `passage_weight > 0`): passage scores are min-max normalized
+  over the served passages and mixed per Record from MaxP, Top2Mean and FirstP; the Record's
+  min-max normalized first-round score is interpolated with that mix. The ranked set is unchanged;
+  only its order moves, so a Record discussing the query in its lead or across passages
+  outranks one that mentions it in a single passage.
 - **Ranking** merges candidates by descending index score and keeps each
   Record once across served spaces, with its best available passage and an explanation
   naming the primitive and space. Equal scores rank by segment id.
@@ -30,6 +35,9 @@ Set these keys in the plugin pin's `configuration`; both core profiles use them.
 | `dense_weight` | Hybrid vector weight (Weaviate `alpha`), 0–1; default 0.5. Keyword weight is `1 - dense_weight`. |
 | `candidate_count` | Candidates per served space, or one lexical request, 1–100; default the search limit. A smaller value can return a shorter page. |
 | `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses reciprocal rank fusion with constant 60. |
+| `passage_weight` | Weight of passage aggregation in the final score, 0–1; default 0 (off). When set, round 1 adds one ungrouped `near_vector` request in the served space so several passages of a Record can be served. |
+| `passage_candidates` | Passages that request asks for, 1–100; default 100. |
+| `passage_max_weight`, `passage_top2_weight`, `passage_lead_weight` | Weights of a Record's best passage (MaxP), the mean of its two best (Top2Mean; a passage not served counts as the pool's lowest score) and its first passage (FirstP, offset 0 of its part); defaults 1, 0, 0. |
 
 Weight and fusion affect hybrid mode only; ranking remains capped by the search limit.
 Omitting settings preserves default request bytes. See
