@@ -6,7 +6,7 @@ ingest its documents into a new Corpus through the public API, wait until every 
 vectors, run every query in each search mode and each profile the API serves, and score the
 rankings (scoring.py). Writes report.json and report.md; see docs/agents/evaluation.md.
 
-By default it starts an isolated local stack (Linux x86_64 only, like make measure). With
+By default it starts an isolated local stack (Linux x86_64 or Apple silicon macOS). With
 --api-url it measures an existing installation instead, using the key in QUIVR_EVAL_API_KEY.
 With --compare-to <ref> it also starts a stack built from that revision, in the same process
 and on the same CPU, and searches the two stacks alternately to compare their latency (THE-874).
@@ -22,6 +22,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -43,6 +44,8 @@ from measure_metrics import percentile  # noqa: E402
 import ci_guard
 
 MODES = ['lexical', 'semantic', 'hybrid']
+BASELINE_PROFILE = 'core.retrieve/default'
+JEV_PLUGIN = 'jev.rerank'
 BASELINE_SYSTEM = 'hybrid/default'  # the API's default mode and profile
 LIMIT = 50  # the API maximum; hits are deduplicated by Record before scoring
 TIMING_LIMITS = [LIMIT, 10]  # limit 10, the API default, is timed only, in a second pass
@@ -71,7 +74,7 @@ class Client:
     def call(self, method, path, body=None, expected=(200,), attempts=5, deadline=None):
         for gate in self.embedding_gates:
             gate.budget.check()
-        paid = method == 'POST' and path == '/v0/search' and body is not None and is_deep(body.get('profile', 'default'))
+        paid = method == 'POST' and path == '/v0/search' and body is not None and is_paid_profile(body.get('profile', ''))
         if not paid:
             try:
                 return self._call(method, path, body, expected, attempts, deadline)
@@ -125,52 +128,78 @@ class Client:
 
 
 def advertised_profiles(client):
-    """The profile names the installation lists (GET /v0/search/profiles), default first."""
+    """Index advertised profiles by the unambiguous name accepted by search."""
     _, listed = client.call('GET', '/v0/search/profiles')
-    return [p['name'] for p in listed['items']]
+    profiles = {}
+    for profile in listed['items']:
+        name = profile['name']
+        fallback = BASELINE_PROFILE if name == 'default' else name
+        profiles[profile.get('full_name', fallback)] = profile
+    return profiles
 
 
-def serving_profiles(client, corpus, advertised, probe_query='profile probe', allow_paid=True):
-    """Which advertised profiles the installation serves; a refused one is recorded, not measured."""
+def select_profiles(advertised, requested):
+    if not requested:
+        return advertised
+    selected = {}
+    for name in requested:
+        matches = [name] if name in advertised else [
+            full_name for full_name, profile in advertised.items() if name in profile.get('aliases', [profile['name']])]
+        if len(matches) != 1:
+            choices = ', '.join(matches or advertised)
+            reason = 'ambiguous' if matches else 'unknown'
+            raise ValueError(f'{reason} search profile {name!r}; choose a full name from: {choices}')
+        full_name = matches[0]
+        selected[full_name] = advertised[full_name]
+    return selected
+
+
+def is_paid_profile(profile):
+    return profile.startswith(f'{JEV_PLUGIN}/')
+
+
+def serving_profiles(client, corpus, advertised, probe_query='profile probe', allow_paid=True, modes=MODES):
+    """Probe unpaid profiles; use provider metadata for paid profiles."""
     served, refused = {}, {}
-    for name in advertised:
-        if is_deep(name) and not allow_paid:
-            refused[name] = 'optional private set excluded from paid evaluation'
+    for full_name, profile in advertised.items():
+        provider = profile['provider']
+        if is_paid_profile(full_name):
+            if not allow_paid:
+                refused[full_name] = 'paid evaluation is restricted to the public miracl-fr set'
+            elif not client.deep_enabled:
+                refused[full_name] = client.deep_skip_reason
+            else:
+                served[full_name] = f"plugin:{provider['plugin_id']}@{provider['plugin_version']}/{profile['name']}"
             continue
-        if is_deep(name) and not client.deep_enabled:
-            refused[name] = client.deep_skip_reason
-            continue
-        if is_deep(name) and client.stack is not None and 'jev_pin' in client.stack.state:
-            _, listed = client.call('GET', '/v0/search/profiles')
-            provider = next(profile['provider'] for profile in listed['items'] if profile['name'] == name)
-            # The same identity a search's retrieval_profile.version carries.
-            served[name] = f"plugin:{provider['plugin_id']}@{provider['plugin_version']}/{name}"
-            continue
-        status, body = client.call('POST', '/v0/search', {'query': probe_query, 'corpus_ids': [corpus], 'mode': 'hybrid' if is_deep(name) else 'lexical', 'profile': name, 'limit': 1}, expected=(200, 422))
-        if status == 200:
-            served[name] = body['retrieval_profile']['version']
+        reasons = []
+        for mode in modes:
+            status, body = client.call('POST', '/v0/search', {
+                'query': probe_query, 'corpus_ids': [corpus], 'mode': mode,
+                'profile': profile.get('full_name', profile['name']), 'limit': 1,
+            }, expected=(200, 422))
+            if status == 200:
+                served[full_name] = body['retrieval_profile']['version']
+                break
+            reasons.append(f"{mode}: 422 {body.get('code', '')}".strip())
         else:
-            refused[name] = f"422 {body.get('code', '')}".strip()
+            refused[full_name] = '; '.join(reasons)
     return served, refused
-
-
-def is_deep(profile):
-    return profile == 'deep' or profile.startswith('deep-k')
 
 
 def measurements(sides, evaluation=None):
     profiles = list(dict.fromkeys(profile for side in sides for profile in side['served']))
-    profiles.sort(key=lambda profile: (profile != 'default', is_deep(profile)))
+    profiles.sort(key=lambda profile: (profile != BASELINE_PROFILE, is_paid_profile(profile)))
     for profile in profiles:
-        if profile == 'deep' and any(side['client'].stack is not None and 'jev_pin' in side['client'].stack.state for side in sides):
+        if profile == f'{JEV_PLUGIN}/deep' and any(
+                side['client'].stack is not None and 'jev_pin' in side['client'].stack.state for side in sides):
             for label, configuration in jev.matrix():
                 yield profile, label, configuration
         else:
-            yield profile, profile, None
+            yield profile, 'default' if profile == BASELINE_PROFILE else profile, None
     for selection in evaluation_selections(evaluation):
-        # Evaluation always uses the served profile's default configuration;
-        # it is a separate cut from the optional paid matrix above.
-        yield 'default', evaluation_label(selection), None
+        defaults = dict.fromkeys(side['evaluation_default'] for side in sides if side['evaluation_default'] in side['served'])
+        for profile in defaults:
+            yield profile, evaluation_label(selection), None
 
 
 def deep_warmups(queries, run_id):
@@ -274,14 +303,68 @@ def ingest(client, corpus, namespace, corpus_docs, timeout, stall, progress=None
                                f'first receipts not done: {stuck(client, receipts)}')
         if not page['has_more'] and not new:
             time.sleep(1)  # poll interval of the change feed, not a wait for a result
-    records = {}
-    _, page = client.poll(f'/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100', deadline=start + timeout)
-    while True:
-        records.update({r['record_id']: r['source']['record_key'] for r in page['items']})
-        if not page.get('next_page_cursor'):
-            break
-        _, page = client.poll(f"/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100&page_cursor={urllib.parse.quote(page['next_page_cursor'])}", deadline=start + timeout)
+    records = list_records(client, corpus, start + timeout)
     return records, {'records': len(records), 'accepted_seconds': round(accepted, 3), 'searchable_with_vectors_seconds': round(time.monotonic() - start, 3)}
+
+
+def list_records(client, corpus, deadline):
+    records = {}
+    query = {'corpus_id': corpus, 'limit': 100}
+    while True:
+        _, page = client.poll('/v0/records?' + urllib.parse.urlencode(query), deadline=deadline)
+        records.update({record['record_id']: record['source']['record_key'] for record in page['items']})
+        if not page.get('next_page_cursor'):
+            return records
+        query['page_cursor'] = page['next_page_cursor']
+
+
+def reused_records(client, corpus, docs, deadline):
+    records = {record: doc for record, doc in list_records(client, corpus, deadline).items() if doc in docs}
+    found = set(records.values())
+    if len(found) != len(records):
+        raise ValueError(f'corpus {corpus} has duplicate evaluation records')
+    if found != docs.keys():
+        raise ValueError(f'corpus {corpus} is missing {len(docs.keys() - found)} evaluation documents')
+    return records
+
+
+def read_corpus_state(path, target, corpus, fingerprint, docs):
+    if path is None or not path.exists():
+        return corpus, None
+    state = load_object(path)
+    if (state.get('api_url') != target or state.get('fingerprint') != fingerprint
+            or (corpus is not None and state.get('corpus_id') != corpus)):
+        raise ValueError('--corpus-state does not match the API URL, corpus ID or evaluation set fingerprint')
+    records = state.get('records')
+    if (not isinstance(state.get('corpus_id'), str) or not state['corpus_id']
+            or not isinstance(records, dict) or len(records) != len(docs)
+            or any(not key or not isinstance(doc, str) for key, doc in records.items())
+            or set(records.values()) != docs.keys()):
+        raise ValueError('--corpus-state contains an invalid record map')
+    return state['corpus_id'], records
+
+
+def write_corpus_state(path, target, corpus, fingerprint, records):
+    state = {'api_url': target, 'corpus_id': corpus, 'fingerprint': fingerprint, 'records': records}
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+            temporary = pathlib.Path(stream.name)
+            json.dump(state, stream)
+        # Two first runs may both prepare a mapping. Never replace the other run's corpus.
+        path.hardlink_to(temporary)
+    except FileExistsError:
+        raise ValueError('--corpus-state was created by another run; retry with the saved state') from None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_object(path):
+    value = json.loads(pathlib.Path(path).read_text())
+    if not isinstance(value, dict):
+        raise ValueError(f'{path} must contain a JSON object')
+    return value
 
 
 def stuck(client, receipts, show=3):
@@ -369,46 +452,78 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
     if evaluation is None:
         evaluation = getattr(options, 'evaluation', None)
     allow_paid = allow_paid and name == 'miracl-fr'
-    if allow_paid and any(client.deep_enabled for client in clients):
+    advertised = [advertised_profiles(client) for client in clients]
+    all_profiles = {}
+    for profiles in advertised:
+        for full_name, profile in profiles.items():
+            aliases = all_profiles.get(full_name, {}).get('aliases', [])
+            all_profiles[full_name] = {**profile, 'aliases': aliases + profile.get('aliases', [profile['name']])}
+    selected_profiles = select_profiles(all_profiles, getattr(options, 'profiles', None))
+    evaluations = evaluation_selections(evaluation)
+    modes = getattr(options, 'modes', MODES)
+    defaults = [next((name for name, profile in profiles.items()
+                      if 'default' in profile.get('aliases', [profile['name']])), None)
+                for profiles in advertised]
+    if evaluations and any(profile is None or is_paid_profile(profile) for profile in defaults):
+        raise ValueError('embedding evaluation requires an advertised unpaid default alias')
+    if allow_paid and any(
+            client.deep_enabled and any(is_paid_profile(profile) and profile in profiles for profile in selected_profiles)
+            for client, profiles in zip(clients, advertised)):
         selected = sorted(data['queries'])[:150]
         data['queries'] = {query: data['queries'][query] for query in selected}
         data['qrels'] = {query: data['qrels'][query] for query in selected}
     manifest_path = pathlib.Path(directory) / 'manifest.json'
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'name': name, 'fingerprint': trec.fingerprint(directory)}
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'name': name}
+    manifest['fingerprint'] = trec.fingerprint(directory)
     if name in public_sets.SETS:
         manifest.update(tier=public_sets.SETS[name]['tier'], promotion_eligible=public_sets.SETS[name]['promotion_eligible'])
     namespace = f'eval-{name}'
     deep_queries = deep_warmups(set(data['queries'].values()), run_id)
     sides = []
-    for client in clients:
+    for client, profiles, default_profile in zip(clients, advertised, defaults):
         gates = client.embedding_gates
         for gate in gates:
             gate.set_name, gate.phase = name, 'indexing'
-        _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
-        corpus = created['corpus_id']
-        result = {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
+        state_path = getattr(options, 'corpus_state', None)
+        save_state = state_path is not None and not state_path.exists()
+        corpus, records = read_corpus_state(state_path, client.base, getattr(options, 'corpus_id', None),
+                                            manifest['fingerprint'], data['corpus'])
+        reused = corpus is not None
+        cached_records = records is not None
+        if not reused:
+            body = {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}
+            if getattr(options, 'corpus_config', None) is not None:
+                body['retrieval'] = options.corpus_config
+            _, created = client.call('POST', '/v0/corpora', body, expected=(201,))
+            corpus = created['corpus_id']
+        result = {'manifest': manifest, 'corpus_id': corpus, 'queries': len(data['queries']), 'documents': len(data['corpus']),
                   'dropped_queries': len(data['dropped_queries']), 'ingestion': {}, 'profiles': {},
                   'systems': {}, 'status': 'indexing'}
         publish = getattr(options, 'publish_partial', None)
         if publish:
             publish(name, result)
-        print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
+        action = 'reusing' if reused else 'ingesting'
+        print(f'[eval] {name}: {action} {len(data["corpus"])} documents', flush=True)
         index_started = time.monotonic()
-        evaluations = evaluation_selections(evaluation)
         observed = result['evaluation_ingestion'] = {}
         def progress(deadline):
             observe_evaluation_spaces(client, corpus, evaluations, len(data['corpus']), deadline, index_started, observed)
             if publish:
                 publish(name, result)
         try:
-            # Observe optional owners while the core baseline is still ingesting,
-            # so a fast owner is not timed by the slowest owner's completion.
-            records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall,
-                                        **({'progress': progress} if evaluations else {}))
-            result['ingestion'] = ingestion
+            if reused:
+                if records is None:
+                    records = reused_records(client, corpus, data['corpus'], index_started + options.ingest_timeout)
+                result['ingestion'] = {'records': len(records), 'reused': True}
+            else:
+                records, result['ingestion'] = ingest(
+                    client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall,
+                    **({'progress': progress} if evaluations else {}))
             wait_evaluation_spaces(client, corpus, evaluations, len(records), index_started + options.ingest_timeout,
                                    index_started, observed)
             result['ingestion']['paired_vectors_seconds'] = round(time.monotonic() - index_started, 3)
+            if save_state and not cached_records:
+                write_corpus_state(state_path, client.base, corpus, manifest['fingerprint'], records)
             result['status'] = 'searching'
         finally:
             result['ingestion'].setdefault('partial_seconds', round(time.monotonic() - index_started, 3))
@@ -420,19 +535,24 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                     gate.phase = 'query'
             if publish:
                 publish(name, result)
-        advertised = advertised_profiles(client)
-        served, refused = serving_profiles(client, corpus, advertised, deep_queries[0], allow_paid=allow_paid)
-        result['profiles'] = {'advertised': advertised, 'served': served, 'refused': refused}
-        sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served, 'out': result})
+        selection = {name: profile for name, profile in profiles.items()
+                     if name in selected_profiles or (evaluations and name == default_profile)}
+        served, refused = serving_profiles(client, corpus, selection, deep_queries[0], allow_paid=allow_paid, modes=modes)
+        result['profiles'] = {'advertised': list(profiles), 'served': served, 'refused': refused,
+                              'default': 'default' if default_profile == BASELINE_PROFILE else default_profile}
+        wire_profiles = {name: profile.get('full_name', profile['name']) for name, profile in selection.items()}
+        sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
+                      'wire_profiles': wire_profiles, 'evaluation_default': default_profile, 'out': result})
     queries = sorted(data['queries'])
-    reranking = any('deep' in side['served'] for side in sides)
+    reranking = any(is_paid_profile(profile) for side in sides for profile in side['served'])
     for profile, label, configuration in measurements(sides, evaluation):
         selected_evaluation = next((e for e in evaluation_selections(evaluation) if label == evaluation_label(e)), None)
-        deep = is_deep(profile)
+        deep = is_paid_profile(profile)
         scored_limit = DEEP_LIMIT if deep or reranking else LIMIT
         limits = [scored_limit] if deep else [scored_limit] + [limit for limit in TIMING_LIMITS if limit != scored_limit]
-        for mode in ['hybrid'] if deep else getattr(options, 'modes', MODES):
-            serving = [side for side in sides if profile in side['served']]
+        for mode in ['hybrid'] if deep else modes:
+            serving = [side for side in sides if profile in side['served']
+                       and (selected_evaluation is None or profile == side['evaluation_default'])]
             if configuration is not None:
                 serving = [side for side in serving if side['client'].stack is not None and 'jev_pin' in side['client'].stack.state]
                 for side in serving:
@@ -444,7 +564,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                 warmups = []
             for query in warmups:
                 for side in serving:
-                    search(side['client'], side['corpus'], query, mode, profile, side['records'], scored_limit,
+                    search(side['client'], side['corpus'], query, mode, side['wire_profiles'][profile], side['records'], scored_limit,
                            evaluation=selected_evaluation)
             for side in serving:
                 side.update(ranking={}, errors=[], timings={limit: [] for limit in limits}, failed={limit: 0 for limit in limits},
@@ -456,7 +576,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
             for limit in limits:
                 for n, q in enumerate(queries):
                     for side in serving if n % 2 == 0 else serving[::-1]:
-                        ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, profile,
+                        ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, side['wire_profiles'][profile],
                                                       side['records'], limit, evaluation=selected_evaluation)
                         if limit == scored_limit:
                             side['ranking'][q] = ranked
@@ -479,10 +599,10 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
             system = f'{mode}/{label}'
             print(f'[eval] {name}: {system} searched', flush=True)
             for side in serving:
-                events = jev.records(side['client'].jev_log, side['log_begin'], side['log_end'], profile)
+                events = jev.records(side['client'].jev_log, side['log_begin'], side['log_end'], profile.rsplit('/', 1)[-1])
                 accounting = jev.summary(side['attempts'], events, unpaid=options.paid_calls == 0 and not deep)
                 latencies = [t['client_ms'] for t in side['timings'][scored_limit]]
-                side['out']['systems'][system] = {**scoring.score(data['qrels'], side['ranking']), 'profile_version': side['served'][profile],
+                side['out']['systems'][system] = {**scoring.score_set(data, side['ranking']), 'profile_version': side['served'][profile],
                                                   'scored_limit': scored_limit, 'reranker': jev.variant(label) if configuration is not None else None,
                                                   'accounting': {'scored': accounting},
                                                   'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
@@ -508,7 +628,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                     side.update(warm_timings=[], warm_attempts=[], warm_failures=0, warm_begin=jev.offset(side['client'].jev_log))
                 for index, query in enumerate(queries):
                     for side in serving if index % 2 == 0 else serving[::-1]:
-                        _, timing, error = search(side['client'], side['corpus'], data['queries'][query], 'hybrid', profile,
+                        _, timing, error = search(side['client'], side['corpus'], data['queries'][query], 'hybrid', side['wire_profiles'][profile],
                                                   side['records'], DEEP_LIMIT, evaluation=selected_evaluation)
                         side['warm_attempts'].append(timing)
                         if error:
@@ -516,7 +636,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                         else:
                             side['warm_timings'].append(timing)
                 for side in serving:
-                    events = jev.records(side['client'].jev_log, side['warm_begin'], jev.offset(side['client'].jev_log), profile)
+                    events = jev.records(side['client'].jev_log, side['warm_begin'], jev.offset(side['client'].jev_log), profile.rsplit('/', 1)[-1])
                     result = side['out']['systems'][system]
                     result['accounting']['warm_cache'] = jev.summary(side['warm_attempts'], events)
                     result['warm_cache_timing'] = time_summary(side['warm_timings'], side['warm_failures'])
@@ -542,7 +662,8 @@ def compare_within(result):
     result['against_served_mode'] = {}
     for system, value in result['systems'].items():
         mode, label = system.split('/', 1)
-        baseline = result['systems'].get(mode + '/default')
+        default = result.get('profiles', {}).get('default', 'default')
+        baseline = result['systems'].get(f'{mode}/{default}')
         if label.startswith('evaluation/') and baseline:
             result['against_served_mode'][system] = {
                 m: scoring.paired(value['per_query'][m], baseline['per_query'][m]) for m in scoring.METRICS}
@@ -578,11 +699,49 @@ def checkout(ref):
     return commit, directory
 
 
-def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingestion=None):
-    """A client of an isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it,
-    built from source; appended to stacks as soon as it exists, so a failed start is still cleaned up."""
-    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
-        sys.exit(f'eval: the local stack needs Linux x86_64 (this is {platform.system()}/{platform.machine()}); use --api-url for an existing installation')
+def load_retrieval_pin(path):
+    pin = load_object(path)
+    if set(pin) - {'manifest', 'endpoint', 'configuration', 'secret_names'}:
+        raise ValueError('retrieval pin supports manifest, endpoint, configuration and secret_names')
+    for key in ('manifest', 'endpoint'):
+        if not isinstance(pin.get(key), str) or not pin[key]:
+            raise ValueError(f'retrieval pin requires {key}')
+    manifest = (pathlib.Path(path).resolve().parent / pin['manifest']).resolve()
+    if not manifest.is_file():
+        raise ValueError('retrieval plugin manifest does not exist')
+    endpoint = urllib.parse.urlsplit(pin['endpoint'])
+    if (endpoint.scheme not in ('http', 'https') or not endpoint.netloc
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
+        raise ValueError('plugin endpoint must be HTTP(S) without credentials, query or fragment')
+    if not isinstance(pin.get('configuration', {}), dict):
+        raise ValueError('retrieval configuration must be an object')
+    names = pin.pop('secret_names', [])
+    if (not isinstance(names, list)
+            or any(not isinstance(name, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]*', name) for name in names)):
+        raise ValueError('secret_names must contain environment variable names')
+    if any(not os.environ.get(name) for name in names):
+        raise ValueError('a retrieval plugin secret environment variable is absent')
+    for name in names:
+        os.environ.pop(name)
+    pin['manifest'] = str(manifest)
+    return pin
+
+
+def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingestion=None, retrieval=None):
+    """Start an isolated stack with core and any opted-in plugins.
+
+    Register the stack before startup so the caller can clean up partial starts.
+    """
+    host_platform = (platform.system(), platform.machine())
+    if host_platform not in {('Linux', 'x86_64'), ('Darwin', 'arm64')}:
+        sys.exit(f'eval: the local stack needs Linux x86_64 or Apple silicon macOS (this is {"/".join(host_platform)}); use --api-url')
+    docker_error = 'eval: Docker is unavailable; install and start Docker, or use --api-url for an existing installation'
+    try:
+        docker = subprocess.run(['docker', 'info'], capture_output=True, timeout=15)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        sys.exit(docker_error)
+    if docker.returncode:
+        sys.exit(docker_error)
     import connector_plugin
     import normalizer_plugin
     import subscription_plugin
@@ -593,6 +752,13 @@ def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingesti
         def config(self):
             super().config()
             jev.configure(self)
+            if retrieval is not None:
+                for name in ('config.json', 'worker.json'):
+                    path = self.directory / name
+                    config = load_object(path)
+                    config.setdefault('plugins', []).append(retrieval)
+                    config.setdefault('retrieval', {}).setdefault('profiles', {}).setdefault('default', BASELINE_PROFILE)
+                    path.write_text(json.dumps(config))
             if ingestion is not None:
                 for selection in evaluation_selections(ingestion):
                     embeddings.install(self.directory, selection)
@@ -612,7 +778,7 @@ def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingesti
     for label, step in steps + [
                         ('go_build', lambda: run([GO, 'build', '-o', str(stack.directory / 'quivr'), './cmd/quivr'], cwd=source)),
                         ('start_dependencies', lambda: stack.compose('up', '-d', '--wait', '--wait-timeout', '300')),
-                        ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack, only=['core-ingest'] if enabled else None), stack.start_processes()))]:
+                        ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack), stack.start_processes()))]:
         started = time.monotonic()
         step()
         phases[label] = round(time.monotonic() - started, 3)
@@ -649,6 +815,11 @@ def main():
     parser.add_argument('--private-name', default='private', help='name of the private set in the report')
     parser.add_argument('--baseline', help='report.json of an earlier run to compare each system with, per query')
     parser.add_argument('--api-url', help='measure this installation instead of a local stack; key in QUIVR_EVAL_API_KEY')
+    parser.add_argument('--corpus-id', help='reuse this corpus on --api-url for a single set')
+    parser.add_argument('--corpus-state', type=pathlib.Path, help='read or save a fingerprinted corpus mapping for one set on --api-url')
+    parser.add_argument('--corpus-config', help='JSON retrieval configuration for newly created corpora')
+    parser.add_argument('--profiles', action='append', help='select advertised full names or aliases, comma-separated or repeated')
+    parser.add_argument('--retrieval-config', help='local candidate retrieval plugin pin with manifest, endpoint, configuration and secret_names')
     parser.add_argument('--evaluation-plugin', help='ingestion plugin owner for an evaluation search cut (requires --evaluation-space and --api-url)')
     parser.add_argument('--evaluation-space', help='vector space name for an evaluation search cut (requires --evaluation-plugin and --api-url)')
     parser.add_argument('--ingestion-config', help='JSON evaluation pin: manifest, endpoint, configuration, secret_names, plugin, space (local stack)')
@@ -663,6 +834,7 @@ def main():
         return
     if ci_guard.in_ci():
         parser.error('measurements run locally only; use --list-sets for offline CI preview')
+    paid_set_selected = options.sets == 'miracl-fr' and not options.private
     if options.sets is None:
         options.sets = ','.join(public_sets.names(options.include_restricted))
     if options.ingestion_config and (options.api_url or options.compare_to or options.evaluation_plugin or options.evaluation_space):
@@ -672,13 +844,23 @@ def main():
         parser.error('--evaluation-plugin and --evaluation-space must be provided together')
     if (options.evaluation_plugin or options.evaluation_space) and not options.api_url:
         parser.error('evaluation selection requires --api-url')
+    if (options.corpus_id is not None or options.corpus_state is not None) and not options.api_url:
+        parser.error('--corpus-id and --corpus-state require --api-url')
+    if (options.corpus_id or options.corpus_state) and len([name for name in options.sets.split(',') if name]) + bool(options.private) != 1:
+        parser.error('--corpus-id and --corpus-state require exactly one evaluation set')
+    if options.corpus_config and (options.corpus_id or (options.corpus_state and options.corpus_state.exists())):
+        parser.error('--corpus-config requires creating a new corpus')
+    if options.retrieval_config and options.api_url:
+        parser.error('--retrieval-config configures the local stack; use --profiles with --api-url')
+    options.corpus_config = load_object(options.corpus_config) if options.corpus_config else None
+    if options.profiles is not None:
+        options.profiles = [name.strip() for value in options.profiles for name in value.split(',') if name.strip()]
+        if not options.profiles:
+            parser.error('--profiles requires at least one profile name')
     typesafe_key = os.environ.pop('TYPESAFE_API_KEY', '').strip()
-    if (options.evaluation_plugin or options.evaluation_space or ingestion) and typesafe_key:
-        parser.error('evaluation selection cannot be combined with paid live configuration')
-    if typesafe_key:
-        if options.api_url or [name.strip() for name in options.sets.split(',') if name.strip()] != ['miracl-fr']:
-            parser.error('paid evaluation requires a local miracl-fr-only run')
-        options.private = ''
+    retrieval = load_retrieval_pin(options.retrieval_config) if options.retrieval_config else None
+    paid_eligible = not options.api_url and paid_set_selected
+    typesafe_key = typesafe_key if paid_eligible else ''
     budget = jev.Budget() if typesafe_key else None
     options.live_paid = bool(typesafe_key)
     options.evaluation = ({'plugin': options.evaluation_plugin, 'space': options.evaluation_space}
@@ -725,7 +907,8 @@ def main():
                 sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, content:read, content:write, changes:read, search:query)')
             clients.append(Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']))
             clients[-1].evaluation = options.evaluation
-            clients[-1].deep_enabled = bool(typesafe_key)
+            clients[-1].deep_enabled = False
+            clients[-1].deep_skip_reason = 'paid evaluation requires an isolated local stack'
             options.paid_calls = None
             report['run']['target'] = 'existing installation (--api-url)'
         else:
@@ -733,10 +916,12 @@ def main():
                 commit, worktree = checkout(options.compare_to)
                 report['compare'] = {'ref': options.compare_to, 'source_revision': commit, 'phases_seconds': {}, 'sets': {}}
                 clients.append(start_stack(report['compare']['phases_seconds'], stacks, worktree, '-base'))
-            clients.append(start_stack(report['run']['phases_seconds'], stacks, typesafe_key=typesafe_key, ingestion=ingestion))
+            clients.append(start_stack(report['run']['phases_seconds'], stacks, typesafe_key=typesafe_key, ingestion=ingestion, retrieval=retrieval))
             clients[-1].budget = budget
             options.paid_calls = 0
             report['run']['target'] = 'isolated local stack, optional reranker' if typesafe_key else 'isolated local stack, core plugins only'
+            if retrieval is not None:
+                report['run']['target'] = 'isolated local stack with configured retrieval plugin'
             if ingestion is not None:
                 report['run']['target'] = 'isolated local stack, core.ingest and configured evaluation owner'
             watch = resources.Watch(stacks)
