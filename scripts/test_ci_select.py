@@ -472,9 +472,26 @@ class Workflow(unittest.TestCase):
         publish_steps = release['jobs']['publish']['steps']
         advance = next(s for s in publish_steps if 'Advance the rolling tag' in s.get('name', ''))
         script = advance['run']
-        self.assertIn('if [ "$alias" = "latest" ]; then', script)
-        self.assertIn('git/refs/heads/stable', script)
-        self.assertIn('-F force=false', script)
+        expected_block = '\n'.join([
+            'if [ "$newest" = "$RELEASE_TAG" ]; then',
+            '  while IFS= read -r image; do',
+            '    docker buildx imagetools create --prefer-index=false --tag "${image%@*}:$alias" "$image"',
+            '  done < images.txt',
+            '  if [ "$alias" = "latest" ]; then',
+            '    if current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/stable" --jq .object.sha 2>stable.err); then',
+            '      if [ "$current" != "$REVISION" ]; then',
+            '        gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/stable" -f sha="$REVISION" -F force=false',
+            '      fi',
+            '    elif grep -q \'HTTP 404\' stable.err; then',
+            '      gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/stable" -f sha="$REVISION"',
+            '    else',
+            '      cat stable.err >&2',
+            '      exit 1',
+            '    fi',
+            '  fi',
+            'fi',
+        ])
+        self.assertIn(expected_block, script)
 
 
 if __name__ == '__main__':
