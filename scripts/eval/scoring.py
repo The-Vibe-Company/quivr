@@ -28,7 +28,8 @@ def score(qrels, ranking, *, diagnostics=False):
 
     qrels: {qid: {doc: grade}}; ranking: {qid: [doc, ...]} best first. Every judged query is
     scored, including those the system returned nothing for. With diagnostics enabled,
-    Judged@10 is the share of ten positions occupied by explicitly judged documents (any grade)."""
+    Judged@10 is the share of ten positions occupied by explicitly judged documents (any grade).
+    Means are unavailable when there are no scored queries."""
     metrics = METRICS + DIAGNOSTIC_METRICS if diagnostics else METRICS
     per_query = {m: {} for m in metrics}
     discounts = [math.log2(i + 2) for i in range(10)]
@@ -47,7 +48,8 @@ def score(qrels, ranking, *, diagnostics=False):
         if diagnostics:
             per_query['recall@50'][query] = sum(judged.get(doc, 0) > 0 for doc in top50) / relevant if relevant else 0.
             per_query['judged@10'][query] = sum(doc in judged for doc in docs) / 10
-    return {'mean': {m: sum(v.values()) / len(v) for m, v in per_query.items()}, 'per_query': per_query}
+    return {'mean': {m: sum(v.values()) / len(v) if v else None for m, v in per_query.items()},
+            'per_query': per_query}
 
 
 def diagnose_errors(qrels, ranking, metadata, k=10):
@@ -82,14 +84,15 @@ def score_set(data, ranking):
     """Score a loaded TREC set into JSON-ready system fields for the report.
 
     Auxiliary tiers score primary evaluation queries with a positive tier judgment.
-    They use their own grades and never replace the primary judgments.
+    Their negative grades count as judged non-relevant with zero gain.
     """
     qrels = data['qrels']
     result = score(qrels, ranking, diagnostics=True)
     if 'auxiliary_qrels' in data:
         tiers = {}
         for tier, judgments in data['auxiliary_qrels'].items():
-            judged = {query: docs for query, docs in judgments.items()
+            judged = {query: {doc: max(grade, 0) for doc, grade in docs.items()}
+                      for query, docs in judgments.items()
                       if query in qrels and any(grade > 0 for grade in docs.values())}
             if judged:
                 tiers[tier] = {'queries': len(judged), **score(judged, ranking, diagnostics=True)}

@@ -270,8 +270,9 @@ def markdown(r):
             lines += [f"Unfinished set: {s['status']}. Only fully completed query cuts are scored.", '']
         if p.get('refused'):
             lines += ['Profiles not served: ' + ', '.join(f'`{k}` ({v})' for k, v in p['refused'].items()) + '.', '']
-        metrics = METRIC_NAMES + [(key, label) for key, label in DIAGNOSTIC_NAMES
-                                  if any(key in v['mean'] for v in s['systems'].values())]
+        diagnostics = [(key, label) for key, label in DIAGNOSTIC_NAMES
+                       if any(key in v['mean'] for v in s['systems'].values())]
+        metrics = METRIC_NAMES + diagnostics
         lines += [f"Against `{r['baseline_system']}` in this run:", '',
                   '| System | ' + ' | '.join(n for _, n in metrics) + ' | Δ nDCG@10 | Δ Recall@10 | p50 ms | p95 ms | Failures | Paid calls / query |',
                   '| --- ' * (len(metrics) + 7) + '|']
@@ -280,7 +281,8 @@ def markdown(r):
             c = against.get(system, {})
             paid = '—' if v['paid_calls_per_query'] is None else v['paid_calls_per_query']
             deltas = ['baseline'] * 2 if system == r['baseline_system'] else [delta(c.get(k)) for k in ['ndcg@10', 'recall@10']]
-            lines.append(f"| {system} | " + ' | '.join(number(v['mean'].get(k)) for k, _ in metrics)
+            means = [v['mean'][key] for key, _ in METRIC_NAMES] + [v['mean'].get(key) for key, _ in diagnostics]
+            lines.append(f"| {system} | " + ' | '.join(number(mean) for mean in means)
                          + f" | {deltas[0]} | {deltas[1]}"
                          + f" | {number(v['latency_ms']['p50'], 0)} | {number(v['latency_ms']['p95'], 0)} | {v['failures']}/{s['queries']} | {paid} |")
         lines.append('')

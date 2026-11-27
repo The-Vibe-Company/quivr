@@ -125,6 +125,9 @@ def parse_qrels(lines, path, *, strict_header=False):
         cols = line.split()
         if not cols:
             continue
+        if strict_header and number == 1 and cols in (
+                ['query-id', 'corpus-id', 'score'], ['qid', 'Q0', 'docid', 'rel']):
+            continue
         if len(cols) == 4:
             cols = [cols[0], cols[2], cols[3]]
         if len(cols) != 3:
@@ -132,7 +135,7 @@ def parse_qrels(lines, path, *, strict_header=False):
         try:
             grade = int(float(cols[2]))
         except (ValueError, OverflowError):
-            if number == 1 and (not strict_header or cols == ['query-id', 'corpus-id', 'score']):
+            if number == 1 and not strict_header:
                 continue  # header row
             raise SetError(f'{path}:{number}: score {cols[2]!r} is not a number') from None
         qrels.setdefault(cols[0], {})[cols[1]] = grade

@@ -66,6 +66,12 @@ class Score(unittest.TestCase):
 
 
 class DiagnosticScores(unittest.TestCase):
+    def test_empty_set_has_no_mean_scores(self):
+        result = scoring.score_set({'qrels': {}}, {})
+        self.assertIsNone(result['mean']['judged@10'])
+        self.assertIsNone(result['mean']['ndcg@10'])
+        self.assertEqual(result['per_query']['recall@50'], {})
+
     def test_recall_at_50_and_judged_at_10_use_distinct_cutoffs(self):
         qrels = {'q1': {'zero': 0, 'early': 1, 'at-50': 2, 'at-51': 1}, 'q2': {'absent': 2}}
         ranking = {'q1': ['zero', 'early'] + [f'x{i}' for i in range(47)] + ['at-50', 'at-51']}

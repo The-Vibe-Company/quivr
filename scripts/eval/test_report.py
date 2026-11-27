@@ -35,8 +35,8 @@ class Markdown(unittest.TestCase):
                        {'q1': 'Example query', 'q2': 'Unscored query'},
                        {'q1': {'good': 2, 'partial': 1, 'bad': 0, 'late': 1}})
             ordinary = trec.fingerprint(directory)
-            (directory / 'qrels-secondary.tsv').write_text('query-id\tcorpus-id\tscore\nq1\tunjudged\t2\nq2\tgood\t1\n')
-            (directory / 'qrels-negatives.tsv').write_text('q1\tbad\t-1\n')
+            (directory / 'qrels-secondary.tsv').write_text('query-id\tcorpus-id\tscore\nq1\tunjudged\t2\nq1\tbad\t-1\nq2\tgood\t1\n')
+            (directory / 'qrels-negatives.tsv').write_text('qid Q0 docid rel\nq1 Q0 bad -1\n')
             (directory / 'judgment-metadata.json').write_text(json.dumps({'q1': {
                 'bad': {'category': 'wrong | topic'}, 'unjudged': {'category': 'wrong | topic'},
                 'good': {'category': 'excluded'}, 'filler4': {}, 'late': {'category': 'outside cutoff'},
@@ -58,7 +58,7 @@ class Markdown(unittest.TestCase):
         text = report.markdown(payload)
         self.assertIn('| Recall@50 | Judged@10 |', text)
         self.assertIn('| 1.0000 | 0.3000 | baseline |', text)
-        self.assertIn('| lexical/default | secondary | 1 | 0.4307 | 1.0000 | 0.2500 | 1.0000 | 0.1000 |', text)
+        self.assertIn('| lexical/default | secondary | 1 | 0.4307 | 1.0000 | 0.2500 | 1.0000 | 0.2000 |', text)
         self.assertIn('| lexical/default | 10 | wrong &#124; topic | 2 |', text)
 
     def test_matrix_rows_separate_scored_quality_spend_and_warm_cache_statistics(self):
