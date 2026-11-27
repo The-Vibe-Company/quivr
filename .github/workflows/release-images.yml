@@ -224,6 +224,18 @@ jobs:
           while IFS= read -r image; do
             docker buildx imagetools create --prefer-index=false --tag "${image%@*}:$alias" "$image"
           done < images.txt
+          if [ "$alias" = "latest" ]; then
+            if current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/stable" --jq .object.sha 2>stable.err); then
+              if [ "$current" != "$REVISION" ]; then
+                gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/stable" -f sha="$REVISION" -F force=false
+              fi
+            elif grep -q 'HTTP 404' stable.err; then
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/stable" -f sha="$REVISION"
+            else
+              cat stable.err >&2
+              exit 1
+            fi
+          fi
         fi
 env:
   DOCKER_BUILD_RECORD_UPLOAD: 'false'

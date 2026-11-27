@@ -468,6 +468,14 @@ class Workflow(unittest.TestCase):
         smoke = next(s for s in scan_steps if s.get('name') == 'Check hosted image token packing offline')
         self.assertEqual(smoke['env']['REVISION'], expected_ref)
 
+        # Publish advances the rolling `stable` branch only for the newest stable release, fast-forward only.
+        publish_steps = release['jobs']['publish']['steps']
+        advance = next(s for s in publish_steps if 'Advance the rolling tag' in s.get('name', ''))
+        script = advance['run']
+        self.assertIn('if [ "$alias" = "latest" ]; then', script)
+        self.assertIn('git/refs/heads/stable', script)
+        self.assertIn('-F force=false', script)
+
 
 if __name__ == '__main__':
     unittest.main()
