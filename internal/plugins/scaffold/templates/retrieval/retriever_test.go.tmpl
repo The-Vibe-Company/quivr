@@ -1,0 +1,57 @@
+package main
+
+import (
+	"context"
+	"slices"
+	"testing"
+
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+)
+
+func served(primitive string, ids ...string) quivrplugin.ServedRequest {
+	s := quivrplugin.ServedRequest{Round: 1, Request: quivrplugin.CandidateRequest{Primitive: primitive}}
+	texts := map[string]string{"harbour": "Dockers went on strike and the harbour stayed closed.", "ferry": "Ferries stayed in the harbour all day.", "rail": "The strike spread to the rail network by noon."}
+	for _, id := range ids {
+		s.Candidates = append(s.Candidates, quivrplugin.Candidate{SegmentID: id, RecordID: "rec_" + id, Text: texts[id]})
+	}
+	return s
+}
+
+func search(t *testing.T, req *quivrplugin.SearchRequest) *quivrplugin.SearchAnswer {
+	t.Helper()
+	req.Query.Text, req.Limit = "harbour strike", 3
+	answer, err := retriever{}.Search(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return answer
+}
+
+func ids(hits []quivrplugin.RankedHit) []string {
+	out := []string{}
+	for _, h := range hits {
+		out = append(out, h.SegmentID)
+	}
+	return out
+}
+
+func TestComposedAsksForTheBaseProfileThenMovesFullMatchesFirst(t *testing.T) {
+	first := search(t, &quivrplugin.SearchRequest{Profile: "composed", Round: 1})
+	if len(first.Requests) != 1 || first.Requests[0].Primitive != quivrplugin.PrimitiveProfile || first.Requests[0].Profile.Name != baseProfile {
+		t.Fatalf("round 1 requests %+v", first.Requests)
+	}
+	last := search(t, &quivrplugin.SearchRequest{Profile: "composed", Round: 2, Served: []quivrplugin.ServedRequest{served(quivrplugin.PrimitiveProfile, "ferry", "rail", "harbour")}})
+	if got := ids(last.Ranking); !slices.Equal(got, []string{"harbour", "ferry", "rail"}) {
+		t.Fatalf("ranking %v", got)
+	}
+}
+
+func TestDefaultFusesKeywordsAndVectors(t *testing.T) {
+	last := search(t, &quivrplugin.SearchRequest{Profile: "default", Round: 2, Served: []quivrplugin.ServedRequest{
+		served(quivrplugin.PrimitiveBM25, "harbour", "ferry", "rail"),
+		served(quivrplugin.PrimitiveNearVector, "rail", "harbour", "ferry"),
+	}})
+	if got := ids(last.Ranking); !slices.Equal(got, []string{"harbour", "rail", "ferry"}) {
+		t.Fatalf("ranking %v", got)
+	}
+}

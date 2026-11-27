@@ -1,0 +1,59 @@
+{
+  "description": "Profile default, hybrid mode: keyword and vector candidates fused by reciprocal rank. seg_harbour ranks first and second, seg_rail first and third, so they lead.",
+  "retrieval": {
+    "query": "harbour strike",
+    "mode": "hybrid",
+    "limit": 3,
+    "profiles": [
+      "default"
+    ],
+    "candidates": [
+      {
+        "segment_id": "seg_harbour",
+        "record_id": "rec_harbour",
+        "text": "Dockers went on strike and the harbour stayed closed."
+      },
+      {
+        "segment_id": "seg_ferry",
+        "record_id": "rec_ferry",
+        "text": "Ferries stayed in the harbour all day."
+      },
+      {
+        "segment_id": "seg_rail",
+        "record_id": "rec_rail",
+        "text": "The strike spread to the rail network by noon."
+      },
+      {
+        "segment_id": "seg_market",
+        "record_id": "rec_market",
+        "text": "The flower market opened early."
+      }
+    ],
+    "order": {
+      "bm25": [
+        "seg_harbour",
+        "seg_ferry",
+        "seg_rail"
+      ],
+      "near_vector": [
+        "seg_rail",
+        "seg_harbour",
+        "seg_market",
+        "seg_ferry"
+      ],
+      "profile": [
+        "seg_ferry",
+        "seg_rail",
+        "seg_harbour",
+        "seg_market"
+      ]
+    },
+    "expect": {
+      "top": [
+        "seg_harbour",
+        "seg_rail",
+        "seg_ferry"
+      ]
+    }
+  }
+}

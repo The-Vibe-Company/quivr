@@ -12,8 +12,9 @@ import (
 
 const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--push] [--dir <path>]"
 
-// initCommand writes an embedded Python plugin template: a normalizer (the
-// default) or an alert rule (--kind subscription).
+// initCommand writes an embedded plugin template: a Python normalizer (the
+// default), alert rule (--kind subscription) or connector (--kind connector),
+// or a Go retrieval plugin (--kind retrieval).
 func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	var name, dir string
 	var push bool
@@ -83,6 +84,12 @@ func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintf(stdout, "Created %s plugin %s in %s (%d files).\n\nNext steps:\n", kind, name, dir, len(files))
 	fmt.Fprintf(stdout, "  cd %s\n", filepath.Clean(dir))
+	if kind == scaffold.KindRetrieval {
+		fmt.Fprintln(stdout, "  go test ./...")
+		fmt.Fprintln(stdout, "  quivr plugin inspect .")
+		fmt.Fprintln(stdout, "  quivr plugin test")
+		return ExitOK
+	}
 	fmt.Fprintln(stdout, "  python3 -m venv .venv && . .venv/bin/activate")
 	fmt.Fprintln(stdout, "  pip install -e <quivr checkout>/sdks/python   # the Quivr Plugin SDK")
 	fmt.Fprintln(stdout, "  python3 -m unittest discover -s tests")

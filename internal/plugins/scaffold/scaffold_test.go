@@ -2,13 +2,16 @@ package scaffold_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/runner"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/scaffold"
 )
 
@@ -24,8 +27,13 @@ func TestTemplatesAreValidPlugins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Dotfiles and the module directory are embedded too (all:).
-			if !slices.Contains(files, ".gitignore") || !slices.Contains(files, "my_plugin/__main__.py") {
+			// Dotfiles and the module directory are embedded too (all:); Go
+			// sources and go.mod lose their .tmpl suffix.
+			entry, command := "my_plugin/__main__.py", "python3 -m my_plugin"
+			if kind == scaffold.KindRetrieval {
+				entry, command = "go.mod", "go run ."
+			}
+			if !slices.Contains(files, ".gitignore") || !slices.Contains(files, entry) || slices.ContainsFunc(files, func(f string) bool { return strings.HasSuffix(f, ".tmpl") }) {
 				t.Fatalf("template files %v", files)
 			}
 			report := plugins.Inspect(dir)
@@ -33,7 +41,7 @@ func TestTemplatesAreValidPlugins(t *testing.T) {
 				t.Fatalf("template fails inspect: %+v", report.Errors)
 			}
 			m := report.Manifest
-			if m.ID != "my-plugin" || strings.Join(m.Run.Command, " ") != "python3 -m my_plugin" || strings.Join(m.Contributions.Names(), ",") != kind {
+			if m.ID != "my-plugin" || strings.Join(m.Run.Command, " ") != command || strings.Join(m.Contributions.Names(), ",") != kind {
 				t.Fatalf("manifest %+v", m)
 			}
 			fixture := filepath.Join(dir, "fixtures", "sample.json")
@@ -55,6 +63,17 @@ func TestTemplatesAreValidPlugins(t *testing.T) {
 				// The expression schema discriminates alert kinds on "kind".
 				if issues := plugins.ValidateSubscriptionItem(m, []byte(`{"kind": "keywords", "text": "x"}`), []byte(`{}`)); len(issues) == 0 {
 					t.Fatal("an unknown kind was accepted")
+				}
+			case scaffold.KindRetrieval:
+				// One fixture per profile, each expecting that profile's ranking.
+				for _, profile := range []string{"default", "composed"} {
+					raw, err := os.ReadFile(filepath.Join(dir, "fixtures", profile+".json"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if run, issues := devhost.BuildRetrievalRun(raw, m); len(issues) != 0 || !slices.Equal(run.Profiles, []string{profile}) || len(run.Top) == 0 {
+						t.Fatalf("%s fixture: %+v %+v", profile, issues, run)
+					}
 				}
 			default:
 				t.Fatalf("no fixture check for template kind %s", kind)
@@ -105,6 +124,59 @@ func TestCheckName(t *testing.T) {
 	for _, name := range []string{"", "Demo", "1demo", "my_plugin", "a.b", "trailing-", "class", "json", "tests", "quivr-plugin", strings.Repeat("a", 65)} {
 		if err := scaffold.CheckName(name); err == nil {
 			t.Errorf("%q accepted", name)
+		}
+	}
+}
+
+// TestRetrievalTemplateIsCertified owns the Go retrieval template end to end:
+// the generated module vets and passes its own tests, and `quivr plugin test`
+// certifies it under both profiles, the composed one through a profile
+// request. The module builds against this checkout's SDK, offline, with the
+// template's go.sum: a missing entry means the template's SDK version needs
+// a bump (go get the new SDK version in a scaffolded plugin, go mod tidy, and
+// copy go.mod and go.sum back).
+func TestRetrievalTemplateIsCertified(t *testing.T) {
+	gobin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the retrieval template needs the go command: %v", err)
+	}
+	sdk, err := filepath.Abs(filepath.Join("..", "..", "..", "sdks", "go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Named after a standard library package: the plugin id must not become
+	// a module path the go command resolves to the standard library.
+	dir := filepath.Join(t.TempDir(), "sort")
+	if _, err := scaffold.Write(dir, "sort", scaffold.KindRetrieval); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin process inherits this environment through `go run .`.
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOFLAGS", "-mod=readonly")
+	for _, args := range [][]string{
+		{"mod", "edit", "-replace", "github.com/The-Vibe-Company/quivr/sdks/go=" + sdk},
+		{"vet", "./..."},
+		// Also compiles the plugin, so the runner's startup wait covers only the start.
+		{"test", "./..."},
+	} {
+		cmd := exec.Command(gobin, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	var logs strings.Builder
+	report := runner.Run(t.Context(), runner.Options{Dir: dir, StartupTimeout: 2 * time.Minute, Output: &logs})
+	if !report.Certified {
+		t.Fatalf("not certified: %+v\nplugin output:\n%s", report.Checks, logs.String())
+	}
+	// Certified alone could pass on the normative fixture: each own fixture
+	// must have ranked as it expects under its profile.
+	for _, profile := range []string{"default", "composed"} {
+		if !slices.ContainsFunc(report.Checks, func(c runner.Check) bool {
+			return c.ID == runner.CheckInvoke && c.Status == runner.Pass && strings.HasSuffix(c.Fixture, profile+".json") && strings.HasPrefix(c.Title, "profile "+profile+" ")
+		}) {
+			t.Errorf("no passing invoke check of fixtures/%s.json under profile %s: %+v", profile, profile, report.Checks)
 		}
 	}
 }

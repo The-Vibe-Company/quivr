@@ -1,0 +1,25 @@
+// Command __PLUGIN_ID__ is a Quivr retrieval plugin: it serves the profiles
+// declared in quivr-plugin.yaml over the Plugin Protocol.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+)
+
+func main() {
+	// New reads quivr-plugin.yaml from the working directory.
+	plugin, err := quivrplugin.New("")
+	if err == nil {
+		err = plugin.Retrieval(retriever{})
+	}
+	if err == nil {
+		err = plugin.Serve()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "__PLUGIN_ID__:", err)
+		os.Exit(1)
+	}
+}

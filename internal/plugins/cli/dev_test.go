@@ -61,6 +61,13 @@ func TestInitWritesTheRequestedTemplate(t *testing.T) {
 	if code, out, _ := run("inspect", collector); code != 0 {
 		t.Fatalf("init --kind connector wrote no collector: %s", out)
 	}
+	retriever := filepath.Join(t.TempDir(), "retriever")
+	if code, out, errOut := run("init", "retriever", "--kind", "retrieval", "--dir", retriever); code != 0 || !strings.Contains(out, "Created retrieval plugin retriever") || !strings.Contains(out, "go test ./...") || strings.Contains(out, "python") {
+		t.Fatalf("init --kind retrieval: exit %d %s %s", code, out, errOut)
+	}
+	if report := plugins.Inspect(retriever); !report.Valid || report.Manifest.Contributions.Retrieval == nil {
+		t.Fatalf("init --kind retrieval wrote no retrieval plugin: %+v", report)
+	}
 	push := filepath.Join(t.TempDir(), "push")
 	if code, _, errOut := run("init", "push", "--kind", "connector", "--push", "--dir", push); code != 0 {
 		t.Fatalf("init push: exit %d %s", code, errOut)
