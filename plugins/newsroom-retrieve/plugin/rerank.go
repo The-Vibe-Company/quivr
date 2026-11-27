@@ -17,9 +17,15 @@ type rerankResult struct {
 	Index          *int     `json:"index"`
 	Score          *float64 `json:"score"`
 	RelevanceScore *float64 `json:"relevance_score"`
+	RawScore       *float64 `json:"raw_score"`
 }
 
-func (r retriever) callReranker(ctx context.Context, cfg configuration, query string, docs []string) ([]float64, error) {
+type rerankScores struct {
+	probabilities []float64
+	logits        []float64
+}
+
+func (r retriever) callReranker(ctx context.Context, cfg configuration, query string, docs []string) (rerankScores, error) {
 	var payload any
 	switch cfg.RerankProtocol {
 	case "cohere":
@@ -39,42 +45,42 @@ func (r retriever) callReranker(ctx context.Context, cfg configuration, query st
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, errors.New("could not encode reranker request")
+		return rerankScores{}, errors.New("could not encode reranker request")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.RerankEndpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, errors.New("could not construct reranker request")
+		return rerankScores{}, errors.New("could not construct reranker request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if r.apiKey != "" {
 		if req.URL.Scheme != "https" {
-			return nil, errors.New("reranker authentication requires HTTPS")
+			return rerankScores{}, errors.New("reranker authentication requires HTTPS")
 		}
 		req.Header.Set("Authorization", "Bearer "+r.apiKey)
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, errors.New("reranker request timed out")
+			return rerankScores{}, errors.New("reranker request timed out")
 		}
-		return nil, errors.New("reranker request failed")
+		return rerankScores{}, errors.New("reranker request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("reranker returned HTTP %d", resp.StatusCode)
+		return rerankScores{}, fmt.Errorf("reranker returned HTTP %d", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRerankResponseBytes+1))
 	if err != nil {
-		return nil, errors.New("reranker read failed")
+		return rerankScores{}, errors.New("reranker read failed")
 	}
 	if len(raw) > maxRerankResponseBytes {
-		return nil, errors.New("reranker response exceeds size limit")
+		return rerankScores{}, errors.New("reranker response exceeds size limit")
 	}
 	return decodeRerankScores(raw, cfg.RerankProtocol, len(docs))
 }
 
-func decodeRerankScores(raw []byte, protocol string, count int) ([]float64, error) {
+func decodeRerankScores(raw []byte, protocol string, count int) (rerankScores, error) {
 	var results []rerankResult
 	var err error
 	if protocol == "cohere" {
@@ -88,9 +94,9 @@ func decodeRerankScores(raw []byte, protocol string, count int) ([]float64, erro
 	}
 	invalid := errors.New("reranker response must contain one valid score per document")
 	if err != nil || len(results) != count {
-		return nil, invalid
+		return rerankScores{}, invalid
 	}
-	scores := make([]float64, count)
+	scores := rerankScores{probabilities: make([]float64, count), logits: make([]float64, count)}
 	seen := make([]bool, count)
 	for _, entry := range results {
 		score := entry.Score
@@ -99,9 +105,14 @@ func decodeRerankScores(raw []byte, protocol string, count int) ([]float64, erro
 		}
 		if entry.Index == nil || *entry.Index < 0 || *entry.Index >= count ||
 			seen[*entry.Index] || score == nil || math.IsNaN(*score) || math.IsInf(*score, 0) {
-			return nil, invalid
+			return rerankScores{}, invalid
 		}
-		scores[*entry.Index] = *score
+		idx := *entry.Index
+		scores.probabilities[idx] = *score
+		scores.logits[idx] = probabilityLogit(*score)
+		if entry.RawScore != nil {
+			scores.logits[idx] = *entry.RawScore
+		}
 		seen[*entry.Index] = true
 	}
 	return scores, nil

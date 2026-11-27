@@ -19,51 +19,58 @@ import (
 const responseMargin = 50 * time.Millisecond
 
 type configuration struct {
-	CandidateCount          int     `json:"candidate_count"`
-	LexicalK                int     `json:"lexical_k"`
-	DenseK                  int     `json:"dense_k"`
-	DenseGrouped            bool    `json:"dense_grouped"`
-	CleanLexicalQuery       bool    `json:"clean_lexical_query"`
-	Fusion                  string  `json:"fusion"`
-	RRFK                    float64 `json:"rrf_k"`
-	DenseWeight             float64 `json:"dense_weight"`
-	QueryAdaptiveAlpha      bool    `json:"query_adaptive_alpha"`
-	LexicalWeight           float64 `json:"lexical_weight"`
-	EntityLeg               bool    `json:"entity_leg"`
-	EntityWeight            float64 `json:"entity_weight"`
-	EntityMaxTerms          int     `json:"entity_max_terms"`
-	CombMNZBonus            float64 `json:"combmnz_bonus"`
-	TitleLeadWeight         float64 `json:"title_lead_weight"`
-	AspectCoverageWeight    float64 `json:"aspect_coverage_weight"`
-	MissingAspectPenalty    float64 `json:"missing_aspect_penalty"`
-	CoveragePenaltyGamma    float64 `json:"coverage_penalty_gamma"`
-	CoveragePenaltyRho      float64 `json:"coverage_penalty_rho"`
-	ProximityWeight         float64 `json:"proximity_weight"`
-	ProximityMode           string  `json:"proximity_mode"`
-	ProximityWindow         int     `json:"proximity_window"`
-	SalienceWeight          float64 `json:"salience_weight"`
-	ExpSalienceWeight       float64 `json:"exp_salience_weight"`
-	TailOnlyPenalty         float64 `json:"tail_only_penalty"`
-	LeadChars               int     `json:"lead_chars"`
-	DeepChunkPenalty        float64 `json:"deep_chunk_penalty"`
-	PassageRatioWeight      float64 `json:"passage_ratio_weight"`
-	PassageSupportWeight    float64 `json:"passage_support_weight"`
-	RerankEndpoint          string  `json:"rerank_endpoint"`
-	RerankProtocol          string  `json:"rerank_protocol"`
-	RerankModel             string  `json:"rerank_model"`
-	RerankInstruction       string  `json:"rerank_instruction"`
-	RerankTopK              int     `json:"rerank_top_k"`
-	RerankRanking           string  `json:"rerank_ranking"`
-	RerankWeight            float64 `json:"rerank_weight"`
-	RerankMaxDocChars       int     `json:"rerank_max_doc_chars"`
-	RerankTimeoutMS         int     `json:"rerank_timeout_ms"`
-	FallbackOnError         *bool   `json:"fallback_on_error"`
-	SurrogateMode           string  `json:"surrogate_mode"`
-	AdaptiveCascade         bool    `json:"adaptive_cascade"`
-	CascadeJaccardThreshold float64 `json:"cascade_jaccard_threshold"`
-	CascadeMarginThreshold  float64 `json:"cascade_margin_threshold"`
-	CascadeDGapThreshold    float64 `json:"cascade_dgap_threshold"`
-	LogDiagnostics          bool    `json:"log_diagnostics"`
+	CandidateCount          int      `json:"candidate_count"`
+	LexicalK                int      `json:"lexical_k"`
+	DenseK                  int      `json:"dense_k"`
+	DenseGrouped            bool     `json:"dense_grouped"`
+	CleanLexicalQuery       bool     `json:"clean_lexical_query"`
+	Fusion                  string   `json:"fusion"`
+	RRFK                    float64  `json:"rrf_k"`
+	DenseWeight             float64  `json:"dense_weight"`
+	QueryAdaptiveAlpha      bool     `json:"query_adaptive_alpha"`
+	LexicalWeight           float64  `json:"lexical_weight"`
+	EntityLeg               bool     `json:"entity_leg"`
+	EntityWeight            float64  `json:"entity_weight"`
+	EntityMaxTerms          int      `json:"entity_max_terms"`
+	CombMNZBonus            float64  `json:"combmnz_bonus"`
+	TitleLeadWeight         float64  `json:"title_lead_weight"`
+	AspectCoverageWeight    float64  `json:"aspect_coverage_weight"`
+	MissingAspectPenalty    float64  `json:"missing_aspect_penalty"`
+	CoveragePenaltyGamma    float64  `json:"coverage_penalty_gamma"`
+	CoveragePenaltyRho      float64  `json:"coverage_penalty_rho"`
+	ProximityWeight         float64  `json:"proximity_weight"`
+	ProximityMode           string   `json:"proximity_mode"`
+	ProximityWindow         int      `json:"proximity_window"`
+	SalienceWeight          float64  `json:"salience_weight"`
+	ExpSalienceWeight       float64  `json:"exp_salience_weight"`
+	TailOnlyPenalty         float64  `json:"tail_only_penalty"`
+	LeadChars               int      `json:"lead_chars"`
+	DeepChunkPenalty        float64  `json:"deep_chunk_penalty"`
+	PassageRatioWeight      float64  `json:"passage_ratio_weight"`
+	PassageSupportWeight    float64  `json:"passage_support_weight"`
+	RerankEndpoint          string   `json:"rerank_endpoint"`
+	RerankSecondaryEndpoint string   `json:"rerank_secondary_endpoint"`
+	RerankCascadeK          int      `json:"rerank_cascade_k"`
+	RerankMediumMargin      *float64 `json:"rerank_medium_margin"`
+	RerankEnsemble          string   `json:"rerank_ensemble"`
+	RerankPrimaryWeight     float64  `json:"rerank_primary_weight"`
+	RerankSecondaryWeight   float64  `json:"rerank_secondary_weight"`
+	RerankStage1Weight      float64  `json:"rerank_stage1_weight"`
+	RerankProtocol          string   `json:"rerank_protocol"`
+	RerankModel             string   `json:"rerank_model"`
+	RerankInstruction       string   `json:"rerank_instruction"`
+	RerankTopK              int      `json:"rerank_top_k"`
+	RerankRanking           string   `json:"rerank_ranking"`
+	RerankWeight            float64  `json:"rerank_weight"`
+	RerankMaxDocChars       int      `json:"rerank_max_doc_chars"`
+	RerankTimeoutMS         int      `json:"rerank_timeout_ms"`
+	FallbackOnError         *bool    `json:"fallback_on_error"`
+	SurrogateMode           string   `json:"surrogate_mode"`
+	AdaptiveCascade         bool     `json:"adaptive_cascade"`
+	CascadeJaccardThreshold float64  `json:"cascade_jaccard_threshold"`
+	CascadeMarginThreshold  float64  `json:"cascade_margin_threshold"`
+	CascadeDGapThreshold    float64  `json:"cascade_dgap_threshold"`
+	LogDiagnostics          bool     `json:"log_diagnostics"`
 }
 
 func (c configuration) fallbackOnError() bool {
@@ -107,6 +114,9 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		RerankTopK:              30,
 		RerankRanking:           "linear",
 		RerankWeight:            0.90,
+		RerankPrimaryWeight:     0.55,
+		RerankSecondaryWeight:   0.35,
+		RerankStage1Weight:      0.10,
 		RerankMaxDocChars:       2000,
 		RerankTimeoutMS:         12000,
 		SurrogateMode:           "inverted_pyramid",
@@ -126,6 +136,9 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 			return cfg, quivrplugin.TerminalSearchError("invalid_configuration", "rerank_endpoint must be an absolute HTTP(S) URL")
 		}
+	}
+	if message := cfg.invalidAdditionalReranker(); message != "" {
+		return cfg, quivrplugin.TerminalSearchError("invalid_configuration", message)
 	}
 	return cfg, nil
 }
@@ -702,9 +715,6 @@ func (r retriever) applyDeepRerank(
 	if topK <= 0 {
 		return bundles, nil
 	}
-	head := bundles[:topK]
-	tail := bundles[topK:]
-
 	deadline := time.Now().Add(time.Duration(cfg.RerankTimeoutMS) * time.Millisecond)
 	if req.Budget != nil {
 		budgetDeadline := started.Add(time.Duration(req.Budget.RemainingTimeMS)*time.Millisecond - responseMargin)
@@ -724,11 +734,7 @@ func (r retriever) applyDeepRerank(
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
-	docs := make([]string, len(head))
-	for i, b := range head {
-		docs[i] = buildSurrogate(b, cfg.SurrogateMode, cfg.RerankMaxDocChars)
-	}
-	scores, err := r.callReranker(callCtx, cfg, req.Query.Text, docs)
+	ranked, err := r.rerankBundles(callCtx, cfg, req.Query.Text, bundles, topK)
 	if err != nil {
 		if cfg.LogDiagnostics {
 			fmt.Fprintf(os.Stderr, "[newsroom-diag] deep_rerank_error=%v fallback=%v\n", err, cfg.fallbackOnError())
@@ -738,18 +744,15 @@ func (r retriever) applyDeepRerank(
 		}
 		return nil, &quivrplugin.SearchError{Code: "reranker_unavailable", Message: err.Error(), Retryable: true}
 	}
+	return ranked, nil
+}
 
-	// Score head according to rerank_ranking mode, keeping strict monotonic separation above untouched tail.
-	reranked := make([]*recordBundle, len(head))
-	copy(reranked, head)
+func scoreHead(cfg configuration, reranked []*recordBundle, result rerankScores) {
+	scores := result.probabilities
 
 	switch cfg.RerankRanking {
 	case "rrf":
-		order := make([]int, len(scores))
-		for i := range order {
-			order[i] = i
-		}
-		sort.SliceStable(order, func(i, j int) bool { return scores[order[i]] > scores[order[j]] })
+		order := descendingOrder(scores)
 		rrank := make([]int, len(scores))
 		for pos, idx := range order {
 			rrank[idx] = pos + 1
@@ -758,16 +761,15 @@ func (r retriever) applyDeepRerank(
 			b.FinalScore = 1.0/float64(61+i) + 1.0/float64(60+rrank[i])
 			b.Explanation = "newsroom+deep(rrf," + cfg.SurrogateMode + ")"
 		}
-	case "linear":
-		baseScores := make([]float64, len(reranked))
-		for i, b := range reranked {
-			baseScores[i] = b.FinalScore
+	case "linear", "logit":
+		if cfg.RerankRanking == "logit" {
+			scores = result.logits
 		}
-		nb := minMaxNormalize(baseScores)
+		nb := minMaxNormalize(bundleScores(reranked))
 		nr := minMaxNormalize(scores)
 		for i, b := range reranked {
 			b.FinalScore = cfg.RerankWeight*nr[i] + (1.0-cfg.RerankWeight)*nb[i]
-			b.Explanation = "newsroom+deep(linear," + cfg.SurrogateMode + ")"
+			b.Explanation = "newsroom+deep(" + cfg.RerankRanking + "," + cfg.SurrogateMode + ")"
 		}
 	default: // rerank_only
 		for i, b := range reranked {
@@ -775,20 +777,21 @@ func (r retriever) applyDeepRerank(
 			b.Explanation = "newsroom+deep(rerank_only," + cfg.SurrogateMode + ")"
 		}
 	}
-	sortBundlesDeterministic(reranked)
+}
 
-	// Shift head scores strictly above tail so the untouched Stage-1 tail preserves Recall@50!
-	if len(tail) > 0 && len(reranked) > 0 {
-		minHead := reranked[len(reranked)-1].FinalScore
+func stitchTail(head, tail []*recordBundle) []*recordBundle {
+	sortBundlesDeterministic(head)
+	if len(tail) > 0 {
+		minHead := head[len(head)-1].FinalScore
 		maxTail := tail[0].FinalScore
 		if minHead <= maxTail {
 			shift := (maxTail - minHead) + 1.0
-			for _, b := range reranked {
+			for _, b := range head {
 				b.FinalScore += shift
 			}
 		}
 	}
-	return append(reranked, tail...), nil
+	return append(head, tail...)
 }
 
 func minMaxNormalize(vals []float64) []float64 {

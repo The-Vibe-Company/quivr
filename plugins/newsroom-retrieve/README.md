@@ -15,9 +15,16 @@
 
 - **`newsroom.retrieve/deep`** (`max_latency_ms: 3000`, `max_cost_cents: 1`):
   - Constructs **Inverted-Pyramid Multi-Passage Surrogates** (`[LEAD]` + `[MATCHED DEEP PASSAGE]` / `[SUPPORTING PASSAGE]` or `[DEEP BODY EXCERPT — NOT IN ARTICLE LEAD]`, `rerank_max_doc_chars: 2000`) for an HTTP cross-encoder reranker (TEI or Cohere protocol, with optional custom `rerank_instruction`).
-  - Applies **score-anchored tail stitching** past `rerank_top_k: 30` (`rerank_weight: 0.90` linear blend) so Recall@50 is never truncated.
+  - Applies **score-anchored tail stitching** past `rerank_top_k: 30` (`rerank_weight: 0.90` linear blend). A single reranker or parallel ensemble at K ≤ 50 preserves the Stage-1 top-50 membership.
   - Supports **Distribution-Shape QPP Adaptive Confidence Cascade** (`adaptive_cascade: true`, `jaccard10 >= 0.50`, `margin >= 0.15`, `dgap >= 2.25`) to early-exit high-confidence queries at `$0` GPU cost.
   - Supports **graceful fallback** (`fallback_on_error: true`, default) returning the Stage-1 `default` ranking on reranker timeout or transient HTTP error.
+
+## Two rerankers
+
+- Set `rerank_secondary_endpoint` and `rerank_cascade_k: 80` to use a TEI filter before the primary reranker. The filter selects the top `rerank_top_k` from that pool. Remaining candidates keep their Stage-1 order below the selected head. A wider pool can change top-50 membership.
+- For a three-tier cascade, also set `adaptive_cascade: true` and `rerank_medium_margin`. High-confidence Stage-1 queries exit before either request. A secondary score gap at or above the configured probability margin exits after the filter. Other queries continue to the primary reranker.
+- Set `rerank_secondary_endpoint` and `rerank_ensemble` to issue both requests concurrently over identical surrogates. `logit` uses per-query standardized margins and Stage-1 scores. `rank_prob` averages each model's rank percentile and probability, with min-max normalization for Stage 1. Default primary, secondary, and Stage-1 weights are 0.55, 0.35, and 0.10. Both model weights must be positive and all three must sum to 1.
+- Logit modes prefer a response's optional `raw_score` and compute a logit from `score` when it is absent. The configured instruction applies to the primary TEI endpoint. Both HTTPS endpoints use the same optional `RERANKER_API_KEY` and share one request deadline.
 
 ## Verification
 

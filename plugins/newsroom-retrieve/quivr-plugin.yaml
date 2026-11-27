@@ -196,6 +196,40 @@ configuration:
         type: string
         format: uri
         description: Optional HTTP(S) reranker endpoint for the deep profile.
+      rerank_secondary_endpoint:
+        type: string
+        format: uri
+        description: Optional TEI endpoint used as a cascade filter or parallel ensemble member.
+      rerank_cascade_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
+        description: Size of the Stage-1 pool scored by the cascade filter. Set at least rerank_top_k when using a cascade.
+      rerank_medium_margin:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: Optional secondary probability gap between ranks 1 and 10 (or the last available rank) required to skip the primary stage.
+      rerank_ensemble:
+        type: string
+        enum: [logit, rank_prob]
+        description: Parallel fusion using standardized logits or a blend of rank percentile and probability.
+      rerank_primary_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.55
+      rerank_secondary_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.35
+      rerank_stage1_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.10
       rerank_protocol:
         type: string
         enum: [tei, cohere]
@@ -208,12 +242,12 @@ configuration:
       rerank_top_k:
         type: integer
         minimum: 1
-        maximum: 50
+        maximum: 100
         default: 30
         description: Number of top Stage-1 candidates to send to the reranker while preserving the remaining tail.
       rerank_ranking:
         type: string
-        enum: [rerank_only, linear, rrf]
+        enum: [rerank_only, linear, logit, rrf]
         default: linear
       rerank_weight:
         type: number
