@@ -22,7 +22,12 @@ def write_set(directory, qrels='q1\td1\t2\nq1\td2\t0\nq2\td2\t1\nq4\td1\t0\n', h
 class Load(unittest.TestCase):
     def test_reads_layout_and_drops_unscorable_queries(self):
         with tempfile.TemporaryDirectory() as d:
-            s = trec.load(write_set(d))
+            directory = write_set(d)
+            s = trec.load(directory)
+            hashes = [hashlib.sha256((directory / name).read_bytes()).hexdigest()
+                      for name in ('corpus.jsonl', 'queries.jsonl', 'qrels.tsv')]
+            self.assertEqual(trec.fingerprint(directory), hashlib.sha256(''.join(hashes).encode()).hexdigest())
+        self.assertEqual(set(s), {'corpus', 'queries', 'qrels', 'dropped_queries'})
         self.assertEqual(s['qrels'], {'q1': {'d1': 2, 'd2': 0}, 'q2': {'d2': 1}})
         self.assertEqual(sorted(s['queries']), ['q1', 'q2'])
         self.assertEqual(s['dropped_queries'], ['q3', 'q4'])  # missing or all-zero judgments
@@ -37,6 +42,24 @@ class Load(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaisesRegex(trec.SetError, "absent from corpus.jsonl, e.g. 'd9'"):
                 trec.load(write_set(d, qrels='q1\td9\t1\n'))
+
+    def test_invalid_sidecars_name_the_file_and_bad_reference(self):
+        cases = [
+            ('qrels-secondary.tsv', 'q1\td1\toops\n', 'score.*not a number'),
+            ('qrels-secondary.tsv', 'missing\td1\t1\n', "'missing'.*queries.jsonl"),
+            ('qrels-secondary.tsv', 'q1\tmissing\t1\n', "corpus.jsonl.*'missing'"),
+            ('judgment-metadata.json', '{"q1":', 'Expecting'),
+            ('judgment-metadata.json', '{"missing": {"d1": {}}}', "'missing'.*queries.jsonl"),
+            ('judgment-metadata.json', '{"q1": {"missing": {}}}', "corpus.jsonl.*'missing'"),
+            ('judgment-metadata.json', '{"q1": {"d1": {"category": 3}}}', 'category.*non-empty string'),
+            ('topics.json', '{', 'Expecting'),
+        ]
+        for name, content, error in cases:
+            with self.subTest(name=name, content=content), tempfile.TemporaryDirectory() as d:
+                directory = write_set(d)
+                (directory / name).write_text(content)
+                with self.assertRaisesRegex(trec.SetError, f'{name}:.*{error}'):
+                    trec.load(directory)
 
     def test_duplicate_document_is_refused(self):
         with tempfile.TemporaryDirectory() as d:

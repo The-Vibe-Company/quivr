@@ -1,7 +1,12 @@
 """The Markdown report: readable for a completed run, and still written for a failed one."""
+import json
+import pathlib
+import tempfile
 import unittest
 
 import report
+import scoring
+import trec
 
 
 def system(ndcg, paid=0):
@@ -21,6 +26,41 @@ RUN = {'id': 'r1', 'source_revision': 'abc', 'finished_at': '2026-09-30T00:00:00
 
 
 class Markdown(unittest.TestCase):
+    def test_trec_sidecars_flow_into_json_and_markdown(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory = pathlib.Path(d)
+            ranking = {'q1': ['bad', 'partial', 'good', 'unjudged', 'uncategorized']
+                       + [f'filler{i}' for i in range(5)] + ['late']}
+            trec.write(directory, {doc: {'text': doc} for doc in ranking['q1']},
+                       {'q1': 'Example query', 'q2': 'Unscored query'},
+                       {'q1': {'good': 2, 'partial': 1, 'bad': 0, 'late': 1}})
+            ordinary = trec.fingerprint(directory)
+            (directory / 'qrels-secondary.tsv').write_text('query-id\tcorpus-id\tscore\nq1\tunjudged\t2\nq1\tbad\t-1\nq2\tgood\t1\n')
+            (directory / 'qrels-negatives.tsv').write_text('\nqid Q0 docid rel\nq1 Q0 bad -1\n')
+            (directory / 'judgment-metadata.json').write_text(json.dumps({'q1': {
+                'bad': {'category': 'wrong | topic'}, 'unjudged': {'category': 'wrong | topic'},
+                'good': {'category': 'excluded'}, 'filler4': {}, 'late': {'category': 'outside cutoff'},
+            }}))
+            (directory / 'topics.json').write_text('{"q1": ["Alternate wording"]}')
+            data = trec.load(directory)
+            self.assertNotEqual(trec.fingerprint(directory), ordinary)
+        self.assertEqual(data['queries'], {'q1': 'Example query'})
+        self.assertEqual(data['topics'], {'q1': ['Alternate wording']})
+        scores = scoring.score_set(data, ranking)
+        self.assertEqual(set(scores['auxiliary_qrels']), {'secondary'})
+        r = {'status': 'completed', 'run': RUN, 'baseline_system': 'lexical/default',
+             'sets': {'synthetic': {'manifest': {}, 'queries': 1, 'documents': 11, 'ingestion': {},
+                                   'systems': {'lexical/default': {**system(.5), **scores}}}}}
+        payload = json.loads(json.dumps(r))
+        diagnostics = payload['sets']['synthetic']['systems']['lexical/default']['error_diagnostics']
+        self.assertEqual(diagnostics['categories'], {'wrong | topic': 2})
+        self.assertEqual(diagnostics['statuses'], {'relevant': 1, 'partial': 1, 'irrelevant': 1, 'unjudged': 7})
+        text = report.markdown(payload)
+        self.assertIn('| Recall@50 | Judged@10 |', text)
+        self.assertIn('| 1.0000 | 0.3000 | baseline |', text)
+        self.assertIn('| lexical/default | secondary | 1 | 0.4307 | 1.0000 | 0.2500 | 1.0000 | 0.2000 |', text)
+        self.assertIn('| lexical/default | 10 | wrong &#124; topic | 2 |', text)
+
     def test_matrix_rows_separate_scored_quality_spend_and_warm_cache_statistics(self):
         value = {**system(.75, 1), 'scored_limit': 10, 'reranker': {'k': 20, 'trim': '128', 'ranking': 'rrf'},
                  'warm_cache_timing': timed(0),

@@ -1,6 +1,8 @@
 """Markdown rendering of an evaluation report.json (THE-775). No third-party package."""
+from html import escape
 
 METRIC_NAMES = [('ndcg@10', 'nDCG@10'), ('recall@10', 'Recall@10'), ('mrr@10', 'MRR@10')]
+DIAGNOSTIC_NAMES = [('recall@50', 'Recall@50'), ('judged@10', 'Judged@10')]
 
 
 def number(v, digits=4):
@@ -182,6 +184,44 @@ def embedding_comparisons(s):
     return lines + ['']
 
 
+def table_label(value):
+    return escape(' '.join(value.split())).replace('|', '&#124;').replace('\\', '&#92;').replace('`', '&#96;')
+
+
+def judgment_tables(systems):
+    lines = []
+    tiers = [(system, tier, scores) for system, value in systems.items()
+             for tier, scores in sorted(value.get('auxiliary_qrels', {}).items())]
+    if tiers:
+        metrics = METRIC_NAMES + DIAGNOSTIC_NAMES
+        lines += ['### Auxiliary qrels', '',
+                  '| System | Tier | Queries | ' + ' | '.join(label for _, label in metrics) + ' |',
+                  '| --- ' * (3 + len(metrics)) + '|']
+        for system, tier, scores in tiers:
+            values = ' | '.join(number(scores['mean'].get(key)) for key, _ in metrics)
+            lines.append(f"| {system} | {table_label(tier)} | {scores['queries']} | {values} |")
+        lines.append('')
+    diagnostics = [(system, value['error_diagnostics']) for system, value in systems.items()
+                   if 'error_diagnostics' in value]
+    if diagnostics:
+        lines += ['### Judgment status', '',
+                  '| System | Cutoff | Relevant | Partial | Irrelevant | Unjudged |', '| --- ' * 6 + '|']
+        for system, counts in diagnostics:
+            values = ' | '.join(str(counts['statuses'][key]) for key in ('relevant', 'partial', 'irrelevant', 'unjudged'))
+            lines.append(f"| {system} | {counts['cutoff']} | {values} |")
+        lines.append('')
+    categories = [(system, counts['cutoff'], category, count) for system, counts in diagnostics
+                  for category, count in sorted(counts['categories'].items())]
+    if categories:
+        lines += ['### False-positive categories', '',
+                  'Counts include explicitly categorized irrelevant and unjudged hits.', '',
+                  '| System | Cutoff | Category | Hits |', '| --- ' * 4 + '|']
+        for system, cutoff, category, count in categories:
+            lines.append(f'| {system} | {cutoff} | {table_label(category)} | {count} |')
+        lines.append('')
+    return lines
+
+
 def markdown(r):
     run = r['run']
     lines = ['# Search quality evaluation', '',
@@ -201,12 +241,15 @@ def markdown(r):
                   f"Blocked searches: {budget['blocked_searches']}. Reservations include all three possible attempts; missing telemetry is not zero.", '']
     lines += embedding_budget(r)
     h = run.get('host', {})
+    recall50 = any('recall@50' in v['mean'] for s in r['sets'].values() for v in s['systems'].values())
+    depth_note = ('Recall@50 uses the scored ranking up to rank 50. '
+                  if recall50 else 'Limit 50 is a retrieval page size, not a Recall@50 score. ')
     lines += [f"Host: {h.get('cpu_model', h.get('machine', ''))}, {h.get('logical_cpus')} logical CPUs. "
               'Default runs in every mode; paid deep profiles run only hybrid. Paid matrix runs score both profiles '
               'at API limit 10 before Record deduplication; no-key runs retain the historical default scored limit 50. '
               'Optional private sets are excluded from paid probes and matrices and retain unpaid default measurement. '
               'Hits are deduplicated by Record. All systems are scored at shared cutoffs @10: nDCG@10, Recall@10, '
-              'and MRR@10. Limit 50 is a retrieval page size, not a Recall@50 score. '
+              'and MRR@10. ' + depth_note +
               'Paired comparisons with past runs omit systems whose scored API page sizes differ.', '']
     lines += comparison(r)
     if r.get('convention'):
@@ -227,18 +270,23 @@ def markdown(r):
             lines += [f"Unfinished set: {s['status']}. Only fully completed query cuts are scored.", '']
         if p.get('refused'):
             lines += ['Profiles not served: ' + ', '.join(f'`{k}` ({v})' for k, v in p['refused'].items()) + '.', '']
+        diagnostics = [(key, label) for key, label in DIAGNOSTIC_NAMES
+                       if any(key in v['mean'] for v in s['systems'].values())]
+        metrics = METRIC_NAMES + diagnostics
         lines += [f"Against `{r['baseline_system']}` in this run:", '',
-                  '| System | ' + ' | '.join(n for _, n in METRIC_NAMES) + ' | Δ nDCG@10 | Δ Recall@10 | p50 ms | p95 ms | Failures | Paid calls / query |',
-                  '| --- ' * (len(METRIC_NAMES) + 7) + '|']
+                  '| System | ' + ' | '.join(n for _, n in metrics) + ' | Δ nDCG@10 | Δ Recall@10 | p50 ms | p95 ms | Failures | Paid calls / query |',
+                  '| --- ' * (len(metrics) + 7) + '|']
         against = s.get('against_baseline_system', {})
         for system, v in s['systems'].items():
             c = against.get(system, {})
             paid = '—' if v['paid_calls_per_query'] is None else v['paid_calls_per_query']
             deltas = ['baseline'] * 2 if system == r['baseline_system'] else [delta(c.get(k)) for k in ['ndcg@10', 'recall@10']]
-            lines.append(f"| {system} | " + ' | '.join(number(v['mean'][k]) for k, _ in METRIC_NAMES)
+            means = [v['mean'][key] for key, _ in METRIC_NAMES] + [v['mean'].get(key) for key, _ in diagnostics]
+            lines.append(f"| {system} | " + ' | '.join(number(mean) for mean in means)
                          + f" | {deltas[0]} | {deltas[1]}"
                          + f" | {number(v['latency_ms']['p50'], 0)} | {number(v['latency_ms']['p95'], 0)} | {v['failures']}/{s['queries']} | {paid} |")
         lines.append('')
+        lines += judgment_tables(s['systems'])
         lines += time_table(s['systems'])
         lines += accounting_table(s['systems'])
         lines += embedding_comparisons(s)

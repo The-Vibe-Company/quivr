@@ -19,6 +19,7 @@ import urllib.request
 import zipfile
 
 QRELS = ['qrels.tsv', 'qrels/test.tsv']
+OPTIONAL_JSON = ('judgment-metadata.json', 'topics.json')
 
 
 class SetError(ValueError):
@@ -112,17 +113,22 @@ def read_jsonl(path):
                     raise SetError(f'{path}:{number}: {error.msg}') from None
 
 
-def read_qrels(path):
+def read_qrels(path, *, strict_header=False):
     with open(path, encoding='utf-8') as f:
-        return parse_qrels(f, path)
+        return parse_qrels(f, path, strict_header=strict_header)
 
 
-def parse_qrels(lines, path):
+def parse_qrels(lines, path, *, strict_header=False):
     """{query_id: {doc_id: grade}} from 3-column BEIR or 4-column TREC rows; path names errors."""
     qrels = {}
+    first_row = True
     for number, line in enumerate(lines, 1):
         cols = line.split()
         if not cols:
+            continue
+        header = first_row and cols in (['query-id', 'corpus-id', 'score'], ['qid', 'Q0', 'docid', 'rel'])
+        first_row = False
+        if strict_header and header:
             continue
         if len(cols) == 4:
             cols = [cols[0], cols[2], cols[3]]
@@ -130,12 +136,48 @@ def parse_qrels(lines, path):
             raise SetError(f'{path}:{number}: expected query-id, corpus-id, score')
         try:
             grade = int(float(cols[2]))
-        except ValueError:
-            if number == 1:
+        except (ValueError, OverflowError):
+            if number == 1 and not strict_header:
                 continue  # header row
             raise SetError(f'{path}:{number}: score {cols[2]!r} is not a number') from None
         qrels.setdefault(cols[0], {})[cols[1]] = grade
     return qrels
+
+
+def auxiliary_qrel_files(directory):
+    return sorted(path for path in directory.glob('qrels-*.tsv') if path.is_file())
+
+
+def validate_references(path, judgments, queries, corpus):
+    for qid, docs in judgments.items():
+        if qid not in queries:
+            raise SetError(f'{path}: query {qid!r} is judged but absent from queries.jsonl')
+        unknown = sorted(d for d in docs if d not in corpus)
+        if unknown:
+            raise SetError(f'{path}: query {qid!r} judges {len(unknown)} document(s) absent from corpus.jsonl, e.g. {unknown[0]!r}')
+
+
+def read_json(path):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except ValueError as error:
+        raise SetError(f'{path}: {error}') from None
+
+
+def read_judgment_metadata(path, queries, corpus):
+    metadata = read_json(path)
+    if not isinstance(metadata, dict):
+        raise SetError(f'{path}: expected an object keyed by query ID')
+    for qid, docs in metadata.items():
+        if not isinstance(docs, dict):
+            raise SetError(f'{path}: query {qid!r} must map to an object keyed by document ID')
+        for doc, entry in docs.items():
+            if not isinstance(entry, dict):
+                raise SetError(f'{path}: entry for {qid!r}/{doc!r} must be an object')
+            if 'category' in entry and (not isinstance(entry['category'], str) or not entry['category'].strip()):
+                raise SetError(f'{path}: category for {qid!r}/{doc!r} must be a non-empty string')
+    validate_references(path, metadata, queries, corpus)
+    return metadata
 
 
 def load(directory):
@@ -143,7 +185,10 @@ def load(directory):
 
     Every query keeps its judgements; a query with no positive judgement is dropped (it cannot
     be scored) and listed in 'dropped_queries'. A judgement naming an unknown query or document
-    is an error: the set would be scored against documents Quivr never saw."""
+    is an error: the set would be scored against documents Quivr never saw.
+
+    Optional keys hold auxiliary qrels by filename suffix, judgment metadata by
+    query and document, and topics as supplied. Queries always come from queries.jsonl."""
     directory = pathlib.Path(directory)
     missing = [n for n in ['corpus.jsonl', 'queries.jsonl'] if not (directory / n).is_file()]
     qrels_file = next((directory / n for n in QRELS if (directory / n).is_file()), None)
@@ -165,16 +210,24 @@ def load(directory):
             raise SetError(f'{directory / "queries.jsonl"}:{number}: duplicate _id {key!r}')
         queries[key] = row['text']
     qrels = read_qrels(qrels_file)
-    for qid, docs in qrels.items():
-        if qid not in queries:
-            raise SetError(f'{qrels_file}: query {qid!r} is judged but absent from queries.jsonl')
-        unknown = sorted(d for d in docs if d not in corpus)
-        if unknown:
-            raise SetError(f'{qrels_file}: query {qid!r} judges {len(unknown)} document(s) absent from corpus.jsonl, e.g. {unknown[0]!r}')
+    validate_references(qrels_file, qrels, queries, corpus)
     scorable = {q for q, docs in qrels.items() if any(g > 0 for g in docs.values())}
     dropped = sorted(q for q in queries if q not in scorable)
-    return {'corpus': corpus, 'queries': {q: t for q, t in queries.items() if q in scorable},
+    data = {'corpus': corpus, 'queries': {q: t for q, t in queries.items() if q in scorable},
             'qrels': {q: qrels[q] for q in sorted(scorable)}, 'dropped_queries': dropped}
+    auxiliary = {}
+    for path in auxiliary_qrel_files(directory):
+        tier = read_qrels(path, strict_header=True)
+        validate_references(path, tier, queries, corpus)
+        auxiliary[path.stem.removeprefix('qrels-')] = tier
+    if auxiliary:
+        data['auxiliary_qrels'] = auxiliary
+    metadata_path, topics_path = (directory / name for name in OPTIONAL_JSON)
+    if metadata_path.is_file():
+        data['judgment_metadata'] = read_judgment_metadata(metadata_path, queries, corpus)
+    if topics_path.is_file():
+        data['topics'] = read_json(topics_path)
+    return data
 
 
 def write(directory, corpus, queries, qrels):
@@ -201,4 +254,8 @@ def fingerprint(directory):
     digest = hashlib.sha256()
     for path in [directory / 'corpus.jsonl', directory / 'queries.jsonl', qrels_file]:
         digest.update(sha256_file(path).encode())
+    optional = auxiliary_qrel_files(directory) + [directory / name for name in OPTIONAL_JSON]
+    for path in optional:
+        if path.is_file():
+            digest.update(b'\0' + path.name.encode() + b'\0' + sha256_file(path).encode())
     return digest.hexdigest()
