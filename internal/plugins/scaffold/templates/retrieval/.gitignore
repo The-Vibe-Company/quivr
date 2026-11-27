@@ -1,3 +1,4 @@
-# Binaries built with `go build`.
+# The binary `go build` writes: it is named after the last element of the
+# module path in go.mod. Change this line when you rename the module.
 /__PLUGIN_ID__
 *.test

@@ -8,7 +8,7 @@ the engine served.
 | Profile | Round 1 | Round 2 |
 | --- | --- | --- |
 | `default` | Keyword (`bm25`) and vector (`near_vector`) candidates, following the search mode | Reciprocal rank fusion |
-| `composed` | The full ranking of `core.retrieve/default`, through a `profile` request | Hits containing every query word first, in the base order |
+| `composed` | The top `candidate_count` hits of the ranking of `core.retrieve/default`, through a `profile` request | Hits containing every query word first, in the base order |
 
 A `profile` request composes another plugin's profile: declare the plugin and
 the profile under `requires` in `quivr-plugin.yaml`, or the engine refuses it.
