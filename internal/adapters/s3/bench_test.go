@@ -30,9 +30,14 @@ func benchPayload(size int) []byte {
 	return data
 }
 
-// BenchmarkPutBlob reports the wall time, client allocations and S3 round
-// trips (requests/put) of one content-addressed write, canonical sizes through
-// Put and larger ones through PutVectorFile.
+// The store builds its own transport, so the fake runs in-process and B/op
+// counts its allocations too. Compare B/op between runs of this harness, not
+// as an absolute client cost: on PUT the fake buffers each body (about one blob
+// size per op); on GET it writes the stored slice without a per-request copy.
+
+// BenchmarkPutBlob reports the wall time, allocations and S3 round trips
+// (requests/put) of one content-addressed write, canonical sizes through Put
+// and larger ones through PutVectorFile.
 func BenchmarkPutBlob(b *testing.B) {
 	for _, tc := range blobBenchSizes {
 		b.Run(tc.name, func(b *testing.B) {
@@ -60,8 +65,8 @@ func BenchmarkPutBlob(b *testing.B) {
 	}
 }
 
-// BenchmarkReadBlob reports the wall time and client allocations (B/op versus
-// the blob size) of one verified read.
+// BenchmarkReadBlob reports the wall time and allocations (B/op versus the
+// blob size) of one verified read.
 func BenchmarkReadBlob(b *testing.B) {
 	for _, tc := range blobBenchSizes {
 		b.Run(tc.name, func(b *testing.B) {
