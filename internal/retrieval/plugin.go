@@ -168,7 +168,17 @@ func (s Service) canFallbackToDefault(defRanker Ranker, defLocal, local string) 
 	if fallbackDisabledByConfig(s.Ranker.Configuration()) {
 		return false
 	}
-	return m.RequiresProfile(dm.ID + "/" + defLocal)
+	return true
+}
+
+// fallbackContext bounds a fallback default search to both the default
+// profile's deadline and the remaining whole-search cap under HTTP WriteTimeout.
+func fallbackContext(parentCtx context.Context, started time.Time, defRanker Ranker, defLocal string) (context.Context, context.CancelFunc) {
+	bound := time.Now().Add(defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+	if searchCap := started.Add(plugins.RetrievalDeadlineCap); searchCap.Before(bound) {
+		bound = searchCap
+	}
+	return context.WithDeadline(parentCtx, bound)
 }
 
 // rank answers a search through the pinned retrieval plugin: each round the
@@ -186,7 +196,7 @@ func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Requ
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
 			slog.WarnContext(ctx, "search profile degraded to default before reranking due to tight deadline",
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
-			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+			fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 			defer cancel()
 			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
@@ -379,7 +389,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			if canFallback && len(ancestors) == 0 && !callerDone && parentCtx != nil {
 				if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok {
 					slog.WarnContext(ctx, "search profile degraded to default after reranker failure", "component", "search", "profile", out.Profile, "plugin", m.ID, "reason", reason)
-					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+					fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 					defer cancel()
 					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, timing, defRanker, defLocal, reason)
 				}

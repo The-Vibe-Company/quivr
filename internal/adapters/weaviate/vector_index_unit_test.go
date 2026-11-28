@@ -120,4 +120,18 @@ func TestVectorIndexSchemaSerializationAndReconciliation(t *testing.T) {
 	if namedCfg["ef"] != float64(512) || gotPuts < 3 {
 		t.Fatalf("after ef reconciliation: cfg=%v puts=%d; want ef=512", namedCfg, gotPuts)
 	}
+
+	// Resetting EF back to 0 clears the explicit ef override cleanly.
+	resetStore := weaviate.New(server.URL)
+	gen.Spaces[0].Index = &content.VectorIndex{Quantization: content.QuantizationRQ8, RescoreLimit: 64, EF: 0}
+	if _, err := resetStore.Search(context.Background(), []retrieval.Route{{CorpusID: "c1", Generation: gen}}, scope,
+		retrieval.Request{Query: "test", Mode: "semantic", Space: space, Vector: []float32{1, 0}}); err != nil {
+		t.Fatalf("reset ef=0 semantic search failed: %v", err)
+	}
+	mu.Lock()
+	namedCfg = schema["vectorConfig"].(map[string]any)[vecName].(map[string]any)["vectorIndexConfig"].(map[string]any)
+	mu.Unlock()
+	if _, hasEF := namedCfg["ef"]; hasEF {
+		t.Fatalf("after ef=0 reset: cfg=%v; want ef override removed", namedCfg)
+	}
 }

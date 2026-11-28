@@ -73,9 +73,9 @@ func (p RetrievalProfile) Objective() time.Duration {
 	return time.Duration(p.MaxLatencyMS) * time.Millisecond
 }
 
-// retrievalDeadlineCap keeps every search bound under the api's 30 s HTTP
-// write timeout, so the error that ends a search always reaches the client.
-const retrievalDeadlineCap = 25 * time.Second
+// RetrievalDeadlineCap keeps every search bound (including any profile fallback)
+// under the api's 30 s HTTP write timeout, so the response always reaches the client.
+const RetrievalDeadlineCap = 25 * time.Second
 
 // Deadline is the hard bound of one search under the profile: four times its
 // objective, at least 2 s, at most 25 s (THE-813). The objective is a p95
@@ -83,7 +83,7 @@ const retrievalDeadlineCap = 25 * time.Second
 // under load; the bound only stops a search whose plugin or dependency is
 // stuck.
 func (p RetrievalProfile) Deadline() time.Duration {
-	return min(max(4*p.Objective(), 2*time.Second), retrievalDeadlineCap)
+	return min(max(4*p.Objective(), 2*time.Second), RetrievalDeadlineCap)
 }
 
 // RetrievalLimits bound one search.

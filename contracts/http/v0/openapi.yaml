@@ -735,7 +735,7 @@ paths:
         If a refusal cannot be audited, that entry returns retryable storage_unavailable. Other entries
         still return their receipts or errors. Retry the affected entry using its original key. Same ingestion
         family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by
-        an 8-second deadline for the whole batch, including envelope decoding and validation. Caller
+        a 25-second deadline for the whole batch, including envelope decoding and validation. Caller
         cancellation or an earlier caller deadline also applies. An entry that times out, and every
         remaining entry after the batch deadline, returns retryable content_unavailable. Retry with
         the same entry keys to recover the original Receipts. If the envelope cannot be read before
@@ -4082,6 +4082,16 @@ paths:
               description: The caller's valid X-Correlation-ID, or the request ID when none was sent; carried into logs, audit events and traces.
               schema:
                 type: string
+            X-Quivr-Degraded:
+              description: Present and set to "true" when the response degraded (for example, reranker fallback or lexical fallback for unavailable vectors).
+              schema:
+                type: string
+                enum:
+                - 'true'
+            X-Quivr-Degraded-Reason:
+              description: Comma-separated degradation reasons matching retrieval_profile.degraded when X-Quivr-Degraded is set.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -4102,6 +4112,10 @@ paths:
               schema:
                 type: integer
                 minimum: 1
+            Server-Timing:
+              description: Phase timing in milliseconds accumulated before the search error, when available.
+              schema:
+                type: string
           content:
             application/json:
               schema:

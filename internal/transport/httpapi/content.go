@@ -198,6 +198,7 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 		result := transport.BatchResult{Items: make([]transport.BatchItem, 0, len(rawItems))}
 		receipts, retryable := 0, 0
 		batchCtx := r.Context()
+		var auditDeadline time.Time
 		for i, rawItem := range rawItems {
 			if err := batchCtx.Err(); err != nil {
 				_, e := errorResponse(err, publicerr.ContentUnavailable)
@@ -211,10 +212,13 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 				receipts++
 			} else {
 				// Avoid passing an already-expired batch context into refusal auditing;
-				// skip auditing for retryable deadline/availability failures so remaining
-				// items are never overwritten with StorageUnavailable.
+				// skip auditing for retryable deadline/availability failures and bound
+				// all refusal audits across the batch to one shared 2-second budget.
 				if !(status >= http.StatusInternalServerError && item.Error.Retryable) {
-					auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(batchCtx), 2*time.Second)
+					if auditDeadline.IsZero() {
+						auditDeadline = time.Now().Add(2 * time.Second)
+					}
+					auditCtx, cancelAudit := context.WithDeadline(context.WithoutCancel(batchCtx), auditDeadline)
 					auditErr := a.auditEmbeddedRefusal(auditCtx, status, item.Error.Code)
 					cancelAudit()
 					if auditErr != nil {

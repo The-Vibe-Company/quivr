@@ -154,10 +154,11 @@ func rq8Setting(raw any, index *content.VectorIndex) (map[string]any, int, bool)
 	return rq, limit, true
 }
 
-// hnswEFSetting identifies a mutable HNSW query-time ef override when index
-// explicitly configures one (non-zero).
+// hnswEFSetting identifies a mutable HNSW query-time ef setting. When index
+// requests ef=0 (index default), it matches only if an explicit non-default
+// ef override is currently present so reconciliation removes it cleanly.
 func hnswEFSetting(raw any, index *content.VectorIndex) (map[string]any, int, bool) {
-	if index == nil || index.EF == 0 {
+	if index == nil {
 		return nil, 0, false
 	}
 	vector, _ := raw.(map[string]any)
@@ -165,7 +166,29 @@ func hnswEFSetting(raw any, index *content.VectorIndex) (map[string]any, int, bo
 	if vector["vectorIndexType"] != "hnsw" || config == nil {
 		return nil, 0, false
 	}
+	if index.EF == 0 {
+		if val, ok := config["ef"]; !ok || val == nil || val == float64(-1) {
+			return nil, 0, false
+		}
+		return config, 0, true
+	}
 	return config, index.EF, true
+}
+
+func hnswEFMatches(config map[string]any, want int) bool {
+	if want == 0 {
+		val, ok := config["ef"]
+		return !ok || val == nil || val == float64(-1)
+	}
+	return config["ef"] == float64(want)
+}
+
+func applyHNSWEF(config map[string]any, want int) {
+	if want == 0 {
+		delete(config, "ef")
+		return
+	}
+	config["ef"] = want
 }
 
 // ensureVectors adds missing spaces and reconciles mutable RQ-8 limits before
@@ -237,8 +260,8 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 			}
 			if cfg, ef, ok := hnswEFSetting(configs[name], sp.Index); ok {
 				efs[name] = ef
-				if cfg["ef"] != float64(ef) {
-					cfg["ef"] = ef
+				if !hnswEFMatches(cfg, ef) {
+					applyHNSWEF(cfg, ef)
 					changed = true
 				}
 			}
@@ -267,8 +290,9 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 			}
 		}
 		if ef, check := efs[name]; check {
-			cfg, _, ok := hnswEFSetting(configs[name], sp.Index)
-			if !ok || cfg["ef"] != float64(ef) {
+			vec, _ := configs[name].(map[string]any)
+			cfg, _ := vec["vectorIndexConfig"].(map[string]any)
+			if cfg == nil || !hnswEFMatches(cfg, ef) {
 				return errors.New("projection named vector ef setting differs")
 			}
 		}
@@ -382,7 +406,7 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 		rq, wantRescore, checkRescore := rq8Setting(existing.VectorConfig[legacyVector], s.DefaultIndex)
 		needRescore := checkRescore && rq["rescoreLimit"] != float64(wantRescore)
 		cfg, wantEF, checkEF := hnswEFSetting(existing.VectorConfig[legacyVector], s.DefaultIndex)
-		needEF := checkEF && cfg["ef"] != float64(wantEF)
+		needEF := checkEF && !hnswEFMatches(cfg, wantEF)
 		if needRescore || needEF {
 			var class map[string]any
 			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &class); err != nil {
@@ -401,7 +425,7 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 				if !ok {
 					return errors.New("projection legacy vector setting changed")
 				}
-				cfg["ef"] = wantEF
+				applyHNSWEF(cfg, wantEF)
 			}
 			if _, err = s.call(ctx, "PUT", "/v1/schema/"+collection, class, nil); err != nil {
 				return err
@@ -416,8 +440,9 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 				}
 			}
 			if needEF {
-				cfg, _, ok := hnswEFSetting(existing.VectorConfig[legacyVector], s.DefaultIndex)
-				if !ok || cfg["ef"] != float64(wantEF) {
+				vec, _ := existing.VectorConfig[legacyVector].(map[string]any)
+				cfg, _ := vec["vectorIndexConfig"].(map[string]any)
+				if cfg == nil || !hnswEFMatches(cfg, wantEF) {
 					return errors.New("projection legacy vector ef setting differs")
 				}
 			}

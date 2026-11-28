@@ -609,8 +609,9 @@ func Run(command string, args ...string) error {
 	projection.SetMetrics(dependencyMetrics)
 	projection.Visibility = grants
 	projection.PurgeTimeout = purgeTimeout
-	projection.LegacySpace = tei.Space().ID
-	defaultVectorIndex := cfg.VectorIndex.For(tei.Space().ID, tei.Space().ID)
+	builtin := BuiltinSpace()
+	projection.LegacySpace = builtin.ID
+	defaultVectorIndex := cfg.VectorIndex.For(builtin.ID, builtin.Name)
 	projection.DefaultIndex = &defaultVectorIndex
 	rebuilds.Projection = projection
 	corpusStore := postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}

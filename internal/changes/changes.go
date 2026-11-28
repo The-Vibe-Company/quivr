@@ -105,6 +105,7 @@ type VisibilityJournal interface {
 // one query and reports the corpus visibility revision so a stream only
 // re-evaluates remaining events when policy changes mid-page.
 type BatchVisibilityJournal interface {
+	VisibilityJournal
 	VisibleChanges(ctx context.Context, organization, corpusID string, positions []int64) (visible map[int64]bool, revision int64, err error)
 	VisibilityRevision(ctx context.Context, organization, corpusID string) (int64, error)
 }

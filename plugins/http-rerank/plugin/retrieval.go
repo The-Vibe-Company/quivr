@@ -123,7 +123,6 @@ type retriever struct {
 	client *http.Client
 	apiKey string
 	stats  *diagnostics
-	log    *slog.Logger
 }
 
 // New creates a retriever for the plugin SDK. It reads its optional secret once at startup.
@@ -134,7 +133,6 @@ func New() quivrplugin.Retriever {
 		},
 		apiKey: os.Getenv("RERANKER_API_KEY"),
 		stats:  &diagnostics{},
-		log:    slog.Default(),
 	}
 }
 
@@ -142,9 +140,9 @@ func (r retriever) Diagnostics() DiagnosticsSnapshot {
 	return r.stats.snapshot()
 }
 
-func (r retriever) logger() *slog.Logger {
-	if r.log != nil {
-		return r.log
+func requestLogger(req *quivrplugin.SearchRequest) *slog.Logger {
+	if req != nil && req.Logger() != nil {
+		return req.Logger()
 	}
 	return slog.Default()
 }
@@ -209,26 +207,36 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		}
 		scores, timeoutPhase, err = r.rerank(callCtx, cfg, req.Query.Text, docs)
 	}
+	log := requestLogger(req)
 	if err != nil {
 		r.stats.recordTimeout(timeoutPhase)
 		if !cfg.FallbackOnError {
 			if r.stats != nil {
 				r.stats.errors.Add(1)
 			}
-			r.logger().WarnContext(ctx, "http reranker failed",
+			snap := r.stats.snapshot()
+			log.WarnContext(ctx, "http reranker failed",
 				"component", "http.rerank", "protocol", cfg.Protocol, "candidates", len(candidates),
 				"title_anchors_formatted", titleFormatted, "timeout_phase", timeoutPhase,
-				"degraded", false, "elapsed_ms", time.Since(started).Milliseconds(), "error", err.Error())
+				"degraded", false, "elapsed_ms", time.Since(started).Milliseconds(),
+				"requests_total", snap.Requests, "errors_total", snap.Errors, "fallbacks_total", snap.Fallbacks,
+				"title_anchors_formatted_total", snap.TitleAnchorsFormatted,
+				"budget_timeouts_total", snap.BudgetTimeouts, "request_timeouts_total", snap.RequestTimeouts, "body_read_timeouts_total", snap.BodyReadTimeouts,
+				"error", err.Error())
 			return nil, &quivrplugin.SearchError{Code: "reranker_unavailable", Message: err.Error(), Retryable: true}
 		}
-		var fallbackCount int64
 		if r.stats != nil {
-			fallbackCount = r.stats.fallbacks.Add(1)
+			r.stats.fallbacks.Add(1)
 		}
-		r.logger().WarnContext(ctx, "http reranker degraded to base profile",
+		snap := r.stats.snapshot()
+		log.WarnContext(ctx, "http reranker degraded to base profile",
 			"component", "http.rerank", "protocol", cfg.Protocol, "candidates", len(candidates),
 			"title_anchors_formatted", titleFormatted, "timeout_phase", timeoutPhase,
-			"degraded", true, "fallback_count", fallbackCount, "elapsed_ms", time.Since(started).Milliseconds(), "error", err.Error())
+			"degraded", true, "fallback_count", snap.Fallbacks, "elapsed_ms", time.Since(started).Milliseconds(),
+			"requests_total", snap.Requests, "errors_total", snap.Errors, "fallbacks_total", snap.Fallbacks,
+			"title_anchors_formatted_total", snap.TitleAnchorsFormatted,
+			"budget_timeouts_total", snap.BudgetTimeouts, "request_timeouts_total", snap.RequestTimeouts, "body_read_timeouts_total", snap.BodyReadTimeouts,
+			"error", err.Error())
 		hits := make([]quivrplugin.RankedHit, min(len(candidates), req.Limit))
 		for i, c := range candidates[:len(hits)] {
 			hits[i] = quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: "base profile fallback: " + err.Error()}
@@ -238,6 +246,12 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 	if r.stats != nil {
 		r.stats.succeeded.Add(1)
 	}
+	snap := r.stats.snapshot()
+	log.DebugContext(ctx, "http reranker completed",
+		"component", "http.rerank", "protocol", cfg.Protocol, "candidates", len(candidates),
+		"title_anchors_formatted", titleFormatted, "elapsed_ms", time.Since(started).Milliseconds(),
+		"requests_total", snap.Requests, "succeeded_total", snap.Succeeded, "fallbacks_total", snap.Fallbacks,
+		"errors_total", snap.Errors, "title_anchors_formatted_total", snap.TitleAnchorsFormatted)
 	hits := rank(cfg, candidates, scores)
 	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
 }
