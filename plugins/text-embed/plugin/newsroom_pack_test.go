@@ -104,13 +104,13 @@ func TestOverlapAndDualLeadSegment(t *testing.T) {
 	}
 }
 
-func TestPagedIngestionDisablesOverlapAndLeadOverrides(t *testing.T) {
+func TestPagedIngestionCoversContiguouslyAndDisablesLeadLimit(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
 	c.DocumentTemplate = "title: {title} | text: {text}"
 	c.MaxTokens = 1024
 	c.BodyTokens = 100
 	c.OverlapTokens = 30
-	c.LeadMaxTokens = 50
+	c.LeadMaxTokens = 40
 	c.ContextualAnchor = "title_lead_slot"
 	c.IncludeTitleInLead = true
 	c.DualLeadSegment = true
@@ -126,6 +126,9 @@ func TestPagedIngestionDisablesOverlapAndLeadOverrides(t *testing.T) {
 	}
 	if len(page.Segments) < 2 {
 		t.Fatalf("expected >= 2 paged segments, got %d", len(page.Segments))
+	}
+	if got := page.Segments[0].End - page.Segments[0].Start; got <= c.LeadMaxTokens {
+		t.Fatalf("expected LeadMaxTokens (%d) to be disabled on paged windows, got first segment len %d", c.LeadMaxTokens, got)
 	}
 	for i := 1; i < len(page.Segments); i++ {
 		if page.Segments[i].Start != page.Segments[i-1].End {

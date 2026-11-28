@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	// Generic wire dateline: uppercase city/date + agency parenthetical + dash, e.g. "PARIS (Agency) - ", "NEW YORK, 12 MAI (Wire) — "
-	reWireDateline = regexp.MustCompile(`^[A-Z0-9\x{00C0}-\x{00D6}\x{00D8}-\x{00DE}][A-Z0-9\x{00C0}-\x{00D6}\x{00D8}-\x{00DE}\s,'-]{1,35}\s*\([^)]{2,25}\)\s*[-–—]\s*`)
+	// Generic wire dateline: uppercase city/date + agency parenthetical + dash, e.g. "PARIS (Agency) - ", "ČESKÝ KRUMLOV (Wire) — "
+	reWireDateline = regexp.MustCompile(`^[\p{Lu}0-9][\p{Lu}0-9\s,'-]{1,35}\s*\([^)]{2,25}\)\s*[-–—]\s*`)
 	// Generic trailing wire desk/initials signature at end of text on its own line: e.g. "\nab/cd" or "\nab/cd/ef"
 	reTrailingCredit = regexp.MustCompile(`(?:\r?\n)[ \t]*[a-z]{2,4}/[a-z]{2,4}(?:/[a-z]{2,4})?[ \t]*$`)
 	// Generic CMS/Markdown syntax artifacts

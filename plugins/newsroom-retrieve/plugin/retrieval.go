@@ -256,15 +256,15 @@ func round1Specs(req *quivrplugin.SearchRequest, cfg configuration) ([]namedRequ
 		mode = "hybrid"
 	}
 	space := req.ServedSpace()
-	if (mode == "semantic" || mode == "hybrid") && space == nil {
-		return nil, quivrplugin.TerminalSearchError("missing_served_space", "semantic and hybrid search require a served vector space")
+	if mode == "semantic" && space == nil {
+		return nil, quivrplugin.TerminalSearchError("missing_served_space", "semantic search requires a served vector space")
 	}
 
 	lexK := clampK(cfg.LexicalK, req.Limit)
 	denseK := clampK(cfg.DenseK, req.Limit)
 
 	var specs []namedRequest
-	if mode == "semantic" || mode == "hybrid" {
+	if (mode == "semantic" || mode == "hybrid") && space != nil {
 		specs = append(specs, namedRequest{
 			Name: legDense,
 			Req: quivrplugin.CandidateRequest{

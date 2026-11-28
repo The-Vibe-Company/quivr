@@ -14,7 +14,6 @@ import (
 
 const (
 	maxRerankResponseBytes = 1 << 20
-	maxErrorBodyDrainBytes = 4 << 10
 )
 
 type rerankResult struct {
@@ -32,26 +31,16 @@ type rerankScores struct {
 }
 
 // logitSpace returns per-document unsaturated relevance margins: the endpoint's
-// raw_score when present, s.Prob directly if the endpoint already emits raw
-// logits outside [0, 1], else log(p/(1-p)) with p clamped away from 0 and 1.
+// explicit raw_score when present, else log(p/(1-p)) with p clamped away from 0
+// and 1. Endpoints returning raw logits directly in score (without raw_score)
+// should set rerank_score_space: "prob" so values pass through untransformed.
 func (s rerankScores) logitSpace() []float64 {
 	if s.Raw != nil {
 		out := make([]float64, len(s.Raw))
 		copy(out, s.Raw)
 		return out
 	}
-	alreadyLogits := false
-	for _, p := range s.Prob {
-		if p < 0 || p > 1 {
-			alreadyLogits = true
-			break
-		}
-	}
 	out := make([]float64, len(s.Prob))
-	if alreadyLogits {
-		copy(out, s.Prob)
-		return out
-	}
 	const eps = 1e-7
 	for i, p := range s.Prob {
 		p = math.Min(math.Max(p, eps), 1-eps)
@@ -61,11 +50,15 @@ func (s rerankScores) logitSpace() []float64 {
 }
 
 func newRerankHTTPClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.MaxIdleConns = 32
-	transport.MaxIdleConnsPerHost = 16
+	rt := http.DefaultTransport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := base.Clone()
+		cloned.MaxIdleConns = 32
+		cloned.MaxIdleConnsPerHost = 16
+		rt = cloned
+	}
 	return &http.Client{
-		Transport: transport,
+		Transport: rt,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -169,7 +162,6 @@ func (r retriever) callRerankerScores(ctx context.Context, cfg configuration, qu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyDrainBytes))
 		return rerankScores{}, fmt.Errorf("reranker returned HTTP %d", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRerankResponseBytes+1))

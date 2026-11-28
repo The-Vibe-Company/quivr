@@ -12,7 +12,7 @@
      - **Multi-Passage Dense Corroboration (`passage_support_weight: 0.12`):** Rewards articles matching >= 2 distinct dense passages without penalizing single-passage dispatches.
      - **Lead-vs-Body Aboutness Ratio (`FirstP / MaxP`, `passage_ratio_weight: 0.10`):** Compares lead segment similarity against max segment similarity to demote buried passing mentions while keeping single-passage records neutral.
 
-- **`newsroom.retrieve/deep`** (`max_latency_ms: 3000`, `max_cost_cents: 1`):
+- **`newsroom.retrieve/deep`** (`max_latency_ms: 3000`, `max_cost_cents: 1`, requires `rerank_endpoint`—otherwise returns the Stage-1 ranking):
   - **Inverted-Pyramid Multi-Passage Surrogates (`rerank_top_k: 50`, `rerank_max_doc_chars: 2000`):** Pairs `[TITLE]` + `[LEAD]` + `[MATCHED DEEP PASSAGE]` / `[SUPPORTING PASSAGE]` for an open-source HTTP cross-encoder (TEI or Cohere protocol, e.g. `Qwen3-Reranker-4B` Apache-2.0).
   - **Unsaturated Logit Calibration (`rerank_score_space: "logit"`, `rerank_ranking: "zscore"`, `rerank_weight: 0.90`):** Uses raw relevance margins (`raw_score`) or log-odds fallback standardized per query to prevent probability saturation near `1.0`.
   - **Recall Band (`rerank_band_start: 30`, `rerank_band_end: 80`, `rerank_band_max_chars: 900`):** Scores Stage-1 ranks `51–80` with compact lead views in the same rerank call so relevant dispatches straddling the Recall@50 cut can move up without disturbing the top-30 head. Set `rerank_band_end: 0` to disable.
@@ -23,6 +23,7 @@
 
 ```sh
 cd plugins/newsroom-retrieve
+go vet ./...
 go test -race ./...
 quivr plugin inspect .
 quivr plugin test .

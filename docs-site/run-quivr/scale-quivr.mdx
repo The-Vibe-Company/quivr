@@ -74,7 +74,7 @@ Budget provider admission for `bulk plugin processes × max_concurrent_requests`
 
 Batch across documents. **Example measurements:** tiny calls of roughly 80 tokens, one document per call and four calls in flight limited an archive to 3–4 documents/s. In a separate synthetic measurement, batches averaging about 11 documents raised searchable throughput from 8 to 55.5 documents/s. `text.embed` collects document inputs within each Organization and plugin process. Queries bypass the collection window but share remote admission; cooldown after `429` or `503` is process-local, with no fleet-wide coordination.
 
-[Tune execution](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model) and the [hosted embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#configuration) own the settings. Check endpoint request-size limits as well as token limits: a byte limit once rejected every input over 2 KB. Oversized text needs more passages, rather than truncation.
+[Tune execution](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model) and the [text embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#configuration-examples) own the settings. Check endpoint request-size limits as well as token limits: a byte limit once rejected every input over 2 KB. Oversized text needs more passages, rather than truncation.
 
 ### PostgreSQL
 

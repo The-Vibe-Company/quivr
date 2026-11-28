@@ -156,21 +156,14 @@ func TestFirstPMaxPRatioDoesNotPenalizeSinglePassage(t *testing.T) {
 	}
 }
 
-func TestLogitSpacePreservesRawMarginsAndHandlesRawLogitEndpoints(t *testing.T) {
+func TestLogitSpacePreservesRawMarginsAndComputesLogOdds(t *testing.T) {
 	sRaw := rerankScores{Prob: []float64{0.9999, 0.9999}, Raw: []float64{9.5, 4.1}}
 	got := sRaw.logitSpace()
 	if got[0] != 9.5 || got[1] != 4.1 {
 		t.Fatalf("expected raw margins preserved, got %v", got)
 	}
 
-	// Endpoint emitting raw logits directly in score (outside [0, 1]) without raw_score.
-	sDirect := rerankScores{Prob: []float64{5.2, -1.4, 2.8}}
-	gotDirect := sDirect.logitSpace()
-	if gotDirect[0] != 5.2 || gotDirect[1] != -1.4 || gotDirect[2] != 2.8 {
-		t.Fatalf("expected direct raw logits preserved without clamping, got %v", gotDirect)
-	}
-
-	// Saturated probability fallback.
+	// Probability log-odds fallback when endpoint does not expose raw_score.
 	sProb := rerankScores{Prob: []float64{0.99, 0.5}}
 	gotProb := sProb.logitSpace()
 	if !(gotProb[0] > 4.0 && math.Abs(gotProb[1]) < 1e-9) {
@@ -304,39 +297,67 @@ func TestRecallBandStraddlesCutAndPreservesHeadAndMonotonicity(t *testing.T) {
 	}
 }
 
-func TestDeepFallbackOnRerankerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	r := retriever{client: srv.Client()}
-	req := &quivrplugin.SearchRequest{
-		Profile:       "deep",
-		Round:         2,
-		Limit:         2,
-		Configuration: json.RawMessage(`{"rerank_endpoint":"` + srv.URL + `","rerank_parallel_requests":1,"fallback_on_error":true}`),
-		Spaces:        []quivrplugin.SearchSpace{{ID: "sp1", Role: "served"}},
-		Served: []quivrplugin.ServedRequest{
-			{
-				Round:        1,
-				RequestIndex: 0,
-				Request:      quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveNearVector, QueryText: "harbour strike", Space: "sp1", K: 100},
-				Candidates: []quivrplugin.Candidate{
-					{SegmentID: "s1", RecordID: "r1", PartKey: "body", Start: 0, Text: "Harbour strike blocks ships", Score: 0.9},
-					{SegmentID: "s2", RecordID: "r2", PartKey: "body", Start: 0, Text: "Other news", Score: 0.5},
+func TestDeepFallbackAndStrictErrorModes(t *testing.T) {
+	mkReq := func(cfgJSON string) *quivrplugin.SearchRequest {
+		req := &quivrplugin.SearchRequest{
+			Profile:       "deep",
+			Round:         2,
+			Limit:         2,
+			Configuration: json.RawMessage(cfgJSON),
+			Spaces:        []quivrplugin.SearchSpace{{ID: "sp1", Role: "served"}},
+			Served: []quivrplugin.ServedRequest{
+				{
+					Round:        1,
+					RequestIndex: 0,
+					Request:      quivrplugin.CandidateRequest{Primitive: quivrplugin.PrimitiveNearVector, QueryText: "harbour strike", Space: "sp1", K: 100},
+					Candidates: []quivrplugin.Candidate{
+						{SegmentID: "s1", RecordID: "r1", PartKey: "body", Start: 0, Text: "Harbour strike blocks ships", Score: 0.9},
+						{SegmentID: "s2", RecordID: "r2", PartKey: "body", Start: 0, Text: "Other news", Score: 0.5},
+					},
 				},
 			},
-		},
+		}
+		req.Query.Text = "harbour strike"
+		req.Query.Mode = "semantic"
+		return req
 	}
-	req.Query.Text = "harbour strike"
-	req.Query.Mode = "semantic"
-	ans, err := r.Search(context.Background(), req)
+
+	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer errSrv.Close()
+	r := retriever{client: errSrv.Client()}
+
+	// HTTP 503 with fallback_on_error: true returns Stage-1 ranking.
+	ans, err := r.Search(context.Background(), mkReq(`{"rerank_endpoint":"`+errSrv.URL+`","rerank_parallel_requests":1,"fallback_on_error":true}`))
 	if err != nil {
-		t.Fatalf("expected graceful fallback, got error: %v", err)
+		t.Fatalf("expected graceful fallback on HTTP 503, got error: %v", err)
 	}
 	if len(ans.Ranking) != 2 || ans.Ranking[0].SegmentID != "s1" {
 		t.Fatalf("unexpected fallback ranking: %+v", ans.Ranking)
+	}
+
+	// HTTP 503 with fallback_on_error: false returns retryable reranker_unavailable.
+	if _, err := r.Search(context.Background(), mkReq(`{"rerank_endpoint":"`+errSrv.URL+`","rerank_parallel_requests":1,"fallback_on_error":false}`)); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("expected strict HTTP 503 error, got %v", err)
+	}
+
+	// Timeout with fallback_on_error: true vs false.
+	slowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer slowSrv.Close()
+	rSlow := retriever{client: slowSrv.Client()}
+
+	ansSlow, err := rSlow.Search(context.Background(), mkReq(`{"rerank_endpoint":"`+slowSrv.URL+`","rerank_timeout_ms":100,"rerank_parallel_requests":1,"fallback_on_error":true}`))
+	if err != nil || len(ansSlow.Ranking) != 2 || ansSlow.Ranking[0].SegmentID != "s1" {
+		t.Fatalf("expected graceful timeout fallback, got ans=%+v err=%v", ansSlow, err)
+	}
+	if _, err := rSlow.Search(context.Background(), mkReq(`{"rerank_endpoint":"`+slowSrv.URL+`","rerank_timeout_ms":100,"rerank_parallel_requests":1,"fallback_on_error":false}`)); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected strict timeout error, got %v", err)
 	}
 }
 

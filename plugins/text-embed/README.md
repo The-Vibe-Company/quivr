@@ -420,7 +420,6 @@ usage field; this accounting interface is the plugin's structured log.
 
 `make check` verifies that the committed TEI manifest matches its generator,
 then certifies generated packages in both formats against the shared
-fake. Reports are `.scratch/plugin-sdk/text-embed/text-embed-*-contract-report.json`
-and the CI artifact `text-embedding-contract-reports`.
+fake. Reports are written to `.scratch/plugin-sdk/text-embed/text-embed-*-contract-report.json`.
 `make verify part=plugins` pins both formats, ingests text and finds it by a
 sentence it contains. These checks make no live paid call.

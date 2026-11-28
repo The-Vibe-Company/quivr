@@ -293,22 +293,38 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 					}
 				}
 				cut := 0
-				lo, hi := 0, len(validCuts)-1
-				for lo <= hi {
-					mid := lo + (hi-lo)/2
-					cand := validCuts[mid]
-					piece := raw
-					piece.end = raw.start + cand
-					piece.text = string(local[:cand])
-					ok, _, err := fitsUnit([]paragraph{piece})
-					if err != nil {
-						return nil, nil, err
+				if !c.NormalizeWireText {
+					// Without text normalization, fitsUnit is monotone in prefix length.
+					lo, hi := 0, len(validCuts)-1
+					for lo <= hi {
+						mid := lo + (hi-lo)/2
+						cand := validCuts[mid]
+						piece := raw
+						piece.end = raw.start + cand
+						piece.text = string(local[:cand])
+						ok, _, err := fitsUnit([]paragraph{piece})
+						if err != nil {
+							return nil, nil, err
+						}
+						if ok {
+							cut = cand
+							lo = mid + 1
+						} else {
+							hi = mid - 1
+						}
 					}
-					if ok {
-						cut = cand
-						lo = mid + 1
-					} else {
-						hi = mid - 1
+				} else {
+					for i := len(validCuts) - 1; i >= 0; i-- {
+						cand := validCuts[i]
+						piece := raw
+						piece.end = raw.start + cand
+						piece.text = string(local[:cand])
+						if ok, _, err := fitsUnit([]paragraph{piece}); err != nil {
+							return nil, nil, err
+						} else if ok {
+							cut = cand
+							break
+						}
 					}
 				}
 				if cut == 0 {
