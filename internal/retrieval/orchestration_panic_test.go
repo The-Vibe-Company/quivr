@@ -97,12 +97,24 @@ func bubbleGoroutines(t *testing.T) int {
 // Outside a search, as for a subscription's meaning query, an encoder that
 // panics on the caller's goroutine is unavailable, not the caller's panic.
 func TestEncodeQueryPanicIsUnavailable(t *testing.T) {
+	logs := &syncBuffer{}
 	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&syncBuffer{}, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 	s := retrieval.Service{Embedder: panickingEmbedder{}}
 	if _, err := s.EncodeQuery(t.Context(), panicOrg, "space", panicQuery); !errors.Is(err, retrieval.ErrUnavailable) {
 		t.Fatalf("EncodeQuery with a panicking encoder = %v, want ErrUnavailable", err)
+	}
+	out := logs.String()
+	for _, want := range []string{"search dependency panicked", "site=query.encode", "panic_type=string", "stack="} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("panic log lacks %q; logs:\n%s", want, out)
+		}
+	}
+	for _, secret := range []string{panicQuery, panicOrg, panicPrincipal} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("logs repeat %q:\n%s", secret, out)
+		}
 	}
 }
 
