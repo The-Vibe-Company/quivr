@@ -214,7 +214,8 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 				// Avoid passing an already-expired batch context into refusal auditing;
 				// skip auditing for retryable deadline/availability failures and bound
 				// all refusal audits across the batch to one shared 2-second budget.
-				if !(status >= http.StatusInternalServerError && item.Error.Retryable) {
+				if !(status >= http.StatusInternalServerError && item.Error.Retryable) &&
+					refusalAuditAction(status, item.Error.Code, true) != "" {
 					if auditDeadline.IsZero() {
 						auditDeadline = time.Now().Add(2 * time.Second)
 					}
