@@ -31,6 +31,7 @@ type dispatchStore struct {
 	onClaim                func(context.Context)
 	batch                  []content.Dispatch
 	acknowledgementError   error
+	killBeforeAcknowledge  bool
 	acknowledged           []content.Dispatch
 	feedback               []content.Dispatch
 }
@@ -45,7 +46,15 @@ func (s *dispatchStore) ClaimIngestionBatches(ctx context.Context, _ int) ([]con
 	}
 	return out, nil
 }
+
+// errKilled models the process dying at the panic site: nothing after it runs.
+var errKilled = errors.New("process killed")
+
 func (s *dispatchStore) IngestionBatchDispatched(_ context.Context, id string) error {
+	if s.killBeforeAcknowledge {
+		s.killBeforeAcknowledge = false
+		panic(errKilled)
+	}
 	if s.acknowledgementError != nil {
 		err := s.acknowledgementError
 		s.acknowledgementError = nil
@@ -77,34 +86,51 @@ func (s *dispatchStore) OperationDispatched(_ context.Context, d operations.Disp
 
 // A restart after Temporal accepted a workflow but before PostgreSQL saw the
 // acknowledgement must reuse that workflow, including when it already completed.
+// The acknowledgement is either lost (the source records retry feedback) or the
+// process is killed between the start and the acknowledgement (nothing runs).
 func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
-	ctx := telemetry.Extract(logging.WithRequestID(context.Background(), "caller-request-123"), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
-	d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1", TraceContext: telemetry.Encode(ctx)}
-	propagated := mock.MatchedBy(func(ctx context.Context) bool {
-		c := telemetry.Capture(ctx)
-		return c.Traceparent == "00-11111111111111111111111111111111-2222222222222222-01" && c.RequestID == "caller-request-123"
-	})
-	store := &dispatchStore{batch: []content.Dispatch{d}, acknowledgementError: errors.New("connection lost after workflow start")}
-	input := testDispatchBatch(d)
-	tc := &mocks.Client{}
-	options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
-		return o.ID == content.StableID("ingestion-batch-v1", d.Organization, d.ReceiptID) && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == workqueue.TaskQueue(workqueue.Live)
-	})
-	tc.On("ExecuteWorkflow", propagated, options, ingestionBatchWorkflow, input).Return(nil, nil).Once()
-	r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
-	r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
-	if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
-		t.Fatalf("lost acknowledgement: ack=%v feedback=%v", store.acknowledged, store.feedback)
+	for _, killed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "acknowledgement_lost", true: "killed_before_acknowledgement"}[killed], func(t *testing.T) {
+			ctx := telemetry.Extract(logging.WithRequestID(context.Background(), "caller-request-123"), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+			d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1", TraceContext: telemetry.Encode(ctx)}
+			propagated := mock.MatchedBy(func(ctx context.Context) bool {
+				c := telemetry.Capture(ctx)
+				return c.Traceparent == "00-11111111111111111111111111111111-2222222222222222-01" && c.RequestID == "caller-request-123"
+			})
+			store := &dispatchStore{batch: []content.Dispatch{d}, acknowledgementError: errors.New("connection lost after workflow start")}
+			wantFeedback := 1
+			if killed {
+				store.acknowledgementError, store.killBeforeAcknowledge, wantFeedback = nil, true, 0
+			}
+			input := testDispatchBatch(d)
+			tc := &mocks.Client{}
+			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
+				return o.ID == content.StableID("ingestion-batch-v1", d.Organization, d.ReceiptID) && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == workqueue.TaskQueue(workqueue.Live)
+			})
+			tc.On("ExecuteWorkflow", propagated, options, ingestionBatchWorkflow, input).Return(nil, nil).Once()
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
+			func() {
+				defer func() {
+					if got := recover(); got != nil && (!killed || got != errKilled) {
+						panic(got)
+					}
+				}()
+				r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
+			}()
+			if len(store.acknowledged) != 0 || len(store.feedback) != wantFeedback {
+				t.Fatalf("lost acknowledgement: ack=%v feedback=%v, want feedback %d", store.acknowledged, store.feedback, wantFeedback)
+			}
+			// Temporal rejects even a completed execution's ID. The stable batch ID
+			// makes that rejection a successful durable dispatch, started only once.
+			tc.On("ExecuteWorkflow", propagated, options, ingestionBatchWorkflow, input).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
+			restarted := Runtime{Client: tc, Store: store}
+			restarted.dispatchBatch(context.Background(), restarted.ingestionIntents(), 1)
+			if len(store.acknowledged) != 1 || store.acknowledged[0] != d || len(store.feedback) != wantFeedback {
+				t.Fatalf("restart acknowledgement: got %v feedback=%v, want %v once", store.acknowledged, store.feedback, d)
+			}
+			tc.AssertExpectations(t)
+		})
 	}
-	// Temporal rejects even a completed execution's ID. The stable batch ID
-	// makes that rejection a successful durable dispatch.
-	tc.On("ExecuteWorkflow", propagated, options, ingestionBatchWorkflow, input).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
-	restarted := Runtime{Client: tc, Store: store}
-	restarted.dispatchBatch(context.Background(), restarted.ingestionIntents(), 1)
-	if len(store.acknowledged) != 1 || store.acknowledged[0] != d {
-		t.Fatalf("restart acknowledgement: got %v, want %v", store.acknowledged, d)
-	}
-	tc.AssertExpectations(t)
 }
 
 // A failed workflow start must keep its intent, without holding up other

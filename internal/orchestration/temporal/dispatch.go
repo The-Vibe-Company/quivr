@@ -53,6 +53,11 @@ func (i dispatchIntent) Complete(ctx context.Context) error { return i.complete(
 func (i dispatchIntent) Retry(ctx context.Context) error    { return i.retry(ctx) }
 
 const dispatchAttempt = 3 * time.Second
+
+// dispatchSettle bounds the acknowledgement or recovery write that follows a
+// start. It runs detached from the attempt, so a start that consumed the whole
+// attempt still settles; process drain keeps its own grace bound.
+const dispatchSettle = 3 * time.Second
 const ingestionDispatchBatch = 8
 const ingestionStartConcurrency = 8
 const operationDispatchBatch = 32
@@ -144,18 +149,52 @@ func (r *Runtime) dispatchBatch(ctx context.Context, source IntentSource, starts
 	running.Wait()
 }
 
+// dispatchIntent settles every start with its source. An accepted start is
+// acknowledged even when the attempt expires before or during that write, and
+// a failed start or acknowledgement always reaches Retry on a live, bounded
+// context.
 func (r *Runtime) dispatchIntent(ctx context.Context, intent Intent) {
 	options, name, input := intent.Start()
 	ctx = intent.Context(ctx)
 	_, err := r.Client.ExecuteWorkflow(ctx, options, name, input)
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if err == nil || errors.As(err, &already) {
-		err = intent.Complete(ctx)
+		err = acknowledge(ctx, intent)
 	}
 	if err != nil {
-		_ = intent.Retry(ctx)
+		_ = settle(ctx, intent.Retry)
 		slog.WarnContext(ctx, "background dispatch pending", "workflow_id", options.ID)
 	}
+}
+
+// acknowledge records an accepted start with its source. The hot path writes
+// on the live attempt, because detaching every acknowledgement costs a timer
+// and five allocations per start. An attempt that ended before or during that
+// write gets one detached write instead, so an accepted workflow is never
+// reported as retrying/dispatch_unavailable. Every source's acknowledgement is
+// idempotent, so repeating one whose first commit was cut short is safe.
+func acknowledge(ctx context.Context, intent Intent) error {
+	if ctx.Err() == nil {
+		err := intent.Complete(ctx)
+		if err == nil || !attemptEnded(ctx, err) {
+			return err
+		}
+	}
+	return settle(ctx, intent.Complete)
+}
+
+// attemptEnded reports whether err came from the attempt's own deadline or
+// cancellation rather than from the source.
+func attemptEnded(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// settle runs a source write on a bounded context detached from the attempt's
+// cancellation; trace and lifecycle values are retained.
+func settle(ctx context.Context, write func(context.Context) error) error {
+	ctx, cancel := lifecycle.CleanupContext(ctx, dispatchSettle)
+	defer cancel()
+	return write(ctx)
 }
 
 func (r *Runtime) ingestionIntents(classes ...string) IntentSource {
