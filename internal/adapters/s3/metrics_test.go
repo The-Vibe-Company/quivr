@@ -78,7 +78,8 @@ func TestStoreCountsS3Operations(t *testing.T) {
 	var b strings.Builder
 	metrics.Write(&b)
 	text := b.String()
-	// Put issues 1 PutObject + 1 verification GetObject; Read issues 1 GetObject;
+	// This store does not echo the PUT checksum, so Put issues 1 PutObject + 1
+	// verification GetObject; Read issues 1 GetObject;
 	// Verify issues 1 HeadObject + 1 fallback GetObject; Ready issues 1 HeadBucket.
 	for _, want := range []string{
 		`quivr_dependency_calls_total{dependency="s3",protocol="http",operation="bucket"} 1`,
