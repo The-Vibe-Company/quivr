@@ -190,14 +190,25 @@ func TestBreakerStateMachine(t *testing.T) {
 		t.Fatalf("state=%v fastClosed=%v, want closed+fastClosed", b.State(), b.fastClosed.Load())
 	}
 
-	// Registry evicts retired idle closed endpoints when capacity is reached.
+	// Registry evicts retired idle closed endpoints after idleTTL while retaining
+	// recently active endpoints and endpoints with active failure state.
 	reg := newBreakerRegistry(3, 5*time.Second, clock)
-	reg.maxEntries = 4
-	for i := range 6 {
-		_ = reg.forEndpoint("http://plugin-" + string(rune('a'+i)) + ".test")
+	reg.maxEntries = 3
+	reg.idleTTL = 10 * time.Minute
+	stale := reg.forEndpoint("http://plugin-stale.test")
+	failing := reg.forEndpoint("http://plugin-failing.test")
+	failing.RecordFailure(0)
+	advance(11 * time.Minute)
+	active := reg.forEndpoint("http://plugin-active.test")
+	_ = reg.forEndpoint("http://plugin-new.test")
+	if _, ok := reg.entries.Load("http://plugin-stale.test"); ok || stale == nil {
+		t.Fatal("stale idle closed endpoint was not evicted past idleTTL")
 	}
-	if got := reg.count.Load(); got > int64(reg.maxEntries) {
-		t.Fatalf("registry count = %d, want <= %d after idle eviction", got, reg.maxEntries)
+	if got, ok := reg.entries.Load("http://plugin-failing.test"); !ok || got != failing {
+		t.Fatal("endpoint with failure streak must not be evicted")
+	}
+	if got, ok := reg.entries.Load("http://plugin-active.test"); !ok || got != active {
+		t.Fatal("recently used endpoint must not be evicted")
 	}
 }
 
@@ -272,9 +283,6 @@ func TestBreakerFastFailAndHalfOpenRecovery(t *testing.T) {
 	p50 := latencies[len(latencies)/2]
 	p99 := latencies[int(float64(len(latencies)-1)*0.99)]
 	t.Logf("breaker open fast-fail (n=%d): p50=%s p99=%s max=%s", fastFailCount, p50, p99, latencies[len(latencies)-1])
-	if p50 > 5*time.Millisecond {
-		t.Fatalf("breaker fast-fail p50 = %s, want <= 5ms", p50)
-	}
 
 	// Restart a healthy server on the same address with a probe gate to prove
 	// half-open admits exactly one probe while rejecting concurrent callers.

@@ -15,6 +15,7 @@ import (
 const (
 	defaultBreakerThreshold = 5
 	defaultBreakerCooldown  = 5 * time.Second
+	defaultBreakerIdleTTL   = 10 * time.Minute
 	maxBreakerEndpoints     = 256
 )
 
@@ -57,7 +58,8 @@ type circuitBreaker struct {
 	cooldown  time.Duration
 	now       func() time.Time
 
-	fastClosed atomic.Bool
+	fastClosed   atomic.Bool
+	lastUsedNano atomic.Int64
 
 	mu                  sync.Mutex
 	state               breakerState
@@ -85,6 +87,7 @@ func newCircuitBreaker(threshold int, cooldown time.Duration, now func() time.Ti
 		state:     breakerClosed,
 	}
 	b.fastClosed.Store(true)
+	b.lastUsedNano.Store(now().UnixNano())
 	return b
 }
 
@@ -230,12 +233,17 @@ func (b *circuitBreaker) isIdleClosed() bool {
 	return b.fastClosed.Load()
 }
 
+func (b *circuitBreaker) touch(now time.Time) {
+	b.lastUsedNano.Store(now.UnixNano())
+}
+
 // breakerRegistry maintains one transport circuit breaker per plugin endpoint
-// and bounds retired healthy entries so endpoint rotations cannot grow
-// unboundedly across the process lifetime.
+// and evicts retired idle healthy entries once idleTTL elapses so endpoint
+// rotations cannot grow unboundedly without disturbing active endpoints.
 type breakerRegistry struct {
 	threshold  int
 	cooldown   time.Duration
+	idleTTL    time.Duration
 	maxEntries int
 	now        func() time.Time
 	entries    sync.Map // map[string]*circuitBreaker
@@ -244,9 +252,13 @@ type breakerRegistry struct {
 }
 
 func newBreakerRegistry(threshold int, cooldown time.Duration, now func() time.Time) *breakerRegistry {
+	if now == nil {
+		now = time.Now
+	}
 	return &breakerRegistry{
 		threshold:  threshold,
 		cooldown:   cooldown,
+		idleTTL:    defaultBreakerIdleTTL,
 		maxEntries: maxBreakerEndpoints,
 		now:        now,
 	}
@@ -256,28 +268,36 @@ func (r *breakerRegistry) forEndpoint(endpoint string) *circuitBreaker {
 	if endpoint == "" {
 		return nil
 	}
+	now := r.now()
 	if existing, ok := r.entries.Load(endpoint); ok {
-		return existing.(*circuitBreaker)
+		b := existing.(*circuitBreaker)
+		b.touch(now)
+		return b
 	}
 	if r.count.Load() >= int64(r.maxEntries) {
-		r.evictIdle()
+		r.evictIdle(now)
 	}
 	created := newCircuitBreaker(r.threshold, r.cooldown, r.now)
+	created.touch(now)
 	actual, loaded := r.entries.LoadOrStore(endpoint, created)
 	if !loaded {
 		r.count.Add(1)
 	}
-	return actual.(*circuitBreaker)
+	b := actual.(*circuitBreaker)
+	b.touch(now)
+	return b
 }
 
-func (r *breakerRegistry) evictIdle() {
+func (r *breakerRegistry) evictIdle(now time.Time) {
 	r.sweepMu.Lock()
 	defer r.sweepMu.Unlock()
 	if r.count.Load() < int64(r.maxEntries) {
 		return
 	}
+	cutoff := now.Add(-r.idleTTL).UnixNano()
 	r.entries.Range(func(k, v any) bool {
-		if v.(*circuitBreaker).isIdleClosed() {
+		b := v.(*circuitBreaker)
+		if b.isIdleClosed() && b.lastUsedNano.Load() <= cutoff {
 			if _, loaded := r.entries.LoadAndDelete(k); loaded {
 				r.count.Add(-1)
 			}
