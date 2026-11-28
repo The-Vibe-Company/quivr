@@ -71,9 +71,33 @@ func TestSynonymLexicalEnricherMatchesWholeTokenBoundariesDeterministically(t *t
 	if !slices.Equal(got["s-match"].Terms, want) {
 		t.Fatalf("terms = %v, want %v (must not match car inside carbon)", got["s-match"].Terms, want)
 	}
+	if _, err := processing.NewSynonymLexicalEnricher(map[string][]string{
+		"solar-panel": {"a"},
+		"solar panel": {"b"},
+	}); err == nil {
+		t.Fatal("normalized synonym key collision must be rejected")
+	}
 }
 
 func TestHTTPLexicalEnricherParsesObjectAndStringQueriesAndHandlesErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  processing.HTTPLexicalEnricherConfig
+	}{
+		{"bad_scheme", processing.HTTPLexicalEnricherConfig{Endpoint: "ftp://expand.example.test/v1"}},
+		{"missing_hostname", processing.HTTPLexicalEnricherConfig{Endpoint: "https://:8443/v1"}},
+		{"userinfo_rejected", processing.HTTPLexicalEnricherConfig{Endpoint: "https://user:pass@expand.example.test/v1"}},
+		{"fragment_rejected", processing.HTTPLexicalEnricherConfig{Endpoint: "https://expand.example.test/v1#frag"}},
+		{"over_cap_timeout", processing.HTTPLexicalEnricherConfig{Endpoint: "https://expand.example.test/v1", Timeout: processing.MaxLexicalEnrichmentTimeout + time.Second}},
+		{"plaintext_key_non_loopback", processing.HTTPLexicalEnricherConfig{Endpoint: "http://expand.example.test/v1", APIKey: "secret-token"}},
+	} {
+		t.Run("validation/"+tc.name, func(t *testing.T) {
+			if _, err := processing.NewHTTPLexicalEnricher(tc.cfg); err == nil {
+				t.Fatalf("NewHTTPLexicalEnricher(%s) succeeded, want error", tc.name)
+			}
+		})
+	}
+
 	var gotAuth string
 	status := http.StatusOK
 	body := `{"segments":[{"segment_id":"s1","terms":["synonym one"],"queries":[{"text":"precomputed query","vector":[1,0]}, "plain query"]},{"segment_id":"unknown","terms":["ignored"]}]}`
@@ -108,11 +132,14 @@ func TestHTTPLexicalEnricherParsesObjectAndStringQueriesAndHandlesErrors(t *test
 		t.Fatalf("Authorization = %q, want Bearer secret-token", gotAuth)
 	}
 	exp, ok := got["s1"]
-	if !ok || len(got) != 1 || !slices.Equal(exp.Terms, []string{"synonym one"}) || len(exp.Queries) != 2 {
+	// Remote HTTP terms and queries both route through cosine gating without trusting remote vectors.
+	if !ok || len(got) != 1 || len(exp.Terms) != 0 || len(exp.Queries) != 3 {
 		t.Fatalf("unexpected expansion: %+v", got)
 	}
-	if exp.Queries[0].Text != "precomputed query" || len(exp.Queries[0].Vector) != 2 || exp.Queries[1].Text != "plain query" || len(exp.Queries[1].Vector) != 0 {
-		t.Fatalf("unexpected queries: %+v", exp.Queries)
+	for i, wantText := range []string{"synonym one", "precomputed query", "plain query"} {
+		if exp.Queries[i].Text != wantText || len(exp.Queries[i].Vector) != 0 {
+			t.Fatalf("query[%d] = %+v, want text=%q with nil vector", i, exp.Queries[i], wantText)
+		}
 	}
 
 	status = http.StatusServiceUnavailable
@@ -192,11 +219,15 @@ func (r *recordingLexicalIndexer) IndexEmbeddingsWithLexical(_ context.Context, 
 
 type staticQueryEncoder struct {
 	vectors map[string][]float32
+	err     error
 	calls   int
 }
 
 func (e *staticQueryEncoder) EncodeQuery(_ context.Context, _, _, q string) ([]float32, error) {
 	e.calls++
+	if e.err != nil {
+		return nil, e.err
+	}
 	if v, ok := e.vectors[q]; ok {
 		return v, nil
 	}
@@ -351,5 +382,37 @@ func TestBaselineRunNeverInvokesLexicalEnricher(t *testing.T) {
 	}
 	if enricher.calls != 0 {
 		t.Fatalf("Stage-1 baseline invoked LexicalEnricher %d times, want 0", enricher.calls)
+	}
+}
+
+// A transient QueryEncoder failure during cosine-salience gating must return a
+// retryable error without persisting partial lexical updates to Postgres.
+func TestEnrichTransientQueryEncoderErrorSkipsPostgresWrite(t *testing.T) {
+	m := content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a long article"}}}}
+	store := &oneVersionWithManifest{m: m}
+	baseline := &lexicalMemoryBaseline{stored: map[string]content.Segmentation{}}
+	artifacts := &memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}
+	calls := 0
+	p := fillPlugin{segments: []content.SegmentInput{{PartKey: "body", End: 14, LexicalText: "long article"}}, calls: &calls}
+	indexer := &recordingLexicalIndexer{}
+	doc2query := &staticLexicalEnricher{fn: func(req processing.LexicalEnrichmentRequest) map[string]processing.SegmentLexicalExpansion {
+		return map[string]processing.SegmentLexicalExpansion{
+			req.Segmentation.Segments[0].ID: {Queries: []processing.ScoredLexicalCandidate{{Text: "synthetic query"}}},
+		}
+	}}
+	service := processing.Service{
+		Content:         content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Baseline: baseline, Embeddings: store},
+		Plugin:          &processing.PluginDeriver{Plugin: p, Content: content.Service{Baseline: baseline, Embeddings: artifacts, Blobs: artifacts}},
+		Routing:         generationRoute{generation: content.Generation{ID: "generation", SpaceID: "p.large@1"}},
+		Enrichment:      indexer,
+		LexicalEnricher: doc2query,
+		LexicalOptions:  processing.LexicalEnrichmentOptions{QueryEncoder: &staticQueryEncoder{err: errors.New("encoder unavailable")}},
+	}
+	if err := service.Enrich(t.Context(), "org", "receipt"); err == nil {
+		t.Fatal("transient QueryEncoder outage must return a retryable error")
+	}
+	if baseline.updateCalls != 0 || indexer.lexicalCalls != 0 || indexer.indexCalls != 0 {
+		t.Fatalf("failed query encoding wrote storage or projection: pg=%d lexical=%d index=%d",
+			baseline.updateCalls, indexer.lexicalCalls, indexer.indexCalls)
 	}
 }

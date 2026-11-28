@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 )
@@ -50,28 +51,63 @@ func TestLexicalEnrichmentConfiguration(t *testing.T) {
 		}
 	})
 
+	t.Run("non_worker_validate_skips_worker_env_secret", func(t *testing.T) {
+		t.Setenv("UNSET_WORKER_LEXICAL_KEY", "")
+		var cfg Config
+		raw := `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example.test/v1","api_key_env":"UNSET_WORKER_LEXICAL_KEY"}}`
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.LexicalEnrichment.validate(false); err != nil {
+			t.Fatalf("non-worker validation must not require worker api_key_env: %v", err)
+		}
+		if err := cfg.LexicalEnrichment.validate(true); err == nil {
+			t.Fatal("worker validation must fail when api_key_env is unset")
+		}
+	})
+
+	t.Run("conflicting_api_keys", func(t *testing.T) {
+		t.Setenv("TEST_CONFLICT_LEXICAL_KEY", "non-empty-env-secret")
+		var cfg Config
+		raw := `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example.test/v1","api_key":"inline-secret","api_key_env":"TEST_CONFLICT_LEXICAL_KEY"}}`
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := cfg.LexicalEnrichment.build(nil)
+		var ce *configError
+		if !errors.As(err, &ce) || ce.code != configConflict || ce.field != "lexical_enrichment.api_key" {
+			t.Fatalf("conflicting_api_keys err = %#v, want configConflict on lexical_enrichment.api_key", err)
+		}
+	})
+
 	for _, tc := range []struct {
-		name string
-		raw  string
+		name      string
+		raw       string
+		wantField string
 	}{
-		{"enabled_without_source", `{"lexical_enrichment":{"enabled":true}}`},
-		{"negative_max_runes", `{"lexical_enrichment":{"enabled":true,"max_lexical_text_runes":-1,"synonyms":{"a":["b"]}}}`},
-		{"excessive_max_runes", `{"lexical_enrichment":{"enabled":true,"max_lexical_text_runes":16385,"synonyms":{"a":["b"]}}}`},
-		{"invalid_cosine_high", `{"lexical_enrichment":{"enabled":true,"min_cosine_salience":1.5,"synonyms":{"a":["b"]}}}`},
-		{"invalid_cosine_low", `{"lexical_enrichment":{"enabled":true,"min_cosine_salience":-1.5,"synonyms":{"a":["b"]}}}`},
-		{"excessive_queries", `{"lexical_enrichment":{"enabled":true,"max_synthetic_queries":65,"synonyms":{"a":["b"]}}}`},
-		{"invalid_endpoint", `{"lexical_enrichment":{"enabled":true,"endpoint":"ftp://invalid.example"}}`},
-		{"invalid_timeout", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example/v1","timeout":"90s"}}`},
-		{"conflicting_api_keys", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example/v1","api_key":"a","api_key_env":"B"}}`},
-		{"empty_synonym_values", `{"lexical_enrichment":{"enabled":true,"synonyms":{"solar":[]}}}`},
+		{"enabled_without_source", `{"lexical_enrichment":{"enabled":true}}`, "lexical_enrichment"},
+		{"negative_max_runes", `{"lexical_enrichment":{"enabled":true,"max_lexical_text_runes":-1,"synonyms":{"a":["b"]}}}`, "lexical_enrichment.max_lexical_text_runes"},
+		{"excessive_max_runes", `{"lexical_enrichment":{"enabled":true,"max_lexical_text_runes":16385,"synonyms":{"a":["b"]}}}`, "lexical_enrichment.max_lexical_text_runes"},
+		{"invalid_cosine_high", `{"lexical_enrichment":{"enabled":true,"min_cosine_salience":1.5,"synonyms":{"a":["b"]}}}`, "lexical_enrichment.min_cosine_salience"},
+		{"invalid_cosine_low", `{"lexical_enrichment":{"enabled":true,"min_cosine_salience":-1.5,"synonyms":{"a":["b"]}}}`, "lexical_enrichment.min_cosine_salience"},
+		{"excessive_queries", `{"lexical_enrichment":{"enabled":true,"max_synthetic_queries":65,"synonyms":{"a":["b"]}}}`, "lexical_enrichment.max_synthetic_queries"},
+		{"invalid_endpoint_scheme", `{"lexical_enrichment":{"enabled":true,"endpoint":"ftp://invalid.example"}}`, "lexical_enrichment.endpoint"},
+		{"missing_endpoint_hostname", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://:8443/v1"}}`, "lexical_enrichment.endpoint"},
+		{"endpoint_userinfo", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://user:pass@expand.example.test/v1"}}`, "lexical_enrichment.endpoint"},
+		{"endpoint_fragment", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example.test/v1#frag"}}`, "lexical_enrichment.endpoint"},
+		{"plaintext_key_non_loopback", `{"lexical_enrichment":{"enabled":true,"endpoint":"http://expand.example.test/v1","api_key":"secret"}}`, "lexical_enrichment.endpoint"},
+		{"invalid_timeout", `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example.test/v1","timeout":"90s"}}`, "lexical_enrichment.timeout"},
+		{"empty_synonym_values", `{"lexical_enrichment":{"enabled":true,"synonyms":{"solar":[]}}}`, "lexical_enrichment.synonyms"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var cfg Config
 			if err := json.Unmarshal([]byte(tc.raw), &cfg); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := cfg.LexicalEnrichment.build(nil); err == nil {
-				t.Fatalf("expected error for %s", tc.name)
+			_, _, err := cfg.LexicalEnrichment.build(nil)
+			var ce *configError
+			if !errors.As(err, &ce) || ce.field != tc.wantField {
+				t.Fatalf("%s: err = %#v, want configError on field %q", tc.name, err, tc.wantField)
 			}
 		})
 	}

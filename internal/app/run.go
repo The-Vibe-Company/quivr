@@ -416,7 +416,7 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := cfg.LexicalEnrichment.build(nil); err != nil {
+	if err := cfg.LexicalEnrichment.validate(command == "worker"); err != nil {
 		return err
 	}
 	if cfg.IngestionEvaluationConcurrency < 0 || cfg.IngestionEvaluationConcurrency > 32 {
@@ -934,7 +934,7 @@ func Run(command string, args ...string) error {
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
-	if cfg.LexicalEnrichment.Enabled {
+	if command == "worker" && cfg.LexicalEnrichment.Enabled {
 		lexicalEnricher, lexicalOptions, err := cfg.LexicalEnrichment.build(ingestor)
 		if err != nil {
 			return err

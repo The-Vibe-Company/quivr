@@ -109,6 +109,10 @@ func (s Service) enrich(ctx context.Context, org string, v content.Version) Deri
 	}
 	if out.Terminal == nil && out.Retry == nil {
 		if s.LexicalEnricher != nil {
+			// Opt-in Phase-2 lexical enrichment runs before CommitEnrichment so
+			// transient failures retry idempotently (reusing stored vectors) and
+			// record.enrichment_available only fires once both vectors and
+			// lexical updates are live. Stage-1 retrieval_ready is unaffected.
 			updated, lexicalUpdates, lexErr := s.applyLexicalEnrichment(ctx, org, rt.corpusID, v, rt.generation, out.Segmentation, out.Data)
 			if lexErr != nil {
 				out.Retry = lexErr

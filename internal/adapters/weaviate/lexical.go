@@ -79,6 +79,9 @@ func (s *Store) updateLexicalBatch(ctx context.Context, g content.Generation, or
 			if err != nil {
 				return err
 			}
+			if len(segRows) >= embeddingInventoryLimit {
+				return errors.New("lexical projection inventory truncated")
+			}
 		}
 		if len(segRows) == 0 {
 			return retrieval.ErrProjectionMissing

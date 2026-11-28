@@ -58,6 +58,15 @@ func TestMergeLexicalTextDeduplicatesBoundsAndStaysIdempotent(t *testing.T) {
 	if empty := content.MergeLexicalText("", []string{"first term", "second term"}, 64); empty != "first term\nsecond term" {
 		t.Fatalf("empty base merge = %q", empty)
 	}
+
+	// Decomposed Unicode combining marks stay inside their token rather than splitting words.
+	decomposed := "cafe\u0301" // "café" in NFD
+	if toks := content.LexicalTokens(decomposed); len(toks) != 1 || toks[0] != decomposed {
+		t.Fatalf("LexicalTokens(%q) = %q, want single token with combining mark", decomposed, toks)
+	}
+	if merged := content.MergeLexicalText(decomposed+" menu", []string{decomposed}, 64); merged != decomposed+" menu" {
+		t.Fatalf("decomposed token was not deduplicated: %q", merged)
+	}
 }
 
 type fakeLexicalStore struct {

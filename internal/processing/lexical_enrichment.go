@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -217,11 +218,17 @@ func NewSynonymLexicalEnricher(synonyms map[string][]string) (*SynonymLexicalEnr
 		return nil, errors.New("synonyms map must not be empty")
 	}
 	rules := make([]synonymRule, 0, len(synonyms))
+	seenKeys := make(map[string]string, len(synonyms))
 	for rawKey, rawValues := range synonyms {
 		tokens := content.LexicalTokens(rawKey)
 		if len(tokens) == 0 {
 			return nil, fmt.Errorf("synonym key %q must contain at least one letter or digit", rawKey)
 		}
+		normKey := strings.Join(tokens, " ")
+		if prev, dup := seenKeys[normKey]; dup {
+			return nil, fmt.Errorf("synonym keys %q and %q normalize to the same token sequence %q", prev, rawKey, normKey)
+		}
+		seenKeys[normKey] = rawKey
 		seen := map[string]struct{}{}
 		values := make([]string, 0, len(rawValues))
 		for _, v := range rawValues {
@@ -239,7 +246,7 @@ func NewSynonymLexicalEnricher(synonyms map[string][]string) (*SynonymLexicalEnr
 		if len(values) == 0 {
 			return nil, fmt.Errorf("synonym key %q must map to at least one expansion term", rawKey)
 		}
-		rules = append(rules, synonymRule{key: strings.Join(tokens, " "), tokens: tokens, values: values})
+		rules = append(rules, synonymRule{key: normKey, tokens: tokens, values: values})
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].key < rules[j].key })
 	return &SynonymLexicalEnricher{rules: rules}, nil
@@ -318,11 +325,22 @@ type HTTPLexicalEnricher struct {
 	client     *http.Client
 }
 
+func isLoopbackHostname(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // NewHTTPLexicalEnricher validates configuration and builds an HTTPLexicalEnricher.
 func NewHTTPLexicalEnricher(cfg HTTPLexicalEnricherConfig) (*HTTPLexicalEnricher, error) {
 	u, err := url.Parse(strings.TrimSpace(cfg.Endpoint))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("lexical enrichment endpoint must be a valid http or https URL")
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return nil, errors.New("lexical enrichment endpoint must be a valid http or https URL without userinfo or fragment")
+	}
+	if cfg.APIKey != "" && u.Scheme != "https" && !isLoopbackHostname(u.Hostname()) {
+		return nil, errors.New("lexical enrichment endpoint with an API key must use https or a loopback host")
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -462,11 +480,16 @@ func (e *HTTPLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalEnri
 			continue
 		}
 		exp := out[seg.SegmentID]
-		exp.Terms = append(exp.Terms, seg.Terms...)
-		for _, q := range seg.Queries {
-			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: q.Text, Vector: q.Vector})
+		// All remote HTTP output (terms and synthetic queries) passes through
+		// cosine-salience gating using engine-encoded served-space vectors so
+		// an untrusted sidecar cannot bypass hallucination filtering.
+		for _, term := range seg.Terms {
+			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: term})
 		}
-		if len(exp.Terms) > 0 || len(exp.Queries) > 0 {
+		for _, q := range seg.Queries {
+			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: q.Text})
+		}
+		if len(exp.Queries) > 0 {
 			out[seg.SegmentID] = exp
 		}
 	}
@@ -567,11 +590,18 @@ func (s Service) applyLexicalEnrichment(
 			continue
 		}
 		base := p.Derivation.LexicalText
+		seededFromText := false
 		if base == "" && p.Text != "" {
 			base = p.Text
+			seededFromText = true
 		}
 		merged := content.MergeLexicalText(base, additions, maxRunes)
 		if merged == "" {
+			continue
+		}
+		if seededFromText && merged == content.MergeLexicalText(base, nil, maxRunes) {
+			// Nothing new was added beyond the canonical segment text; avoid
+			// persisting a redundant or truncated copy into Derivation.LexicalText.
 			continue
 		}
 		update := content.SegmentLexicalUpdate{SegmentID: p.ID, LexicalText: merged}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"math"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -25,12 +26,20 @@ type LexicalEnrichmentConfig struct {
 	Timeout             string              `json:"timeout,omitempty"`
 }
 
-func (c LexicalEnrichmentConfig) resolveAPIKey() (string, error) {
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (c LexicalEnrichmentConfig) resolveAPIKey(resolveEnv bool) (string, error) {
 	if c.APIKey != "" && c.APIKeyEnv != "" {
 		return "", badConfig(configConflict, "lexical_enrichment.api_key", "set either lexical_enrichment.api_key or lexical_enrichment.api_key_env, not both")
 	}
 	key := c.APIKey
-	if c.APIKeyEnv != "" {
+	if c.APIKeyEnv != "" && resolveEnv {
 		var err error
 		key, err = boundSecret(c.APIKeyEnv, "lexical_enrichment.api_key_env")
 		if err != nil {
@@ -46,10 +55,22 @@ func (c LexicalEnrichmentConfig) resolveAPIKey() (string, error) {
 	return key, nil
 }
 
+// validate checks LexicalEnrichmentConfig at process startup. When resolveEnv
+// is false (non-worker commands such as api and migrate), worker-only
+// api_key_env bindings are not required in the process environment.
+func (c LexicalEnrichmentConfig) validate(resolveEnv bool) error {
+	_, _, err := c.buildWithOptions(nil, resolveEnv)
+	return err
+}
+
 // build validates LexicalEnrichmentConfig and constructs the opt-in Stage-2
-// enricher and options. When disabled, it returns (nil, zero, nil) with zero
-// runtime overhead.
+// enricher and options for the worker. When disabled, it returns (nil, zero, nil)
+// with zero runtime overhead.
 func (c LexicalEnrichmentConfig) build(encoder processing.LexicalQueryEncoder) (processing.LexicalEnricher, processing.LexicalEnrichmentOptions, error) {
+	return c.buildWithOptions(encoder, true)
+}
+
+func (c LexicalEnrichmentConfig) buildWithOptions(encoder processing.LexicalQueryEncoder, resolveEnv bool) (processing.LexicalEnricher, processing.LexicalEnrichmentOptions, error) {
 	if !c.Enabled {
 		return nil, processing.LexicalEnrichmentOptions{}, nil
 	}
@@ -84,10 +105,14 @@ func (c LexicalEnrichmentConfig) build(encoder processing.LexicalQueryEncoder) (
 	}
 	if strings.TrimSpace(c.Endpoint) != "" {
 		u, err := url.Parse(strings.TrimSpace(c.Endpoint))
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, processing.LexicalEnrichmentOptions{}, badConfig(configInvalid, "lexical_enrichment.endpoint", "lexical_enrichment.endpoint must be a valid http or https URL")
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+			return nil, processing.LexicalEnrichmentOptions{}, badConfig(configInvalid, "lexical_enrichment.endpoint", "lexical_enrichment.endpoint must be a valid http or https URL without userinfo or fragment")
 		}
-		apiKey, err := c.resolveAPIKey()
+		hasKey := c.APIKey != "" || c.APIKeyEnv != ""
+		if hasKey && u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+			return nil, processing.LexicalEnrichmentOptions{}, badConfig(configInvalid, "lexical_enrichment.endpoint", "lexical_enrichment.endpoint with an API key must use https or a loopback host")
+		}
+		apiKey, err := c.resolveAPIKey(resolveEnv)
 		if err != nil {
 			return nil, processing.LexicalEnrichmentOptions{}, err
 		}

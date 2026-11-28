@@ -3,6 +3,7 @@ package retrieval_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -346,8 +347,8 @@ func TestIndexEmbeddingsWithLexicalUpdatesProjectionBeforeCommit(t *testing.T) {
 	if err := svc.IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); err != nil {
 		t.Fatalf("IndexEmbeddingsWithLexical failed: %v", err)
 	}
-	if p.attached != 1 || p.lexicalCalls != 1 || len(p.lexicalUpdates) != 1 || e.commits != 1 {
-		t.Fatalf("attached=%d lexicalCalls=%d updates=%+v commits=%d", p.attached, p.lexicalCalls, p.lexicalUpdates, e.commits)
+	if p.attached != 1 || p.lexicalCalls != 1 || !slices.Equal(p.lexicalUpdates, updates) || e.commits != 1 {
+		t.Fatalf("attached=%d lexicalCalls=%d updates=%+v want=%+v commits=%d", p.attached, p.lexicalCalls, p.lexicalUpdates, updates, e.commits)
 	}
 
 	// Transient lexical update failure must not commit enrichment.
@@ -357,6 +358,15 @@ func TestIndexEmbeddingsWithLexicalUpdatesProjectionBeforeCommit(t *testing.T) {
 	}
 	if eFail.commits != 0 {
 		t.Fatal("failed lexical update must not commit enrichment")
+	}
+
+	// Eligible version with missing projection during lexical update must retry.
+	pRetry, eRetry := &fakeProjection{lexicalErr: retrieval.ErrProjectionMissing}, &fakeEmbeddings{eligible: []bool{true}}
+	if err := service(pRetry, eRetry).IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); !errors.Is(err, retrieval.ErrProjectionMissing) {
+		t.Fatalf("eligible version missing projection during lexical update = %v, want ErrProjectionMissing", err)
+	}
+	if eRetry.commits != 0 {
+		t.Fatal("missing projection during lexical update must not commit enrichment")
 	}
 
 	// Withdrawn version during lexical update settles cleanly without committing.

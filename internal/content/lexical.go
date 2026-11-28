@@ -5,8 +5,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // MaxLexicalTextRunes bounds SegmentDerivation.LexicalText across baseline
@@ -40,13 +38,13 @@ func effectiveLexicalMaxRunes(maxRunes int) int {
 	return maxRunes
 }
 
-// LexicalTokens extracts lowercased Unicode letter/number tokens from s for
-// whole-word and phrase boundary matching.
+// LexicalTokens extracts lowercased Unicode word tokens (letters, numbers, and
+// combining marks) from s for whole-word and phrase boundary matching.
 func LexicalTokens(s string) []string {
 	var tokens []string
 	start := -1
 	for i, r := range s {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) {
 			if start < 0 {
 				start = i
 			}
@@ -216,7 +214,7 @@ func (s Service) UpdateSegmentLexicalText(ctx context.Context, org string, seg S
 	}
 	store, ok := s.Baseline.(LexicalTextStore)
 	if !ok {
-		return seg, corpus.ErrNotFound
+		return seg, ErrInvalid
 	}
 	return store.UpdateSegmentLexicalText(ctx, org, seg, updates)
 }

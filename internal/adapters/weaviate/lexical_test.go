@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc"
+
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -125,7 +130,7 @@ func TestUpdateLexicalTextPatchesPropertyOnlyAndIsIdempotent(t *testing.T) {
 	if len(props) != 1 || props["lexicalText"] != "original\nsynonym phrase" {
 		t.Fatalf("PATCH must touch only lexicalText, got %+v", props)
 	}
-	if !strings.Contains(httpFake.patchPaths[0], "tenant=") || body["tenant"] == "" {
+	if tenant, _ := body["tenant"].(string); !strings.Contains(httpFake.patchPaths[0], "tenant=") || tenant == "" {
 		t.Fatalf("multi-tenant InitialCollection PATCH missing tenant: path=%q body=%+v", httpFake.patchPaths[0], body)
 	}
 	storedProps := httpFake.objects["obj-1"]["properties"].(map[string]any)
@@ -156,6 +161,74 @@ func TestUpdateLexicalTextPatchesPropertyOnlyAndIsIdempotent(t *testing.T) {
 	})
 	if !errors.Is(err, retrieval.ErrProjectionMissing) {
 		t.Fatalf("404 on PATCH err = %v, want ErrProjectionMissing", err)
+	}
+}
+
+type grpcLexicalFixture struct {
+	pb.UnimplementedWeaviateServer
+	lexicalText string
+}
+
+func (f *grpcLexicalFixture) Search(_ context.Context, _ *pb.SearchRequest) (*pb.SearchReply, error) {
+	return &pb.SearchReply{
+		Results: []*pb.SearchResult{{
+			Metadata: &pb.MetadataResult{Id: "obj-grpc-1"},
+			Properties: &pb.PropertiesResult{NonRefProps: &pb.Properties{Fields: map[string]*pb.Value{
+				"segmentId":   {Kind: &pb.Value_TextValue{TextValue: "seg-1"}},
+				"lexicalText": {Kind: &pb.Value_TextValue{TextValue: f.lexicalText}},
+			}}},
+		}},
+	}, nil
+}
+
+// grpcProjectionRows must populate LexicalText so gRPC retries recognize
+// already-converged objects and skip redundant PATCH calls.
+func TestUpdateLexicalTextGRPCReadsLexicalTextForIdempotency(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcFixture := &grpcLexicalFixture{lexicalText: "original\nsynonym phrase"}
+	server := grpc.NewServer()
+	pb.RegisterWeaviateServer(server, grpcFixture)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+
+	httpFake := &lexicalPatchHTTP{
+		objects: map[string]map[string]any{
+			"obj-grpc-1": {
+				"id": "obj-grpc-1",
+				"properties": map[string]any{
+					"segmentId":   "seg-1",
+					"lexicalText": "original\nsynonym phrase",
+				},
+			},
+		},
+	}
+	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", listener.Addr().String(), outbound.TLS{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+	store.Client.Transport = httpFake
+
+	g := content.Generation{ID: "gen-1", Collection: "LexicalGRPC", SpaceID: "space@1", SpacesProjected: true}
+	if err := store.UpdateLexicalText(context.Background(), g, "org-1", "corpus-1", []content.SegmentLexicalUpdate{
+		{SegmentID: "seg-1", LexicalText: "original\nsynonym phrase"},
+	}); err != nil {
+		t.Fatalf("gRPC idempotent UpdateLexicalText failed: %v", err)
+	}
+	if len(httpFake.patchBodies) != 0 {
+		t.Fatalf("gRPC retry sent %d patches for already-converged object, want 0", len(httpFake.patchBodies))
+	}
+
+	if err := store.UpdateLexicalText(context.Background(), g, "org-1", "corpus-1", []content.SegmentLexicalUpdate{
+		{SegmentID: "seg-1", LexicalText: "original\nsynonym phrase\nadded"},
+	}); err != nil {
+		t.Fatalf("gRPC differing UpdateLexicalText failed: %v", err)
+	}
+	if len(httpFake.patchBodies) != 1 {
+		t.Fatalf("gRPC differing update sent %d patches, want 1", len(httpFake.patchBodies))
 	}
 }
 

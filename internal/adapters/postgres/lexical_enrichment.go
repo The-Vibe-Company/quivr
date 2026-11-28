@@ -49,27 +49,49 @@ func (s ProjectionStore) UpdateSegmentLexicalText(ctx context.Context, org strin
 		return seg, content.ErrConflict
 	}
 
-	for _, u := range updates {
+	ids := make([]string, len(updates))
+	for i, u := range updates {
+		ids[i] = u.SegmentID
+	}
+	rows, err := tx.Query(ctx, `SELECT id, derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 AND id=ANY($3)`, org, seg.ID, ids)
+	if err != nil {
+		return seg, err
+	}
+	derivations := make(map[string]content.SegmentDerivation, len(updates))
+	for rows.Next() {
+		var id string
 		var raw []byte
-		err = tx.QueryRow(ctx, `SELECT derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 AND id=$3 FOR UPDATE`, org, seg.ID, u.SegmentID).Scan(&raw)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return seg, corpus.ErrNotFound
-			}
+		if err = rows.Scan(&id, &raw); err != nil {
+			rows.Close()
 			return seg, err
 		}
 		var d content.SegmentDerivation
 		if err = json.Unmarshal(raw, &d); err != nil {
+			rows.Close()
 			return seg, err
 		}
+		derivations[id] = d
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return seg, err
+	}
+	if len(derivations) != len(updates) {
+		return seg, corpus.ErrNotFound
+	}
+
+	encoded := make([][]byte, len(updates))
+	for i, u := range updates {
+		d := derivations[u.SegmentID]
 		d.LexicalText = u.LexicalText
 		metadata, err := compactSegmentDerivation(d)
 		if err != nil {
 			return seg, err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE segments SET derivation=$4 WHERE organization=$1 AND segmentation_id=$2 AND id=$3`, org, seg.ID, u.SegmentID, metadata); err != nil {
-			return seg, err
-		}
+		encoded[i] = metadata
+	}
+	if _, err = tx.Exec(ctx, `UPDATE segments AS s SET derivation=u.derivation FROM unnest($3::text[],$4::jsonb[]) AS u(id,derivation) WHERE s.organization=$1 AND s.segmentation_id=$2 AND s.id=u.id`, org, seg.ID, ids, encoded); err != nil {
+		return seg, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE segmentations SET digest=$4 WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID, afterDigest); err != nil {
 		return seg, err
