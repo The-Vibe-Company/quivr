@@ -7,7 +7,10 @@ import (
 )
 
 func requestMatches(previous, digest, canonical []byte) bool {
-	sum := sha256.Sum256(canonical)
+	return requestMatchesDigest(previous, digest, canonical, sha256.Sum256(canonical))
+}
+
+func requestMatchesDigest(previous, digest, canonical []byte, sum [32]byte) bool {
 	if len(digest) > 0 {
 		return bytes.Equal(digest, sum[:])
 	}

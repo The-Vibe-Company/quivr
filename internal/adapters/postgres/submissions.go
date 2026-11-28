@@ -25,23 +25,18 @@ type SubmissionStore struct {
 
 var _ content.SubmissionStore = SubmissionStore{}
 
-// digestSlot picks the Version slot of a submission without a source revision
-// (ADR 0003). Content already reserved converges on its latest reservation,
-// unless that reservation is no longer the Record's desired Version and this
-// submission would become desired: a revert to earlier bytes then reserves a
-// new slot, qualified by its acceptance order, and so mints a new Version with
-// identical content. Callers hold the Organization journal lock.
-func digestSlot(ctx context.Context, tx pgx.Tx, org, recordID, digest string, order int64, incoming, desiredPosition string) (string, error) {
-	base := "digest:" + digest
-	var latest string
-	var desired bool
-	err := tx.QueryRow(ctx, `SELECT a.slot,a.version_id IS NOT DISTINCT FROM r.desired_version_id FROM accepted_revisions a JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id)
-WHERE a.organization=$1 AND a.record_id=$2 AND a.digest=$3 AND (a.slot=$4 OR a.slot LIKE $4||'@%') ORDER BY a.acceptance_order DESC LIMIT 1`, org, recordID, digest, base).Scan(&latest, &desired)
-	if errors.Is(err, pgx.ErrNoRows) {
+// resolveDigestSlot picks the Version slot of a submission without a source
+// revision (ADR 0003). Content already reserved converges on its latest
+// reservation, unless that reservation is no longer the Record's desired
+// Version and this submission would become desired: a revert to earlier bytes
+// then reserves a new slot, qualified by its acceptance order, and so mints a
+// new Version with identical content.
+func resolveDigestSlot(base, latest string, desired bool, slotErr error, order int64, incoming, desiredPosition string) (string, error) {
+	if errors.Is(slotErr, pgx.ErrNoRows) {
 		return base, nil
 	}
-	if err != nil {
-		return "", err
+	if slotErr != nil {
+		return "", slotErr
 	}
 	if desired || !content.NewerPosition(incoming, desiredPosition) {
 		return latest, nil
@@ -70,6 +65,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if err != nil {
 		return content.Receipt{}, err
 	}
+	requestDigest := sha256.Sum256(canonical)
 	recordID := content.StableID("record", scope.Organization, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
 	receiptID := content.StableID("receipt", scope.Organization, "ingestion", c.Key)
 	digest := content.Digest(c)
@@ -78,81 +74,147 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		slot = "revision:" + c.Revision
 	}
 	db := database(ctx, s.Pool)
+	if db == s.Pool {
+		// Pin a single pool connection across lookup, optional transaction, and
+		// replay hydration so every accept path uses at most one connection.
+		conn, err := s.Pool.Acquire(ctx)
+		if err != nil {
+			return content.Receipt{}, err
+		}
+		defer conn.Release()
+		query, args := buildAcceptLookupQuery(ctx, scope.Organization, "ingestion", c.Key, recordID, c.Source.CorpusID)
+		row, err := scanReplayReceiptRow(conn.QueryRow(ctx, query, args...))
+		if err != nil {
+			return content.Receipt{}, err
+		}
+		if row.replayID != nil {
+			if !requestMatchesDigest(row.previous, row.previousDigest, canonical, requestDigest) {
+				return content.Receipt{}, content.ErrConflict
+			}
+			if !row.visible {
+				return content.Receipt{}, corpus.ErrNotFound
+			}
+			return (ReceiptStore{Pool: s.Pool}).hydrateReceipt(ctx, conn, scope.Organization, row)
+		}
+		if !row.corpusExists {
+			return content.Receipt{}, corpus.ErrNotFound
+		}
+		if !row.recordExists {
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return content.Receipt{}, err
+			}
+			created, err := acceptFirstRevision(ctx, tx, scope.Organization, c, canonical, requestDigest, recordID, receiptID, slot, digest, s.RetainImportAuditDetail)
+			if err != nil {
+				rollbackTx(ctx, tx)
+				return content.Receipt{}, err
+			}
+			if created {
+				if err := tx.Commit(ctx); err != nil {
+					rollbackTx(ctx, tx)
+					return content.Receipt{}, err
+				}
+				return pendingReceipt(receiptID, recordID, c.Source, true), nil
+			}
+			// A concurrent writer raced and created the Record or Receipt
+			// between lookup and lock; discard any speculative observation and
+			// converge cleanly on the general path using this same connection.
+			rollbackTx(ctx, tx)
+		}
+		return s.acceptGeneral(ctx, conn, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest)
+	}
+	return s.acceptGeneral(ctx, db, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest)
+}
+
+func (s SubmissionStore) acceptGeneral(ctx context.Context, db transactionalDatabase, scope corpus.Scope, c content.Command, canonical []byte, requestDigest [32]byte, recordID, receiptID, slot, digest string) (content.Receipt, error) {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
 	defer rollbackTx(ctx, tx)
-	if db != s.Pool {
-		if err = lockProjectionRouting(ctx, tx); err != nil {
-			return content.Receipt{}, err
-		}
-		claims := &pgx.Batch{}
-		claims.Queue(journalClaimSQL, scope.Organization, "ingestion", c.Key)
-		claims.Queue(journalClaimSQL, scope.Organization, "record", recordID)
-		if err = tx.SendBatch(ctx, claims).Close(); err != nil {
+
+	// Acquire routing, claim, and journal fences together with the guarded
+	// replay/corpus check, conditional Record upsert/order advance, and
+	// optional digest-slot lookup in a single round trip. Separate statements
+	// preserve fresh READ COMMITTED snapshots after lock acquisition.
+	guard := &pgx.Batch{}
+	guard.Queue(`WITH mode AS MATERIALIZED (SELECT pg_advisory_xact_lock_shared($2))
+ SELECT pg_advisory_xact_lock_shared($1) FROM mode`, projectionRoutingLock, journalModeLock)
+	queueJournalClaim(guard, scope.Organization, "ingestion", c.Key)
+	queueJournalClaim(guard, scope.Organization, "record", recordID)
+	guard.Queue(`INSERT INTO organization_journals(organization) SELECT $1 WHERE NOT `+parallelJournalSQL+` ON CONFLICT DO NOTHING`, scope.Organization)
+	guard.Queue(`SELECT last_sequence FROM organization_journals WHERE organization=$1 AND NOT `+parallelJournalSQL+` FOR UPDATE`, scope.Organization)
+	lookupIndex := guard.Len()
+	query, args := buildAcceptLookupQuery(ctx, scope.Organization, "ingestion", c.Key, recordID, c.Source.CorpusID)
+	guard.Queue(query, args...)
+	guard.Queue(`WITH record AS (
+ INSERT INTO records(organization,id,corpus_id,namespace,record_key,record_acl)
+ SELECT $1,$2,$3,$4,$5,$6::text[]
+ WHERE EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$3)
+ AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$7)
+ ON CONFLICT DO NOTHING RETURNING organization,corpus_id,namespace,record_acl
+)`+recordVisibilityAdmissionSQL+` SELECT 1`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.ACL, c.Key)
+	guard.Queue(`UPDATE records SET acceptance_order=acceptance_order+1
+ WHERE organization=$1 AND id=$2
+ AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$3)
+ RETURNING acceptance_order,desired_position,withdrawn,record_acl`, scope.Organization, recordID, c.Key)
+	baseSlot := "digest:" + digest
+	if c.Revision == "" {
+		guard.Queue(`SELECT a.slot,a.version_id IS NOT DISTINCT FROM r.desired_version_id FROM accepted_revisions a JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id)
+WHERE a.organization=$1 AND a.record_id=$2 AND a.digest=$3 AND (a.slot=$4 OR a.slot LIKE $4||'@%') ORDER BY a.acceptance_order DESC LIMIT 1`, scope.Organization, recordID, digest, baseSlot)
+	}
+	guardResults := tx.SendBatch(ctx, guard)
+	for range lookupIndex {
+		if _, err = guardResults.Exec(); err != nil {
+			_ = guardResults.Close()
 			return content.Receipt{}, err
 		}
 	}
-	// Audited requests keep their surrounding transaction. Ordinary accepts
-	// try the new-record path inside this same transaction, so corrections
-	// do not pay for a speculative rollback, another BEGIN or another fence.
-	if db == s.Pool {
-		created, err := acceptFirstRevision(ctx, tx, scope.Organization, c, canonical, recordID, receiptID, slot, digest, s.RetainImportAuditDetail)
-		if err != nil {
-			return content.Receipt{}, err
-		}
-		if created {
-			if err := tx.Commit(ctx); err != nil {
-				return content.Receipt{}, err
-			}
-			return pendingReceipt(receiptID, recordID, c.Source, true), nil
-		}
-	}
-	requestCopy, receiptCommand, execution := importRequestStorage(canonical, s.RetainImportAuditDetail)
-	requestDigest := sha256.Sum256(canonical)
-	var previous, previousDigest []byte
-	var replayID *string
-	var exists bool
-	err = readJournal(ctx, tx, scope.Organization, `SELECT previous.id,previous.canonical_request,previous.request_digest,
- EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$3)
- FROM (VALUES(1)) seed(n) LEFT JOIN ingestion_receipts previous
- ON previous.organization=$1 AND previous.route_family='ingestion' AND previous.request_key=$2`,
-		[]any{scope.Organization, c.Key, c.Source.CorpusID}, &replayID, &previous, &previousDigest, &exists)
+	row, err := scanReplayReceiptRow(guardResults.QueryRow())
 	if err != nil {
+		_ = guardResults.Close()
 		return content.Receipt{}, err
 	}
-	if replayID != nil {
-		if !requestMatches(previous, previousDigest, canonical) {
-			return content.Receipt{}, content.ErrConflict
-		}
-		if err = tx.Commit(ctx); err != nil {
-			return content.Receipt{}, err
-		}
-		return (ReceiptStore{Pool: s.Pool}).Receipt(ctx, scope.Organization, *replayID)
-	}
-	if !exists {
-		return content.Receipt{}, corpus.ErrNotFound
-	}
-	identity := &pgx.Batch{}
-	identity.Queue(`WITH record AS (
- INSERT INTO records(organization,id,corpus_id,namespace,record_key,record_acl)
- VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING organization,corpus_id,namespace,record_acl
-)`+recordVisibilityAdmissionSQL+` SELECT 1`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.ACL)
-	identity.Queue(`UPDATE records SET acceptance_order=acceptance_order+1 WHERE organization=$1 AND id=$2 RETURNING acceptance_order,desired_position,withdrawn,record_acl`, scope.Organization, recordID)
-	result := tx.SendBatch(ctx, identity)
-	if _, err = result.Exec(); err != nil {
-		_ = result.Close()
+	if _, err = guardResults.Exec(); err != nil {
+		_ = guardResults.Close()
 		return content.Receipt{}, err
 	}
 	var order int64
 	var position string
 	var withdrawn bool
 	var acl []string
-	err = result.QueryRow().Scan(&order, &position, &withdrawn, &acl)
-	closeErr := result.Close()
-	if err != nil {
-		return content.Receipt{}, err
+	updateErr := guardResults.QueryRow().Scan(&order, &position, &withdrawn, &acl)
+	var latestSlot string
+	var latestDesired bool
+	var slotErr error
+	if c.Revision == "" {
+		slotErr = guardResults.QueryRow().Scan(&latestSlot, &latestDesired)
+	}
+	closeErr := guardResults.Close()
+	if row.replayID != nil {
+		if closeErr != nil {
+			return content.Receipt{}, closeErr
+		}
+		if !requestMatchesDigest(row.previous, row.previousDigest, canonical, requestDigest) {
+			return content.Receipt{}, content.ErrConflict
+		}
+		if !row.visible {
+			return content.Receipt{}, corpus.ErrNotFound
+		}
+		receipt, err := (ReceiptStore{Pool: s.Pool}).hydrateReceipt(ctx, tx, scope.Organization, row)
+		if err != nil {
+			return content.Receipt{}, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return content.Receipt{}, err
+		}
+		return receipt, nil
+	}
+	if !row.corpusExists {
+		return content.Receipt{}, corpus.ErrNotFound
+	}
+	if updateErr != nil {
+		return content.Receipt{}, updateErr
 	}
 	if closeErr != nil {
 		return content.Receipt{}, closeErr
@@ -161,11 +223,12 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 		return content.Receipt{}, content.ErrConflict
 	}
 	if c.Revision == "" {
-		slot, err = digestSlot(ctx, tx, scope.Organization, recordID, digest, order, c.Position, position)
+		slot, err = resolveDigestSlot(baseSlot, latestSlot, latestDesired, slotErr, order, c.Position, position)
+		if err != nil {
+			return content.Receipt{}, err
+		}
 	}
-	if err != nil {
-		return content.Receipt{}, err
-	}
+	requestCopy, receiptCommand, execution := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	versionID := content.StableID("version", scope.Organization, recordID, slot)
 	// Reserve lineage, currentness, receipt, outbox and journal facts together.
 	// Separate statements retain fresh READ COMMITTED snapshots; the caller
@@ -244,33 +307,35 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 	if err = lockJournalRecord(ctx, tx, scope.Organization, recordID); err != nil {
 		return content.Receipt{}, err
 	}
-	requestCopy, receiptCommand, _ := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	requestDigest := sha256.Sum256(canonical)
 	if err = lockJournal(ctx, tx, scope.Organization); err != nil {
 		return content.Receipt{}, err
 	}
-	var previous, previousDigest []byte
-	var receiptID string
-	err = tx.QueryRow(ctx, "SELECT id,canonical_request,request_digest FROM ingestion_receipts WHERE organization=$1 AND route_family='withdrawal' AND request_key=$2", scope.Organization, w.Key).Scan(&receiptID, &previous, &previousDigest)
-	if err == nil {
-		if !requestMatches(previous, previousDigest, canonical) {
+	query, args := buildAcceptLookupQuery(ctx, scope.Organization, "withdrawal", w.Key, recordID, w.Source.CorpusID)
+	row, err := scanReplayReceiptRow(tx.QueryRow(ctx, query, args...))
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	if row.replayID != nil {
+		if !requestMatchesDigest(row.previous, row.previousDigest, canonical, requestDigest) {
 			return content.Receipt{}, content.ErrConflict
+		}
+		if !row.visible {
+			return content.Receipt{}, corpus.ErrNotFound
+		}
+		receipt, err := (ReceiptStore{Pool: s.Pool}).hydrateReceipt(ctx, tx, scope.Organization, row)
+		if err != nil {
+			return content.Receipt{}, err
 		}
 		if err = tx.Commit(ctx); err != nil {
 			return content.Receipt{}, err
 		}
-		return (ReceiptStore{Pool: s.Pool}).Receipt(ctx, scope.Organization, receiptID)
+		return receipt, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return content.Receipt{}, err
-	}
-	var exists bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$2)", scope.Organization, w.Source.CorpusID).Scan(&exists); err != nil {
-		return content.Receipt{}, err
-	}
-	if !exists {
+	if !row.corpusExists {
 		return content.Receipt{}, corpus.ErrNotFound
 	}
+	requestCopy, receiptCommand, _ := importRequestStorage(canonical, s.RetainImportAuditDetail)
 	if _, err = tx.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, w.Source.CorpusID, w.Source.Namespace, w.Source.RecordKey); err != nil {
 		return content.Receipt{}, err
 	}
@@ -286,7 +351,7 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 		return content.Receipt{}, err
 	}
 	digest := content.Hash(canonical)
-	receiptID = content.StableID("receipt", scope.Organization, "withdrawal", w.Key)
+	receiptID := content.StableID("receipt", scope.Organization, "withdrawal", w.Key)
 	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,route_family,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,state,outcome,processing,error_code,request_digest) VALUES($1,$2,'withdrawal',$3,$4,$5,$6,$7,$8,$9,$10,'resolved','withdrawal_applied','idle','',$11)`, scope.Organization, receiptID, w.Key, requestCopy, receiptCommand, w.Source.CorpusID, recordID, order, "withdrawal:"+w.Key, digest, requestDigest[:])
 	if err != nil {
 		return content.Receipt{}, err

@@ -12,6 +12,34 @@ import (
 
 type journalRetryKey struct{}
 
+const (
+	// journalRetryMaxAttempts bounds 40P01 deadlock retries (1 initial attempt + 7 retries).
+	journalRetryMaxAttempts = 8
+	// auditJournalRetryMaxAttempts preserves the 3-attempt bound for audited outer transactions.
+	auditJournalRetryMaxAttempts = 3
+	journalRetryBaseBackoff      = 5 * time.Millisecond
+	journalRetryMaxBackoff       = 250 * time.Millisecond
+)
+
+func journalRetryLimit(operation string) int {
+	if operation == "Audit.Record" {
+		return auditJournalRetryMaxAttempts
+	}
+	return journalRetryMaxAttempts
+}
+
+// journalRetryBackoff returns a bounded, jittered exponential backoff delay in
+// [1ms, min(journalRetryBaseBackoff << (attempt-1), journalRetryMaxBackoff)].
+func journalRetryBackoff(attempt int) time.Duration {
+	shift := max(0, min(attempt-1, 6))
+	capDelay := min(journalRetryBaseBackoff<<shift, journalRetryMaxBackoff)
+	if capDelay <= time.Millisecond {
+		return time.Millisecond
+	}
+	jitterRange := int64(capDelay - time.Millisecond)
+	return time.Millisecond + time.Duration(rand.Int64N(jitterRange+1))
+}
+
 // Retry only a PostgreSQL deadlock, which guarantees the transaction did not
 // commit. Connection errors and ambiguous commits must escape to the caller.
 // An audited command retries at its parent, never inside an aborted savepoint.
@@ -26,17 +54,22 @@ func retryJournalWrite(ctx context.Context, operation string, write func(context
 	if ctx.Value(journalRetryKey{}) != nil {
 		return write(ctx)
 	}
+	maxAttempts := journalRetryLimit(operation)
 	work := context.WithValue(ctx, journalRetryKey{}, true)
 	for attempt := 1; ; attempt++ {
 		err := write(work)
 		if !isDeadlock(err) {
 			return err
 		}
-		slog.WarnContext(ctx, "journal transaction deadlock", "event", "quivr.postgres.journal_deadlock", "operation", operation, "attempt", attempt, "retry_count", attempt-1, "retry_exhausted", attempt == 3)
-		if attempt == 3 {
+		exhausted := attempt >= maxAttempts
+		slog.WarnContext(ctx, "journal transaction deadlock", "event", "quivr.postgres.journal_deadlock", "operation", operation, "attempt", attempt, "retry_count", attempt-1, "retry_exhausted", exhausted)
+		if exhausted {
 			return err
 		}
-		timer := time.NewTimer(time.Duration(1+rand.IntN(10*attempt)) * time.Millisecond)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		timer := time.NewTimer(journalRetryBackoff(attempt))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

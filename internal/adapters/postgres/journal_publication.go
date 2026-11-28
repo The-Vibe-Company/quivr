@@ -238,24 +238,35 @@ func (s JournalStore) Run(ctx context.Context) {
 
 // lockJournalRequest supplies request/entity uniqueness before a fresh guarded
 // read. Legacy mode already owns its organization fence; it creates no claims.
-const journalClaimSQL = `INSERT INTO journal_request_claims(organization,family,request_key)
+// Using ON CONFLICT DO NOTHING followed by SELECT FOR UPDATE serializes
+// concurrent writers without rewriting heap tuples (avoiding dead-tuple bloat).
+const journalClaimInsertSQL = `INSERT INTO journal_request_claims(organization,family,request_key)
  SELECT $1,$2,$3 WHERE ` + parallelJournalSQL + `
- ON CONFLICT(organization,family,request_key) DO UPDATE SET request_key=EXCLUDED.request_key`
+ ON CONFLICT(organization,family,request_key) DO NOTHING`
+
+const journalClaimLockSQL = `SELECT 1 FROM journal_request_claims
+ WHERE organization=$1 AND family=$2 AND request_key=$3 AND ` + parallelJournalSQL + `
+ FOR UPDATE`
+
+func queueJournalClaim(batch *pgx.Batch, org, family, key string) {
+	batch.Queue(journalClaimInsertSQL, org, family, key)
+	batch.Queue(journalClaimLockSQL, org, family, key)
+}
 
 func lockJournalRequest(ctx context.Context, tx pgx.Tx, org, family, key string) error {
-	_, err := tx.Exec(ctx, journalClaimSQL, org, family, key)
-	return err
+	batch := &pgx.Batch{}
+	queueJournalClaim(batch, org, family, key)
+	return tx.SendBatch(ctx, batch).Close()
 }
 
 func lockJournalRecord(ctx context.Context, tx pgx.Tx, org, record string) error {
 	if record == "" {
 		return fmt.Errorf("missing record identity")
 	}
-	if err := lockJournalRequest(ctx, tx, org, "record", record); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT id FROM records WHERE organization=$1 AND id=$2 AND `+parallelJournalSQL+` FOR UPDATE`, org, record)
-	return err
+	batch := &pgx.Batch{}
+	queueJournalClaim(batch, org, "record", record)
+	batch.Queue(`SELECT id FROM records WHERE organization=$1 AND id=$2 AND `+parallelJournalSQL+` FOR UPDATE`, org, record)
+	return tx.SendBatch(ctx, batch).Close()
 }
 
 // lockJournalRecords uses the same identity fence as acceptance before any
@@ -264,10 +275,15 @@ func lockJournalRecord(ctx context.Context, tx pgx.Tx, org, record string) error
 func lockJournalRecords(ctx context.Context, tx pgx.Tx, org string, records []string) error {
 	keys := slices.Clone(records)
 	slices.Sort(keys)
+	keys = slices.Compact(keys)
 	batch := &pgx.Batch{}
-	for _, record := range slices.Compact(keys) {
-		batch.Queue(journalClaimSQL, org, "record", record)
-	}
+	batch.Queue(`INSERT INTO journal_request_claims(organization,family,request_key)
+ SELECT $1,'record',k FROM unnest($2::text[]) k WHERE `+parallelJournalSQL+`
+ ORDER BY k
+ ON CONFLICT(organization,family,request_key) DO NOTHING`, org, keys)
+	batch.Queue(`SELECT request_key FROM journal_request_claims
+ WHERE organization=$1 AND family='record' AND request_key=ANY($2::text[]) AND `+parallelJournalSQL+`
+ ORDER BY request_key FOR UPDATE`, org, keys)
 	batch.Queue(`SELECT id FROM records WHERE organization=$1 AND id=ANY($2) AND `+parallelJournalSQL+` ORDER BY id FOR UPDATE`, org, keys)
 	return tx.SendBatch(ctx, batch).Close()
 }
@@ -275,16 +291,18 @@ func lockJournalRecords(ctx context.Context, tx pgx.Tx, org string, records []st
 func lockJournalVersion(ctx context.Context, tx pgx.Tx, org, version string) error {
 	// The Version-to-Record identity is immutable. Acquire its Record before
 	// any shared hash or mutable guard, then read canonical state afresh.
-	_, err := tx.Exec(ctx, `INSERT INTO journal_request_claims(organization,family,request_key)
+	batch := &pgx.Batch{}
+	batch.Queue(`INSERT INTO journal_request_claims(organization,family,request_key)
  SELECT organization,'record',record_id FROM record_versions
  WHERE organization=$1 AND id=$2 AND `+parallelJournalSQL+`
- ON CONFLICT(organization,family,request_key) DO UPDATE SET request_key=EXCLUDED.request_key`, org, version)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `SELECT r.id FROM records r JOIN record_versions v ON (v.organization,v.record_id)=(r.organization,r.id)
+ ON CONFLICT(organization,family,request_key) DO NOTHING`, org, version)
+	batch.Queue(`SELECT c.request_key FROM journal_request_claims c
+ JOIN record_versions v ON (v.organization,v.record_id)=(c.organization,c.request_key)
+ WHERE v.organization=$1 AND v.id=$2 AND c.family='record' AND `+parallelJournalSQL+`
+ FOR UPDATE OF c`, org, version)
+	batch.Queue(`SELECT r.id FROM records r JOIN record_versions v ON (v.organization,v.record_id)=(r.organization,r.id)
  WHERE v.organization=$1 AND v.id=$2 AND `+parallelJournalSQL+` FOR UPDATE OF r`, org, version)
-	return err
+	return tx.SendBatch(ctx, batch).Close()
 }
 
 // batchPositionsSQL is a CTE for an ordered input batch. The writer CTE
@@ -355,7 +373,11 @@ func queueDeliveryResourceLocks(batch *pgx.Batch, org string, deliveries []strin
 	batch.Queue(`INSERT INTO journal_request_claims(organization,family,request_key)
  SELECT DISTINCT m.organization,'record',m.record_id FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
  WHERE d.organization=$1 AND d.id=ANY($2) AND `+parallelJournalSQL+` ORDER BY m.organization,m.record_id
- ON CONFLICT(organization,family,request_key) DO UPDATE SET request_key=EXCLUDED.request_key`, org, deliveries)
+ ON CONFLICT(organization,family,request_key) DO NOTHING`, org, deliveries)
+	batch.Queue(`SELECT c.request_key FROM journal_request_claims c
+ WHERE c.organization=$1 AND c.family='record' AND `+parallelJournalSQL+` AND EXISTS(
+ SELECT FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
+ WHERE d.organization=$1 AND d.id=ANY($2) AND m.record_id=c.request_key) ORDER BY c.request_key FOR UPDATE`, org, deliveries)
 	batch.Queue(`SELECT id FROM records r WHERE r.organization=$1 AND `+parallelJournalSQL+` AND EXISTS(
  SELECT FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
  WHERE d.organization=$1 AND d.id=ANY($2) AND m.record_id=r.id) ORDER BY id FOR UPDATE`, org, deliveries)
