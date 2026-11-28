@@ -1495,3 +1495,32 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 		}
 	}
 }
+
+func TestStructuredContextPartsAndLexicalText(t *testing.T) {
+	c := testConfig("openai", "http://127.0.0.1:9")
+	c.MaxTokens = 512
+	c.BodyTokens = 256
+	c.DocumentTemplate = "title: {title} | text: {text}"
+	c.TitleSource = "title"
+	i := newIngester(c, "", slog.Default())
+	req := ingestRequest(c, "", false)
+	req.Parts = []quivrplugin.IngestPart{
+		{Key: "title", Role: "title", Text: "Sommet climat"},
+		{Key: "body", Role: "body", Text: "Texte principal de la depeche."},
+		{Key: "entity_card", Role: "context", Text: "Sujet central: Sommet climat a Paris."},
+		{Key: "entity_card__lexical", Role: "context", Text: "paris climat sommet"},
+	}
+	got, err := i.SegmentAndEmbed(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 segments (body + entity_card), got %d: %+v", len(got), got)
+	}
+	if got[0].PartKey != "body" || got[1].PartKey != "entity_card" {
+		t.Fatalf("unexpected part keys: %+v", got)
+	}
+	if got[1].LexicalText != "paris climat sommet" {
+		t.Fatalf("expected LexicalText on entity_card, got %q", got[1].LexicalText)
+	}
+}

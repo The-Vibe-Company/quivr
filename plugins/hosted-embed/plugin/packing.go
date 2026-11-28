@@ -338,6 +338,15 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	}
 	segments := make([]quivrplugin.Segment, len(groups))
 	inputs := make([]string, len(groups))
+	lexicalByTarget := map[string]string{}
+	for _, part := range parts {
+		if part.Role == "context" && strings.HasSuffix(part.Key, "__lexical") {
+			target := strings.TrimSuffix(part.Key, "__lexical")
+			if lex := strings.TrimSpace(part.Text); lex != "" {
+				lexicalByTarget[target] = lex
+			}
+		}
+	}
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
@@ -346,8 +355,93 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		if err != nil {
 			return nil, nil, err
 		}
-		segments[n] = quivrplugin.Segment{PartKey: ranges[0].PartKey, Start: ranges[0].Start, End: ranges[0].End, SourceRanges: ranges, SourceSeparator: sourceSeparator, Vectors: map[string][]float32{}, Provenance: map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "paragraphs"}}
+		seg := quivrplugin.Segment{PartKey: ranges[0].PartKey, Start: ranges[0].Start, End: ranges[0].End, SourceRanges: ranges, SourceSeparator: sourceSeparator, Vectors: map[string][]float32{}, Provenance: map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "paragraphs"}}
+		if n == 0 {
+			if lex := lexicalByTarget[ranges[0].PartKey]; lex != "" {
+				seg.LexicalText = lex
+			}
+		}
+		segments[n] = seg
 		inputs[n] = input
+	}
+	// Structured auxiliary views (e.g. entity_card, claims, macro_summary) sent with
+	// role="context" become standalone Weaviate-native segments with their exact PartKey
+	// and optional companion "<part_key>__lexical" Segment.LexicalText.
+	for _, part := range parts {
+		if part.Role != "context" || strings.HasSuffix(part.Key, "__lexical") || strings.TrimSpace(part.Text) == "" {
+			continue
+		}
+		runes := []rune(part.Text)
+		raw := paragraph{key: part.Key, start: 0, end: len(runes), text: part.Text, run: -1}
+		cardUnits := []paragraph{}
+		for raw.start < raw.end {
+			ok, _, err := fits([]paragraph{raw})
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok {
+				cardUnits = append(cardUnits, raw)
+				break
+			}
+			e, err := encodeOne(ctx, t, raw.text, false)
+			if err != nil {
+				return nil, nil, err
+			}
+			limit := min(e.Tokens, c.BodyTokens)
+			cut := 0
+			for k := limit; k > 0; k-- {
+				candidate := e.Offsets[k-1][1]
+				if k < e.Tokens && candidate > e.Offsets[k][0] {
+					continue
+				}
+				if candidate <= 0 || candidate >= utf8.RuneCountInString(raw.text) {
+					continue
+				}
+				piece := raw
+				piece.end = raw.start + candidate
+				piece.text = string([]rune(raw.text)[:candidate])
+				if ok, _, err := fits([]paragraph{piece}); err != nil {
+					return nil, nil, err
+				} else if ok {
+					cut = candidate
+					break
+				}
+			}
+			if cut == 0 {
+				return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "structured part leaves no safe token boundary")
+			}
+			local := []rune(raw.text)
+			piece := raw
+			piece.end = raw.start + cut
+			piece.text = string(local[:cut])
+			cardUnits = append(cardUnits, piece)
+			raw.start = piece.end
+			raw.text = string(local[cut:])
+		}
+		for idx, u := range cardUnits {
+			ranges := []quivrplugin.SourceRange{{PartKey: u.key, Start: u.start, End: u.end}}
+			input := inputForBody(u.text)
+			e, err := encodeOne(ctx, t, input, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			seg := quivrplugin.Segment{
+				PartKey:         u.key,
+				Start:           u.start,
+				End:             u.end,
+				SourceRanges:    ranges,
+				SourceSeparator: sourceSeparator,
+				Vectors:         map[string][]float32{},
+				Provenance:      map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "structured_card"},
+			}
+			if idx == 0 {
+				if lex := lexicalByTarget[part.Key]; lex != "" {
+					seg.LexicalText = lex
+				}
+			}
+			segments = append(segments, seg)
+			inputs = append(inputs, input)
+		}
 	}
 	return segments, inputs, nil
 }

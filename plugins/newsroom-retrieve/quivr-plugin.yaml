@@ -1,0 +1,294 @@
+# Experimental editorial retrieval plugin implementing multi-branch entity
+# retrieval, calibrated fusion (DBSF/CombMNZ), proximity & query-aspect
+# coverage, inverted-pyramid lead-vs-body salience, and adaptive cascade
+# reranking with structured surrogates.
+id: newsroom.retrieve
+version: 0.1.0
+description: Multi-branch algorithmic retrieval with calibrated fusion, proximity/aspect coverage, inverted-pyramid salience, and optional adaptive cascade reranking.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.21.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Zero-inference-cost algorithmic retrieval combining multi-branch lexical+dense legs, calibrated fusion, aspect coverage, proximity, and inverted-pyramid salience.
+        max_latency_ms: 500
+        max_cost_cents: 0
+      deep:
+        description: Two-stage algorithmic retrieval with inverted-pyramid passage surrogates, optional adaptive confidence cascade, and tail-preserving HTTP reranking.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      max_rounds: 3
+      max_requests: 8
+      max_candidates: 100
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      candidate_count:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+        description: Default candidates requested per retrieval leg.
+      lexical_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 60
+        description: Optional override for BM25 lexical leg candidate count (0 uses candidate_count).
+      dense_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 100
+        description: Optional override for ungrouped dense near_vector leg candidate count (0 uses candidate_count).
+      dense_grouped:
+        type: boolean
+        default: false
+        description: Issue an additional record-grouped dense near_vector leg (false uses a single ungrouped dense leg for lower latency and tighter MaxP floor).
+      clean_lexical_query:
+        type: boolean
+        default: true
+        description: Strip generic multilingual stopwords and elision prefixes from the BM25 leg query text so raw lexical branches do not mask analyzed stems.
+      fusion:
+        type: string
+        enum: [dbsf, convex, rrf]
+        default: convex
+        description: Multi-leg score fusion method.
+      rrf_k:
+        type: number
+        minimum: 1
+        maximum: 1000
+        default: 60
+        description: Rank constant k for RRF fusion.
+      dense_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.65
+        description: Weight for full-query dense near_vector leg.
+      query_adaptive_alpha:
+        type: boolean
+        default: false
+        description: Dynamically reduce dense weight on entity/digit-dense queries.
+      lexical_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.35
+        description: Weight for full-query lexical BM25 leg.
+      entity_leg:
+        type: boolean
+        default: false
+        description: Enable third retrieval leg issuing a focused entity/key-term BM25 sub-query.
+      entity_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.25
+        description: Weight for the focused entity/key-term BM25 leg.
+      entity_max_terms:
+        type: integer
+        minimum: 2
+        maximum: 16
+        default: 6
+        description: Maximum distinct high-specificity terms in the focused entity sub-query.
+      field_lexical_leg:
+        type: boolean
+        default: false
+        description: Enable an additional BM25 leg over Segment.LexicalText (FieldLexical) using French-normalized query tokens.
+      field_lexical_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.15
+        description: Fusion weight for the FieldLexical BM25 leg.
+      field_lexical_k:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 60
+        description: Candidate count for the FieldLexical BM25 leg (0 uses lexical_k).
+      part_key_boosts:
+        type: object
+        additionalProperties:
+          type: number
+          minimum: 0.1
+          maximum: 5
+        description: Optional per-PartKey score prior multipliers applied to dense segment scores (e.g. entity_card -> 1.15).
+      combmnz_bonus:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Consensus multiplier bonus per additional independent leg matching a record (0 disables; 1 equals classic CombMNZ).
+      title_lead_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.12
+        description: Weight for pool-IDF-weighted query coverage in the record title and opening lead window.
+      aspect_coverage_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Weight for pool-IDF-weighted query-aspect coverage over top candidates.
+      missing_aspect_penalty:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Additional penalty applied when a candidate covers fewer than half of query aspects.
+      coverage_penalty_gamma:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Superlinear pool-IDF coverage deficit penalty gamma * (1 - cov)^rho.
+      coverage_penalty_rho:
+        type: number
+        minimum: 1
+        maximum: 4
+        default: 1.75
+        description: Exponent rho for superlinear coverage deficit penalty.
+      proximity_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Weight for query-term proximity (pairwise min-span or shortest-cover + SDM bigrams).
+      proximity_mode:
+        type: string
+        enum: [pairwise, sdm_span]
+        default: pairwise
+        description: Proximity formulation (pairwise log-decay vs shortest-cover span + ordered/unordered SDM bigrams).
+      proximity_window:
+        type: integer
+        minimum: 2
+        maximum: 200
+        default: 25
+        description: Maximum token span window for query-term pair proximity.
+      salience_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Weight for inverted-pyramid zone salience (title 3x, lead 2x, early body 1x, deep body 0.35x).
+      exp_salience_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Weight for continuous earliest-mention exponential decay exp(-pos_1/600).
+      tail_only_penalty:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Penalty when primary query facet only appears once deep in body (pos_1 > 800, tf=1).
+      lead_chars:
+        type: integer
+        minimum: 50
+        maximum: 2000
+        default: 250
+        description: Character length of the inverted-pyramid lead zone at body offset 0.
+      deep_chunk_penalty:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0
+        description: Penalty subtracted when the best matched segment starts past offset 0.
+      passage_ratio_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.10
+        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages.
+      passage_support_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.12
+        description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents).
+      rerank_endpoint:
+        type: string
+        format: uri
+        description: Optional HTTP(S) reranker endpoint for the deep profile.
+      rerank_protocol:
+        type: string
+        enum: [tei, cohere]
+        default: tei
+      rerank_model:
+        type: string
+      rerank_instruction:
+        type: string
+        description: Optional rubric/instruction forwarded to instruction-aware TEI rerankers (e.g. Qwen3-Reranker).
+      rerank_top_k:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 30
+        description: Number of top Stage-1 candidates to send to the reranker while preserving the remaining tail.
+      rerank_ranking:
+        type: string
+        enum: [rerank_only, linear, rrf]
+        default: linear
+      rerank_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.90
+      rerank_max_doc_chars:
+        type: integer
+        minimum: 200
+        maximum: 32000
+        default: 2000
+      rerank_timeout_ms:
+        type: integer
+        minimum: 100
+        maximum: 20000
+        default: 12000
+      fallback_on_error:
+        type: boolean
+        default: true
+        description: Gracefully return Stage-1 default ranking when the deep reranker times out or errors.
+      surrogate_mode:
+        type: string
+        enum: [raw, inverted_pyramid]
+        default: inverted_pyramid
+        description: Document surrogate representation sent to the deep reranker.
+      adaptive_cascade:
+        type: boolean
+        default: false
+        description: Skip deep reranking when Stage-1 dense/lexical agreement and score margin exceed thresholds.
+      cascade_jaccard_threshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.5
+      cascade_margin_threshold:
+        type: number
+        minimum: 0
+        maximum: 2
+        default: 0.15
+      cascade_dgap_threshold:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 2.25
+        description: Optional Stage-1 dense distribution-shape Gap threshold (mean(1..5)-mean(25..50))/std for adaptive early-exit.
+      log_diagnostics:
+        type: boolean
+        default: false
+        description: Emit per-query algorithmic diagnostics to stderr.
+secrets:
+  - name: RERANKER_API_KEY
+    required: false
+    description: Optional Bearer token for an HTTPS rerank endpoint.
+run:
+  command: [go, run, .]
