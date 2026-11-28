@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
-	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
 )
@@ -112,37 +112,42 @@ func (f filter) encodedLen() int {
 	return n
 }
 
-func (f filter) writeGraphQL(b *strings.Builder) {
+func (f filter) appendGraphQL(dst []byte) []byte {
 	op := graphOperator(f.operator)
 	if f.field == "" {
-		b.WriteString("{operator:")
-		b.WriteString(op)
-		b.WriteString(",operands:[")
+		dst = append(dst, "{operator:"...)
+		dst = append(dst, op...)
+		dst = append(dst, ",operands:["...)
 		for i, child := range f.children {
 			if i > 0 {
-				b.WriteByte(',')
+				dst = append(dst, ',')
 			}
-			child.writeGraphQL(b)
+			dst = child.appendGraphQL(dst)
 		}
-		b.WriteString("]}")
-		return
+		return append(dst, "]}"...)
 	}
-	b.WriteString("{path:[")
-	writeJSONString(b, f.field)
-	b.WriteString("],operator:")
-	b.WriteString(op)
-	b.WriteByte(',')
-	b.WriteString(f.jsonKey)
-	b.WriteByte(':')
-	writeJSONValue(b, f.value)
-	b.WriteByte('}')
+	dst = append(dst, "{path:["...)
+	dst = appendJSONString(dst, f.field)
+	dst = append(dst, "],operator:"...)
+	dst = append(dst, op...)
+	dst = append(dst, ',')
+	dst = append(dst, f.jsonKey...)
+	dst = append(dst, ':')
+	dst = appendJSONValue(dst, f.value)
+	return append(dst, '}')
+}
+
+func ownedBytesToString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 func (f filter) String() string {
-	var b strings.Builder
-	b.Grow(f.encodedLen())
-	f.writeGraphQL(&b)
-	return b.String()
+	buf := make([]byte, 0, f.encodedLen())
+	buf = f.appendGraphQL(buf)
+	return ownedBytesToString(buf)
 }
 
 func generationFilter(ctx context.Context, org, generationID string) filter {
@@ -156,12 +161,11 @@ func (f filter) graphql() string {
 	if f.operator == 0 {
 		return ""
 	}
-	var b strings.Builder
-	b.Grow(len("where:") + f.encodedLen() + 1)
-	b.WriteString("where:")
-	f.writeGraphQL(&b)
-	b.WriteByte(',')
-	return b.String()
+	buf := make([]byte, 0, len("where:")+f.encodedLen()+1)
+	buf = append(buf, "where:"...)
+	buf = f.appendGraphQL(buf)
+	buf = append(buf, ',')
+	return ownedBytesToString(buf)
 }
 
 func (f filter) proto() *pb.Filters {
@@ -229,50 +233,49 @@ func (b searchBranch) encodedLen() int {
 	}
 }
 
-func (b searchBranch) writeGraphQL(dst *strings.Builder) {
+func (b searchBranch) appendGraphQL(dst []byte) []byte {
 	switch b.mode {
 	case "lexical":
-		dst.WriteString("bm25:{query:")
-		writeJSONString(dst, b.query)
-		dst.WriteString(",properties:")
-		writeJSONStrings(dst, b.properties)
-		dst.WriteString("},")
+		dst = append(dst, "bm25:{query:"...)
+		dst = appendJSONString(dst, b.query)
+		dst = append(dst, ",properties:"...)
+		dst = appendJSONStrings(dst, b.properties)
+		return append(dst, "},"...)
 	case "semantic":
-		dst.WriteString("nearVector:{vector:")
-		writeJSONFloat32Slice(dst, b.vector)
-		dst.WriteString(",targetVectors:[")
-		writeJSONString(dst, b.target)
-		dst.WriteString("]},")
+		dst = append(dst, "nearVector:{vector:"...)
+		dst = appendJSONFloat32Slice(dst, b.vector)
+		dst = append(dst, ",targetVectors:["...)
+		dst = appendJSONString(dst, b.target)
+		return append(dst, "]},"...)
 	case "hybrid":
 		fusion := "relativeScoreFusion"
 		if b.ranked {
 			fusion = "rankedFusion"
 		}
-		var num [32]byte
-		dst.WriteString("hybrid:{query:")
-		writeJSONString(dst, b.query)
-		dst.WriteString(",vector:")
-		writeJSONFloat32Slice(dst, b.vector)
-		dst.WriteString(",alpha:")
-		dst.Write(strconv.AppendFloat(num[:0], b.alpha, 'f', -1, 64))
-		dst.WriteString(",fusionType:")
-		dst.WriteString(fusion)
-		dst.WriteString(",properties:")
-		writeJSONStrings(dst, b.properties)
-		dst.WriteString(",targetVectors:[")
-		writeJSONString(dst, b.target)
-		dst.WriteString("]},")
+		dst = append(dst, "hybrid:{query:"...)
+		dst = appendJSONString(dst, b.query)
+		dst = append(dst, ",vector:"...)
+		dst = appendJSONFloat32Slice(dst, b.vector)
+		dst = append(dst, ",alpha:"...)
+		dst = strconv.AppendFloat(dst, b.alpha, 'f', -1, 64)
+		dst = append(dst, ",fusionType:"...)
+		dst = append(dst, fusion...)
+		dst = append(dst, ",properties:"...)
+		dst = appendJSONStrings(dst, b.properties)
+		dst = append(dst, ",targetVectors:["...)
+		dst = appendJSONString(dst, b.target)
+		return append(dst, "]},"...)
 	}
+	return dst
 }
 
 func (b searchBranch) graphql() string {
 	if b.mode != "lexical" && b.mode != "semantic" && b.mode != "hybrid" {
 		return ""
 	}
-	var dst strings.Builder
-	dst.Grow(b.encodedLen())
-	b.writeGraphQL(&dst)
-	return dst.String()
+	buf := make([]byte, 0, b.encodedLen())
+	buf = b.appendGraphQL(buf)
+	return ownedBytesToString(buf)
 }
 
 type searchOrder struct {
@@ -287,40 +290,36 @@ func (o searchOrder) encodedLen() int {
 	return len("sort:[{path:[],order:desc}],") + len(o.field) + 2
 }
 
-func (o searchOrder) writeGraphQL(dst *strings.Builder) {
+func (o searchOrder) appendGraphQL(dst []byte) []byte {
 	if o.field == "" {
-		return
+		return dst
 	}
-	dst.WriteString("sort:[{path:[")
-	writeJSONString(dst, o.field)
+	dst = append(dst, "sort:[{path:["...)
+	dst = appendJSONString(dst, o.field)
 	if o.desc {
-		dst.WriteString("],order:desc}],")
-	} else {
-		dst.WriteString("],order:asc}],")
+		return append(dst, "],order:desc}],"...)
 	}
+	return append(dst, "],order:asc}],"...)
 }
 
 func (o searchOrder) graphql() string {
 	if o.field == "" {
 		return ""
 	}
-	var dst strings.Builder
-	dst.Grow(o.encodedLen())
-	o.writeGraphQL(&dst)
-	return dst.String()
+	buf := make([]byte, 0, o.encodedLen())
+	buf = o.appendGraphQL(buf)
+	return ownedBytesToString(buf)
 }
 
 func quote(value string) string {
-	var b strings.Builder
-	b.Grow(len(value) + 2)
-	writeJSONString(&b, value)
-	return b.String()
+	buf := make([]byte, 0, len(value)+2)
+	buf = appendJSONString(buf, value)
+	return ownedBytesToString(buf)
 }
 
 func encodeJSON(value any) string {
-	var b strings.Builder
-	writeJSONValue(&b, value)
-	return b.String()
+	buf := appendJSONValue(nil, value)
+	return ownedBytesToString(buf)
 }
 
 const hexDigits = "0123456789abcdef"
@@ -335,85 +334,9 @@ var safeJSONChar = func() [256]bool {
 	return t
 }()
 
-// writeJSONString writes s as a JSON string literal byte-identical to
-// encoding/json.Marshal(s) (with HTML escaping for <, >, &, line/paragraph
-// separators, control characters, and U+FFFD replacement for invalid UTF-8).
-func writeJSONString(b *strings.Builder, s string) {
-	b.WriteByte('"')
-	start := 0
-	for i := 0; i < len(s); {
-		c := s[i]
-		if safeJSONChar[c] {
-			i++
-			continue
-		}
-		if c < utf8.RuneSelf {
-			if start < i {
-				b.WriteString(s[start:i])
-			}
-			switch c {
-			case '"':
-				b.WriteString(`\"`)
-			case '\\':
-				b.WriteString(`\\`)
-			case '\b':
-				b.WriteString(`\b`)
-			case '\f':
-				b.WriteString(`\f`)
-			case '\n':
-				b.WriteString(`\n`)
-			case '\r':
-				b.WriteString(`\r`)
-			case '\t':
-				b.WriteString(`\t`)
-			case '<':
-				b.WriteString(`\u003c`)
-			case '>':
-				b.WriteString(`\u003e`)
-			case '&':
-				b.WriteString(`\u0026`)
-			default:
-				b.WriteString(`\u00`)
-				b.WriteByte(hexDigits[c>>4])
-				b.WriteByte(hexDigits[c&0x0f])
-			}
-			i++
-			start = i
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			if start < i {
-				b.WriteString(s[start:i])
-			}
-			b.WriteString("\ufffd")
-			i++
-			start = i
-			continue
-		}
-		if r == '\u2028' || r == '\u2029' {
-			if start < i {
-				b.WriteString(s[start:i])
-			}
-			if r == '\u2028' {
-				b.WriteString(`\u2028`)
-			} else {
-				b.WriteString(`\u2029`)
-			}
-			i += size
-			start = i
-			continue
-		}
-		i += size
-	}
-	if start < len(s) {
-		b.WriteString(s[start:])
-	}
-	b.WriteByte('"')
-}
-
-// appendJSONString appends s as a JSON string literal byte-identical to
-// encoding/json.Marshal(s).
+// appendJSONString appends s as a JSON string literal byte-identical to Go
+// 1.27's encoding/json.Marshal(s), including HTML escapes, control characters,
+// line/paragraph separators, and UTF-8 U+FFFD replacement for invalid bytes.
 func appendJSONString(dst []byte, s string) []byte {
 	dst = append(dst, '"')
 	start := 0
@@ -486,19 +409,18 @@ func appendJSONString(dst []byte, s string) []byte {
 	return append(dst, '"')
 }
 
-func writeJSONStrings(b *strings.Builder, values []string) {
+func appendJSONStrings(dst []byte, values []string) []byte {
 	if values == nil {
-		b.WriteString("null")
-		return
+		return append(dst, "null"...)
 	}
-	b.WriteByte('[')
+	dst = append(dst, '[')
 	for i, s := range values {
 		if i > 0 {
-			b.WriteByte(',')
+			dst = append(dst, ',')
 		}
-		writeJSONString(b, s)
+		dst = appendJSONString(dst, s)
 	}
-	b.WriteByte(']')
+	return append(dst, ']')
 }
 
 func appendJSONFloat(dst []byte, v float64, bitSize int) []byte {
@@ -527,51 +449,46 @@ func appendJSONFloat(dst []byte, v float64, bitSize int) []byte {
 	return dst
 }
 
-func writeJSONFloat32Slice(b *strings.Builder, values []float32) {
+func appendJSONFloat32Slice(dst []byte, values []float32) []byte {
 	if values == nil {
-		b.WriteString("null")
-		return
+		return append(dst, "null"...)
 	}
-	b.WriteByte('[')
-	var num [32]byte
+	dst = append(dst, '[')
 	for i, v := range values {
 		if i > 0 {
-			b.WriteByte(',')
+			dst = append(dst, ',')
 		}
 		f := float64(v)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			b.WriteString("null")
+			dst = append(dst, "null"...)
 			continue
 		}
-		b.Write(appendJSONFloat(num[:0], f, 32))
+		dst = appendJSONFloat(dst, f, 32)
 	}
-	b.WriteByte(']')
+	return append(dst, ']')
 }
 
-func writeJSONValue(b *strings.Builder, value any) {
+func appendJSONValue(dst []byte, value any) []byte {
 	switch v := value.(type) {
 	case string:
-		writeJSONString(b, v)
+		return appendJSONString(dst, v)
 	case []string:
-		writeJSONStrings(b, v)
+		return appendJSONStrings(dst, v)
 	case []float32:
-		writeJSONFloat32Slice(b, v)
+		return appendJSONFloat32Slice(dst, v)
 	case float64:
 		if math.IsNaN(v) || math.IsInf(v, 0) {
 			raw, _ := json.Marshal(v)
-			b.Write(raw)
-			return
+			return append(dst, raw...)
 		}
-		var num [32]byte
-		b.Write(appendJSONFloat(num[:0], v, 64))
+		return appendJSONFloat(dst, v, 64)
 	case bool:
 		if v {
-			b.WriteString("true")
-		} else {
-			b.WriteString("false")
+			return append(dst, "true"...)
 		}
+		return append(dst, "false"...)
 	default:
 		raw, _ := json.Marshal(value)
-		b.Write(raw)
+		return append(dst, raw...)
 	}
 }

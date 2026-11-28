@@ -603,7 +603,7 @@ func (s *Store) fetchAnchors(ctx context.Context, collection string, ids []strin
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(anchorFetchConcurrency)
 	for _, id := range missing {
-		goRecover(g, func() error {
+		goRecover(gctx, g, "fetch_anchors", func() error {
 			anchor, projected, err := s.anchorProperties(gctx, collection, id)
 			if err != nil {
 				return err
@@ -681,45 +681,37 @@ func (s *Store) projectionRowsLimit(ctx context.Context, collection string, wher
 	if s.grpc != nil {
 		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created, responseLimit)
 	}
-	var qb strings.Builder
-	qb.Grow(len("{Get{(") + len(collection) + where.encodedLen() + order.encodedLen() + len(properties)*16 + 96)
-	qb.WriteString("{Get{")
-	qb.WriteString(collection)
-	qb.WriteByte('(')
-	if tenant := tenantFrom(ctx); tenant != "" {
-		qb.WriteString("tenant:")
-		writeJSONString(&qb, tenant)
-		qb.WriteByte(',')
+	qb := make([]byte, 0, len("{Get{(")+len(collection)+where.encodedLen()+order.encodedLen()+len(properties)*16+96)
+	qb = append(qb, "{Get{"...)
+	qb = append(qb, collection...)
+	qb = append(qb, '(')
+	if tenantArg := tenantArgument(ctx); tenantArg != "" {
+		qb = append(qb, tenantArg...)
 	}
 	if where.operator != 0 {
-		qb.WriteString("where:")
-		where.writeGraphQL(&qb)
-		qb.WriteByte(',')
+		qb = append(qb, "where:"...)
+		qb = where.appendGraphQL(qb)
+		qb = append(qb, ',')
 	}
-	qb.WriteString(" limit:")
-	var num [24]byte
-	qb.Write(strconv.AppendInt(num[:0], int64(limit), 10))
+	qb = append(qb, " limit:"...)
+	qb = strconv.AppendInt(qb, int64(limit), 10)
 	if order.field != "" {
-		qb.WriteString(",sort:[{path:[")
-		writeJSONString(&qb, order.field)
-		if order.desc {
-			qb.WriteString("],order:desc}]")
-		} else {
-			qb.WriteString("],order:asc}]")
-		}
+		qb = append(qb, ',')
+		qb = order.appendGraphQL(qb)
+		qb = qb[:len(qb)-1]
 	}
-	qb.WriteString("){")
+	qb = append(qb, "){"...)
 	for _, prop := range properties {
-		qb.WriteString(prop)
-		qb.WriteByte(' ')
+		qb = append(qb, prop...)
+		qb = append(qb, ' ')
 	}
 	if created {
-		qb.WriteString("_additional{id creationTimeUnix}")
+		qb = append(qb, "_additional{id creationTimeUnix}"...)
 	} else {
-		qb.WriteString("_additional{id}")
+		qb = append(qb, "_additional{id}"...)
 	}
-	qb.WriteString("}}}")
-	query := qb.String()
+	qb = append(qb, "}}}"...)
+	query := ownedBytesToString(qb)
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`

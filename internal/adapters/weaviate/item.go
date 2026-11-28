@@ -265,56 +265,57 @@ func (r itemRow) candidate(dense bool) content.Candidate {
 	return content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, VersionID: r.VersionID, Score: score}
 }
 
-var queryBuilderPool = sync.Pool{
+var queryBufPool = sync.Pool{
 	New: func() any {
-		return &strings.Builder{}
+		b := make([]byte, 0, 4<<10)
+		return &b
 	},
 }
 
 const maxPooledQueryCap = 64 << 10
 
 func buildSearchRowsRequestBody(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, item, text bool) []byte {
-	qb := queryBuilderPool.Get().(*strings.Builder)
-	qb.Reset()
+	bufPtr := queryBufPool.Get().(*[]byte)
+	qb := (*bufPtr)[:0]
 	est := len("{Get{(") + len(collection) + branch.encodedLen() + order.encodedLen() + where.encodedLen() + 128
-	qb.Grow(est)
-	qb.WriteString("{Get{")
-	qb.WriteString(collection)
-	qb.WriteByte('(')
+	if cap(qb) < est {
+		qb = make([]byte, 0, est)
+	}
+	qb = append(qb, "{Get{"...)
+	qb = append(qb, collection...)
+	qb = append(qb, '(')
 	if tenant := tenantFrom(ctx); tenant != "" {
-		qb.WriteString("tenant:")
-		writeJSONString(qb, tenant)
-		qb.WriteByte(',')
+		qb = append(qb, "tenant:"...)
+		qb = appendJSONString(qb, tenant)
+		qb = append(qb, ',')
 	}
-	branch.writeGraphQL(qb)
-	order.writeGraphQL(qb)
+	qb = branch.appendGraphQL(qb)
+	qb = order.appendGraphQL(qb)
 	if where.operator != 0 {
-		qb.WriteString("where:")
-		where.writeGraphQL(qb)
-		qb.WriteByte(',')
+		qb = append(qb, "where:"...)
+		qb = where.appendGraphQL(qb)
+		qb = append(qb, ',')
 	}
-	qb.WriteString("limit:")
-	var num [24]byte
-	qb.Write(strconv.AppendInt(num[:0], int64(limit), 10))
-	qb.WriteString("){segmentId generationId")
+	qb = append(qb, "limit:"...)
+	qb = strconv.AppendInt(qb, int64(limit), 10)
+	qb = append(qb, "){segmentId generationId"...)
 	if item {
-		qb.WriteString(" versionId")
+		qb = append(qb, " versionId"...)
 	}
 	if text {
-		qb.WriteByte(' ')
-		qb.WriteString(passageText)
+		qb = append(qb, ' ')
+		qb = append(qb, passageText...)
 	}
-	qb.WriteString(" _additional{score distance}}}}")
+	qb = append(qb, " _additional{score distance}}}}"...)
 
-	query := qb.String()
-	body := make([]byte, 0, len(query)+len(`{"query":""}`)+32)
+	body := make([]byte, 0, len(qb)+len(`{"query":""}`)+32)
 	body = append(body, `{"query":`...)
-	body = appendJSONString(body, query)
+	body = appendJSONString(body, bytesAsString(qb))
 	body = append(body, '}')
 
-	if qb.Cap() <= maxPooledQueryCap {
-		qb.Reset()
-		queryBuilderPool.Put(qb)
+	if cap(qb) <= maxPooledQueryCap {
+		*bufPtr = qb[:0]
+		queryBufPool.Put(bufPtr)
 	}
 	return body
 }
@@ -1702,7 +1703,7 @@ func (s *Store) recoverMissingPassages(ctx context.Context, collection string, p
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(missingPassageConcurrency)
 	for i, ver := range versions {
-		goRecover(group, func() error {
+		goRecover(gctx, group, "recover_missing_passages", func() error {
 			rows, err := s.searchRows(gctx, collection, searchBranch{}, and(passageWhere, equal("versionId", ver)), passageOrder, perVersionLimit, true, false)
 			results[i] = rows
 			return err
@@ -1861,7 +1862,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	legs, legCtx := errgroup.WithContext(ctx)
 	denseDone := make(chan struct{})
 	if q.Mode != "lexical" {
-		goRecover(legs, func() error {
+		goRecover(legCtx, legs, "item_dense", func() error {
 			defer close(denseDone)
 			var err error
 			dense, err = s.itemDense(legCtx, collection, routes, scope, q, limit, grouped)
@@ -1869,7 +1870,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 		})
 	}
 	if q.Mode != "semantic" {
-		goRecover(legs, func() error {
+		goRecover(legCtx, legs, "item_sparse", func() error {
 			sparse = make(map[candidateID]content.Candidate, limit)
 			var densePassages func() map[candidateID]content.Candidate
 			if q.Mode != "lexical" && alpha > 0 && fusion != retrieval.FusionRanked {
@@ -1916,7 +1917,7 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 		results := make([][]itemRow, len(requests))
 		copies, copyCtx := errgroup.WithContext(ctx)
 		for i, branch := range requests {
-			goRecover(copies, func() error {
+			goRecover(copyCtx, copies, "item_bm25", func() error {
 				rows, err := s.searchRows(copyCtx, collection, branch, where, searchOrder{}, depth, true, false)
 				results[i] = rows
 				return err
@@ -2081,12 +2082,12 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 			var tailBest map[candidateID]itemRow
 			var textExhausted bool
 			group, gctx := errgroup.WithContext(ctx)
-			goRecover(group, func() error {
+			goRecover(gctx, group, "resolve_ambiguous_passages", func() error {
 				var err error
 				textExhausted, err = s.resolveAmbiguousPassages(gctx, collection, passageWhere, best, ambiguous, query)
 				return err
 			})
-			goRecover(group, func() error {
+			goRecover(gctx, group, "fetch_tail_passages", func() error {
 				var err error
 				tailBest, _, err = fetchTail(gctx, 1)
 				return err

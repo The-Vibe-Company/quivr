@@ -105,7 +105,7 @@ func (s *Store) updateLexicalBatch(ctx context.Context, g content.Generation, or
 	group.SetLimit(lexicalPatchConcurrency)
 	tenant := tenantFrom(ctx)
 	for _, spec := range patches {
-		goRecover(group, func() error {
+		goRecover(gctx, group, "update_lexical_batch", func() error {
 			body := map[string]any{
 				"class":      g.Collection,
 				"id":         spec.objectID,

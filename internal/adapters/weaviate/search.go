@@ -4,6 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -15,13 +18,25 @@ import (
 
 const maxTenantSearches = 4
 
+// logRecoveredPanic records the panic type and stack without logging raw panic
+// values, which could contain tenant text, queries, or credentials.
+func logRecoveredPanic(ctx context.Context, path string, recovered any) {
+	slog.ErrorContext(ctx, "recovered weaviate panic",
+		"component", "weaviate",
+		"path", path,
+		"panic_type", fmt.Sprintf("%T", recovered),
+		"stack", string(debug.Stack()),
+	)
+}
+
 // goRecover launches fn on group and converts any panic into
 // retrieval.ErrUnavailable so sibling legs are cancelled via the group's
 // context instead of crashing the process.
-func goRecover(group *errgroup.Group, fn func() error) {
+func goRecover(ctx context.Context, group *errgroup.Group, path string, fn func() error) {
 	group.Go(func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
+				logRecoveredPanic(ctx, path, r)
 				err = retrieval.ErrUnavailable
 			}
 		}()
@@ -91,7 +106,7 @@ func (s *Store) searchRouted(ctx context.Context, routes []retrieval.Route, scop
 		if work.Err() != nil {
 			break
 		}
-		goRecover(group, func() error {
+		goRecover(work, group, "search_route", func() error {
 			if err := work.Err(); err != nil {
 				return err
 			}

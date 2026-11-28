@@ -89,7 +89,14 @@ type resolvedRouteVisibility struct {
 	possible  bool
 }
 
-func (s *Store) resolveRouteVisibility(ctx context.Context, route retrieval.Route, org string, principals []string) (resolvedRouteVisibility, error) {
+func (s *Store) resolveRouteVisibility(ctx context.Context, route retrieval.Route, org string, principals []string) (res resolvedRouteVisibility, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logRecoveredPanic(ctx, "resolve_visibility", r)
+			res = resolvedRouteVisibility{}
+			err = retrieval.ErrUnavailable
+		}
+	}()
 	sources, err := s.Visibility.Sources(ctx, org, route.CorpusID, principals)
 	if err != nil {
 		return resolvedRouteVisibility{}, err
@@ -125,7 +132,7 @@ func (s *Store) resolveVisibility(ctx context.Context, routes []retrieval.Route,
 			if gctx.Err() != nil {
 				break
 			}
-			goRecover(group, func() error {
+			goRecover(gctx, group, "resolve_visibility", func() error {
 				if err := gctx.Err(); err != nil {
 					return err
 				}

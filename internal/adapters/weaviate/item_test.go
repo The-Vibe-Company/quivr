@@ -1714,4 +1714,24 @@ func TestItemSearchErrgroupPanicRecovery(t *testing.T) {
 		}
 		<-resolver.siblingCanceled
 	})
+
+	t.Run("single-route resolveVisibility panic returns ErrUnavailable", func(t *testing.T) {
+		siblingStarted := make(chan struct{})
+		close(siblingStarted)
+		resolver := &panicVisibilityResolver{
+			siblingStarted:  siblingStarted,
+			siblingCanceled: make(chan struct{}),
+		}
+		store := weaviate.New("http://index.invalid")
+		store.Visibility = resolver
+		g := content.Generation{ID: "gen", Collection: weaviate.InitialCollection}
+		routes := []retrieval.Route{{CorpusID: "panic-corpus", Generation: g}}
+		ctx := visibility.WithPrincipals(t.Context(), []string{"group:reader"})
+		_, err := store.Search(ctx, routes, corpus.Scope{Organization: "org", Corpora: []string{"panic-corpus"}}, retrieval.Request{
+			Query: "harbour", Mode: "lexical", K: 5,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+	})
 }
