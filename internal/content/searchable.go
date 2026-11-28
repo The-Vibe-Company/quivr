@@ -2,15 +2,19 @@ package content
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -528,6 +532,9 @@ const MaxHydrationBlobCacheBytes int64 = 1 << 30
 // list node, and string header footprint so tiny blobs cannot bypass maxBytes.
 const blobCacheEntryOverhead int64 = 160
 
+// textIndexOverhead approximates a rune index's header and pointer.
+const textIndexOverhead int64 = 64
+
 type blobCacheKey struct {
 	organization string
 	key          string
@@ -539,11 +546,26 @@ func (k blobCacheKey) cacheable() bool {
 	return k.organization != "" && k.key != "" && k.sha256 != "" && k.size >= 0
 }
 
+// blobCacheEntry is one verified immutable blob, resident in a cache or held
+// only by the hydrations that read it.
 type blobCacheEntry struct {
-	key        blobCacheKey
-	text       string
+	key  blobCacheKey
+	text string
+	// valid and ascii describe the whole text once: when valid, every Part
+	// cut at code point boundaries is valid canonical text.
+	valid, ascii bool
+	// index locates the code points of valid non-ASCII text. It is built on
+	// the first cut and, while the entry is resident, charged to its bytes.
+	index      atomic.Pointer[textIndex]
 	bytes      int64
 	prev, next *blobCacheEntry
+}
+
+func newBlobEntry(key blobCacheKey, text string) *blobCacheEntry {
+	e := &blobCacheEntry{key: key, text: text, valid: ValidText(text)}
+	e.ascii = e.valid && utf8.RuneCountInString(text) == len(text)
+	e.bytes = blobEntryCost(key, text, nil)
+	return e
 }
 
 // HydrationBlobCacheStats is a point-in-time snapshot of hydration cache usage.
@@ -567,6 +589,9 @@ type HydrationBlobCache struct {
 
 	lookups   *telemetry.Counter
 	evictions *telemetry.Counter
+
+	// flights shares concurrent cold reads of one blob across hydrations.
+	flights blobFlights
 }
 
 var hydrationBlobCacheGauges = []telemetry.GaugeDefinition{
@@ -649,27 +674,38 @@ func (c *HydrationBlobCache) WriteMetrics(w io.Writer) {
 	}
 }
 
-func blobEntryCost(key blobCacheKey, text string) int64 {
-	return int64(len(text)) + int64(len(key.organization)+len(key.key)+len(key.sha256)) + blobCacheEntryOverhead
+// blobEntryCost is the estimated memory of an entry holding text and, once
+// built, its rune index.
+func blobEntryCost(key blobCacheKey, text string, index *textIndex) int64 {
+	cost := int64(len(text)) + int64(len(key.organization)+len(key.key)+len(key.sha256)) + blobCacheEntryOverhead
+	if index != nil {
+		cost += index.cost()
+	}
+	return cost
 }
 
-func (c *HydrationBlobCache) getBatch(keys []blobCacheKey) (map[blobCacheKey]string, int) {
-	if c == nil || len(keys) == 0 {
-		return nil, 0
+// blobGroup is one distinct blob a hydration batch cuts: its cache key, its
+// resident entry when cached, and the span of its requests in batch order.
+type blobGroup struct {
+	key        blobCacheKey
+	entry      *blobCacheEntry
+	start, end int
+}
+
+// getBatch sets the resident entry of every cached group and reports hits.
+func (c *HydrationBlobCache) getBatch(groups []blobGroup) int {
+	if c == nil || len(groups) == 0 {
+		return 0
 	}
-	var hits map[blobCacheKey]string
 	hitCount, missCount := 0, 0
 	c.mu.Lock()
-	for _, key := range keys {
-		if !key.cacheable() {
+	for i := range groups {
+		if !groups[i].key.cacheable() {
 			continue
 		}
-		if e, ok := c.entries[key]; ok {
+		if e, ok := c.entries[groups[i].key]; ok {
 			c.moveToFront(e)
-			if hits == nil {
-				hits = make(map[blobCacheKey]string, len(keys))
-			}
-			hits[key] = e.text
+			groups[i].entry = e
 			hitCount++
 		} else {
 			missCount++
@@ -682,39 +718,94 @@ func (c *HydrationBlobCache) getBatch(keys []blobCacheKey) (map[blobCacheKey]str
 	if missCount > 0 {
 		c.lookups.Add(missCount, "miss")
 	}
-	return hits, hitCount
+	return hitCount
 }
 
-func (c *HydrationBlobCache) put(key blobCacheKey, text string) {
+// resident returns the cached entry for key without counting a lookup, or nil.
+func (c *HydrationBlobCache) resident(key blobCacheKey) *blobCacheEntry {
 	if c == nil || !key.cacheable() {
-		return
+		return nil
 	}
-	cost := blobEntryCost(key, text)
-	if cost > c.maxBytes {
-		return
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.entries[key]
+	if e != nil {
+		c.moveToFront(e)
+	}
+	return e
+}
+
+// put admits a new, unshared entry and returns the resident entry for its
+// key: e, or the one already cached. An entry over the budget stays transient.
+func (c *HydrationBlobCache) put(e *blobCacheEntry) *blobCacheEntry {
+	if c == nil || !e.key.cacheable() {
+		return e
+	}
+	e.bytes = blobEntryCost(e.key, e.text, e.index.Load())
+	if e.bytes > c.maxBytes {
+		return e
+	}
+	c.mu.Lock()
+	if existing, ok := c.entries[e.key]; ok {
+		c.moveToFront(existing)
+		c.mu.Unlock()
+		return existing
+	}
+	evicted := c.evictLocked(e.bytes)
+	c.entries[e.key] = e
+	c.pushFront(e)
+	c.usedBytes += e.bytes
+	c.mu.Unlock()
+	if evicted > 0 {
+		c.evictions.Add(evicted)
+	}
+	return e
+}
+
+// runeIndex returns the code point index of e's valid text, building it on
+// first use. A resident entry is charged for the index, which may evict
+// least recently used entries, e included, to stay within the budget.
+func (c *HydrationBlobCache) runeIndex(e *blobCacheEntry) textIndex {
+	if e.ascii {
+		return textIndex{text: e.text, runes: len(e.text)}
+	}
+	if ix := e.index.Load(); ix != nil {
+		return *ix
+	}
+	ix := newTextIndex(e.text)
+	if !e.index.CompareAndSwap(nil, ix) {
+		return *e.index.Load()
+	}
+	if c == nil {
+		return *ix
 	}
 	evicted := 0
 	c.mu.Lock()
-	if existing, ok := c.entries[key]; ok {
-		c.moveToFront(existing)
-		c.mu.Unlock()
-		return
+	if c.entries[e.key] == e {
+		cost := blobEntryCost(e.key, e.text, ix)
+		c.usedBytes += cost - e.bytes
+		e.bytes = cost
+		evicted = c.evictLocked(0)
 	}
-	for c.usedBytes+cost > c.maxBytes && c.tail != nil {
+	c.mu.Unlock()
+	if evicted > 0 {
+		c.evictions.Add(evicted)
+	}
+	return *ix
+}
+
+// evictLocked evicts least recently used entries until incoming more bytes
+// fit the budget, and returns how many it evicted.
+func (c *HydrationBlobCache) evictLocked(incoming int64) int {
+	evicted := 0
+	for c.usedBytes+incoming > c.maxBytes && c.tail != nil {
 		victim := c.tail
 		c.unlink(victim)
 		delete(c.entries, victim.key)
 		c.usedBytes -= victim.bytes
 		evicted++
 	}
-	e := &blobCacheEntry{key: key, text: text, bytes: cost}
-	c.entries[key] = e
-	c.pushFront(e)
-	c.usedBytes += cost
-	c.mu.Unlock()
-	if evicted > 0 {
-		c.evictions.Add(evicted)
-	}
+	return evicted
 }
 
 func (c *HydrationBlobCache) moveToFront(e *blobCacheEntry) {
@@ -751,36 +842,126 @@ func (c *HydrationBlobCache) unlink(e *blobCacheEntry) {
 	e.next = nil
 }
 
-// blobSlicer decodes a blob once per hydration batch (avoiding []rune entirely
-// for ASCII blobs) and returns independent excerpt strings so callers never pin
-// an evicted cache entry's backing memory.
-type blobSlicer struct {
+// runeIndexStride is the code point spacing of a textIndex's byte offset
+// marks: a lookup steps over at most runeIndexStride-1 code points, and the
+// marks of non-ASCII text cost at most 1/16 of its bytes.
+const runeIndexStride = 128
+
+// textIndex locates code points in valid canonical text without decoding it
+// to []rune. ASCII text addresses bytes directly; other text keeps the byte
+// offset of every runeIndexStride-th code point and steps forward from the
+// nearest one. Coordinates are those of []rune(text).
+type textIndex struct {
 	text  string
-	ascii bool
-	runes []rune
+	runes int
+	marks []int // nil for ASCII text
 }
 
-func newBlobSlicer(text string) blobSlicer {
-	for i := 0; i < len(text); i++ {
-		if text[i] >= utf8.RuneSelf {
-			return blobSlicer{text: text, runes: []rune(text)}
+// newTextIndex indexes valid non-ASCII text.
+func newTextIndex(text string) *textIndex {
+	n := utf8.RuneCountInString(text)
+	marks := make([]int, 0, (n+runeIndexStride-1)/runeIndexStride)
+	for i, off := 0, 0; off < len(text); i++ {
+		if i%runeIndexStride == 0 {
+			marks = append(marks, off)
 		}
+		off += utf8Len(text[off])
 	}
-	return blobSlicer{text: text, ascii: true}
+	return &textIndex{text: text, runes: n, marks: marks}
 }
 
-func (b blobSlicer) slice(start, end int) (string, bool) {
-	if b.ascii {
-		if start < 0 || end < start || end > len(b.text) {
-			return "", false
-		}
-		return strings.Clone(b.text[start:end]), true
+// indexText indexes one Part's text, or reports that it is not valid
+// canonical text.
+func indexText(text string) (textIndex, bool) {
+	if !ValidText(text) {
+		return textIndex{}, false
 	}
-	if start < 0 || end < start || end > len(b.runes) {
+	if utf8.RuneCountInString(text) == len(text) {
+		return textIndex{text: text, runes: len(text)}, true
+	}
+	return *newTextIndex(text), true
+}
+
+func (x *textIndex) cost() int64 { return textIndexOverhead + int64(cap(x.marks))*8 }
+
+// utf8Len is the byte length of the code point that lead byte b starts in
+// valid UTF-8.
+func utf8Len(b byte) int {
+	switch {
+	case b < 0x80:
+		return 1
+	case b < 0xE0:
+		return 2
+	case b < 0xF0:
+		return 3
+	}
+	return 4
+}
+
+// step is the byte offset k code points after byte offset off.
+func (x *textIndex) step(off, k int) int {
+	if x.marks == nil {
+		return off + k
+	}
+	for ; k > 0; k-- {
+		off += utf8Len(x.text[off])
+	}
+	return off
+}
+
+// offset is the byte offset of code point n, for 0 <= n <= runes.
+func (x *textIndex) offset(n int) int {
+	if x.marks == nil {
+		return n
+	}
+	if n == x.runes {
+		return len(x.text)
+	}
+	return x.step(x.marks[n/runeIndexStride], n%runeIndexStride)
+}
+
+// runeAt is the number of code points before byte offset b, a code point
+// boundary of text.
+func (x *textIndex) runeAt(b int) int {
+	if x.marks == nil {
+		return b
+	}
+	i := sort.SearchInts(x.marks, b+1) - 1
+	n, off := i*runeIndexStride, x.marks[i]
+	for off < b {
+		off += utf8Len(x.text[off])
+		n++
+	}
+	return n
+}
+
+// cut is an independent copy of code points [start, end) of the Part at
+// bytes [b0, b1) of text, whose ends are code point boundaries, so callers
+// never pin a cache entry. It is string([]rune(text[b0:b1])[start:end]) when
+// that slice is in bounds.
+func (x *textIndex) cut(b0, b1, start, end int) (string, bool) {
+	if start < 0 || end < start {
 		return "", false
 	}
-	return string(b.runes[start:end]), true
+	base := x.runeAt(b0)
+	if end > x.runes-base {
+		return "", false
+	}
+	from := x.offset(base + start)
+	var to int
+	if end-start < runeIndexStride {
+		to = x.step(from, end-start)
+	} else {
+		to = x.offset(base + end)
+	}
+	if to > b1 {
+		return "", false
+	}
+	return strings.Clone(x.text[from:to]), true
 }
+
+// runeBoundary reports whether byte offset i of s starts a code point or ends s.
+func runeBoundary(s string, i int) bool { return i == len(s) || utf8.RuneStart(s[i]) }
 
 // blobReadParallelism bounds the concurrent canonical blob reads of one
 // hydration batch, staying within the S3 transport's idle connection pool
@@ -809,9 +990,8 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	if err := scope.Require(corpus.ActionContentHydrate); err != nil {
 		return nil, err
 	}
-	out := map[int]Hydrated{}
 	if len(cs) == 0 {
-		return out, nil
+		return map[int]Hydrated{}, nil
 	}
 	located, err := s.Baseline.Hydrate(ctx, scope, cs)
 	if err != nil {
@@ -821,7 +1001,8 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	if err != nil {
 		return nil, err
 	}
-	var found []int
+	out := make(map[int]Hydrated, len(located))
+	found := make([]int, 0, len(located))
 	for i := range cs {
 		l, ok := located[i]
 		if !ok {
@@ -895,235 +1076,265 @@ func (s Service) LeadSegments(ctx context.Context, scope corpus.Scope, refs []Le
 // excerpts reads each distinct blob of a batch once, serving verified immutable
 // blobs from BlobCache when present and reading only misses concurrently from
 // canonical storage, then cuts and checksum-verifies each candidate's excerpt.
-// It also reports whether any uncached blob had to be read from canonical storage.
+// Concurrent batches missing the same cacheable blob share one read. The first
+// failed read fails the batch at once and cancels its other reads. It also
+// reports whether any uncached blob had to be read from canonical storage.
 func (s Service) excerpts(ctx context.Context, org string, located map[int]Located) (map[int]string, bool, error) {
+	// A request cuts one source excerpt of a candidate from its blob, into
+	// pieces[at], or, with ranges, all of a candidate's excerpts from its
+	// legacy Manifest blob, into pieces[at:at+len(ranges)].
 	type request struct {
-		candidate, index int
-		source           LocatedSource
-		ranges           []SourceRange
+		group, at int
+		source    SourceRange
+		pack      PackRange
+		ranges    []SourceRange
 	}
-	byBlob := map[blobCacheKey][]request{}
-	seenBlob := map[string]Blob{}
-	regionOnly := map[int]bool{}
+	var regionOnly map[int]bool
+	total := 0
 	for i, l := range located {
-		if len(l.Sources) == 0 && l.Blob.Key == "" && l.ManifestBlob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0 {
+		switch {
+		case len(l.Sources) == 0 && l.Blob.Key == "" && l.ManifestBlob.Key == "" && l.Segment.Derivation.Region != nil && l.Segment.Start == 0 && l.Segment.End == 0:
+			if regionOnly == nil {
+				regionOnly = map[int]bool{}
+			}
 			regionOnly[i] = true
-			continue
-		}
-		if len(l.Sources) == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0 {
-			if prev, ok := seenBlob[l.ManifestBlob.Key]; ok && prev != l.ManifestBlob {
-				return nil, false, ErrArtifactCorrupt
-			}
-			seenBlob[l.ManifestBlob.Key] = l.ManifestBlob
-			key := blobCacheKey{organization: org, key: l.ManifestBlob.Key, sha256: l.ManifestBlob.SHA256, size: l.ManifestBlob.Size}
-			byBlob[key] = append(byBlob[key], request{
-				candidate: i,
-				source:    LocatedSource{Blob: l.ManifestBlob},
-				ranges:    l.Segment.Derivation.SourceRanges,
-			})
-			continue
-		}
-		sources := l.Sources
-		if len(sources) == 0 {
-			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob, Pack: l.Pack}}
-		}
-		for k, source := range sources {
-			if prev, ok := seenBlob[source.Blob.Key]; ok && prev != source.Blob {
-				return nil, false, ErrArtifactCorrupt
-			}
-			seenBlob[source.Blob.Key] = source.Blob
-			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256, size: source.Blob.Size}
-			byBlob[key] = append(byBlob[key], request{candidate: i, index: k, source: source})
+		case len(l.Sources) == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0:
+			total += len(l.Segment.Derivation.SourceRanges)
+		case len(l.Sources) > 0:
+			total += len(l.Sources)
+		default:
+			total++
 		}
 	}
-	slices := map[int][]SourceExcerpt{}
+	// pieces holds every candidate's source excerpts; slices views each
+	// candidate's own, capped so a caller appending cannot reach another's.
+	pieces := make([]SourceExcerpt, total)
+	slices := make(map[int][]SourceExcerpt, len(located)-len(regionOnly))
+	requests := make([]request, 0, total)
+	groups := make([]blobGroup, 0, total)
+	groupOf := make(map[string]int, total)
+	addRequest := func(blob Blob, r request) error {
+		g, ok := groupOf[blob.Key]
+		if !ok {
+			g = len(groups)
+			groupOf[blob.Key] = g
+			groups = append(groups, blobGroup{key: blobCacheKey{organization: org, key: blob.Key, sha256: blob.SHA256, size: blob.Size}})
+		} else if k := groups[g].key; k.sha256 != blob.SHA256 || k.size != blob.Size {
+			return ErrArtifactCorrupt
+		}
+		r.group = g
+		groups[g].end++
+		requests = append(requests, r)
+		return nil
+	}
+	at := 0
 	for i, l := range located {
 		if regionOnly[i] {
 			continue
 		}
-		n := len(l.Sources)
-		if n == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0 {
+		var err error
+		n := 1
+		switch {
+		case len(l.Sources) == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0:
 			n = len(l.Segment.Derivation.SourceRanges)
+			err = addRequest(l.ManifestBlob, request{at: at, ranges: l.Segment.Derivation.SourceRanges})
+		case len(l.Sources) > 0:
+			n = len(l.Sources)
+			for k, source := range l.Sources {
+				if err = addRequest(source.Blob, request{at: at + k, source: source.Range, pack: source.Pack}); err != nil {
+					break
+				}
+			}
+		default:
+			err = addRequest(l.Blob, request{at: at, source: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, pack: l.Pack})
 		}
-		if n == 0 {
-			n = 1
+		if err != nil {
+			return nil, false, err
 		}
-		slices[i] = make([]SourceExcerpt, n)
+		slices[i] = pieces[at : at+n : at+n]
+		at += n
 	}
-	sliceBlob := func(blob string, requests []request) ([][]SourceExcerpt, error) {
+	// Order requests by group: groups[g] owns order[groups[g].start:groups[g].end].
+	next := 0
+	for g := range groups {
+		count := groups[g].end
+		groups[g].start, groups[g].end = next, next
+		next += count
+	}
+	order := make([]int, len(requests))
+	for j, r := range requests {
+		order[groups[r.group].end] = j
+		groups[r.group].end++
+	}
+	// cutBlob writes the excerpts of one group's requests into their pieces;
+	// requests of distinct groups write distinct pieces.
+	cutBlob := func(e *blobCacheEntry, g blobGroup) error {
+		blob := e.text
 		var manifestParts map[string]string
-		var manifestSlicers map[string]*blobSlicer
-		parts := map[[2]int64]*blobSlicer{}
-		cuts := make([][]SourceExcerpt, len(requests))
-		for idx, req := range requests {
+		var manifestIndexes map[string]textIndex
+		var whole textIndex
+		indexed := false
+		var parts map[[2]int64]textIndex
+		for _, j := range order[g.start:g.end] {
+			req := &requests[j]
 			if len(req.ranges) > 0 {
 				if manifestParts == nil {
 					var manifest Manifest
 					if err := json.Unmarshal([]byte(blob), &manifest); err != nil {
-						return nil, ErrArtifactCorrupt
+						return ErrArtifactCorrupt
 					}
 					manifestParts = make(map[string]string, len(manifest.Parts))
-					manifestSlicers = make(map[string]*blobSlicer, len(manifest.Parts))
+					manifestIndexes = make(map[string]textIndex, len(manifest.Parts))
 					for _, part := range manifest.Parts {
 						if part.Content.Kind == "text" {
 							manifestParts[part.Key] = part.Content.Text
 						}
 					}
 				}
-				excerpts := make([]SourceExcerpt, len(req.ranges))
 				for k, r := range req.ranges {
-					slicer, ok := manifestSlicers[r.PartKey]
+					ix, ok := manifestIndexes[r.PartKey]
 					if !ok {
 						partText, exists := manifestParts[r.PartKey]
-						if !exists || !ValidText(partText) {
-							return nil, ErrArtifactCorrupt
+						if !exists {
+							return ErrArtifactCorrupt
 						}
-						s := newBlobSlicer(partText)
-						slicer = &s
-						manifestSlicers[r.PartKey] = slicer
+						if ix, ok = indexText(partText); !ok {
+							return ErrArtifactCorrupt
+						}
+						manifestIndexes[r.PartKey] = ix
 					}
-					cut, valid := slicer.slice(r.Start, r.End)
+					cut, valid := ix.cut(0, len(ix.text), r.Start, r.End)
 					if !valid {
-						return nil, ErrArtifactCorrupt
+						return ErrArtifactCorrupt
 					}
-					excerpts[k] = SourceExcerpt{SourceRange: r, Text: cut}
+					pieces[req.at+k] = SourceExcerpt{SourceRange: r, Text: cut}
 				}
-				cuts[idx] = excerpts
 				continue
 			}
-			bounds, err := req.source.Pack.bounds(int64(len(blob)))
+			bounds, err := req.pack.bounds(int64(len(blob)))
 			if err != nil {
-				return nil, err
+				return err
 			}
-			slicer, ok := parts[bounds]
-			if !ok {
-				partText := blob[bounds[0]:bounds[1]]
-				if !ValidText(partText) {
-					return nil, ErrArtifactCorrupt
+			b0, b1 := int(bounds[0]), int(bounds[1])
+			var ix textIndex
+			if e.valid {
+				// Within valid text, a Part is valid exactly when it is cut at
+				// code point boundaries, so the blob's index serves every Part.
+				if !runeBoundary(blob, b0) || !runeBoundary(blob, b1) {
+					return ErrArtifactCorrupt
 				}
-				s := newBlobSlicer(partText)
-				slicer = &s
-				parts[bounds] = slicer
-			}
-			r := req.source.Range
-			cut, valid := slicer.slice(r.Start, r.End)
-			if !valid {
-				return nil, ErrArtifactCorrupt
-			}
-			cuts[idx] = []SourceExcerpt{{SourceRange: r, Text: cut}}
-		}
-		return cuts, nil
-	}
-	applyCuts := func(requests []request, cuts [][]SourceExcerpt) {
-		for idx, req := range requests {
-			if len(req.ranges) > 0 {
-				copy(slices[req.candidate], cuts[idx])
+				if !indexed {
+					whole, indexed = s.BlobCache.runeIndex(e), true
+				}
+				ix = whole
 			} else {
-				slices[req.candidate][req.index] = cuts[idx][0]
+				var ok bool
+				if ix, ok = parts[bounds]; !ok {
+					if ix, ok = indexText(blob[b0:b1]); !ok {
+						return ErrArtifactCorrupt
+					}
+					if parts == nil {
+						parts = map[[2]int64]textIndex{}
+					}
+					parts[bounds] = ix
+				}
+				b0, b1 = 0, len(ix.text)
 			}
+			r := req.source
+			cut, valid := ix.cut(b0, b1, r.Start, r.End)
+			if !valid {
+				return ErrArtifactCorrupt
+			}
+			pieces[req.at] = SourceExcerpt{SourceRange: r, Text: cut}
 		}
+		return nil
 	}
-	type miss struct {
-		key      blobCacheKey
-		requests []request
-	}
-	var misses []miss
-	var cached map[blobCacheKey]string
-	if s.BlobCache != nil {
-		keys := make([]blobCacheKey, 0, len(byBlob))
-		for key := range byBlob {
-			keys = append(keys, key)
-		}
-		cached, _ = s.BlobCache.getBatch(keys)
-	}
-	for key, requests := range byBlob {
-		if text, ok := cached[key]; ok {
-			cuts, err := sliceBlob(text, requests)
-			if err != nil {
+	s.BlobCache.getBatch(groups)
+	var misses []int
+	for g := range groups {
+		if e := groups[g].entry; e != nil {
+			if err := cutBlob(e, groups[g]); err != nil {
 				return nil, false, err
 			}
-			applyCuts(requests, cuts)
 			continue
 		}
-		misses = append(misses, miss{key: key, requests: requests})
+		misses = append(misses, g)
 	}
 	readBlobs := len(misses) > 0
 	if readBlobs {
+		batch, cancel := context.WithCancel(ctx)
+		defer cancel()
 		var mu sync.Mutex
 		var failure error
+		fail := func(err error) {
+			mu.Lock()
+			if failure == nil {
+				failure = err
+			}
+			mu.Unlock()
+			cancel()
+		}
 		var wg sync.WaitGroup
-		slots := make(chan struct{}, blobReadParallelism)
-	launch:
-		for _, item := range misses {
+		slots := make(chan struct{}, min(blobReadParallelism, len(misses)))
+		for _, g := range misses {
 			select {
 			case slots <- struct{}{}:
-			case <-ctx.Done():
-				mu.Lock()
-				if failure == nil {
-					failure = ctx.Err()
-				}
-				mu.Unlock()
-				break launch
+			case <-batch.Done():
 			}
-			if ctx.Err() != nil {
-				<-slots
-				mu.Lock()
-				if failure == nil {
-					failure = ctx.Err()
-				}
-				mu.Unlock()
-				break launch
+			if batch.Err() != nil {
+				fail(ctx.Err())
+				break
 			}
 			wg.Add(1)
-			go func(item miss) {
-				defer func() { <-slots; wg.Done() }()
+			go func(g blobGroup) {
+				defer wg.Done()
+				defer func() { <-slots }()
+				defer func() {
+					if r := recover(); r != nil {
+						fail(recoveredBlobPanic(r))
+					}
+				}()
 				// Verify the whole shared object once through Read before slicing Parts.
-				data, err := s.Blobs.Read(ctx, item.requests[0].source.Blob)
+				e, err := s.readBlob(batch, g.key)
+				if err == nil {
+					err = cutBlob(e, g)
+				}
 				if err != nil {
-					mu.Lock()
-					if failure == nil {
-						failure = err
-					}
-					mu.Unlock()
-					return
+					fail(err)
 				}
-				text := string(data)
-				cuts, err := sliceBlob(text, item.requests)
-				if err != nil {
-					mu.Lock()
-					if failure == nil {
-						failure = err
-					}
-					mu.Unlock()
-					return
-				}
-				if s.BlobCache != nil && item.key.cacheable() && int64(len(data)) == item.key.size && Hash(data) == item.key.sha256 {
-					s.BlobCache.put(item.key, text)
-				}
-				mu.Lock()
-				applyCuts(item.requests, cuts)
-				mu.Unlock()
-			}(item)
+			}(groups[g])
 		}
 		wg.Wait()
 		if failure != nil {
 			return nil, readBlobs, failure
 		}
 	}
-	out := map[int]string{}
+	out := make(map[int]string, len(located))
 	for i := range regionOnly {
-		if Hash(nil) != located[i].TextSHA256 {
+		if !hashMatches("", located[i].TextSHA256) {
 			return nil, readBlobs, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = ""
 	}
 	for i, pieces := range slices {
-		texts := make([]string, len(pieces))
-		for k, p := range pieces {
-			texts[k] = p.Text
+		text := pieces[0].Text
+		if len(pieces) > 1 {
+			separator := located[i].Segment.Derivation.SourceSeparator
+			n := len(separator) * (len(pieces) - 1)
+			for _, p := range pieces {
+				n += len(p.Text)
+			}
+			var b strings.Builder
+			b.Grow(n)
+			for k, p := range pieces {
+				if k > 0 {
+					b.WriteString(separator)
+				}
+				b.WriteString(p.Text)
+			}
+			text = b.String()
 		}
-		text := strings.Join(texts, located[i].Segment.Derivation.SourceSeparator)
-		if Hash([]byte(text)) != located[i].TextSHA256 {
+		if !hashMatches(text, located[i].TextSHA256) {
 			return nil, readBlobs, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = text
@@ -1134,6 +1345,40 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 	}
 	return out, readBlobs, nil
+}
+
+// readBlob reads a missed blob, through one shared flight per cacheable key
+// when BlobCache is set, and admits it to BlobCache only when its bytes match
+// the size and SHA-256 that canonical storage recorded.
+func (s Service) readBlob(ctx context.Context, key blobCacheKey) (*blobCacheEntry, error) {
+	read := func(ctx context.Context) (*blobCacheEntry, error) {
+		// An earlier flight may have admitted the blob since this batch missed.
+		if e := s.BlobCache.resident(key); e != nil {
+			return e, nil
+		}
+		data, err := s.Blobs.Read(ctx, Blob{Key: key.key, SHA256: key.sha256, Size: key.size})
+		if err != nil {
+			return nil, err
+		}
+		e := newBlobEntry(key, string(data))
+		if s.BlobCache != nil && key.cacheable() && int64(len(data)) == key.size && Hash(data) == key.sha256 {
+			e = s.BlobCache.put(e)
+		}
+		return e, nil
+	}
+	if s.BlobCache == nil || !key.cacheable() {
+		return read(ctx)
+	}
+	return s.BlobCache.flights.do(ctx, key, read)
+}
+
+// hashMatches reports whether Hash([]byte(s)) == want without copying s or
+// allocating the digest: SHA-256 only reads its input.
+func hashMatches(s, want string) bool {
+	sum := sha256.Sum256(unsafe.Slice(unsafe.StringData(s), len(s)))
+	var digest [2 * sha256.Size]byte
+	hex.Encode(digest[:], sum[:])
+	return string(digest[:]) == want
 }
 
 // bounds returns a half-open byte interval. Check the length with subtraction
