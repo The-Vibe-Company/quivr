@@ -458,44 +458,56 @@ func TestHydrateShardPanicCancelsSiblings(t *testing.T) {
 	}
 }
 
-// Owns the shared-load panic contract: a load that panics fails its flight
-// with errSourceLoadInterrupted for the loading caller and every waiter,
-// caches nothing, and logs only the panic type and stack.
+// Owns the shared-load failure contract: a load that panics, or exits
+// through runtime.Goexit where recover yields nil, fails its flight with
+// errSourceLoadInterrupted for the leading caller and every waiter, caches
+// nothing, and logs only the panic type and stack.
 func TestVisibilitySnapshotLoadPanicFailsTheFlight(t *testing.T) {
-	logs := captureLogs(t)
-	synctest.Test(t, func(t *testing.T) {
-		var s VisibilityStore
-		key := visibilityCorpus{"example", "corpus"}
-		release := make(chan struct{})
-		var calls atomic.Int64
-		panicking := func(ctx context.Context, _ visibilityCorpus) (sourceSnapshot, error) {
-			calls.Add(1)
-			<-release
-			panic("load failed for organization=private-org")
-		}
-		errs := make([]error, 2)
-		var wg sync.WaitGroup
-		for i := range errs {
-			wg.Go(func() { _, errs[i] = s.snapshotUsing(t.Context(), key, panicking) })
-			synctest.Wait()
-		}
-		close(release)
-		wg.Wait()
-		for i, err := range errs {
-			if !errors.Is(err, errSourceLoadInterrupted) {
-				t.Fatalf("caller %d: err %v, want errSourceLoadInterrupted", i, err)
+	for _, tc := range []struct {
+		name, panicType string
+		exit            func()
+	}{
+		{"panic", "string", func() { panic("load failed for organization=private-org") }},
+		{"goexit", "<nil>", runtime.Goexit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLogs(t)
+			synctest.Test(t, func(t *testing.T) {
+				var s VisibilityStore
+				key := visibilityCorpus{"example", "corpus"}
+				release := make(chan struct{})
+				var calls atomic.Int64
+				failing := func(ctx context.Context, _ visibilityCorpus) (sourceSnapshot, error) {
+					calls.Add(1)
+					<-release
+					tc.exit()
+					return sourceSnapshot{}, nil
+				}
+				errs := make([]error, 2)
+				var wg sync.WaitGroup
+				for i := range errs {
+					wg.Go(func() { _, errs[i] = s.snapshotUsing(t.Context(), key, failing) })
+					synctest.Wait()
+				}
+				close(release)
+				wg.Wait()
+				for i, err := range errs {
+					if !errors.Is(err, errSourceLoadInterrupted) {
+						t.Fatalf("caller %d: err %v, want errSourceLoadInterrupted", i, err)
+					}
+				}
+				if calls.Load() != 1 {
+					t.Fatalf("%d loads, want one shared load", calls.Load())
+				}
+				load := &sourceLoad{}
+				if snapshot, err := s.snapshotUsing(t.Context(), key, load.load); err != nil || load.calls.Load() != 1 || snapshot.revision != 1 {
+					t.Fatalf("after a failed load: snapshot %+v, err %v, %d loads; want a fresh load", snapshot, err, load.calls.Load())
+				}
+			})
+			if out := logs.String(); !strings.Contains(out, "panic_type="+tc.panicType) || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
+				t.Fatalf("panic log %q: want panic_type %s and stack only", out, tc.panicType)
 			}
-		}
-		if calls.Load() != 1 {
-			t.Fatalf("%d loads, want one shared load", calls.Load())
-		}
-		load := &sourceLoad{}
-		if snapshot, err := s.snapshotUsing(t.Context(), key, load.load); err != nil || load.calls.Load() != 1 || snapshot.revision != 1 {
-			t.Fatalf("after a panicked load: snapshot %+v, err %v, %d loads; want a fresh load", snapshot, err, load.calls.Load())
-		}
-	})
-	if out := logs.String(); !strings.Contains(out, "panic_type=string") || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
-		t.Fatalf("panic log %q: want panic_type and stack only", out)
+		})
 	}
 }
 

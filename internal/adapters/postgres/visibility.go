@@ -206,7 +206,9 @@ func (s *VisibilityStore) snapshotUsing(ctx context.Context, key visibilityCorpu
 		}
 		s.mu.Unlock()
 		if lead {
-			s.fly(ctx, key, f, start, load)
+			// The load runs on its own goroutine so that even an exit recover
+			// cannot stop (runtime.Goexit) leaves the leader waiting below.
+			go s.fly(ctx, key, f, start, load)
 		}
 		select {
 		case <-f.done:
@@ -226,10 +228,11 @@ func (s *VisibilityStore) snapshotUsing(ctx context.Context, key visibilityCorpu
 	}
 }
 
-// fly runs flight f and publishes its result. A load that panics or exits
-// abnormally fails the flight with errSourceLoadInterrupted for the loading
-// caller and every waiter; only the panic's type and stack are logged, since
-// its value may quote a query or an Organization.
+// fly runs flight f on its own goroutine and publishes its result. A load
+// that panics or exits abnormally fails the flight with
+// errSourceLoadInterrupted for the leading caller and every waiter; only the
+// panic's type and stack are logged, since its value may quote a query or an
+// Organization.
 func (s *VisibilityStore) fly(ctx context.Context, key visibilityCorpus, f *sourceFlight, start time.Time, load func(context.Context, visibilityCorpus) (sourceSnapshot, error)) {
 	panicking := true
 	defer func() {
