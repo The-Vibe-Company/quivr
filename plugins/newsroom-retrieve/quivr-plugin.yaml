@@ -1,24 +1,24 @@
 id: newsroom.retrieve
-version: 0.1.0
-description: High-performance editorial hybrid retrieval with optional HTTP cross-encoder reranking, inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band support.
+version: 0.2.0
+description: High-performance editorial hybrid retrieval with Plugin API 0.21 rich candidate metadata, hydrated lead passages, deep candidate pools, optional HTTP cross-encoder reranking, inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band support.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
-  plugin_api: ">=0.17.0 <0.21.0"
+  plugin_api: ">=0.21.0 <0.22.0"
 contributions:
   retrieval:
     profiles:
       default:
-        description: Zero-GPU editorial hybrid retrieval with stopword-cleaned BM25, boilerplate-stripped multi-view legs, convex fusion, and inverted-pyramid aboutness signals.
+        description: Zero-GPU editorial hybrid retrieval with stopword-cleaned BM25, boilerplate-stripped multi-view legs, convex fusion, inverted-pyramid aboutness signals, hydrated leads, and CommonMetadata boosting.
         max_latency_ms: 500
         max_cost_cents: 0
       deep:
-        description: Full-performance open-source cross-encoder reranking over inverted-pyramid surrogates with unsaturated logit Z-score calibration, Recall Band 31-80, sharded requests, and graceful Stage-1 fallback.
+        description: Full-performance open-source cross-encoder reranking over inverted-pyramid surrogates with hydrated leads, unsaturated logit Z-score calibration, Recall Band 31-80, sharded requests, and graceful Stage-1 fallback.
         max_latency_ms: 3000
         max_cost_cents: 1
     limits:
       max_rounds: 3
       max_requests: 8
-      max_candidates: 100
+      max_candidates: 400
 configuration:
   schema:
     type: object
@@ -27,15 +27,19 @@ configuration:
       dense_k:
         type: integer
         minimum: 1
-        maximum: 100
+        maximum: 400
         default: 100
-        description: Candidate count for the ungrouped dense passage leg.
+        description: Candidate count for the ungrouped dense passage leg (up to 400).
       lexical_k:
         type: integer
         minimum: 1
-        maximum: 100
+        maximum: 400
         default: 60
-        description: Candidate count for the primary BM25 leg.
+        description: Candidate count for the primary BM25 leg (up to 400).
+      include_lead:
+        type: boolean
+        default: true
+        description: Request opening lead passages (ordinal 0) from the engine for deep-passage hits (Plugin API 0.21+).
       clean_lexical_query:
         type: boolean
         default: true
@@ -100,19 +104,43 @@ configuration:
         minimum: 50
         maximum: 2000
         default: 250
-        description: Character length of the inverted-pyramid lead zone at body offset 0.
+        description: Character length of the inverted-pyramid lead zone in the opening passage.
       passage_ratio_weight:
         type: number
         minimum: 0
         maximum: 5
         default: 0.10
-        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages (set 0 to disable).
+        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio using exact passage_ordinal/total_passages with offset fallback (set 0 to disable).
       passage_support_weight:
         type: number
         minimum: 0
         maximum: 5
         default: 0.12
         description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents; set 0 to disable).
+      metadata_overlap_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.08
+        description: Weight for pool-IDF query aspect overlap against Candidate.CommonMetadata (subjects, tags, place, country, author, source; set 0 to disable).
+      date_alignment_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.06
+        description: Weight for aligning explicit year/month mentions in the query with Candidate.CommonMetadata.published_at (set 0 to disable).
+      recency_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0
+        description: Optional weight for deterministic pool-relative temporal freshness decay from published_at (0 disables for archival neutrality; set > 0 for live news).
+      recency_half_life_days:
+        type: number
+        minimum: 1
+        maximum: 3650
+        default: 30
+        description: Half-life in days for pool-relative temporal freshness decay when recency_weight > 0.
       rerank_endpoint:
         type: string
         format: uri
@@ -131,9 +159,9 @@ configuration:
       rerank_top_k:
         type: integer
         minimum: 1
-        maximum: 100
+        maximum: 400
         default: 50
-        description: Number of top Stage-1 candidates scored with full inverted-pyramid surrogates (lower to 30 for faster latency).
+        description: Number of top Stage-1 candidates scored with full inverted-pyramid surrogates (lower to 30 for faster latency, up to 400).
       rerank_score_space:
         type: string
         enum: [logit, prob]
@@ -168,15 +196,15 @@ configuration:
       rerank_band_start:
         type: integer
         minimum: 0
-        maximum: 100
+        maximum: 400
         default: 30
         description: Start offset (0-indexed) of the Recall Band region straddling the Recall@50 cut (0 uses rerank_top_k).
       rerank_band_end:
         type: integer
         minimum: 0
-        maximum: 100
+        maximum: 400
         default: 80
-        description: End offset of the Recall Band region scored with compact lead views (set 0 to disable Recall Band).
+        description: End offset of the Recall Band region scored with compact lead views (set 0 to disable Recall Band, up to 400).
       rerank_band_max_chars:
         type: integer
         minimum: 200

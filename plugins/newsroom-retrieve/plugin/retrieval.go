@@ -15,7 +15,10 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
-const responseMargin = 50 * time.Millisecond
+const (
+	responseMargin = 50 * time.Millisecond
+	maxCandidates  = 400
+)
 
 const (
 	legDense     = "dense"
@@ -38,6 +41,7 @@ type extraLeg struct {
 type configuration struct {
 	DenseK                  int     `json:"dense_k"`
 	LexicalK                int     `json:"lexical_k"`
+	IncludeLead             *bool   `json:"include_lead"`
 	CleanLexicalQuery       bool    `json:"clean_lexical_query"`
 	Fusion                  string  `json:"fusion"`
 	RRFK                    float64 `json:"rrf_k"`
@@ -52,6 +56,10 @@ type configuration struct {
 	LeadChars               int     `json:"lead_chars"`
 	PassageRatioWeight      float64 `json:"passage_ratio_weight"`
 	PassageSupportWeight    float64 `json:"passage_support_weight"`
+	MetadataOverlapWeight   float64 `json:"metadata_overlap_weight"`
+	DateAlignmentWeight     float64 `json:"date_alignment_weight"`
+	RecencyWeight           float64 `json:"recency_weight"`
+	RecencyHalfLifeDays     float64 `json:"recency_half_life_days"`
 	RerankEndpoint          string  `json:"rerank_endpoint"`
 	RerankProtocol          string  `json:"rerank_protocol"`
 	RerankModel             string  `json:"rerank_model"`
@@ -72,6 +80,13 @@ type configuration struct {
 	CascadeJaccardThreshold float64 `json:"cascade_jaccard_threshold"`
 	CascadeMarginThreshold  float64 `json:"cascade_margin_threshold"`
 	CascadeDGapThreshold    float64 `json:"cascade_dgap_threshold"`
+}
+
+func (c configuration) includeLead() bool {
+	if c.IncludeLead == nil {
+		return true
+	}
+	return *c.IncludeLead
 }
 
 func (c configuration) fallbackOnError() bool {
@@ -101,6 +116,10 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		LeadChars:               250,
 		PassageRatioWeight:      0.10,
 		PassageSupportWeight:    0.12,
+		MetadataOverlapWeight:   0.08,
+		DateAlignmentWeight:     0.06,
+		RecencyWeight:           0,
+		RecencyHalfLifeDays:     30,
 		RerankProtocol:          "tei",
 		RerankTopK:              50,
 		RerankScoreSpace:        "logit",
@@ -262,16 +281,18 @@ func round1Specs(req *quivrplugin.SearchRequest, cfg configuration) ([]namedRequ
 
 	lexK := clampK(cfg.LexicalK, req.Limit)
 	denseK := clampK(cfg.DenseK, req.Limit)
+	includeLead := cfg.includeLead()
 
 	var specs []namedRequest
 	if (mode == "semantic" || mode == "hybrid") && space != nil {
 		specs = append(specs, namedRequest{
 			Name: legDense,
 			Req: quivrplugin.CandidateRequest{
-				Primitive: quivrplugin.PrimitiveNearVector,
-				QueryText: req.Query.Text,
-				Space:     space.ID,
-				K:         denseK,
+				Primitive:   quivrplugin.PrimitiveNearVector,
+				QueryText:   req.Query.Text,
+				Space:       space.ID,
+				K:           denseK,
+				IncludeLead: includeLead,
 			},
 		})
 		if viewQ, ok := denseViewQuery(req.Query.Text, cfg); ok {
@@ -282,11 +303,12 @@ func round1Specs(req *quivrplugin.SearchRequest, cfg configuration) ([]namedRequ
 			specs = append(specs, namedRequest{
 				Name: legDenseView,
 				Req: quivrplugin.CandidateRequest{
-					Primitive: quivrplugin.PrimitiveNearVector,
-					QueryText: viewQ,
-					Space:     space.ID,
-					K:         denseK,
-					GroupBy:   gb,
+					Primitive:   quivrplugin.PrimitiveNearVector,
+					QueryText:   viewQ,
+					Space:       space.ID,
+					K:           denseK,
+					GroupBy:     gb,
+					IncludeLead: includeLead,
 				},
 			})
 		}
@@ -299,22 +321,24 @@ func round1Specs(req *quivrplugin.SearchRequest, cfg configuration) ([]namedRequ
 		specs = append(specs, namedRequest{
 			Name: legLexical,
 			Req: quivrplugin.CandidateRequest{
-				Primitive: quivrplugin.PrimitiveBM25,
-				QueryText: lexQuery,
-				Field:     quivrplugin.FieldSource,
-				K:         lexK,
-				GroupBy:   "record",
+				Primitive:   quivrplugin.PrimitiveBM25,
+				QueryText:   lexQuery,
+				Field:       quivrplugin.FieldSource,
+				K:           lexK,
+				GroupBy:     "record",
+				IncludeLead: includeLead,
 			},
 		})
 		if viewLex, ok := lexicalViewQuery(req.Query.Text, cfg); ok {
 			specs = append(specs, namedRequest{
 				Name: legLexView,
 				Req: quivrplugin.CandidateRequest{
-					Primitive: quivrplugin.PrimitiveBM25,
-					QueryText: viewLex,
-					Field:     quivrplugin.FieldSource,
-					K:         lexK,
-					GroupBy:   "record",
+					Primitive:   quivrplugin.PrimitiveBM25,
+					QueryText:   viewLex,
+					Field:       quivrplugin.FieldSource,
+					K:           lexK,
+					GroupBy:     "record",
+					IncludeLead: includeLead,
 				},
 			})
 		}
@@ -342,8 +366,8 @@ func clampK(configured, limit int) int {
 	if limit > k {
 		k = limit
 	}
-	if k > 100 {
-		k = 100
+	if k > maxCandidates {
+		k = maxCandidates
 	}
 	return k
 }
@@ -364,6 +388,23 @@ func fuseAndScore(
 		if !ok {
 			b = &recordBundle{RecordID: key}
 			byRecord[key] = b
+		}
+		if b.Title == "" {
+			if t := strings.TrimSpace(c.Title); t != "" {
+				b.Title = t
+			}
+		}
+		if b.CommonMetadata == nil && c.CommonMetadata != nil {
+			b.CommonMetadata = c.CommonMetadata
+		}
+		if c.TotalPassages > b.TotalPassages {
+			b.TotalPassages = c.TotalPassages
+		}
+		if lp := strings.TrimSpace(c.LeadPassage); lp != "" {
+			if b.LeadPassage == "" || (fromDense && !b.LeadPassageFromDense) {
+				b.LeadPassage = lp
+				b.LeadPassageFromDense = fromDense
+			}
 		}
 		if isLeadSegment(c) {
 			replace := b.LeadSeg == nil ||
@@ -539,25 +580,27 @@ func fuseAndScore(
 		b.FinalScore = fused
 	}
 
+	var aspects []string
+	if cfg.TitleLeadWeight > 0 || cfg.MetadataOverlapWeight > 0 {
+		aspects = queryAspects(req.Query.Text)
+	}
+
 	// Stage 2: Title + Lead pool-IDF aspect coverage (single-pass tokenization).
-	if cfg.TitleLeadWeight > 0 {
-		aspects := queryAspects(req.Query.Text)
-		if len(aspects) > 0 {
-			titleLeadSets := make([]map[string]bool, len(bundles))
-			for i, b := range bundles {
-				t, l := extractTitleAndLead(b, cfg.LeadChars)
-				if t != "" && l != "" {
-					titleLeadSets[i] = tokenSetOf(t + " " + l)
-				} else if t != "" {
-					titleLeadSets[i] = tokenSetOf(t)
-				} else if l != "" {
-					titleLeadSets[i] = tokenSetOf(l)
-				}
+	if cfg.TitleLeadWeight > 0 && len(aspects) > 0 {
+		titleLeadSets := make([]map[string]bool, len(bundles))
+		for i, b := range bundles {
+			t, l := extractTitleAndLead(b, cfg.LeadChars)
+			if t != "" && l != "" {
+				titleLeadSets[i] = tokenSetOf(t + " " + l)
+			} else if t != "" {
+				titleLeadSets[i] = tokenSetOf(t)
+			} else if l != "" {
+				titleLeadSets[i] = tokenSetOf(l)
 			}
-			idfs := computePoolIDF(aspects, titleLeadSets)
-			for i, b := range bundles {
-				b.FinalScore += cfg.TitleLeadWeight * scoreAspectCoverage(aspects, idfs, titleLeadSets[i])
-			}
+		}
+		idfs := computePoolIDF(aspects, titleLeadSets)
+		for i, b := range bundles {
+			b.FinalScore += cfg.TitleLeadWeight * scoreAspectCoverage(aspects, idfs, titleLeadSets[i])
 		}
 	}
 
@@ -569,11 +612,18 @@ func fuseAndScore(
 				switch {
 				case b.HasUngrouped && b.HasFirstP && b.MaxP > 0:
 					ratio = clamp01(b.FirstP / b.MaxP)
+				case b.HasUngrouped && b.isSinglePassage() && b.MaxP > 0:
+					ratio = 1.0
 				case b.HasUngrouped && !b.HasFirstP && b.MaxP > 0:
 					ratio = clamp01((ungrpFloor * 0.95) / b.MaxP)
+					if depth, ok := passageDepthFactor(b.BestSeg, b.TotalPassages); ok {
+						ratio *= 1.0 - 0.25*depth
+					}
 				default:
-					if isLeadSegment(b.BestSeg) || b.LeadSeg != nil {
+					if b.isSinglePassage() || isLeadSegment(b.BestSeg) || b.LeadSeg != nil {
 						ratio = 0.85
+					} else if depth, ok := passageDepthFactor(b.BestSeg, b.TotalPassages); ok {
+						ratio = 0.55 - 0.30*depth
 					} else {
 						ratio = 0.35
 					}
@@ -583,6 +633,62 @@ func fuseAndScore(
 			if cfg.PassageSupportWeight > 0 && b.PassageCount >= 2 {
 				support := clamp01(math.Log2(float64(b.PassageCount)) / 2.0)
 				b.FinalScore += cfg.PassageSupportWeight * support
+			}
+		}
+	}
+
+	// Stage 4: CommonMetadata boosting (query facet overlap, date-mention
+	// alignment, and optional deterministic pool-relative recency).
+	if cfg.MetadataOverlapWeight > 0 && len(aspects) > 0 {
+		metaSets := make([]map[string]bool, len(bundles))
+		anyMeta := false
+		for i, b := range bundles {
+			if ms := metadataTokenSet(b.CommonMetadata); len(ms) > 0 {
+				metaSets[i] = ms
+				anyMeta = true
+			}
+		}
+		if anyMeta {
+			idfs := computePoolIDF(aspects, metaSets)
+			for i, b := range bundles {
+				if len(metaSets[i]) > 0 {
+					b.FinalScore += cfg.MetadataOverlapWeight * scoreAspectCoverage(aspects, idfs, metaSets[i])
+				}
+			}
+		}
+	}
+	if cfg.DateAlignmentWeight > 0 || cfg.RecencyWeight > 0 {
+		var qDates []queryDate
+		if cfg.DateAlignmentWeight > 0 {
+			qDates = extractQueryDates(req.Query.Text)
+		}
+		if len(qDates) > 0 || cfg.RecencyWeight > 0 {
+			pubTimes := make([]time.Time, len(bundles))
+			hasPub := make([]bool, len(bundles))
+			anyPub := false
+			for i, b := range bundles {
+				if t, ok := parsePublishedAt(b.CommonMetadata); ok {
+					pubTimes[i] = t
+					hasPub[i] = true
+					anyPub = true
+				}
+			}
+			if anyPub {
+				if len(qDates) > 0 {
+					for i, b := range bundles {
+						if hasPub[i] {
+							b.FinalScore += cfg.DateAlignmentWeight * scoreDateAlignment(pubTimes[i], qDates)
+						}
+					}
+				}
+				if cfg.RecencyWeight > 0 {
+					recency := scorePoolRecency(pubTimes, hasPub, cfg.RecencyHalfLifeDays)
+					for i, b := range bundles {
+						if recency[i] > 0 {
+							b.FinalScore += cfg.RecencyWeight * recency[i]
+						}
+					}
+				}
 			}
 		}
 	}

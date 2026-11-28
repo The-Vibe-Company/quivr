@@ -1,5 +1,5 @@
 {
-  "description": "Hybrid mode fuses near_vector and bm25 legs via calibrated convex fusion.",
+  "description": "Hybrid mode fuses near_vector and bm25 legs via calibrated convex fusion with Plugin API 0.21 rich candidate metadata.",
   "retrieval": {
     "query": "harbour strike",
     "mode": "hybrid",
@@ -8,17 +8,43 @@
       {
         "segment_id": "seg_harbour",
         "record_id": "rec_harbour",
-        "text": "Dockers went on strike and the harbour stayed closed."
+        "title": "Harbour strike closes northern port",
+        "text": "Dockers went on strike and the harbour stayed closed.",
+        "passage_ordinal": 0,
+        "total_passages": 2,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2025-03-14T08:00:00Z",
+          "subjects": ["maritime transport"],
+          "tags": ["harbour", "strike"]
+        }
       },
       {
         "segment_id": "seg_ferry",
         "record_id": "rec_ferry",
-        "text": "Ferries stayed in the harbour all day."
+        "title": "Ferry crossings delayed",
+        "text": "Ferries stayed in the harbour all day.",
+        "passage_ordinal": 0,
+        "total_passages": 1,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2025-03-13T12:00:00Z",
+          "subjects": ["ferries"]
+        }
       },
       {
         "segment_id": "seg_rail",
         "record_id": "rec_rail",
-        "text": "The strike spread to the rail network by noon."
+        "title": "Rail strike slows regional trains",
+        "text": "The strike spread to the rail network by noon.",
+        "passage_ordinal": 0,
+        "total_passages": 1,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2025-03-14T11:30:00Z",
+          "subjects": ["rail transport"],
+          "tags": ["strike"]
+        }
       }
     ],
     "order": {

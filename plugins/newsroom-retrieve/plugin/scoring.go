@@ -13,30 +13,39 @@ import (
 // recordBundle aggregates all evidence retrieved for one Record across
 // retrieval legs and ungrouped dense passages.
 type recordBundle struct {
-	RecordID      string
-	BestSeg       quivrplugin.Candidate
-	HasBestSeg    bool
-	LeadSeg       *quivrplugin.Candidate
-	LeadFromDense bool
-	DeepBestSeg   *quivrplugin.Candidate
-	DeepFromDense bool
-	SecondSeg     *quivrplugin.Candidate
-	DenseScore    float64
-	HasDense      bool
-	DenseRank     int
-	LexicalScore  float64
-	HasLexical    bool
-	LexicalRank   int
-	FirstP        float64
-	HasFirstP     bool
-	MaxP          float64
-	HasUngrouped  bool
-	PassageCount  int
-	Extra         map[string]legHit
-	Stage1Score   float64
-	FinalScore    float64
-	LegsMatched   int
-	Explanation   string
+	RecordID             string
+	Title                string
+	CommonMetadata       *quivrplugin.CommonMetadata
+	TotalPassages        int
+	LeadPassage          string
+	LeadPassageFromDense bool
+	BestSeg              quivrplugin.Candidate
+	HasBestSeg           bool
+	LeadSeg              *quivrplugin.Candidate
+	LeadFromDense        bool
+	DeepBestSeg          *quivrplugin.Candidate
+	DeepFromDense        bool
+	SecondSeg            *quivrplugin.Candidate
+	DenseScore           float64
+	HasDense             bool
+	DenseRank            int
+	LexicalScore         float64
+	HasLexical           bool
+	LexicalRank          int
+	FirstP               float64
+	HasFirstP            bool
+	MaxP                 float64
+	HasUngrouped         bool
+	PassageCount         int
+	Extra                map[string]legHit
+	Stage1Score          float64
+	FinalScore           float64
+	LegsMatched          int
+	Explanation          string
+}
+
+func (b *recordBundle) isSinglePassage() bool {
+	return b.TotalPassages == 1
 }
 
 type legHit struct {
@@ -115,7 +124,16 @@ func candidateBodyText(c quivrplugin.Candidate) string {
 	return c.Text
 }
 
+// isLeadSegment reports whether c is the opening/lead segment of its Record.
+// Prefers exact Plugin API 0.21 passage_ordinal/total_passages when populated,
+// falling back gracefully to PartKey/SourceRanges/Start heuristics when nil/0.
 func isLeadSegment(c quivrplugin.Candidate) bool {
+	if c.PassageOrdinal != nil {
+		return *c.PassageOrdinal == 0
+	}
+	if c.TotalPassages == 1 {
+		return true
+	}
 	if c.PartKey == "title" {
 		return true
 	}
@@ -128,6 +146,41 @@ func isLeadSegment(c quivrplugin.Candidate) bool {
 		return false
 	}
 	return c.Start == 0
+}
+
+// passageDepthFactor returns normalized relative depth in (0, 1] for a deep
+// passage when exact passage_ordinal (> 0) and total_passages (> 1) are known.
+func passageDepthFactor(c quivrplugin.Candidate, totalPassages int) (float64, bool) {
+	if c.PassageOrdinal == nil || *c.PassageOrdinal <= 0 {
+		return 0, false
+	}
+	total := totalPassages
+	if c.TotalPassages > total {
+		total = c.TotalPassages
+	}
+	if total <= 1 {
+		return 0, false
+	}
+	return clamp01(float64(*c.PassageOrdinal) / float64(total-1)), true
+}
+
+// stripLeadingTitle removes a duplicated headline line from the start of a
+// packed lead passage when explicit Candidate.Title is already emitted in
+// [TITLE], avoiding repeated headline text without altering inline prose.
+func stripLeadingTitle(title, lead string) string {
+	title = strings.TrimSpace(title)
+	lead = strings.TrimSpace(lead)
+	if title == "" || lead == "" || !strings.HasPrefix(lead, title) {
+		return lead
+	}
+	rest := lead[len(title):]
+	if rest == "" {
+		return ""
+	}
+	if rest[0] == '\n' || rest[0] == '\r' {
+		return strings.TrimSpace(rest)
+	}
+	return lead
 }
 
 // sliceSourceRanges extracts each SourceRange's exact rune span from PassageText
@@ -166,19 +219,26 @@ func sliceSourceRanges(c quivrplugin.Candidate) ([]string, bool) {
 	return parts, true
 }
 
-// extractTitleAndLead returns the headline (when present via PartKey=="title" or
-// packed SourceRanges) and the opening lead excerpt (first leadChars runes of
-// body offset 0).
+// extractTitleAndLead returns the headline (preferring explicit Candidate.Title
+// over PartKey=="title"/SourceRanges heuristics) and the opening lead excerpt
+// (first leadChars runes of the opening passage or hydrated Candidate.LeadPassage).
 func extractTitleAndLead(b *recordBundle, leadChars int) (title, lead string) {
 	if leadChars <= 0 {
 		leadChars = 250
 	}
+	title = strings.TrimSpace(b.Title)
 	inspect := func(c quivrplugin.Candidate) {
+		if title == "" {
+			title = strings.TrimSpace(c.Title)
+		}
 		if parts, ok := sliceSourceRanges(c); ok {
+			leadSeg := isLeadSegment(c)
 			for i, sr := range c.SourceRanges {
-				if sr.PartKey == "title" && title == "" {
-					title = strings.TrimSpace(parts[i])
-				} else if sr.PartKey != "title" && sr.Start == 0 && lead == "" {
+				if sr.PartKey == "title" {
+					if title == "" {
+						title = strings.TrimSpace(parts[i])
+					}
+				} else if lead == "" && (sr.Start == 0 || leadSeg) {
 					lead = truncateRunes(strings.TrimSpace(parts[i]), leadChars)
 				}
 			}
@@ -195,7 +255,7 @@ func extractTitleAndLead(b *recordBundle, leadChars int) (title, lead string) {
 			return
 		}
 		if isLeadSegment(c) && lead == "" {
-			lead = truncateRunes(txt, leadChars)
+			lead = truncateRunes(stripLeadingTitle(title, txt), leadChars)
 		}
 	}
 	if b.LeadSeg != nil {
@@ -204,13 +264,22 @@ func extractTitleAndLead(b *recordBundle, leadChars int) (title, lead string) {
 	if b.HasBestSeg && (b.LeadSeg == nil || b.BestSeg.SegmentID != b.LeadSeg.SegmentID) {
 		inspect(b.BestSeg)
 	}
+	if lead == "" && b.LeadPassage != "" {
+		if leadBody := stripLeadingTitle(title, b.LeadPassage); leadBody != "" {
+			lead = truncateRunes(leadBody, leadChars)
+		}
+	}
 	return title, lead
 }
 
 // extractOpeningParts separates a lead segment into (title, openingBody) cleanly
 // whether the segment is a single body chunk, a title-only chunk, or a packed
-// [title, body@0] segment.
-func extractOpeningParts(c quivrplugin.Candidate) (title, openingBody string) {
+// [title, body@0] segment. Prefers explicitTitle / Candidate.Title when present.
+func extractOpeningParts(c quivrplugin.Candidate, explicitTitle string) (title, openingBody string) {
+	title = strings.TrimSpace(explicitTitle)
+	if title == "" {
+		title = strings.TrimSpace(c.Title)
+	}
 	if parts, ok := sliceSourceRanges(c); ok {
 		var bodyBuf strings.Builder
 		for i, sr := range c.SourceRanges {
@@ -218,8 +287,10 @@ func extractOpeningParts(c quivrplugin.Candidate) (title, openingBody string) {
 			if seg == "" {
 				continue
 			}
-			if sr.PartKey == "title" && title == "" {
-				title = seg
+			if sr.PartKey == "title" {
+				if title == "" {
+					title = seg
+				}
 				continue
 			}
 			if bodyBuf.Len() > 0 {
@@ -231,9 +302,12 @@ func extractOpeningParts(c quivrplugin.Candidate) (title, openingBody string) {
 	}
 	txt := strings.TrimSpace(candidateBodyText(c))
 	if c.PartKey == "title" && len(c.SourceRanges) <= 1 {
-		return txt, ""
+		if title == "" {
+			title = txt
+		}
+		return title, ""
 	}
-	return "", txt
+	return title, stripLeadingTitle(title, txt)
 }
 
 func truncateRunes(s string, maxRunes int) string {
@@ -364,9 +438,13 @@ func buildSurrogate(b *recordBundle, maxChars int) string {
 		return ""
 	}
 	var out strings.Builder
+	explicitTitle := strings.TrimSpace(b.Title)
+	if explicitTitle == "" {
+		explicitTitle = strings.TrimSpace(b.BestSeg.Title)
+	}
 	bestIsLead := isLeadSegment(b.BestSeg)
 	if bestIsLead {
-		title, body := extractOpeningParts(b.BestSeg)
+		title, body := extractOpeningParts(b.BestSeg, explicitTitle)
 		if title != "" {
 			out.WriteString("[TITLE]: ")
 			out.WriteString(truncateRunes(title, min(300, maxChars)))
@@ -386,7 +464,29 @@ func buildSurrogate(b *recordBundle, maxChars int) string {
 			}
 		}
 	} else if b.LeadSeg != nil {
-		title, leadBody := extractOpeningParts(*b.LeadSeg)
+		title, leadBody := extractOpeningParts(*b.LeadSeg, explicitTitle)
+		if title != "" {
+			out.WriteString("[TITLE]: ")
+			out.WriteString(truncateRunes(title, min(300, maxChars/4)))
+		}
+		if leadBody != "" {
+			if out.Len() > 0 {
+				out.WriteString("\n\n")
+			}
+			out.WriteString("[LEAD]: ")
+			out.WriteString(truncateRunes(leadBody, min(600, maxChars/2)))
+		}
+		bestText := strings.TrimSpace(candidateBodyText(b.BestSeg))
+		if bestText != "" {
+			if out.Len() > 0 {
+				out.WriteString("\n\n")
+			}
+			out.WriteString("[MATCHED DEEP PASSAGE]: ")
+			out.WriteString(bestText)
+		}
+	} else if leadText := strings.TrimSpace(b.LeadPassage); leadText != "" {
+		title := explicitTitle
+		leadBody := stripLeadingTitle(title, leadText)
 		if title != "" {
 			out.WriteString("[TITLE]: ")
 			out.WriteString(truncateRunes(title, min(300, maxChars/4)))
@@ -407,6 +507,11 @@ func buildSurrogate(b *recordBundle, maxChars int) string {
 			out.WriteString(bestText)
 		}
 	} else {
+		if explicitTitle != "" {
+			out.WriteString("[TITLE]: ")
+			out.WriteString(truncateRunes(explicitTitle, min(300, maxChars/4)))
+			out.WriteString("\n\n")
+		}
 		bestText := strings.TrimSpace(candidateBodyText(b.BestSeg))
 		out.WriteString("[DEEP BODY EXCERPT — NOT IN ARTICLE LEAD]: ")
 		out.WriteString(bestText)
@@ -424,16 +529,21 @@ func buildLeadView(b *recordBundle, maxChars int) string {
 	if !b.HasBestSeg || maxChars <= 0 {
 		return ""
 	}
-	var leadCand *quivrplugin.Candidate
-	if b.LeadSeg != nil {
-		leadCand = b.LeadSeg
-	} else if isLeadSegment(b.BestSeg) {
-		leadCand = &b.BestSeg
+	explicitTitle := strings.TrimSpace(b.Title)
+	if explicitTitle == "" {
+		explicitTitle = strings.TrimSpace(b.BestSeg.Title)
 	}
-	if leadCand == nil {
+	var title, body string
+	if b.LeadSeg != nil {
+		title, body = extractOpeningParts(*b.LeadSeg, explicitTitle)
+	} else if isLeadSegment(b.BestSeg) {
+		title, body = extractOpeningParts(b.BestSeg, explicitTitle)
+	} else if leadText := strings.TrimSpace(b.LeadPassage); leadText != "" {
+		title = explicitTitle
+		body = stripLeadingTitle(title, leadText)
+	} else {
 		return buildSurrogate(b, maxChars)
 	}
-	title, body := extractOpeningParts(*leadCand)
 	var out strings.Builder
 	if title != "" {
 		out.WriteString("[TITLE]: ")

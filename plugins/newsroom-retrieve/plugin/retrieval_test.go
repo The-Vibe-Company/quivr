@@ -31,16 +31,21 @@ func TestCleanLexicalQueryStripsHyphenatedAndFrenchStopwords(t *testing.T) {
 	}
 }
 
+func intPtr(v int) *int { return &v }
+
 func TestHighPerfDefaultsEnabledOutOfTheBox(t *testing.T) {
 	cfg, err := readConfig(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DenseK != 100 || cfg.LexicalK != 60 || !cfg.CleanLexicalQuery || cfg.Fusion != "convex" {
+	if cfg.DenseK != 100 || cfg.LexicalK != 60 || !cfg.includeLead() || !cfg.CleanLexicalQuery || cfg.Fusion != "convex" {
 		t.Fatalf("unexpected Stage-1 retrieval defaults: %+v", cfg)
 	}
 	if cfg.DenseWeight != 0.65 || cfg.LexicalWeight != 0.35 || cfg.TitleLeadWeight != 0.12 || cfg.LeadChars != 250 || cfg.PassageRatioWeight != 0.10 || cfg.PassageSupportWeight != 0.12 {
 		t.Fatalf("unexpected Stage-1 fusion/aboutness defaults: %+v", cfg)
+	}
+	if cfg.MetadataOverlapWeight != 0.08 || cfg.DateAlignmentWeight != 0.06 || cfg.RecencyWeight != 0 || cfg.RecencyHalfLifeDays != 30 {
+		t.Fatalf("unexpected CommonMetadata defaults: %+v", cfg)
 	}
 	if cfg.DenseViewMode != "question" || cfg.LexicalViewMode != "question" {
 		t.Fatalf("expected multi-view question defaults ON, got dense=%q lex=%q", cfg.DenseViewMode, cfg.LexicalViewMode)
@@ -51,11 +56,17 @@ func TestHighPerfDefaultsEnabledOutOfTheBox(t *testing.T) {
 	if cfg.RerankBandStart != 30 || cfg.RerankBandEnd != 80 || cfg.RerankParallelRequests != 2 {
 		t.Fatalf("expected Recall Band 30..80 and 2-shard defaults ON, got band=%d..%d shards=%d", cfg.RerankBandStart, cfg.RerankBandEnd, cfg.RerankParallelRequests)
 	}
+	if got := clampK(250, 10); got != 250 {
+		t.Fatalf("expected Plugin API 0.21 deep pool k=250 preserved, got %d", got)
+	}
+	if got := clampK(500, 10); got != 400 {
+		t.Fatalf("expected k clamped at max_candidates=400, got %d", got)
+	}
 }
 
 func TestRound1AsksMultiViewForStructuredQuestionsAndTwoLegsForShortQueries(t *testing.T) {
 	r := New()
-	// Short keyword query has no boilerplate -> stays at 2 clean legs.
+	// Short keyword query has no boilerplate -> stays at 2 clean legs with include_lead=true.
 	shortReq := &quivrplugin.SearchRequest{
 		Profile: "default",
 		Round:   1,
@@ -71,13 +82,19 @@ func TestRound1AsksMultiViewForStructuredQuestionsAndTwoLegsForShortQueries(t *t
 	if len(ans.Requests) != 2 {
 		t.Fatalf("expected 2 legs for short keyword query, got %d: %+v", len(ans.Requests), ans.Requests)
 	}
+	for i, req := range ans.Requests {
+		if !req.IncludeLead {
+			t.Fatalf("expected include_lead=true by default on leg %d: %+v", i, req)
+		}
+	}
 
-	// Structured natural-language question automatically triggers question views.
+	// Structured natural-language question automatically triggers question views + deep pool config + opt-out include_lead.
 	richReq := &quivrplugin.SearchRequest{
-		Profile: "default",
-		Round:   1,
-		Limit:   10,
-		Spaces:  []quivrplugin.SearchSpace{{ID: "sp1", Role: "served"}},
+		Profile:       "default",
+		Round:         1,
+		Limit:         10,
+		Configuration: json.RawMessage(`{"dense_k":250,"lexical_k":180,"include_lead":false}`),
+		Spaces:        []quivrplugin.SearchSpace{{ID: "sp1", Role: "served"}},
 	}
 	richReq.Query.Text = "Grève portuaire\nQuelles conséquences de la grève des dockers sur le trafic maritime ?"
 	richReq.Query.Mode = "hybrid"
@@ -88,8 +105,16 @@ func TestRound1AsksMultiViewForStructuredQuestionsAndTwoLegsForShortQueries(t *t
 	if len(ans2.Requests) != 4 {
 		t.Fatalf("expected 4 legs (dense + dense_view + bm25 + lex_view) by default, got %d: %+v", len(ans2.Requests), ans2.Requests)
 	}
+	if ans2.Requests[0].K != 250 || ans2.Requests[2].K != 180 {
+		t.Fatalf("expected deep candidate pool k=(250,180), got (%d,%d)", ans2.Requests[0].K, ans2.Requests[2].K)
+	}
 	if ans2.Requests[1].GroupBy != "record" {
 		t.Fatalf("expected dense_view grouped by record, got %q", ans2.Requests[1].GroupBy)
+	}
+	for i, req := range ans2.Requests {
+		if req.IncludeLead {
+			t.Fatalf("expected include_lead=false when opted out on leg %d: %+v", i, req)
+		}
 	}
 }
 
@@ -375,5 +400,200 @@ func TestRerankEndpointRejectsUserinfoAndFragment(t *testing.T) {
 		if _, err := readConfig(json.RawMessage(`{"rerank_endpoint":"` + bad + `"}`)); err == nil {
 			t.Fatalf("expected invalid rerank_endpoint %q to be rejected", bad)
 		}
+	}
+}
+
+func TestExplicitTitleAndHydratedLeadEnrichAboutnessAndSurrogates(t *testing.T) {
+	deepCand := quivrplugin.Candidate{
+		SegmentID:      "seg_deep_2",
+		RecordID:       "rec_deep",
+		PartKey:        "body",
+		Start:          1800,
+		End:            2400,
+		Title:          "Accord commercial européen",
+		Text:           "Les ministres ont détaillé le calendrier d'application au paragraphe trois.",
+		PassageOrdinal: intPtr(2),
+		TotalPassages:  5,
+		LeadPassage:    "Accord commercial européen\n\nBruxelles et ses partenaires ont signé un accord douanier majeur.",
+		Score:          0.84,
+	}
+	b := &recordBundle{
+		RecordID:      "rec_deep",
+		Title:         deepCand.Title,
+		TotalPassages: deepCand.TotalPassages,
+		LeadPassage:   deepCand.LeadPassage,
+		BestSeg:       deepCand,
+		HasBestSeg:    true,
+	}
+
+	gotTitle, gotLead := extractTitleAndLead(b, 250)
+	if gotTitle != "Accord commercial européen" {
+		t.Fatalf("expected explicit Candidate.Title, got %q", gotTitle)
+	}
+	if gotLead != "Bruxelles et ses partenaires ont signé un accord douanier majeur." {
+		t.Fatalf("expected hydrated LeadPassage with duplicated title line stripped, got %q", gotLead)
+	}
+
+	sur := buildSurrogate(b, 1000)
+	for _, want := range []string{"[TITLE]: Accord commercial européen", "[LEAD]: Bruxelles et ses partenaires", "[MATCHED DEEP PASSAGE]: Les ministres ont détaillé"} {
+		if !strings.Contains(sur, want) {
+			t.Fatalf("expected deep surrogate to contain %q, got %q", want, sur)
+		}
+	}
+	if strings.Contains(sur, "NOT IN ARTICLE LEAD") {
+		t.Fatalf("expected hydrated LeadPassage to replace missing-lead banner, got %q", sur)
+	}
+
+	lv := buildLeadView(b, 600)
+	if !strings.Contains(lv, "[TITLE]: Accord commercial européen") || !strings.Contains(lv, "[LEAD]: Bruxelles et ses partenaires") || strings.Contains(lv, "[MATCHED DEEP PASSAGE]") {
+		t.Fatalf("expected Recall Band lead view built from explicit Title + LeadPassage, got %q", lv)
+	}
+}
+
+func TestExactPassageOrdinalAndTotalPassagesReplaceOffsetHeuristics(t *testing.T) {
+	// PassageOrdinal==0 with Start>0 (e.g. after dateline trim) is still the exact lead.
+	leadAfterDateline := quivrplugin.Candidate{
+		SegmentID:      "s_lead_offset",
+		RecordID:       "r_lead",
+		PartKey:        "body",
+		Start:          120,
+		End:            600,
+		PassageOrdinal: intPtr(0),
+		TotalPassages:  1,
+		Text:           "Grève portuaire à Marseille.",
+		Score:          0.80,
+	}
+	if !isLeadSegment(leadAfterDateline) {
+		t.Fatal("expected PassageOrdinal==0 to be recognized as lead regardless of Start offset")
+	}
+
+	// PassageOrdinal>0 with Start==0 (e.g. a later part starting at offset 0) is NOT the lead.
+	deepPartZero := quivrplugin.Candidate{
+		SegmentID:      "s_deep_zero",
+		RecordID:       "r_deep_early",
+		PartKey:        "sidebar",
+		Start:          0,
+		End:            400,
+		PassageOrdinal: intPtr(1),
+		TotalPassages:  5,
+		Text:           "Rappel sur la grève portuaire.",
+		Score:          0.82,
+	}
+	if isLeadSegment(deepPartZero) {
+		t.Fatal("expected PassageOrdinal>0 to be treated as deep passage even when Start==0")
+	}
+
+	deepTail := quivrplugin.Candidate{
+		SegmentID:      "s_deep_tail",
+		RecordID:       "r_deep_tail",
+		PartKey:        "body",
+		Start:          4000,
+		End:            4500,
+		PassageOrdinal: intPtr(4),
+		TotalPassages:  5,
+		Text:           "Rappel sur la grève portuaire.",
+		Score:          0.82,
+	}
+	floor := quivrplugin.Candidate{
+		SegmentID:      "s_floor",
+		RecordID:       "r_floor",
+		PartKey:        "body",
+		Start:          0,
+		End:            300,
+		PassageOrdinal: intPtr(0),
+		TotalPassages:  2,
+		Text:           "Autre sujet.",
+		Score:          0.40,
+	}
+
+	req := &quivrplugin.SearchRequest{Profile: "default", Round: 2, Limit: 5}
+	req.Query.Text = "grève portuaire"
+	req.Query.Mode = "semantic"
+	cfg, _ := readConfig(json.RawMessage(`{"title_lead_weight":0,"metadata_overlap_weight":0,"date_alignment_weight":0,"passage_ratio_weight":0.30}`))
+	bundles, _ := fuseAndScore(req, cfg, []quivrplugin.Candidate{deepTail, deepPartZero, leadAfterDateline, floor}, nil, nil)
+	if len(bundles) != 4 {
+		t.Fatalf("expected 4 bundles, got %d", len(bundles))
+	}
+	if bundles[0].RecordID != "r_lead" || bundles[1].RecordID != "r_deep_early" || bundles[2].RecordID != "r_deep_tail" {
+		t.Fatalf("expected single-passage lead > early deep (ord 1/5) > buried tail (ord 4/5); got %s, %s, %s",
+			bundles[0].RecordID, bundles[1].RecordID, bundles[2].RecordID)
+	}
+}
+
+func TestCommonMetadataOverlapDateAlignmentAndPoolRecency(t *testing.T) {
+	mkCand := func(id string, score float64, meta *quivrplugin.CommonMetadata) quivrplugin.Candidate {
+		return quivrplugin.Candidate{
+			SegmentID:      "seg_" + id,
+			RecordID:       "rec_" + id,
+			PartKey:        "body",
+			Start:          0,
+			End:            80,
+			Text:           "Communiqué sur le budget public.",
+			PassageOrdinal: intPtr(0),
+			TotalPassages:  1,
+			CommonMetadata: meta,
+			Score:          score,
+		}
+	}
+
+	// 1. Metadata facet overlap + date-mention alignment (EN/FR month+year & year, including lowercase RFC3339 t/z) boost matching candidate.
+	cMatch := mkCand("match", 0.78, &quivrplugin.CommonMetadata{
+		PublishedAt: "2025-03-12t09:00:00z",
+		Subjects:    []string{"finances publiques"},
+		Tags:        []string{"budget"},
+		Place:       []string{"Paris"},
+		Author:      []string{"Claire Moreau"},
+	})
+	cStale := mkCand("stale", 0.80, &quivrplugin.CommonMetadata{
+		PublishedAt: "2021-07-04T09:00:00Z",
+		Subjects:    []string{"sport"},
+		Place:       []string{"Lyon"},
+	})
+	cFloor := mkCand("floor", 0.30, nil)
+
+	req := &quivrplugin.SearchRequest{Profile: "default", Round: 2, Limit: 5}
+	req.Query.Text = "budget Paris mars 2025 Claire Moreau"
+	req.Query.Mode = "semantic"
+
+	cfgOn, _ := readConfig(json.RawMessage(`{"title_lead_weight":0,"passage_ratio_weight":0,"passage_support_weight":0,"metadata_overlap_weight":0.10,"date_alignment_weight":0.08}`))
+	onBundles, _ := fuseAndScore(req, cfgOn, []quivrplugin.Candidate{cStale, cMatch, cFloor}, nil, nil)
+	if onBundles[0].RecordID != "rec_match" {
+		t.Fatalf("expected metadata+date match to outrank stale candidate, got %s first", onBundles[0].RecordID)
+	}
+
+	// Opt-out with 0 weights restores pure Stage-1 dense order.
+	cfgOff, _ := readConfig(json.RawMessage(`{"title_lead_weight":0,"passage_ratio_weight":0,"passage_support_weight":0,"metadata_overlap_weight":0,"date_alignment_weight":0}`))
+	offBundles, _ := fuseAndScore(req, cfgOff, []quivrplugin.Candidate{cStale, cMatch, cFloor}, nil, nil)
+	if offBundles[0].RecordID != "rec_stale" {
+		t.Fatalf("expected 0 weights to disable metadata/date boosting, got %s first", offBundles[0].RecordID)
+	}
+
+	// 2. Opt-in deterministic pool-relative recency boost promotes fresher dispatch when enabled.
+	reqNoDate := &quivrplugin.SearchRequest{Profile: "default", Round: 2, Limit: 5}
+	reqNoDate.Query.Text = "budget public"
+	reqNoDate.Query.Mode = "semantic"
+	cFresh := mkCand("fresh", 0.78, &quivrplugin.CommonMetadata{PublishedAt: "2026-11-27T10:00:00Z"})
+	cOld := mkCand("old", 0.80, &quivrplugin.CommonMetadata{PublishedAt: "2026-06-01T10:00:00Z"})
+
+	cfgDefaultRecency, _ := readConfig(json.RawMessage(`{"title_lead_weight":0,"passage_ratio_weight":0,"passage_support_weight":0,"metadata_overlap_weight":0,"date_alignment_weight":0}`))
+	bArchival, _ := fuseAndScore(reqNoDate, cfgDefaultRecency, []quivrplugin.Candidate{cOld, cFresh, cFloor}, nil, nil)
+	if bArchival[0].RecordID != "rec_old" {
+		t.Fatalf("expected recency_weight=0 default to preserve archival order, got %s first", bArchival[0].RecordID)
+	}
+
+	cfgRecencyOn, _ := readConfig(json.RawMessage(`{"title_lead_weight":0,"passage_ratio_weight":0,"passage_support_weight":0,"metadata_overlap_weight":0,"date_alignment_weight":0,"recency_weight":0.10,"recency_half_life_days":30}`))
+	bLive1, _ := fuseAndScore(reqNoDate, cfgRecencyOn, []quivrplugin.Candidate{cOld, cFresh, cFloor}, nil, nil)
+	bLive2, _ := fuseAndScore(reqNoDate, cfgRecencyOn, []quivrplugin.Candidate{cOld, cFresh, cFloor}, nil, nil)
+	if bLive1[0].RecordID != "rec_fresh" {
+		t.Fatalf("expected recency_weight>0 to boost fresher dispatch, got %s first", bLive1[0].RecordID)
+	}
+	if bLive1[0].FinalScore != bLive2[0].FinalScore {
+		t.Fatalf("pool-relative recency must be strictly deterministic: %f vs %f", bLive1[0].FinalScore, bLive2[0].FinalScore)
+	}
+
+	// 3. Date parser handles EN month-day-year, FR day-month-year, ISO, and standalone years.
+	dates := extractQueryDates("March 14, 2025 summit and 2024-11 review in 2023")
+	if len(dates) != 3 || dates[0] != (queryDate{Year: 2024, Month: 11}) || dates[1] != (queryDate{Year: 2025, Month: 3}) || dates[2] != (queryDate{Year: 2023, Month: 0}) {
+		t.Fatalf("unexpected extracted query dates: %+v", dates)
 	}
 }
