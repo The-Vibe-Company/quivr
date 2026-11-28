@@ -19,12 +19,18 @@ import (
 const ingestionBatchWorkflow = "process-ingestion-batch-v1"
 const ingestionBatchActivity = "process-receipt-batch-v1"
 const ingestionBatchReleaseActivity = "release-receipt-batch-v1"
-const ingestionReceiptConcurrency = 16
 
-// Two waves of sixteen receipts cover a full batch. Four activities admit at
-// most 64 receipts per worker; provider admission remains independently bounded.
-// Each receipt keeps its per-step deadlines; a silent worker is recovered by
-// the heartbeat bound.
+// A receipt holds one of ingestionReceiptConcurrency Stage-1 slots (pin, Run,
+// normalization) only until it is retrieval_ready. Its Stage-2 enrichment then
+// holds one of ingestionEnrichConcurrency slots, so slow embedders never keep
+// ready receipts from freeing Stage-1 slots for their siblings.
+const ingestionReceiptConcurrency = 16
+const ingestionEnrichConcurrency = 16
+
+// Two waves of sixteen receipts cover a full batch in each stage. Four
+// activities admit at most 64 receipts per worker per stage; provider admission
+// remains independently bounded. Each receipt keeps its per-step deadlines; a
+// silent worker is recovered by the heartbeat bound.
 const ingestionBatchTimeout = 4 * (30*time.Second + maxNormalizationRounds*(normalizationActivityTimeout+30*time.Second) + enrichmentActivityTimeout)
 
 // Remaining indexes belong to this activity's input. A nil result from an
@@ -103,32 +109,39 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 				}
 			}
 		}()
-		pending := make(chan int, len(done))
-		for i := range done {
-			if !done[i] {
-				pending <- i
-			}
-		}
-		close(pending)
+		stage1 := make(chan struct{}, ingestionReceiptConcurrency)
+		enrich := make(chan struct{}, ingestionEnrichConcurrency)
 		var wg sync.WaitGroup
 		var failures []error
-		for range min(ingestionReceiptConcurrency, len(done)) {
+	admit:
+		for i := range done {
+			if done[i] {
+				continue
+			}
+			select {
+			case stage1 <- struct{}{}:
+			case <-ctx.Done():
+				break admit
+			}
+			// select picks at random when cancellation and a free slot are
+			// both ready; a cancelled batch admits no further receipt.
+			if ctx.Err() != nil {
+				<-stage1
+				break
+			}
 			wg.Go(func() {
-				for i := range pending {
-					if ctx.Err() != nil {
-						return
-					}
-					err := processBatchedReceipt(ctx, steps, pins, in.Receipts[i])
-					mu.Lock()
-					if err == nil {
-						done[i] = true
-						completed = append(completed, i)
-					} else {
-						failures = append(failures, err)
-					}
-					mu.Unlock()
-					beat()
+				lanes := receiptLanes{retrievalReady: sync.OnceFunc(func() { <-stage1 }), enrich: enrich}
+				defer lanes.retrievalReady()
+				err := processBatchedReceipt(ctx, steps, pins, in.Receipts[i], lanes)
+				mu.Lock()
+				if err == nil {
+					done[i] = true
+					completed = append(completed, i)
+				} else {
+					failures = append(failures, err)
 				}
+				mu.Unlock()
+				beat()
 			})
 		}
 		wg.Wait()
@@ -157,11 +170,19 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 	}, activity.RegisterOptions{Name: ingestionBatchReleaseActivity})
 }
 
-func processBatchedReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch) error {
-	return workqueue.Track(ctx, in.Organization, "ingestion", in.ReceiptID, in.ReceiptID, func(ctx context.Context) error { return processReceipt(ctx, steps, pins, in) })
+// receiptLanes moves one receipt from Stage 1 to Stage 2.
+type receiptLanes struct {
+	retrievalReady func()        // frees the receipt's Stage-1 slot; idempotent
+	enrich         chan struct{} // bounds concurrent Stage-2 enrichment
 }
 
-func processReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch) error {
+func processBatchedReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch, lanes receiptLanes) error {
+	return workqueue.Track(ctx, in.Organization, "ingestion", in.ReceiptID, in.ReceiptID, func(ctx context.Context) error { return processReceipt(ctx, steps, pins, in, lanes) })
+}
+
+// processReceipt runs both stages under one trace, pin and lease. A cancelled
+// batch stops after the current step instead of starting another one.
+func processReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch, lanes receiptLanes) error {
 	parent := trace.SpanContextFromContext(ctx)
 	ctx, span := telemetry.Start(telemetry.Restore(ctx, in.TraceContext), "ingestion.receipt", trace.WithLinks(trace.Link{SpanContext: parent}))
 	defer span.End()
@@ -179,6 +200,9 @@ func processReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Di
 		if round == maxNormalizationRounds {
 			return temporal.NewNonRetryableApplicationError("normalization recorded no outcome", "NormalizationRoundsExceeded", nil)
 		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		attempt, cancel = context.WithTimeout(pinned, normalizationActivityTimeout)
 		err = steps.Normalize(attempt, in.Organization, in.ReceiptID)
 		cancel()
@@ -187,6 +211,18 @@ func processReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Di
 		}
 	}
 	if err != nil {
+		return err
+	}
+	// The receipt is retrieval_ready: a sibling takes its Stage-1 slot while it
+	// waits for an enrichment slot.
+	lanes.retrievalReady()
+	select {
+	case lanes.enrich <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-lanes.enrich }()
+	if err = ctx.Err(); err != nil {
 		return err
 	}
 	attempt, cancel := context.WithTimeout(pinned, enrichmentActivityTimeout)
