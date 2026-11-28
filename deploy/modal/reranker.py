@@ -41,7 +41,9 @@ gpu_image = (modal.Image.debian_slim(python_version='3.12')
              .add_local_file(ROOT / 'reranker_api.py', '/root/reranker_api.py', copy=True))
 
 
-@app.cls(image=gpu_image, gpu=['L4', 'A10G', 'L40S'], cpu=4, memory=8192, timeout=90,
+# Leave host memory for the checkpoint and model tensors during the CPU-to-GPU load.
+@app.cls(image=gpu_image, gpu=['L4', 'A10G', 'L40S'], cpu=4,
+         memory=24576 if MODEL_KIND == 'qwen' else 8192, timeout=90,
          min_containers=MIN_CONTAINERS, max_containers=MAX_CONTAINERS, scaledown_window=60)
 class Reranker:
     @modal.enter()

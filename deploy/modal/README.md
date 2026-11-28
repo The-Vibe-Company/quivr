@@ -143,6 +143,9 @@ to the query and the single relevance logit is used directly.
 
 Configure `newsroom.retrieve` with the full HTTPS `/rerank` URL as
 `rerank_endpoint`, `rerank_protocol: tei`, and the same `RERANKER_API_KEY`
-through the plugin's secret interface. Its default logit score space uses
-the returned margins directly. The combined and API images include
+through the plugin's secret interface. The deep profile defaults to
+`rerank_score_space: logit` and `rerank_ranking: zscore`. It standardizes
+the raw margins and first-stage scores per query before combining them.
+Set the score space to `prob` for sigmoid probabilities. Ranking modes also
+include `linear`, `rrf`, and `rerank_only`. The combined and API images include
 `quivr-newsroom-retrieve` for opt-in registration.
