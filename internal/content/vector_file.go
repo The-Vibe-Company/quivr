@@ -53,6 +53,8 @@ type vectorFileWriter interface {
 }
 
 type vectorFileReader interface {
+	// ReadVectorFile, like Blobs.Read, returns immutable bytes verified
+	// against the Blob's size and SHA-256, up to MaxVectorFileBytes.
 	ReadVectorFile(context.Context, Blob) ([]byte, error)
 }
 
@@ -227,7 +229,7 @@ func (s Service) readVectorFileBytes(ctx context.Context, f EmbeddingFile) ([]by
 		return nil, err
 	}
 	// Both readers return bytes already verified against the Blob's SHA-256
-	// (see Blobs.Read); hashing a 256 MiB matrix again is pure overhead.
+	// (Blobs.Read, vectorFileReader); hashing up to 256 MiB again is overhead.
 	if int64(len(raw)) != f.Blob.Size {
 		return nil, ErrArtifactCorrupt
 	}
