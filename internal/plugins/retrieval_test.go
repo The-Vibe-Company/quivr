@@ -115,3 +115,51 @@ func TestRetrievalProfileAliases(t *testing.T) {
 		})
 	}
 }
+
+// CheckSearchOutput enforces Plugin API 0.21 gates for k > 100 and include_lead
+// so older plugins cannot opt into 0.21 wire features without declaring 0.21.
+func TestCheckSearchOutputPluginAPI021Gates(t *testing.T) {
+	req := plugins.SearchRequest{Round: 1, Limit: 10}
+	manifest := func(apiRange string, maxCand int) *plugins.Manifest {
+		return &plugins.Manifest{
+			ID:            "example.retriever",
+			Version:       "1.0.0",
+			Compatibility: plugins.Compatibility{Engine: ">=0.1.0 <0.3.0", PluginAPI: apiRange},
+			Requires:      []plugins.Requirement{{Plugin: "core.retrieve", Version: ">=0.1.0 <1.0.0", Profiles: []string{"default"}}},
+			Contributions: plugins.Contributions{
+				Retrieval: &plugins.Retrieval{
+					Profiles: map[string]plugins.RetrievalProfile{"default": {MaxLatencyMS: 500}},
+					Limits:   plugins.RetrievalLimits{MaxRounds: 2, MaxRequests: 4, MaxCandidates: maxCand, MaxResponseBytes: 1 << 20},
+				},
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		apiRange string
+		maxCand  int
+		body     string
+		wantCode string
+	}{
+		{name: "0.21 accepts k=250 and include_lead", apiRange: ">=0.21.0 <0.22.0", maxCand: 300, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":250,"include_lead":true}]}`},
+		{name: "0.21 accepts include_lead on profile", apiRange: ">=0.21.0 <0.22.0", maxCand: 50, body: `{"requests":[{"primitive":"profile","profile":{"name":"core.retrieve/default","limit":10},"include_lead":true}]}`},
+		{name: "0.21 rejects k above max_candidates", apiRange: ">=0.21.0 <0.22.0", maxCand: 200, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":250}]}`, wantCode: plugins.CodeCandidateLimit},
+		{name: "0.20 rejects k above 100", apiRange: ">=0.20.0 <0.21.0", maxCand: 300, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":150}]}`, wantCode: plugins.CodeCandidateLimit},
+		{name: "0.20 rejects include_lead", apiRange: ">=0.20.0 <0.21.0", maxCand: 50, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":10,"include_lead":true}]}`, wantCode: plugins.CodeIncompatiblePluginAPI},
+		{name: "wide range rejects include_lead", apiRange: ">=0.7.0 <0.22.0", maxCand: 50, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":10,"include_lead":true}]}`, wantCode: plugins.CodeIncompatiblePluginAPI},
+		{name: "k above 400 fails schema", apiRange: ">=0.21.0 <0.22.0", maxCand: 400, body: `{"requests":[{"primitive":"bm25","query_text":"harbour","k":401}]}`, wantCode: plugins.CodeSchema},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issues := plugins.CheckSearchOutput([]byte(tc.body), req, manifest(tc.apiRange, tc.maxCand))
+			if tc.wantCode == "" {
+				if len(issues) > 0 {
+					t.Fatalf("unexpected issues: %+v", issues)
+				}
+				return
+			}
+			if len(issues) == 0 || issues[0].Code != tc.wantCode {
+				t.Fatalf("issues = %+v, want code %q", issues, tc.wantCode)
+			}
+		})
+	}
+}

@@ -22,6 +22,12 @@ func TestHydrateSQLMergesPackedSourcesAndScopeFence(t *testing.T) {
 		"WHERE sr.part_key<>c.part_key AND (vp.organization,vp.version_id,vp.part_key)>=(c.organization,sg.version_id,sr.part_key)",
 		"WHERE sr.part_key<>c.part_key AND sp.blob_id IS NOT NULL AND (cb.organization,cb.blob_id)>=(c.organization,sp.blob_id)",
 		"WHERE (sr.part_key=c.part_key AND b.blob_id IS NOT NULL) OR sb.blob_id IS NOT NULL",
+		"'ordinal',coalesce((c.derivation->>'ordinal')::integer,0)",
+		"v.extensions->'quivr.metadata'->'data' AS common_metadata",
+		"coalesce(ar.title,'')",
+		"FROM accepted_revisions ar",
+		"FROM segmentations s",
+		"coalesce(s.segment_count,0)",
 	} {
 		if !strings.Contains(hydrateSQL, fragment) {
 			t.Fatalf("hydrateSQL missing expected clause %q", fragment)

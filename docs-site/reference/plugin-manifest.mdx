@@ -116,7 +116,7 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.retrieval.limits` | object | no | — |
 | `contributions.retrieval.limits.max_rounds` | integer | no | Most rounds of one search; the last round must return a ranking. 1 to 3. Default `3`. |
 | `contributions.retrieval.limits.max_requests` | integer | no | Most candidate requests of one round. 1 to 8. Default `4`. |
-| `contributions.retrieval.limits.max_candidates` | integer | no | Largest k of one candidate request. 1 to 100. Default `50`. |
+| `contributions.retrieval.limits.max_candidates` | integer | no | Largest k of one candidate request. Values above 100 require Plugin API 0.21. 1 to 400. Default `50`. |
 | `contributions.retrieval.limits.max_response_bytes` | integer | no | 1024 to 4194304. Default `1048576`. |
 
 ## Reserved contributions

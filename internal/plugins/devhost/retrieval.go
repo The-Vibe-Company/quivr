@@ -38,12 +38,17 @@ func IsRetrievalFixture(raw []byte) bool {
 
 // FixtureCandidate is one segment of a retrieval fixture's catalogue.
 type FixtureCandidate struct {
-	SegmentID       string   `json:"segment_id"`
-	RecordID        string   `json:"record_id"`
-	SourceNamespace string   `json:"source_namespace,omitempty"`
-	Text            string   `json:"text"`
-	Score           *float64 `json:"score,omitempty"`
-	Explanation     string   `json:"explanation,omitempty"`
+	SegmentID       string          `json:"segment_id"`
+	RecordID        string          `json:"record_id"`
+	SourceNamespace string          `json:"source_namespace,omitempty"`
+	Text            string          `json:"text"`
+	Score           *float64        `json:"score,omitempty"`
+	Explanation     string          `json:"explanation,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	CommonMetadata  json.RawMessage `json:"common_metadata,omitempty"`
+	PassageOrdinal  *int            `json:"passage_ordinal,omitempty"`
+	TotalPassages   int             `json:"total_passages,omitempty"`
+	LeadPassage     string          `json:"lead_passage,omitempty"`
 }
 
 type retrievalFixture struct {
@@ -72,6 +77,7 @@ type RetrievalRun struct {
 	candidates []FixtureCandidate
 	order      map[string][]string
 	short      string
+	rich       bool
 }
 
 // BuildRetrievalRun turns retrieval fixture bytes into a development search.
@@ -151,7 +157,7 @@ func BuildRetrievalRun(raw []byte, m *plugins.Manifest) (*RetrievalRun, []plugin
 	}
 	sum := sha256.Sum256(raw)
 	short := hex.EncodeToString(sum[:])[:16]
-	run := &RetrievalRun{Profiles: profiles, candidates: in.Candidates, order: in.Order, short: short,
+	run := &RetrievalRun{Profiles: profiles, candidates: in.Candidates, order: in.Order, short: short, rich: m.SupportsRichRetrievalCandidates(),
 		first: plugins.SearchRequest{OrganizationID: "dev-organization", Configuration: config, Query: plugins.SearchQuery{Text: in.Query, Mode: mode},
 			Limit: limit, Scope: plugins.SearchScope{CorpusIDs: []string{"dev-corpus"}}, Spaces: spaces}}
 	if in.Expect != nil {
@@ -225,13 +231,54 @@ func (r *RetrievalRun) Serve(c plugins.CandidateRequest) []plugins.Candidate {
 			}
 			explanation = f.Explanation
 		}
-		out = append(out, plugins.Candidate{SegmentID: f.SegmentID, RecordID: f.RecordID, VersionID: "dev-version-" + f.RecordID, PartKey: "body",
-			Text: f.Text, End: utf8.RuneCountInString(f.Text), Score: score, Explanation: explanation})
+		cand := plugins.Candidate{
+			SegmentID:   f.SegmentID,
+			RecordID:    f.RecordID,
+			VersionID:   "dev-version-" + f.RecordID,
+			PartKey:     "body",
+			Text:        f.Text,
+			End:         utf8.RuneCountInString(f.Text),
+			Score:       score,
+			Explanation: explanation,
+		}
+		if r.rich {
+			cand.Title = f.Title
+			cand.CommonMetadata = f.CommonMetadata
+			cand.PassageOrdinal = f.PassageOrdinal
+			cand.TotalPassages = f.TotalPassages
+			if c.IncludeLead && f.PassageOrdinal != nil && *f.PassageOrdinal > 0 {
+				if f.LeadPassage != "" {
+					cand.LeadPassage = truncateRunes(f.LeadPassage, 16384)
+				} else {
+					for _, other := range r.candidates {
+						if other.RecordID == f.RecordID && other.SegmentID != f.SegmentID && other.PassageOrdinal != nil && *other.PassageOrdinal == 0 {
+							cand.LeadPassage = truncateRunes(other.Text, 16384)
+							break
+						}
+					}
+				}
+			}
+		}
+		out = append(out, cand)
 		if len(out) == c.Limit() {
 			break
 		}
 	}
 	return out
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	count := 0
+	for i := range s {
+		if count == maxRunes {
+			return s[:i]
+		}
+		count++
+	}
+	return s
 }
 
 func wordSet(text string) map[string]bool {

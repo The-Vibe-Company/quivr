@@ -693,9 +693,9 @@
             "max_candidates": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
+              "maximum": 400,
               "default": 50,
-              "description": "Largest k of one candidate request."
+              "description": "Largest k of one candidate request. Values above 100 require Plugin API 0.21."
             },
             "max_response_bytes": {
               "type": "integer",

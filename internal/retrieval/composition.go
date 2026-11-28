@@ -252,11 +252,22 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 		}
 	}
 	out := make([]plugins.Candidate, 0, len(result.Hits))
+	outHydrated := make([]content.Hydrated, 0, len(result.Hits))
 	sv.mu.Lock()
 	for _, h := range result.Hits {
 		sv.hydrated[h.Segment.ID] = h.Hydrated
 		out = append(out, sv.candidate(h.Hydrated, h.Score, h.Explanation))
+		outHydrated = append(outHydrated, h.Hydrated)
 	}
 	sv.mu.Unlock()
+	if c.IncludeLead && sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		// Use innerCtx so lead lookup/hydration stays inside the inner budget
+		// and preserves profileReturnMargin for the outer ranker to finish its round.
+		leadDur, err := sv.attachLeads(innerCtx, q, out, outHydrated)
+		phases.Hydration += leadDur
+		if err != nil {
+			return nil, nil, phases, err
+		}
+	}
 	return out, fallback, phases, nil
 }

@@ -981,9 +981,10 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 // lookup per wave so Postgres and blob reads are never duplicated across legs.
 func (sv *server) hydrateRound(ctx context.Context, q Request, requests []plugins.CandidateRequest, fetched []*fetchedCandidates, served [][]plugins.Candidate) error {
 	type legState struct {
-		next    int
-		out     []plugins.Candidate
-		records map[string]bool
+		next     int
+		out      []plugins.Candidate
+		hydrated []content.Hydrated
+		records  map[string]bool
 	}
 	routed := make(map[string]Route, len(sv.routes))
 	for _, r := range sv.routes {
@@ -995,7 +996,7 @@ func (sv *server) hydrateRound(ctx context.Context, q Request, requests []plugin
 		if fc == nil {
 			continue
 		}
-		states[i] = &legState{out: []plugins.Candidate{}, records: map[string]bool{}}
+		states[i] = &legState{out: []plugins.Candidate{}, hydrated: []content.Hydrated{}, records: map[string]bool{}}
 		if len(fc.unique) > 0 && requests[i].K > 0 {
 			active = true
 		}
@@ -1093,10 +1094,28 @@ func (sv *server) hydrateRound(ctx context.Context, q Request, requests []plugin
 					st.records[h.RecordID] = true
 				}
 				st.out = append(st.out, sv.candidate(h, f.Score, ""))
+				st.hydrated = append(st.hydrated, h)
 				sv.chain.addVisibleCandidate(visibilityCandidate(h, q))
 				if len(st.out) == c.K {
 					break
 				}
+			}
+		}
+	}
+	if sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		var leadOuts [][]plugins.Candidate
+		var leadHydrated [][]content.Hydrated
+		for i, st := range states {
+			if st != nil && requests[i].IncludeLead && len(st.out) > 0 {
+				leadOuts = append(leadOuts, st.out)
+				leadHydrated = append(leadHydrated, st.hydrated)
+			}
+		}
+		if len(leadOuts) > 0 {
+			leadDur, err := sv.attachLeadsBatch(ctx, q, leadOuts, leadHydrated)
+			sv.timing.Hydration += leadDur
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -1279,5 +1298,140 @@ func (sv *server) candidate(h content.Hydrated, score float64, explanation strin
 			Label:            r.Label,
 		}
 	}
+	if sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		if title := truncateRunes(h.Title, maxCandidateTitleRunes); title != "" {
+			c.Title = title
+		}
+		if len(h.CommonMetadata) > 0 && h.CommonMetadata[0] == '{' && string(h.CommonMetadata) != "{}" {
+			c.CommonMetadata = h.CommonMetadata
+		}
+		ord := max(0, h.Segment.Derivation.Ordinal)
+		c.PassageOrdinal = &ord
+		if h.TotalPassages > 0 {
+			c.TotalPassages = h.TotalPassages
+		}
+	}
 	return c
+}
+
+const (
+	maxCandidateTitleRunes       = 1024
+	maxCandidateLeadPassageRunes = 16384
+)
+
+func truncateRunes(s string, maxRunes int) string {
+	if s == "" || maxRunes <= 0 {
+		return ""
+	}
+	if len(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes])
+}
+
+// attachLeads hydrates the opening (ordinal 0) text segment for each served
+// candidate whose passage_ordinal > 0, reusing the search's hydration cache and
+// enforcing every canonical authorization, currentness, and routing fence.
+// It returns the hydration time spent rather than mutating sv.timing so callers
+// running in concurrent round goroutines (such as serveProfile) stay race-free.
+func (sv *server) attachLeads(ctx context.Context, q Request, out []plugins.Candidate, hydrated []content.Hydrated) (time.Duration, error) {
+	if len(out) == 0 || len(out) != len(hydrated) {
+		return 0, nil
+	}
+	return sv.attachLeadsBatch(ctx, q, [][]plugins.Candidate{out}, [][]content.Hydrated{hydrated})
+}
+
+func (sv *server) attachLeadsBatch(ctx context.Context, q Request, outs [][]plugins.Candidate, hydrateds [][]content.Hydrated) (time.Duration, error) {
+	if len(outs) == 0 || len(outs) != len(hydrateds) {
+		return 0, nil
+	}
+	var refs []content.LeadSegmentRef
+	seenSeg := map[string]bool{}
+	for leg, hydrated := range hydrateds {
+		if len(outs[leg]) == 0 || len(outs[leg]) != len(hydrated) {
+			continue
+		}
+		for _, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 || h.SegmentationID == "" || h.VersionID == "" || seenSeg[h.SegmentationID] {
+				continue
+			}
+			seenSeg[h.SegmentationID] = true
+			refs = append(refs, content.LeadSegmentRef{VersionID: h.VersionID, SegmentationID: h.SegmentationID})
+		}
+	}
+	if len(refs) == 0 {
+		return 0, nil
+	}
+	var elapsed time.Duration
+	phase := time.Now()
+	leadIDs, err := sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+	elapsed += time.Since(phase)
+	if err != nil {
+		return elapsed, ErrUnavailable
+	}
+	if len(leadIDs) == 0 {
+		return elapsed, nil
+	}
+	var batch []content.Candidate
+	segToLeadIdx := map[string]int{}
+	for leg, hydrated := range hydrateds {
+		if len(outs[leg]) == 0 || len(outs[leg]) != len(hydrated) {
+			continue
+		}
+		for _, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 {
+				continue
+			}
+			leadID, ok := leadIDs[h.SegmentationID]
+			if !ok || leadID == "" || leadID == h.Segment.ID {
+				continue
+			}
+			if _, queued := segToLeadIdx[h.SegmentationID]; queued {
+				continue
+			}
+			segToLeadIdx[h.SegmentationID] = len(batch)
+			batch = append(batch, content.Candidate{
+				SegmentID:        leadID,
+				GenerationID:     h.GenerationID,
+				EvaluationPlugin: q.EvaluationPlugin,
+				EvaluationSpace:  q.Space,
+			})
+		}
+	}
+	if len(batch) == 0 {
+		return elapsed, nil
+	}
+	phase = time.Now()
+	leadHydrated, err := sv.hydrate(ctx, batch)
+	elapsed += time.Since(phase)
+	if err != nil {
+		return elapsed, err
+	}
+	for leg, hydrated := range hydrateds {
+		out := outs[leg]
+		if len(out) == 0 || len(out) != len(hydrated) {
+			continue
+		}
+		for i, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 {
+				continue
+			}
+			idx, ok := segToLeadIdx[h.SegmentationID]
+			if !ok {
+				continue
+			}
+			lh, ok := leadHydrated[idx]
+			if !ok || lh.Segment.ID == h.Segment.ID {
+				continue
+			}
+			if text := truncateRunes(lh.Segment.Text, maxCandidateLeadPassageRunes); text != "" {
+				out[i].LeadPassage = text
+			}
+		}
+	}
+	return elapsed, nil
 }

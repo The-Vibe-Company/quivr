@@ -66,7 +66,7 @@ DEFAULT_SHUTDOWN_TIMEOUT = 30.0
 MAX_REQUEST_BYTES = 1 << 20
 # A subscription request carries the text of a Record Version; the core keeps it within 16 MiB.
 MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
-MAX_RETRIEVAL_REQUEST_BYTES = 16 << 20
+MAX_RETRIEVAL_REQUEST_BYTES = 64 << 20
 
 
 def max_request_bytes(path: str) -> int:
@@ -497,6 +497,11 @@ class Plugin:
         problems = protocol_errors("retrieval-search-response.schema.json", result)
         if problems:
             return _error(500, "invalid_response", "the retrieval response violates the protocol")
+        for req_item in result.get("requests") or ():
+            if (req_item.get("k") or 0) > 100 and not self.manifest.strictly_speaks("deep_candidate_pools"):
+                return _error(500, "invalid_response", f"k above 100 requires Plugin API {FEATURE_SINCE['deep_candidate_pools']}")
+            if req_item.get("include_lead") and not self.manifest.strictly_speaks("rich_retrieval_candidates"):
+                return _error(500, "invalid_response", f"include_lead requires Plugin API {FEATURE_SINCE['rich_retrieval_candidates']}")
         return Reply(200, result)
 
     def invoke(self, request: NormalizerRequest | dict[str, Any]) -> Reply:

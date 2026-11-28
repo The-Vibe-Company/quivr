@@ -1205,6 +1205,95 @@ func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 	}
 }
 
+// Deep candidate pools (k > 100, up to 400 in Plugin API 0.21) scale scan
+// ceilings cleanly without saturating at 512/600.
+func TestItemSearchScalesScanCapsForDeepCandidatePools(t *testing.T) {
+	parseLim := func(query string) int {
+		idx := strings.LastIndex(query, "limit:")
+		if idx < 0 {
+			return -1
+		}
+		rest := query[idx+len("limit:"):]
+		if end := strings.IndexAny(rest, "), }"); end > 0 {
+			rest = rest[:end]
+		}
+		n, _ := strconv.Atoi(rest)
+		return n
+	}
+
+	t.Run("grouped dense search refills past 600 when k > 100", func(t *testing.T) {
+		var seenDenseLimits []int
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLim(query)
+			seenDenseLimits = append(seenDenseLimits, lim)
+			// Return lim rows belonging to only 100 versions on the first wave so grouped
+			// dense search must refill beyond 600 to reach limit=600 unique versions.
+			rows := make([]itemSearchRow, lim)
+			d := 0.1
+			for i := range rows {
+				ver := fmt.Sprintf("v-%04d", i%100)
+				if lim > 600 {
+					ver = fmt.Sprintf("v-%04d", i)
+				}
+				rows[i] = itemSearchRow{Segment: fmt.Sprintf("seg-%04d", i), Version: ver, Distance: &d}
+			}
+			return itemSearchResponse(rows), nil
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "semantic", Vector: []float32{1}, GroupBy: "record", Limit: 200, K: 600,
+		})
+		if err != nil {
+			t.Fatalf("deep dense search failed: %v", err)
+		}
+		if len(hits) != 600 {
+			t.Fatalf("got %d hits, want 600", len(hits))
+		}
+		if len(seenDenseLimits) < 2 || seenDenseLimits[0] != 600 || seenDenseLimits[1] != 1200 {
+			t.Fatalf("dense scan limits = %v, want refill [600 1200]", seenDenseLimits)
+		}
+	})
+
+	t.Run("grouped sparse tail scan scales past 512 for 400-candidate pools", func(t *testing.T) {
+		const totalItems = 400
+		bm25Rows := make([]itemSearchRow, totalItems)
+		passages := make([]itemSearchRow, totalItems)
+		for i := range totalItems {
+			ver := fmt.Sprintf("v-%04d", i)
+			bm25Rows[i] = itemSearchRow{Version: ver, Score: fmt.Sprintf("%.2f", float64(totalItems-i))}
+			passages[i] = itemSearchRow{Segment: fmt.Sprintf("seg-%04d", i), Version: ver}
+		}
+		var maxPassageLimit int
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			lim := parseLim(query)
+			if strings.Contains(query, "bm25:") {
+				return itemSearchResponse(bm25Rows), nil
+			}
+			if lim > maxPassageLimit {
+				maxPassageLimit = lim
+			}
+			var out []itemSearchRow
+			for _, row := range passages {
+				if matchesFieldFilter(query, "versionId", row.Version) {
+					out = append(out, row)
+				}
+			}
+			return itemSearchResponse(out), nil
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: 200, K: 400,
+		})
+		if err != nil {
+			t.Fatalf("deep sparse search failed: %v", err)
+		}
+		if len(hits) != totalItems {
+			t.Fatalf("got %d hits, want %d", len(hits), totalItems)
+		}
+		if maxPassageLimit <= 512 {
+			t.Fatalf("max passage scan limit = %d, want > 512 for 400-item tail", maxPassageLimit)
+		}
+	})
+}
+
 // Regression test for BM25F stopword masking: analyzed fields (e.g. french_light)
 // must not also run on the unfiltered raw branch where stopwords inflate raw BM25
 // and mask stemmed matches; an all-stopword query falls back to raw fields.

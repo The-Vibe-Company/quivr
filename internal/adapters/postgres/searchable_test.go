@@ -366,7 +366,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 		// A private copy of the hot tables gives every run genuinely empty
 		// statistics, independent of test order and autovacuum on public tables.
 		// LIKE retains the real indexes; no production hook or global tuning.
-		for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "corpora", "corpus_projection_routes", "accepted_revisions", "tombstones", "routing_coverage_gaps"} {
+		for _, table := range []string{"segments", "segmentations", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "corpora", "corpus_projection_routes", "accepted_revisions", "tombstones", "routing_coverage_gaps"} {
 			if _, err := conn.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL); ANALYZE "+table); err != nil {
 				return err
 			}
@@ -386,7 +386,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	// both choices. Repeat with current statistics so ANALYZE cannot regress it.
 	for _, statistics := range []string{"empty", "analyzed"} {
 		if statistics == "analyzed" {
-			if _, err = explained.Exec(ctx, `ANALYZE segments, record_versions, records, version_parts, content_blobs, projection_coverage, corpora, corpus_projection_routes, accepted_revisions, tombstones, routing_coverage_gaps`); err != nil {
+			if _, err = explained.Exec(ctx, `ANALYZE segments, segmentations, record_versions, records, version_parts, content_blobs, projection_coverage, corpora, corpus_projection_routes, accepted_revisions, tombstones, routing_coverage_gaps`); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -492,7 +492,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Copy the new packed rows into pg_temp so auto_explain observes the merged SQL.
-	for _, table := range []string{"segments", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "accepted_revisions"} {
+	for _, table := range []string{"segments", "segmentations", "record_versions", "records", "version_parts", "content_blobs", "projection_coverage", "accepted_revisions"} {
 		if _, err := explained.Exec(ctx, "TRUNCATE pg_temp."+table); err != nil {
 			t.Fatal(err)
 		}

@@ -333,6 +333,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 		if rc.Limits.MaxCandidates == 0 {
 			rc.Limits.MaxCandidates = 50
 		}
+		if rc.Limits.MaxCandidates > 100 && !strictlySpeaksRange(m.Compatibility.PluginAPI, "deep_candidate_pools") {
+			return nil, fmt.Errorf("%s: contributions.retrieval.limits.max_candidates above 100 requires a plugin_api range admitting only Plugin API %s or later", path, FeatureSince["deep_candidate_pools"])
+		}
 		if rc.Limits.MaxResponseBytes == 0 {
 			rc.Limits.MaxResponseBytes = 1 << 20
 		}
@@ -468,6 +471,51 @@ func negotiate(r string) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+// strictlySpeaksRange reports whether every supported Plugin API version
+// admitted by r (and at least one) speaks feature.
+func strictlySpeaksRange(r, feature string) bool {
+	fields := strings.Fields(r)
+	if len(fields) == 0 {
+		return false
+	}
+	type cmp struct{ op, version string }
+	var cmps []cmp
+	for _, f := range fields {
+		m := comparator.FindStringSubmatch(f)
+		if m == nil {
+			return false
+		}
+		cmps = append(cmps, cmp{m[1], m[2] + "." + m[3] + "." + m[4]})
+	}
+	admitted := false
+	for _, v := range SupportedPluginAPIVersions {
+		ok := true
+		for _, c := range cmps {
+			d := compareVersions(v, c.version)
+			switch c.op {
+			case ">=":
+				ok = ok && d >= 0
+			case ">":
+				ok = ok && d > 0
+			case "<=":
+				ok = ok && d <= 0
+			case "<":
+				ok = ok && d < 0
+			default:
+				ok = ok && d == 0
+			}
+		}
+		if !ok {
+			continue
+		}
+		admitted = true
+		if !resolveAPIFeatures(v).speaks(feature) {
+			return false
+		}
+	}
+	return admitted
 }
 
 // compareVersions orders MAJOR.MINOR.PATCH release versions.

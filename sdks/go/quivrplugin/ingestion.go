@@ -265,9 +265,10 @@ func RetryableIngestError(code, message string) *IngestError {
 // readIngestion reads and validates a request against a protocol schema and
 // the configuration schema; it answers the refusal itself and returns false.
 func (p *Plugin) readIngestion(w http.ResponseWriter, r *http.Request, schema string, into any) bool {
+	limit := requestLimit(r.URL.Path)
 	body, err := requestBody(r)
-	if err != nil || len(body) > maxRequestBytes {
-		refuse(w, 400, "invalid_request", "the request body is unreadable or larger than 16 MiB", Credential{})
+	if err != nil || int64(len(body)) > limit {
+		refuse(w, 400, "invalid_request", fmt.Sprintf("the request body is unreadable or larger than %d MiB", limit>>20), Credential{})
 		return false
 	}
 	if err := validate(schema, body); err != nil {

@@ -23,6 +23,8 @@ const (
 	MaxRetrievalRounds               = 3
 	DefaultMaxRetrievalRequests      = 4
 	DefaultMaxRetrievalCandidates    = 50
+	LegacyMaxRetrievalCandidates     = 100
+	MaxRetrievalCandidates           = 400
 	DefaultRetrievalMaxResponseBytes = 1 << 20
 	EngineRetrievalMaxResponseBytes  = 4 << 20
 )
@@ -154,17 +156,18 @@ func retrievalMaxCandidates(m *Manifest) int {
 
 // CandidateRequest is one request for candidates.
 type CandidateRequest struct {
-	Primitive string             `json:"primitive"`
-	QueryText string             `json:"query_text,omitempty"`
-	Vector    []float64          `json:"vector,omitempty"`
-	Space     string             `json:"space,omitempty"`
-	Field     string             `json:"field,omitempty"`
-	Alpha     *float64           `json:"alpha,omitempty"`
-	Fusion    string             `json:"fusion,omitempty"`
-	K         int                `json:"k,omitempty"`
-	Profile   *ProfileCandidates `json:"profile,omitempty"`
-	Filter    *CandidateFilter   `json:"filter,omitempty"`
-	GroupBy   string             `json:"group_by,omitempty"`
+	Primitive   string             `json:"primitive"`
+	QueryText   string             `json:"query_text,omitempty"`
+	Vector      []float64          `json:"vector,omitempty"`
+	Space       string             `json:"space,omitempty"`
+	Field       string             `json:"field,omitempty"`
+	Alpha       *float64           `json:"alpha,omitempty"`
+	Fusion      string             `json:"fusion,omitempty"`
+	K           int                `json:"k,omitempty"`
+	Profile     *ProfileCandidates `json:"profile,omitempty"`
+	Filter      *CandidateFilter   `json:"filter,omitempty"`
+	GroupBy     string             `json:"group_by,omitempty"`
+	IncludeLead bool               `json:"include_lead,omitempty"`
 }
 
 // ProfileCandidates asks the engine to run a declared full profile name.
@@ -213,19 +216,24 @@ func (c CandidateRequest) EffectiveFusion() string {
 
 // Candidate is one served candidate: an authorized, current segment.
 type Candidate struct {
-	SegmentID       string        `json:"segment_id"`
-	RecordID        string        `json:"record_id"`
-	VersionID       string        `json:"version_id"`
-	PartKey         string        `json:"part_key"`
-	Text            string        `json:"text"`
-	Start           int           `json:"start"`
-	End             int           `json:"end"`
-	PassageText     string        `json:"passage_text,omitempty"`
-	SourceRanges    []SourceRange `json:"source_ranges,omitempty"`
-	SourceSeparator string        `json:"source_separator,omitempty"`
-	Region          *ImageRegion  `json:"region,omitempty"`
-	Score           float64       `json:"score"`
-	Explanation     string        `json:"explanation,omitempty"`
+	SegmentID       string          `json:"segment_id"`
+	RecordID        string          `json:"record_id"`
+	VersionID       string          `json:"version_id"`
+	PartKey         string          `json:"part_key"`
+	Text            string          `json:"text"`
+	Start           int             `json:"start"`
+	End             int             `json:"end"`
+	PassageText     string          `json:"passage_text,omitempty"`
+	SourceRanges    []SourceRange   `json:"source_ranges,omitempty"`
+	SourceSeparator string          `json:"source_separator,omitempty"`
+	Region          *ImageRegion    `json:"region,omitempty"`
+	Score           float64         `json:"score"`
+	Explanation     string          `json:"explanation,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	CommonMetadata  json.RawMessage `json:"common_metadata,omitempty"`
+	PassageOrdinal  *int            `json:"passage_ordinal,omitempty"`
+	TotalPassages   int             `json:"total_passages,omitempty"`
+	LeadPassage     string          `json:"lead_passage,omitempty"`
 }
 
 // ServedRequest is a candidate request of an earlier round with what the core
@@ -369,6 +377,15 @@ func requestIssues(requests []CandidateRequest, request SearchRequest, m *Manife
 		if c.Limit() > maxK {
 			issues = append(issues, Issue{Code: CodeCandidateLimit, Path: path + "/k",
 				Message: fmt.Sprintf("limit is %d; the manifest declares at most %d candidates per request (limits.max_candidates)", c.Limit(), maxK)})
+		} else if c.K > LegacyMaxRetrievalCandidates {
+			if !m.SupportsDeepCandidatePools() {
+				issues = append(issues, Issue{Code: CodeCandidateLimit, Path: path + "/k",
+					Message: fmt.Sprintf("k above %d requires a plugin_api range admitting only Plugin API %s or later", LegacyMaxRetrievalCandidates, FeatureSince(FeatureDeepCandidatePools))})
+			}
+		}
+		if c.IncludeLead && !m.SupportsRichRetrievalCandidates() {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: path + "/include_lead",
+				Message: fmt.Sprintf("include_lead requires a plugin_api range admitting only Plugin API %s or later", FeatureSince(FeatureRichRetrievalCandidates))})
 		}
 		if c.Primitive == PrimitiveProfile {
 			r, _ := ParseRange(m.Compatibility.PluginAPI)

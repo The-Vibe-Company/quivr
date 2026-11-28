@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from .api_versions import PLUGIN_API_VERSION, SUPPORTED_PLUGIN_API_VERSIONS
+from .api_versions import FEATURE_SINCE, PLUGIN_API_VERSION, SUPPORTED_PLUGIN_API_VERSIONS
 from .errors import ConfigurationError
 from .models import PluginManifest
 from .schema import protocol_errors, schema_errors
@@ -52,6 +52,32 @@ def negotiate_plugin_api(declared_range: str) -> str | None:
     return None
 
 
+def strictly_speaks_plugin_api(declared_range: str, feature: str) -> bool:
+    """Return True when declared_range admits at least one supported API version and every admitted version speaks feature."""
+    since = FEATURE_SINCE.get(feature)
+    if since is None:
+        return False
+    min_version = tuple(int(n) for n in since.split("."))
+    comparators = []
+    for token in declared_range.split():
+        match = _COMPARATOR.match(token)
+        if not match:
+            return False
+        comparators.append((match.group(1) or "=", tuple(int(g) for g in match.group(2, 3, 4))))
+    if not comparators:
+        return False
+    tests = {">=": lambda a, b: a >= b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b,
+             "<": lambda a, b: a < b, "=": lambda a, b: a == b}
+    admitted = False
+    for version in SUPPORTED_PLUGIN_API_VERSIONS:
+        candidate = tuple(int(n) for n in version.split("."))
+        if all(tests[op](candidate, bound) for op, bound in comparators):
+            admitted = True
+            if candidate < min_version:
+                return False
+    return admitted
+
+
 class ManifestError(ValueError):
     """quivr-plugin.yaml is unreadable or does not match the manifest schema."""
 
@@ -79,6 +105,10 @@ class LoadedManifest:
     def plugin_api(self) -> str:
         """The Plugin API version discovery reports: the highest supported one the range admits."""
         return negotiate_plugin_api(self.model.compatibility.plugin_api) or PLUGIN_API_VERSION
+
+    def strictly_speaks(self, feature: str) -> bool:
+        """Whether every supported Plugin API version admitted by this manifest speaks feature."""
+        return strictly_speaks_plugin_api(self.model.compatibility.plugin_api, feature)
 
     @property
     def media_types(self) -> list[str]:

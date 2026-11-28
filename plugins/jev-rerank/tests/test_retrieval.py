@@ -285,7 +285,8 @@ class RetrievalContract(unittest.TestCase):
         thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
         thread.start()
         try:
-            for size, expected in [(len(raw), 200), ((16 << 20) + 1, 413)]:
+            from quivr_plugin.server import MAX_RETRIEVAL_REQUEST_BYTES
+            for size, expected in [(len(raw), 200), (MAX_RETRIEVAL_REQUEST_BYTES + 1, 413)]:
                 with self.subTest(size=size):
                     connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
                     try:
@@ -297,7 +298,7 @@ class RetrievalContract(unittest.TestCase):
                         reply.read()
                     finally:
                         connection.close()
-            oversized = json.dumps({**large, "padding": "x" * (16 << 20)}).encode()
+            oversized = b"x" * (MAX_RETRIEVAL_REQUEST_BYTES + 1)
             self.assertEqual(plugin.handle("POST", RETRIEVAL_PATH, oversized).status, 413)
         finally:
             server.shutdown()

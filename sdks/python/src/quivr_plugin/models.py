@@ -1201,6 +1201,7 @@ class CandidateRequest(Model):
     k: int | None = None
     filter: CandidateRequestFilter | None = None
     group_by: Literal["record"] | None = None
+    include_lead: bool | None = None
     profile: CandidateRequestProfile | None = None
 
 
@@ -1211,6 +1212,21 @@ class SourceRange(Model):
     part_key: str
     start: int
     end: int
+
+
+@dataclass(kw_only=True)
+class CommonMetadata(Model):
+    "Optional source metadata available to every connector and normalizer."
+
+    language: str | None = None
+    published_at: str | None = None
+    source_type: str | None = None
+    source: str | None = None
+    author: list[str] | None = None
+    subjects: list[str] | None = None
+    tags: list[str] | None = None
+    country: list[str] | None = None
+    place: list[str] | None = None
 
 
 @dataclass(kw_only=True)
@@ -1230,6 +1246,11 @@ class Candidate(Model):
     source_separator: str | None = None
     region: ImageRegion | None = None
     explanation: str | None = None
+    title: str | None = None
+    common_metadata: CommonMetadata | None = None
+    passage_ordinal: int | None = None
+    total_passages: int | None = None
+    lead_passage: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -1301,6 +1322,11 @@ class RetrievalFixtureRetrievalCandidatesItem(Model):
     text: str
     score: float | None = None
     explanation: str | None = None
+    title: str | None = None
+    common_metadata: CommonMetadata | None = None
+    passage_ordinal: int | None = None
+    total_passages: int | None = None
+    lead_passage: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -1352,6 +1378,7 @@ __all__ = [
     "CandidateRequest",
     "CandidateRequestFilter",
     "CandidateRequestProfile",
+    "CommonMetadata",
     "ConnectorAPI",
     "ConnectorAPIRoute",
     "ConnectorAttachment",

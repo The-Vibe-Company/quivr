@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.20.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`, `0.19.0`, `0.20.0`.
+Latest Plugin API: `0.21.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`, `0.18.0`, `0.19.0`, `0.20.0`, `0.21.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -37,6 +37,8 @@ Latest Plugin API: `0.20.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Bounded ingestion pages with complete source coverage and durable negotiated cuts | `0.18.0` |
 | Optional connector pages with ordered revisions of each record | `0.19.0` |
 | Multimodal image ingestion with Blob Part references and segment region provenance | `0.20.0` |
+| Retrieval candidate pools above 100 (up to 400) | `0.21.0` |
+| Retrieval candidate title, common metadata, passage ordinals and opt-in lead passages | `0.21.0` |
 
 ## Trace context
 
@@ -586,16 +588,17 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].request.field` | `source`, `lexical` | no | bm25 and hybrid: source ranks the title and body as written; lexical ranks the lexical text an ingestion plugin produced. Default `"source"`. |
 | `served[].request.alpha` | number | no | hybrid: weight of the vector side (1 is vector only, 0 is keywords only). 0 to 1. Default `0.5`. |
 | `served[].request.fusion` | `relative_score`, `ranked` | no | hybrid: how the index fuses the two sides. Default `"relative_score"`. |
-| `served[].request.k` | integer | no | Most candidates to serve; at most limits.max_candidates. 1 to 100. |
+| `served[].request.k` | integer | no | Most candidates to serve; at most limits.max_candidates. Values above 100 require Plugin API 0.21. 1 to 400. |
 | `served[].request.filter` | object | no | Narrows the search's scope for this request; it never widens it. |
 | `served[].request.filter.source_namespaces` | array of string | no | Keep only Records from these Source Namespaces, each one the search's scope admits. 1 to 50 items. |
 | `served[].request.group_by` | `record` | no | record keeps the best candidate of each Record. |
+| `served[].request.include_lead` | boolean | no | Since Plugin API 0.21. When true, attach the record's opening lead passage (ordinal 0) to served candidates whose passage_ordinal is greater than 0. Default `false`. |
 | `served[].request.profile` | object | no | — |
 | `served[].request.profile.name` | string | yes | Full plugin/profile name declared in requires. |
 | `served[].request.profile.query` | string | no | Optional replacement query text; otherwise inherits the outer query. 1 to 8192 characters. |
 | `served[].request.profile.mode` | `lexical`, `semantic`, `hybrid` | no | Optional search mode override, since the profile-candidate-mode feature; otherwise inherits the outer mode. |
 | `served[].request.profile.limit` | integer | yes | At most limits.max_candidates ranked hits. 1 to 50. |
-| `served[].candidates` | array of object | yes | At most 100 items. |
+| `served[].candidates` | array of object | yes | Served candidates for this request (at most limits.max_candidates; values above 100 require Plugin API 0.21). At most 400 items. |
 | `served[].candidates[].segment_id` | string | yes | 1 to 200 characters. |
 | `served[].candidates[].record_id` | string | yes | 1 to 200 characters. |
 | `served[].candidates[].version_id` | string | yes | 1 to 200 characters. |
@@ -612,6 +615,11 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].candidates[].source_separator` | string | no | Optional Unicode separator used between source_ranges; missing and empty are equivalent. At most 16 characters. |
 | `served[].candidates[].region` | `ImageRegion` (plugin-manifest.schema.json) | no | Since Plugin API 0.20. Optional image region provenance when the candidate comes from a Blob Part (0 &lt;= x, y &lt;= 1, 0 &lt; width, height &lt;= 1, x + width &lt;= 1 and y + height &lt;= 1). |
 | `served[].candidates[].explanation` | string | no | The inner profile explanation, when profile candidates supply one. 1 to 1024 characters. |
+| `served[].candidates[].title` | string | no | Since Plugin API 0.21. Optional Record title when available. 1 to 1024 characters. |
+| `served[].candidates[].common_metadata` | any | no | Since Plugin API 0.21. Optional common source metadata (quivr.metadata) for this Record Version. |
+| `served[].candidates[].passage_ordinal` | integer | no | Since Plugin API 0.21. Zero-based ordinal of this segment within its Record Version's segmentation. |
+| `served[].candidates[].total_passages` | integer | no | Since Plugin API 0.21. Total number of segments in this Record Version's segmentation, when known. |
+| `served[].candidates[].lead_passage` | string | no | Since Plugin API 0.21. Optional opening lead passage text (ordinal 0) of the same segmentation, populated only when include_lead is true and passage_ordinal is greater than 0. 1 to 16384 characters. |
 | `budget` | object | no | Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only. |
 | `budget.remaining_time_ms` | integer | yes | — |
 | `budget.remaining_cost_cents` | number | yes | — |
@@ -744,7 +752,7 @@ Schema: `retrieval-fixture.schema.json`.
 | `retrieval.configuration` | object | no | Plugin configuration; default &#123;&#125;. |
 | `retrieval.profiles` | array of `ProfileName` (plugin-manifest.schema.json) | no | Profiles to certify; default every declared profile. |
 | `retrieval.spaces` | array of `space` (retrieval-search-request.schema.json) | no | Ids of the spaces offered (served first); default one served space, fixture.served@1. At most 16 items. |
-| `retrieval.candidates` | array of object | yes | The segments the runner may serve. Unless order says otherwise, every primitive serves them ranked by how many query words they contain, ties in catalogue order. 1 to 200 items. |
+| `retrieval.candidates` | array of object | yes | The segments the runner may serve. Unless order says otherwise, every primitive serves them ranked by how many query words they contain, ties in catalogue order. 1 to 400 items. |
 | `retrieval.order` | object | no | The exact segment order a primitive serves, whatever its query. profile supplies an offline dependency ranking; no other plugin is contacted. |
 | `retrieval.expect` | object | no | — |
 

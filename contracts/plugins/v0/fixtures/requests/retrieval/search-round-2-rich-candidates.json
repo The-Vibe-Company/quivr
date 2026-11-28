@@ -1,0 +1,97 @@
+{
+  "invocation_id": "inv-search-rich-2",
+  "contribution": "retrieval",
+  "organization_id": "org_example",
+  "configuration": {},
+  "profile": "default",
+  "round": 2,
+  "query": {
+    "text": "harbour strike",
+    "mode": "hybrid"
+  },
+  "limit": 10,
+  "scope": {
+    "corpus_ids": [
+      "corpus_news"
+    ],
+    "source_namespaces": [
+      "wire"
+    ]
+  },
+  "spaces": [
+    {
+      "id": "example.words.small@1",
+      "owner": {
+        "kind": "plugin",
+        "plugin_id": "example.words",
+        "plugin_version": "0.1.0"
+      },
+      "model": "example/words-4",
+      "dimensions": 4,
+      "metric": "cosine",
+      "indexes": [
+        "text"
+      ],
+      "query_modalities": [
+        "text"
+      ],
+      "role": "served",
+      "coverage": {
+        "segments": 5,
+        "total": 5
+      }
+    }
+  ],
+  "served": [
+    {
+      "round": 1,
+      "request_index": 0,
+      "request": {
+        "primitive": "hybrid",
+        "space": "example.words.small@1",
+        "query_text": "harbour strike",
+        "k": 250,
+        "group_by": "record",
+        "include_lead": true
+      },
+      "candidates": [
+        {
+          "segment_id": "seg_harbour_deep",
+          "record_id": "rec_harbour",
+          "version_id": "ver_harbour",
+          "part_key": "body",
+          "text": "Port negotiators scheduled talks for Tuesday afternoon.",
+          "start": 240,
+          "end": 295,
+          "score": 0.92,
+          "title": "Harbour ferry crews begin stoppage",
+          "common_metadata": {
+            "language": "en",
+            "published_at": "2026-10-01T12:30:00Z",
+            "source_type": "wire",
+            "source": "Harbour Wire",
+            "author": [
+              "Maritime Desk"
+            ],
+            "subjects": [
+              "transport"
+            ],
+            "tags": [
+              "harbour",
+              "ferry"
+            ],
+            "country": [
+              "FR"
+            ],
+            "place": [
+              "Marseille"
+            ]
+          },
+          "passage_ordinal": 2,
+          "total_passages": 5,
+          "lead_passage": "Dockers stopped work at the northern harbour at dawn."
+        }
+      ]
+    }
+  ]
+}

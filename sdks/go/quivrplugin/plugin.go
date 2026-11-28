@@ -41,8 +41,19 @@ const (
 	DefaultIdleTimeout     = 120 * time.Second
 )
 
-// maxRequestBytes bounds a request body the SDK reads.
-const maxRequestBytes = 16 << 20
+// maxRequestBytes bounds a request body the SDK reads on non-retrieval routes.
+// maxRetrievalRequestBytes accommodates deep multi-round candidate pools (up to 400 per leg).
+const (
+	maxRequestBytes          = 16 << 20
+	maxRetrievalRequestBytes = 64 << 20
+)
+
+func requestLimit(path string) int64 {
+	if path == "/v0/contributions/retrieval/search" {
+		return maxRetrievalRequestBytes
+	}
+	return maxRequestBytes
+}
 
 var healthErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 

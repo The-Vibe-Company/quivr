@@ -731,6 +731,14 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 				Message: fmt.Sprintf(`%s exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to ">=%s <%d.%d.0"`, row.Field, row.Since, r.String(), row.Since, minimum.Major, minimum.Minor+1)})
 		}
 	}
+	retrieval, _ := contributions["retrieval"].(map[string]any)
+	retrievalLimits, _ := retrieval["limits"].(map[string]any)
+	if maxCand, ok := jsonInt(retrievalLimits["max_candidates"]); ok && maxCand > LegacyMaxRetrievalCandidates && maxCand <= MaxRetrievalCandidates {
+		if minimum, admitted := admitsFeature(r, FeatureDeepCandidatePools); !admitted {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/retrieval/limits/max_candidates",
+				Message: fmt.Sprintf("max_candidates above %d exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", LegacyMaxRetrievalCandidates, FeatureSince(FeatureDeepCandidatePools), r.String(), FeatureSince(FeatureDeepCandidatePools), minimum.Major, minimum.Minor+1)})
+		}
+	}
 	ingestion, _ := contributions["ingestion"].(map[string]any)
 	spaces, _ := ingestion["spaces"].(map[string]any)
 	for _, name := range sortedKeys(spaces) {
@@ -793,6 +801,22 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 		}
 	}
 	return issues
+}
+
+func jsonInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case float64:
+		return int(n), float64(int(n)) == n
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 // declaresMode reports whether a decoded connector kind lists mode.
