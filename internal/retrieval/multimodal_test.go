@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -111,6 +112,7 @@ func (m multimodalSpaces) VectorSpaces(context.Context, string, string) (content
 }
 
 type recordingEncoder struct {
+	mu     sync.Mutex
 	called []string
 }
 
@@ -119,7 +121,9 @@ func (e *recordingEncoder) Owns(space string) bool {
 }
 
 func (e *recordingEncoder) EncodeQuery(_ context.Context, _, space, _ string) ([]float32, error) {
+	e.mu.Lock()
 	e.called = append(e.called, space)
+	e.mu.Unlock()
 	return []float32{0.6, 0.8}, nil
 }
 

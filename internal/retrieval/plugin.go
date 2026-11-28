@@ -587,12 +587,19 @@ type server struct {
 	// keywordCandidates avoids querying the same fallback partition for every
 	// healthy space. Keys include the full effective lexical request.
 	keywordCandidates map[string][]content.Candidate
+	keywordFlights    map[string]*keywordCall
 	timing            *Phases
 	chain             *searchChain
 	frames            []*profileSpend
 	requestedProfile  string
 	localProfile      string
 	fallback          *Result
+}
+
+type keywordCall struct {
+	done chan struct{}
+	res  []content.Candidate
+	err  error
 }
 
 type fetchedCandidates struct {
@@ -701,21 +708,27 @@ func (sv *server) serveRound(ctx context.Context, q Request, requests []plugins.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var serialPhases Phases
 			for _, i := range profileIndices {
 				if ctxs[i].Err() != nil {
 					errs[i] = ctxs[i].Err()
-					return
+					break
 				}
+				var ph Phases
 				var err error
-				served[i], fallbacks[i], legPhases[i], err = sv.serveProfile(ctxs[i], q, requests[i])
+				served[i], fallbacks[i], ph, err = sv.serveProfile(ctxs[i], q, requests[i])
+				serialPhases.add(ph)
 				if err != nil {
 					errs[i] = err
 					for j := i + 1; j < n; j++ {
 						cancels[j]()
 					}
-					return
+					break
 				}
 			}
+			// Attribute sequential profile legs as one summed concurrent lane
+			// so mergeWavePhases does not collapse their sequential durations via max.
+			legPhases[profileIndices[0]] = serialPhases
 		}()
 	}
 	wg.Wait()
@@ -832,21 +845,64 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 		if err != nil {
 			return fc, ErrUnsupported
 		}
-		sv.mu.Lock()
-		more, cached := sv.keywordCandidates[string(key)]
-		sv.mu.Unlock()
-		if _, enforced := visibility.Principals(ctx); !cached || enforced {
+		var more []content.Candidate
+		if _, enforced := visibility.Principals(ctx); enforced {
 			more, err = search(fallback, keywords)
 			if err != nil {
 				return fc, ErrUnavailable
 			}
-			sv.mu.Lock()
-			if sv.keywordCandidates == nil {
-				sv.keywordCandidates = map[string][]content.Candidate{}
+		} else {
+			k := string(key)
+			for {
+				sv.mu.Lock()
+				if cached, ok := sv.keywordCandidates[k]; ok {
+					more = cached
+					sv.mu.Unlock()
+					break
+				}
+				if flight, ok := sv.keywordFlights[k]; ok {
+					sv.mu.Unlock()
+					select {
+					case <-flight.done:
+						if flight.err == nil {
+							more = flight.res
+							goto haveKeywords
+						}
+						if ctx.Err() != nil {
+							return fc, ErrUnavailable
+						}
+						continue
+					case <-ctx.Done():
+						return fc, ErrUnavailable
+					}
+				}
+				flight := &keywordCall{done: make(chan struct{})}
+				if sv.keywordFlights == nil {
+					sv.keywordFlights = map[string]*keywordCall{}
+				}
+				sv.keywordFlights[k] = flight
+				sv.mu.Unlock()
+
+				res, searchErr := search(fallback, keywords)
+				flight.res, flight.err = res, searchErr
+				sv.mu.Lock()
+				delete(sv.keywordFlights, k)
+				if searchErr == nil {
+					if sv.keywordCandidates == nil {
+						sv.keywordCandidates = map[string][]content.Candidate{}
+					}
+					sv.keywordCandidates[k] = res
+				}
+				sv.mu.Unlock()
+				close(flight.done)
+				if searchErr != nil {
+					return fc, ErrUnavailable
+				}
+				more = res
+				break
 			}
-			sv.keywordCandidates[string(key)] = more
-			sv.mu.Unlock()
 		}
+	haveKeywords:
 		if !pq.RankAcrossRoutes {
 			found, more = NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)
 		}
