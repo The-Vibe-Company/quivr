@@ -37,7 +37,7 @@ export REGISTRATION_ID=<the active text.embed registration_id>
 export SPACE_ID=text.embed.cohere-embed-v5-pro-1024-c025d1f04d71722f@1
 ```
 
-Confirm the space name in the generated manifest. Model or prefix changes require regenerating it and using its new identity. Upgrading from the previous `hosted.embed` plugin ID changes the default space owner to `text.embed` and the multicall command from `hosted-embed` to `text-embed`: regenerate manifests with `quivr-text-embed configure` (and either rebuild existing Corpora under `text.embed` or set `"plugin_id": "hosted.embed"` in configuration during transition to keep serving existing spaces without an immediate rebuild).
+Confirm the space name in the generated manifest. Model or prefix changes require regenerating it and using its new identity. Upgrading from the previous `hosted.embed` plugin ID changes the default space owner to `text.embed` and the multicall command from `hosted-embed` to `text-embed`: regenerate manifests with `quivr-text-embed configure <configuration.json>` (and either rebuild existing Corpora under `text.embed` or set `"plugin_id": "hosted.embed"` in configuration during transition to keep serving existing spaces without an immediate rebuild).
 
 ## Estimate and fill each affected Corpus
 

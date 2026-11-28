@@ -40,6 +40,11 @@ func TestNormalizeWireText(t *testing.T) {
 			t.Fatalf("expected %q preserved in %q", good, got)
 		}
 	}
+	unicodeIn := "ČESKÝ KRUMLOV (Wire) — Regional festival opens today."
+	unicodeGot := normalizeWireText(unicodeIn)
+	if strings.Contains(unicodeGot, "ČESKÝ KRUMLOV") || unicodeGot != "Regional festival opens today." {
+		t.Fatalf("expected Unicode uppercase dateline stripped, got %q", unicodeGot)
+	}
 }
 
 func TestLeadIsolationAndContextualAnchors(t *testing.T) {

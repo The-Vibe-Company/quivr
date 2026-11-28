@@ -293,28 +293,31 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 					}
 				}
 				cut := 0
-				if !c.NormalizeWireText {
-					// Without text normalization, fitsUnit is monotone in prefix length.
-					lo, hi := 0, len(validCuts)-1
-					for lo <= hi {
-						mid := lo + (hi-lo)/2
-						cand := validCuts[mid]
-						piece := raw
-						piece.end = raw.start + cand
-						piece.text = string(local[:cand])
-						ok, _, err := fitsUnit([]paragraph{piece})
-						if err != nil {
-							return nil, nil, err
-						}
-						if ok {
-							cut = cand
-							lo = mid + 1
-						} else {
-							hi = mid - 1
-						}
+				bestIdx := -1
+				lo, hi := 0, len(validCuts)-1
+				for lo <= hi {
+					mid := lo + (hi-lo)/2
+					cand := validCuts[mid]
+					piece := raw
+					piece.end = raw.start + cand
+					piece.text = string(local[:cand])
+					ok, _, err := fitsUnit([]paragraph{piece})
+					if err != nil {
+						return nil, nil, err
 					}
-				} else {
-					for i := len(validCuts) - 1; i >= 0; i-- {
+					if ok {
+						cut = cand
+						bestIdx = mid
+						lo = mid + 1
+					} else {
+						hi = mid - 1
+					}
+				}
+				if c.NormalizeWireText && bestIdx+1 < len(validCuts) {
+					// Wire normalization can shorten a slightly longer prefix (e.g. a stripped URL/markdown span);
+					// scan a small bounded window past the binary-search boundary while keeping probe count O(log N).
+					scanHi := min(len(validCuts)-1, bestIdx+16)
+					for i := scanHi; i > bestIdx; i-- {
 						cand := validCuts[i]
 						piece := raw
 						piece.end = raw.start + cand
