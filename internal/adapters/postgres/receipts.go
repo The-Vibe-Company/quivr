@@ -105,7 +105,7 @@ func quarantinedReceiptDiagnostic(ctx context.Context, q querier, org, versionID
 			return nil, err
 		}
 	}
-	d := content.Diagnostic{Code: code, Message: "Processing could not complete safely; the Version is withheld from search."}
+	d := content.Diagnostic{Code: code, Message: legacyQuarantineMessage}
 	if len(quarantineRaw) > 0 {
 		if err := json.Unmarshal(quarantineRaw, &d); err != nil {
 			return nil, err
