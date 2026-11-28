@@ -144,11 +144,42 @@ func invocationID() string {
 	return "search-" + hex.EncodeToString(b[:])
 }
 
-func isDeepProfile(requested, local string) bool {
-	if requested == DefaultProfile {
+func fallbackDisabledByConfig(raw json.RawMessage) bool {
+	if len(raw) == 0 {
 		return false
 	}
-	return requested == "deep" || local == "deep" || strings.HasSuffix(requested, "/deep")
+	var cfg struct {
+		FallbackOnError *bool `json:"fallback_on_error"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return false
+	}
+	return cfg.FallbackOnError != nil && !*cfg.FallbackOnError
+}
+
+func (s Service) canFallbackToDefault(defRanker Ranker, defLocal, local string) bool {
+	if s.DisableProfileFallback || defRanker == nil || s.Ranker == nil {
+		return false
+	}
+	dm := defRanker.Manifest()
+	m := s.Ranker.Manifest()
+	if dm.ID == m.ID && defLocal == local {
+		return false
+	}
+	if fallbackDisabledByConfig(s.Ranker.Configuration()) {
+		return false
+	}
+	return true
+}
+
+// fallbackContext bounds a fallback default search to both the default
+// profile's deadline and the remaining whole-search cap under HTTP WriteTimeout.
+func fallbackContext(parentCtx context.Context, started time.Time, defRanker Ranker, defLocal string) (context.Context, context.CancelFunc) {
+	bound := time.Now().Add(defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+	if searchCap := started.Add(plugins.RetrievalDeadlineCap); searchCap.Before(bound) {
+		bound = searchCap
+	}
+	return context.WithDeadline(parentCtx, bound)
 }
 
 // rank answers a search through the pinned retrieval plugin: each round the
@@ -161,13 +192,12 @@ func isDeepProfile(requested, local string) bool {
 // began authorizing and routing.
 func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain) (Result, error) {
 	defRanker, defLocal, hasDefault := s.resolveProfile(DefaultProfile)
-	canFallback := isDeepProfile(out.Profile, q.Profile) && hasDefault &&
-		(defRanker.Manifest().ID != s.Ranker.Manifest().ID || defLocal != q.Profile)
+	canFallback := hasDefault && s.canFallbackToDefault(defRanker, defLocal, q.Profile)
 	if canFallback && (parentCtx == nil || parentCtx.Err() == nil) {
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
-			slog.WarnContext(ctx, "deep search degraded to default before reranking due to tight deadline",
+			slog.WarnContext(ctx, "search profile degraded to default before reranking due to tight deadline",
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
-			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+			fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 			defer cancel()
 			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
@@ -201,7 +231,7 @@ func (s Service) isDefaultResolved(m *plugins.Manifest, localProfile string) boo
 }
 
 func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Request, routes []Route, fallback *Result, reason string, chain *searchChain, timing *Phases, started time.Time, rounds int, profile plugins.RetrievalProfile) Result {
-	slog.WarnContext(ctx, "deep search degraded to default hybrid results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
+	slog.WarnContext(ctx, "search profile degraded to default results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
 	out.ProfileVersion = fallback.ProfileVersion
 	out.Hits = append([]Hit{}, fallback.Hits[:min(len(fallback.Hits), q.Limit)]...)
 	out.Degraded = appendDegradation(chain.degradations(), reason, routes)
@@ -209,6 +239,22 @@ func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Reque
 	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: paidCalls, CostCents: costCents, Objective: profile.Objective(), DefaultProfile: false, Phases: *timing, Profiles: profiles}
 	out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective()
 	return out
+}
+
+func (s Service) buildUsage(m *plugins.Manifest, localProfile string, started time.Time, timing *Phases, chain *searchChain, profile plugins.RetrievalProfile, rounds int) *Usage {
+	paidCalls, costCents, profiles := chain.snapshotUsage()
+	u := &Usage{
+		Rounds:         rounds,
+		Elapsed:        time.Since(started),
+		PaidCalls:      paidCalls,
+		CostCents:      costCents,
+		Objective:      profile.Objective(),
+		DefaultProfile: s.isDefaultResolved(m, localProfile),
+		Phases:         *timing,
+		Profiles:       profiles,
+	}
+	u.OverObjective = u.Elapsed > profile.Objective()
+	return u
 }
 
 func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend, carriedTiming *Phases, canFallback bool) (Result, error) {
@@ -230,6 +276,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	plan, err := s.searchSpaces(ctx, scope.Organization, routes, q.Mode == "hybrid" && q.EvaluationPlugin == "")
 	timing.Coverage += time.Since(phase)
 	if err != nil {
+		out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, 0)
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
 	spaces := plan.spaces
@@ -274,7 +321,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile, canFallback: canFallback}
 	for {
 		callerDone := parentCtx != nil && parentCtx.Err() != nil
 		if sv.fallback != nil && !callerDone {
@@ -286,11 +333,13 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			}
 		}
 		if ctx.Err() != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round()-1)
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if sv.chain.hasVisibleCandidates() {
 			allowed, err := sv.recheckServed(ctx, q, session.Request().Served)
 			if err != nil {
+				out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round()-1)
 				return out, s.unserved(ctx, m.ID, err, timing)
 			}
 			if !allowed {
@@ -317,8 +366,10 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
 			// The plugin refuses this query: it can never be answered.
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, ErrUnsupported
 		case errors.Is(err, ErrPluginInvalid):
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, err
 		default:
 			reason := DegradationRerankerUnavailable
@@ -330,21 +381,24 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			}
 			if canFallback && len(ancestors) == 0 && !callerDone && parentCtx != nil {
 				if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok {
-					slog.WarnContext(ctx, "deep search degraded to default after reranker failure", "component", "search", "profile", out.Profile, "reason", reason)
-					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+					slog.WarnContext(ctx, "search profile degraded to default after reranker failure", "component", "search", "profile", out.Profile, "plugin", m.ID, "reason", reason)
+					fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 					defer cancel()
 					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, timing, defRanker, defLocal, reason)
 				}
 			}
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
 			slog.WarnContext(ctx, "retrieval plugin answer refused", "component", "search", "plugin", m.ID, "round", session.Round(), "code", issues[0].Code, "path", issues[0].Path, "detail", issues[0].Message)
-			return out, fmt.Errorf("%w: %s %s", ErrPluginInvalid, issues[0].Code, issues[0].Message)
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
+			return out, fmt.Errorf("%w: plugin %s: %s %s", ErrPluginInvalid, m.ID, issues[0].Code, issues[0].Message)
 		}
 		chain.setRounds(spend, session.Round())
 		if err := chain.record(frames, answer.Usage); err != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, err
 		}
 		if ctx.Err() != nil {
@@ -352,6 +406,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			if sv.fallback != nil && !callerDone && errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
 			}
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if answer.Ranking != nil {
@@ -359,9 +414,8 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			for _, h := range answer.Ranking.Hits {
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
-			paidCalls, costCents, profiles := chain.snapshotUsage()
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: paidCalls, CostCents: costCents, Objective: profile.Objective(), DefaultProfile: s.isDefaultResolved(m, q.Profile), Phases: *timing, Profiles: profiles}
-			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
+			if out.Usage.OverObjective {
 				slog.WarnContext(ctx, "search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
 			}
@@ -372,6 +426,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		}
 		served, err := sv.serveRound(ctx, q, answer.Requests)
 		if err != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, s.unserved(ctx, m.ID, err, timing)
 		}
 		session.Serve(invocationID(), answer.Requests, served)
@@ -383,9 +438,9 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
-		return ErrDeadline
+		return fmt.Errorf("plugin %s: %w", plugin, ErrDeadline)
 	}
-	return err
+	return fmt.Errorf("plugin %s: %w", plugin, err)
 }
 
 // unserved reports a failure of the engine to serve candidates as it is,
@@ -397,7 +452,7 @@ func (s Service) unserved(ctx context.Context, plugin string, err error, timing 
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
-	return err
+	return fmt.Errorf("plugin %s: %w", plugin, err)
 }
 
 // Phases is the time one search spent in each of its phases: authorizing and
@@ -593,6 +648,7 @@ type server struct {
 	frames            []*profileSpend
 	requestedProfile  string
 	localProfile      string
+	canFallback       bool
 	fallback          *Result
 }
 

@@ -234,7 +234,7 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	sameMode := c.Profile.Mode == "" || c.Profile.Mode == origMode || c.Profile.Mode == "hybrid"
 	enoughLimit := c.Profile.Limit >= origLimit
 	sameNamespaces := c.Filter == nil || len(c.Filter.SourceNamespaces) == 0 || slices.Equal(c.Filter.SourceNamespaces, origNamespaces)
-	if hasDefault && len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) &&
+	if hasDefault && len(sv.frames) == 1 && sv.canFallback &&
 		sameQuery && sameMode && enoughLimit && sameNamespaces &&
 		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal {
 		saved := result

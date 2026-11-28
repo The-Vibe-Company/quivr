@@ -218,3 +218,118 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 	}
 	return rows, nil
 }
+
+const grpcAnchorBatchLimit = 16 << 20
+
+func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids []string) (map[string]map[string]any, error) {
+	request := &pb.SearchRequest{
+		Collection: collection,
+		Limit:      uint32(len(ids)),
+		Filters:    containsAny("id", ids).proto(),
+		Uses_127Api: true,
+		Properties: &pb.PropertiesRequest{ReturnAllNonrefProperties: true},
+		Metadata:   &pb.MetadataRequest{Uuid: true},
+	}
+	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, grpcAnchorBatchLimit, false)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]any, len(results))
+	for _, result := range results {
+		m := result.GetMetadata()
+		id := m.GetId()
+		if raw := m.GetIdAsBytes(); len(raw) == 16 {
+			id = fmt.Sprintf("%x-%x-%x-%x-%x", raw[:4], raw[4:6], raw[6:8], raw[8:10], raw[10:])
+		}
+		if id == "" {
+			return nil, errors.New("projection identity missing")
+		}
+		out[id] = protoProperties(result.GetProperties().GetNonRefProps())
+	}
+	return out, nil
+}
+
+func protoProperties(props *pb.Properties) map[string]any {
+	fields := props.GetFields()
+	out := make(map[string]any, len(fields))
+	for key, val := range fields {
+		if converted, ok := protoValue(val); ok {
+			out[key] = converted
+		}
+	}
+	return out
+}
+
+func protoValue(v *pb.Value) (any, bool) {
+	if v == nil {
+		return nil, false
+	}
+	switch kind := v.GetKind().(type) {
+	case *pb.Value_TextValue:
+		return kind.TextValue, true
+	case *pb.Value_NumberValue:
+		return kind.NumberValue, true
+	case *pb.Value_IntValue:
+		return kind.IntValue, true
+	case *pb.Value_BoolValue:
+		return kind.BoolValue, true
+	case *pb.Value_DateValue:
+		return kind.DateValue, true
+	case *pb.Value_UuidValue:
+		return kind.UuidValue, true
+	case *pb.Value_BlobValue:
+		return kind.BlobValue, true
+	case *pb.Value_ObjectValue:
+		return protoProperties(kind.ObjectValue), true
+	case *pb.Value_ListValue:
+		return protoListValue(kind.ListValue)
+	case *pb.Value_NullValue:
+		return nil, false
+	default:
+		return nil, false
+	}
+}
+
+func protoListValue(list *pb.ListValue) (any, bool) {
+	if list == nil {
+		return nil, false
+	}
+	switch kind := list.GetKind().(type) {
+	case *pb.ListValue_TextValues:
+		return append([]string(nil), kind.TextValues.GetValues()...), true
+	case *pb.ListValue_DateValues:
+		return append([]string(nil), kind.DateValues.GetValues()...), true
+	case *pb.ListValue_UuidValues:
+		return append([]string(nil), kind.UuidValues.GetValues()...), true
+	case *pb.ListValue_NumberValues:
+		vals := kind.NumberValues.GetValues()
+		out := make([]any, len(vals))
+		for i, n := range vals {
+			out[i] = n
+		}
+		return out, true
+	case *pb.ListValue_IntValues:
+		vals := kind.IntValues.GetValues()
+		out := make([]any, len(vals))
+		for i, n := range vals {
+			out[i] = n
+		}
+		return out, true
+	case *pb.ListValue_BoolValues:
+		vals := kind.BoolValues.GetValues()
+		out := make([]any, len(vals))
+		for i, b := range vals {
+			out[i] = b
+		}
+		return out, true
+	case *pb.ListValue_ObjectValues:
+		vals := kind.ObjectValues.GetValues()
+		out := make([]any, len(vals))
+		for i, o := range vals {
+			out[i] = protoProperties(o)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}

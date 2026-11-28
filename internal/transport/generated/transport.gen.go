@@ -10905,8 +10905,10 @@ func (response SearchRecordsResponseFunc) VisitSearchRecordsResponse(w http.Resp
 }
 
 type SearchRecords200ResponseHeaders struct {
-	ServerTiming   *string
-	XCorrelationID *string
+	ServerTiming         *string
+	XCorrelationID       *string
+	XQuivrDegraded       *string
+	XQuivrDegradedReason *string
 }
 
 type SearchRecords200JSONResponse struct {
@@ -10927,13 +10929,20 @@ func (response SearchRecords200JSONResponse) VisitSearchRecordsResponse(w http.R
 	if response.Headers.XCorrelationID != nil {
 		w.Header().Set("X-Correlation-ID", fmt.Sprint(*response.Headers.XCorrelationID))
 	}
+	if response.Headers.XQuivrDegraded != nil {
+		w.Header().Set("X-Quivr-Degraded", fmt.Sprint(*response.Headers.XQuivrDegraded))
+	}
+	if response.Headers.XQuivrDegradedReason != nil {
+		w.Header().Set("X-Quivr-Degraded-Reason", fmt.Sprint(*response.Headers.XQuivrDegradedReason))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
 type SearchRecordsdefaultResponseHeaders struct {
-	RetryAfter *int
+	RetryAfter   *int
+	ServerTiming *string
 }
 
 type SearchRecordsdefaultJSONResponse struct {
@@ -10951,6 +10960,9 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 	w.Header().Set("Content-Type", "application/json")
 	if response.Headers.RetryAfter != nil {
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	if response.Headers.ServerTiming != nil {
+		w.Header().Set("Server-Timing", fmt.Sprint(*response.Headers.ServerTiming))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)

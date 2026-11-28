@@ -2,8 +2,10 @@ package retrieval_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -382,6 +384,83 @@ func TestDeepProfileDegradesToDefaultUnderBudgetAndRerankerFailure(t *testing.T)
 			}
 			if len(res.Degraded) != 1 || res.Degraded[0].Reason != retrieval.DegradationRerankerUnavailable {
 				t.Fatalf("unexpected degradation: %+v", res.Degraded)
+			}
+		})
+	})
+
+	// 10. Non-"deep" composing profile names degrade identically; disabling fallback
+	// (via Service or plugin configuration) surfaces the error with Usage + plugin ID.
+	t.Run("non-deep composing profile degrades and disabled fallback preserves error diagnostics", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			s, _, _ := newPair(func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
+				time.Sleep(150 * time.Millisecond)
+				return nil, errors.New("reranker 503")
+			}, nil, 0)
+			base, _, _ := s.ProfilesRouter.Resolve("default")
+			origDeep, _, _ := s.ProfilesRouter.Resolve("deep")
+			rerankManifest := *origDeep.Manifest()
+			rerankManifest.Contributions.Retrieval = &plugins.Retrieval{
+				Profiles: map[string]plugins.RetrievalProfile{
+					"rerank": {MaxLatencyMS: 3000, MaxCostCents: 1},
+				},
+			}
+			rerank := &profileRanker{
+				m: rerankManifest,
+				round: func(ctx context.Context, q plugins.SearchRequest) ([]byte, error) {
+					return origDeep.Round(ctx, q)
+				},
+			}
+			s.ProfilesRouter = namedProfileMap{entries: map[string]struct {
+				ranker retrieval.Ranker
+				local  string
+			}{
+				"default":               {ranker: base, local: "default"},
+				"core.retrieve/default": {ranker: base, local: "default"},
+				"rerank":                {ranker: rerank, local: "rerank"},
+				"example.rerank/rerank": {ranker: rerank, local: "rerank"},
+			}}
+			// Composing profile named "rerank" degrades cleanly without hardcoded "deep".
+			res, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "rerank", Limit: 2})
+			if err != nil {
+				t.Fatalf("non-deep composing profile failed: %v", err)
+			}
+			if res.Profile != "rerank" || res.ProfileVersion != "plugin:core.retrieve@1.0.0/default" ||
+				len(res.Degraded) != 1 || res.Degraded[0].Reason != retrieval.DegradationRerankerUnavailable {
+				t.Fatalf("non-deep degraded result: %+v", res)
+			}
+
+			// Engine-level fallback disabled surfaces ErrUnavailable with Usage + plugin ID.
+			noFallback := s
+			noFallback.DisableProfileFallback = true
+			errRes, err := noFallback.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "rerank", Limit: 2})
+			if !errors.Is(err, retrieval.ErrUnavailable) || !strings.Contains(err.Error(), "example.rerank") {
+				t.Fatalf("disabled engine fallback err=%v; want ErrUnavailable naming example.rerank", err)
+			}
+			if errRes.Usage == nil || errRes.Usage.Elapsed < 150*time.Millisecond || errRes.Usage.Phases.PluginRounds < 150*time.Millisecond {
+				t.Fatalf("error path missing populated Usage/Phases: %+v", errRes.Usage)
+			}
+
+			// Plugin configuration fallback_on_error=false is honored even when engine fallback is enabled.
+			rerank.cfg = json.RawMessage(`{"fallback_on_error":false}`)
+			cfgErrRes, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "rerank", Limit: 2})
+			if !errors.Is(err, retrieval.ErrUnavailable) || !strings.Contains(err.Error(), "example.rerank") {
+				t.Fatalf("fallback_on_error=false err=%v; want ErrUnavailable naming example.rerank", err)
+			}
+			if cfgErrRes.Usage == nil || cfgErrRes.Usage.Phases.PluginRounds < 150*time.Millisecond {
+				t.Fatalf("fallback_on_error=false error path missing Usage: %+v", cfgErrRes.Usage)
+			}
+
+			// Deadline timeout error path also populates Usage/Phases and plugin ID.
+			rerank.round = func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			timeoutRes, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "harbour", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "rerank", Limit: 2})
+			if !errors.Is(err, retrieval.ErrDeadline) || !strings.Contains(err.Error(), "example.rerank") {
+				t.Fatalf("deadline err=%v; want ErrDeadline naming example.rerank", err)
+			}
+			if timeoutRes.Usage == nil || timeoutRes.Usage.Elapsed <= 0 || timeoutRes.Usage.Phases.PluginRounds <= 0 {
+				t.Fatalf("deadline error path missing Usage/Phases: %+v", timeoutRes.Usage)
 			}
 		})
 	})

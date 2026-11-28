@@ -101,6 +101,15 @@ type VisibilityJournal interface {
 	VisibleChange(ctx context.Context, organization, corpusID string, position int64) (bool, error)
 }
 
+// BatchVisibilityJournal rechecks visibility for a page of candidate events in
+// one query and reports the corpus visibility revision so a stream only
+// re-evaluates remaining events when policy changes mid-page.
+type BatchVisibilityJournal interface {
+	VisibilityJournal
+	VisibleChanges(ctx context.Context, organization, corpusID string, positions []int64) (visible map[int64]bool, revision int64, err error)
+	VisibilityRevision(ctx context.Context, organization, corpusID string) (int64, error)
+}
+
 func (s Service) VisibleChange(ctx context.Context, scope corpus.Scope, event Event) (bool, error) {
 	if _, enforced := visibility.Principals(ctx); !enforced {
 		return true, nil
@@ -109,6 +118,42 @@ func (s Service) VisibleChange(ctx context.Context, scope corpus.Scope, event Ev
 		return journal.VisibleChange(ctx, scope.Organization, event.CorpusID, event.Position)
 	}
 	return false, publicerr.ChangesUnavailable
+}
+
+// SupportsBatchVisibility reports whether the underlying journal supports
+// batched page visibility rechecks.
+func (s Service) SupportsBatchVisibility() bool {
+	_, ok := s.Journal.(BatchVisibilityJournal)
+	return ok
+}
+
+// VisibleChanges rechecks visibility for a batch of events in one journal query.
+func (s Service) VisibleChanges(ctx context.Context, scope corpus.Scope, corpusID string, events []Change) (map[int64]bool, int64, error) {
+	if _, enforced := visibility.Principals(ctx); !enforced {
+		all := make(map[int64]bool, len(events))
+		for _, e := range events {
+			all[e.Position] = true
+		}
+		return all, 0, nil
+	}
+	journal, ok := s.Journal.(BatchVisibilityJournal)
+	if !ok {
+		return nil, 0, publicerr.ChangesUnavailable
+	}
+	positions := make([]int64, len(events))
+	for i, e := range events {
+		positions[i] = e.Position
+	}
+	return journal.VisibleChanges(ctx, scope.Organization, corpusID, positions)
+}
+
+// VisibilityRevision reads the current visibility revision for one Corpus.
+func (s Service) VisibilityRevision(ctx context.Context, scope corpus.Scope, corpusID string) (int64, error) {
+	journal, ok := s.Journal.(BatchVisibilityJournal)
+	if !ok {
+		return 0, publicerr.ChangesUnavailable
+	}
+	return journal.VisibilityRevision(ctx, scope.Organization, corpusID)
 }
 
 // SnapshotJournal adds exact start-now and resume support without changing the

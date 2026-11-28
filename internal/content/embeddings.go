@@ -54,23 +54,29 @@ const (
 	QuantizationNone = "none"
 )
 
+// MaxVectorIndexEF bounds HNSW query-time ef. Zero leaves the index default;
+// -1 selects dynamic ef.
+const MaxVectorIndexEF = 4096
+
 // VectorIndex is how the search index stores one space's vectors: an HNSW
 // graph over vectors compressed by Quantization. A compressed index keeps
 // the full-precision vectors on disk and rescores the best RescoreLimit
 // candidates with them; zero disables RQ-8 rescoring and keeps the RQ-1
-// default. A generation
-// records it with each space, so changing it builds a new index through a
-// rebuild. The adapter reconciles the zero RQ-8 default in place.
+// default. EF sets HNSW query-time ef (0 keeps the index default, -1 selects
+// dynamic ef). A generation records it with each space, so changing
+// quantization or rescore_limit builds a new index through a rebuild. The
+// adapter reconciles mutable RQ-8 rescoreLimit and HNSW ef settings in place.
 type VectorIndex struct {
 	Quantization string `json:"quantization"`
 	RescoreLimit int    `json:"rescore_limit,omitempty"`
+	EF           int    `json:"ef,omitempty"`
 }
 
 // DefaultVectorIndex compresses vectors to 8 bits.
 var DefaultVectorIndex = VectorIndex{Quantization: QuantizationRQ8}
 
-// Validate refuses an unknown quantization, a negative rescore limit, and a
-// rescore limit without compression to rescore.
+// Validate refuses an unknown quantization, a negative rescore limit, a
+// rescore limit without compression to rescore, or an out-of-range HNSW ef.
 func (x VectorIndex) Validate() error {
 	switch x.Quantization {
 	case QuantizationRQ8, QuantizationRQ1, QuantizationNone:
@@ -82,6 +88,9 @@ func (x VectorIndex) Validate() error {
 	}
 	if x.RescoreLimit > 0 && x.Quantization == QuantizationNone {
 		return errors.New("rescore_limit needs a quantization to rescore")
+	}
+	if x.EF < -1 || x.EF > MaxVectorIndexEF {
+		return fmt.Errorf("ef must be -1 (dynamic), 0 (default), or between 1 and %d", MaxVectorIndexEF)
 	}
 	return nil
 }

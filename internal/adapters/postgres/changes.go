@@ -243,6 +243,57 @@ func (s ChangeStore) VisibleChange(ctx context.Context, org, corpusID string, po
 	return allowed, err
 }
 
+// VisibleChanges rechecks a batch of SSE page positions in one snapshot query
+// and returns the corpus visibility revision alongside the allowed positions.
+func (s ChangeStore) VisibleChanges(ctx context.Context, org, corpusID string, positions []int64) (map[int64]bool, int64, error) {
+	principals, enforced := visibility.Principals(ctx)
+	if !enforced {
+		allowed := make(map[int64]bool, len(positions))
+		for _, pos := range positions {
+			allowed[pos] = true
+		}
+		return allowed, 0, nil
+	}
+	if len(positions) == 0 {
+		rev, err := s.VisibilityRevision(ctx, org, corpusID)
+		return map[int64]bool{}, rev, err
+	}
+	rows, err := s.Pool.Query(ctx, `WITH rev AS (
+  SELECT coalesce((SELECT revision FROM visibility_revisions WHERE organization=$1 AND corpus_id=$2), 0) AS revision
+)
+SELECT r.revision, e.sequence
+FROM rev r
+LEFT JOIN change_events e
+  ON e.organization=$1 AND e.corpus_id=$2 AND e.sequence=ANY($3::bigint[]) AND `+changeVisibilitySQL("$4"),
+		org, corpusID, positions, principals)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	allowed := make(map[int64]bool, len(positions))
+	var revision int64
+	for rows.Next() {
+		var seq *int64
+		if err := rows.Scan(&revision, &seq); err != nil {
+			return nil, 0, err
+		}
+		if seq != nil {
+			allowed[*seq] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return allowed, revision, nil
+}
+
+// VisibilityRevision reads the corpus's current visibility policy revision.
+func (s ChangeStore) VisibilityRevision(ctx context.Context, org, corpusID string) (int64, error) {
+	var revision int64
+	err := s.Pool.QueryRow(ctx, `SELECT coalesce((SELECT revision FROM visibility_revisions WHERE organization=$1 AND corpus_id=$2), 0)`, org, corpusID).Scan(&revision)
+	return revision, err
+}
+
 func startID() (string, error) {
 	b := make([]byte, 24)
 	if _, err := cryptorand.Read(b); err != nil {

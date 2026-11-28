@@ -214,12 +214,15 @@ type Service struct {
 	// QueryVectors is shared by searches using these encoders.
 	QueryVectors *QueryVectorCache
 	// MinRerankBudget is the minimum remaining deadline budget required to run
-	// deep reranking before degrading gracefully to default hybrid results.
+	// composing reranker profiles before degrading gracefully to default results.
 	// Zero selects DefaultMinRerankBudget.
 	MinRerankBudget time.Duration
-	Routing         Routing
-	Projection      Projection
-	Content         content.Service
+	// DisableProfileFallback disables engine-level degradation to the deployment's
+	// default profile when a composing profile exceeds its budget or fails.
+	DisableProfileFallback bool
+	Routing                Routing
+	Projection             Projection
+	Content                content.Service
 }
 
 func (s Service) minRerankBudget() time.Duration {
@@ -332,6 +335,8 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	}
 	started := time.Now()
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
+		elapsed := time.Since(started)
+		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}}
 		return out, err
 	}
 	routes := make([]Route, 0, len(q.CorpusIDs))
@@ -339,6 +344,8 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	for _, id := range q.CorpusIDs {
 		g, err := s.Routing.Generation(ctx, scope.Organization, id)
 		if err != nil {
+			elapsed := time.Since(started)
+			out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}}
 			return out, ErrUnavailable
 		}
 		if g.ProfileVersion != ProfileVersion {
