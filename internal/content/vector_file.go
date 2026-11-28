@@ -3,10 +3,15 @@ package content
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash"
+	"io"
 	"math"
+	"math/bits"
 	"reflect"
 
 	"golang.org/x/sync/semaphore"
@@ -85,11 +90,10 @@ func EncodeEmbeddingFile(f EmbeddingFile, vectors [][]float32) ([]byte, error) {
 			if len(v) != f.Dimensions {
 				return nil, ErrInvalid
 			}
-			row, err := VectorBytes(v)
-			if err != nil {
-				return nil, err
+			// Validate and write in place: no per-row buffer.
+			if !putVector(raw[offset:offset+4*f.Dimensions], v) {
+				return nil, ErrInvalid
 			}
-			copy(raw[offset:], row)
 		} else if len(v) != 0 {
 			return nil, ErrInvalid
 		}
@@ -99,6 +103,19 @@ func EncodeEmbeddingFile(f EmbeddingFile, vectors [][]float32) ([]byte, error) {
 }
 
 func embeddingFileMatrix(f EmbeddingFile, raw []byte) ([]byte, error) {
+	matrix, err := embeddingFileHeader(f, raw)
+	if err != nil {
+		return nil, err
+	}
+	if !validMatrixRows(f, matrix, nil, nil) {
+		return nil, ErrArtifactCorrupt
+	}
+	return matrix, nil
+}
+
+// embeddingFileHeader verifies the file's framing and header and returns its
+// unverified row matrix.
+func embeddingFileHeader(f EmbeddingFile, raw []byte) ([]byte, error) {
 	if !validFileShape(f) || len(raw) < 12 || int64(len(raw)) > MaxVectorFileBytes || !bytes.Equal(raw[:8], []byte("QVEC\x00\x00\x00\x01")) {
 		return nil, ErrArtifactCorrupt
 	}
@@ -110,39 +127,58 @@ func embeddingFileMatrix(f EmbeddingFile, raw []byte) ([]byte, error) {
 	if json.Unmarshal(raw[12:12+n], &header) != nil || !reflect.DeepEqual(header, fileHeader(f)) {
 		return nil, ErrArtifactCorrupt
 	}
-	matrix := raw[12+n:]
-	zero := make([]byte, 4*f.Dimensions)
+	return raw[12+n:], nil
+}
+
+// validMatrixRows checks that absent rows are zero and present rows finite.
+// When decoded is non-nil it receives each present row, sliced in order from
+// backing, so verification and decoding share one pass over the matrix.
+func validMatrixRows(f EmbeddingFile, matrix []byte, decoded [][]float32, backing []float32) bool {
+	width := 4 * f.Dimensions
+	zero := make([]byte, width)
+	next := 0
 	for i := range f.RowCount {
-		row := matrix[i*4*f.Dimensions : (i+1)*4*f.Dimensions]
+		row := matrix[i*width : (i+1)*width]
 		if !Present(f.Presence, i) {
 			if !bytes.Equal(row, zero) {
-				return nil, ErrArtifactCorrupt
+				return false
 			}
+			continue
+		}
+		if decoded != nil {
+			v := backing[next : next+f.Dimensions : next+f.Dimensions]
+			next += f.Dimensions
+			if !getVector(v, row) {
+				return false
+			}
+			decoded[i] = v
 			continue
 		}
 		for offset := 0; offset < len(row); offset += 4 {
 			v := float64(math.Float32frombits(binary.LittleEndian.Uint32(row[offset:])))
 			if math.IsNaN(v) || math.IsInf(v, 0) {
-				return nil, ErrArtifactCorrupt
+				return false
 			}
 		}
 	}
-	return matrix, nil
+	return true
 }
 
+// DecodeEmbeddingFile verifies a file and returns its rows, nil where absent.
+// Present rows share one backing array, each capped at its own row.
 func DecodeEmbeddingFile(f EmbeddingFile, raw []byte) ([][]float32, error) {
-	matrix, err := embeddingFileMatrix(f, raw)
+	matrix, err := embeddingFileHeader(f, raw)
 	if err != nil {
 		return nil, err
 	}
+	// validFileShape guarantees no presence bits past RowCount.
+	present := 0
+	for _, b := range f.Presence {
+		present += bits.OnesCount8(b)
+	}
 	vectors := make([][]float32, f.RowCount)
-	for i := range vectors {
-		if Present(f.Presence, i) {
-			vectors[i], err = ReadVector(matrix[i*4*f.Dimensions : (i+1)*4*f.Dimensions])
-			if err != nil {
-				return nil, ErrArtifactCorrupt
-			}
-		}
+	if !validMatrixRows(f, matrix, vectors, make([]float32, present*f.Dimensions)) {
+		return nil, ErrArtifactCorrupt
 	}
 	return vectors, nil
 }
@@ -190,7 +226,9 @@ func (s Service) readVectorFileBytes(ctx context.Context, f EmbeddingFile) ([]by
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(raw)) != f.Blob.Size || Hash(raw) != f.Blob.SHA256 {
+	// Both readers return bytes already verified against the Blob's SHA-256
+	// (see Blobs.Read); hashing a 256 MiB matrix again is pure overhead.
+	if int64(len(raw)) != f.Blob.Size {
 		return nil, ErrArtifactCorrupt
 	}
 	return raw, nil
@@ -221,6 +259,7 @@ func (s Service) LoadEmbeddingData(ctx context.Context, artifacts []Embedding) (
 	}
 	// Decode only requested rows; do not retain whole decoded matrices across
 	// all documents of a rebuild or subscription batch.
+	var ids artifactHasher
 	for _, group := range files {
 		if err := func() error {
 			f := group.descriptor
@@ -248,7 +287,7 @@ func (s Service) LoadEmbeddingData(ctx context.Context, artifacts []Embedding) (
 				expected.ID = ""
 				expected.Manifest = Blob{}
 				manifest := embeddingManifest(expected)
-				if err != nil || Hash(row) != e.Payload.SHA256 || e.ID != Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), row...)) {
+				if err != nil || Hash(row) != e.Payload.SHA256 || e.ID != ids.id(manifest, row) {
 					return ErrArtifactCorrupt
 				}
 				result[i] = EmbeddingData{e, vector}
@@ -293,6 +332,27 @@ func (s Service) LoadEmbeddingGroup(ctx context.Context, inputs []Embedding) ([]
 	return nil, false, nil
 }
 
+// artifactHasher computes embedding artifact IDs, reusing one SHA-256 state
+// and digest buffer instead of concatenating prefix, manifest and row.
+type artifactHasher struct {
+	h   hash.Hash
+	sum [sha256.Size]byte
+}
+
+const artifactIDPrefix = "quivr/embedding-artifact/v1\x00"
+
+// id is Hash(prefix + manifest + row).
+func (a *artifactHasher) id(manifest, row []byte) string {
+	if a.h == nil {
+		a.h = sha256.New()
+	}
+	a.h.Reset()
+	_, _ = io.WriteString(a.h, artifactIDPrefix)
+	_, _ = a.h.Write(manifest)
+	_, _ = a.h.Write(row)
+	return hex.EncodeToString(a.h.Sum(a.sum[:0]))
+}
+
 func virtualBlob(org string, raw []byte) Blob {
 	sha := Hash(raw)
 	return Blob{Key: Hash([]byte(org)) + "/sha256/" + sha, SHA256: sha, Size: int64(len(raw))}
@@ -306,6 +366,7 @@ func (s Service) SaveEmbeddingGroup(ctx context.Context, seg Segmentation, space
 		return nil, ErrInvalid
 	}
 	first := data[0].Artifact
+	var ids artifactHasher
 	for attempt := 0; attempt < 8; attempt++ {
 		old, stored, err := repo.EmbeddingGroup(ctx, first.Organization, seg.ID, space.ID)
 		if err != nil && !errors.Is(err, corpus.ErrNotFound) {
@@ -342,7 +403,7 @@ func (s Service) SaveEmbeddingGroup(ctx context.Context, seg Segmentation, space
 			e.ID = ""
 			e.Manifest = Blob{}
 			manifest := embeddingManifest(e)
-			e.ID = Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), raw...))
+			e.ID = ids.id(manifest, raw)
 			e.Manifest = virtualBlob(e.Organization, manifest)
 			bySegment[e.SegmentID] = EmbeddingData{e, d.Vector}
 		}
