@@ -46,7 +46,7 @@ func resolveDigestSlot(base, latest string, desired bool, slotErr error, order i
 
 func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
 	var result0 content.Receipt
-	err := retryJournalWrite(ctx, "Accept", func(ctx context.Context) error {
+	err := retryJournalWriteWithLimit(ctx, "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 		var err error
 		result0, err = s.acceptAttempt(ctx, scope, c)
 		return err
@@ -121,12 +121,12 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 			// converge cleanly on the general path using this same connection.
 			rollbackTx(ctx, tx)
 		}
-		return s.acceptGeneral(ctx, conn, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest)
+		return s.acceptGeneral(ctx, conn, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest, row.recordExists)
 	}
-	return s.acceptGeneral(ctx, db, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest)
+	return s.acceptGeneral(ctx, db, scope, c, canonical, requestDigest, recordID, receiptID, slot, digest, false)
 }
 
-func (s SubmissionStore) acceptGeneral(ctx context.Context, db transactionalDatabase, scope corpus.Scope, c content.Command, canonical []byte, requestDigest [32]byte, recordID, receiptID, slot, digest string) (content.Receipt, error) {
+func (s SubmissionStore) acceptGeneral(ctx context.Context, db transactionalDatabase, scope corpus.Scope, c content.Command, canonical []byte, requestDigest [32]byte, recordID, receiptID, slot, digest string, recordKnown bool) (content.Receipt, error) {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
@@ -147,13 +147,15 @@ func (s SubmissionStore) acceptGeneral(ctx context.Context, db transactionalData
 	lookupIndex := guard.Len()
 	query, args := buildAcceptLookupQuery(ctx, scope.Organization, "ingestion", c.Key, recordID, c.Source.CorpusID)
 	guard.Queue(query, args...)
-	guard.Queue(`WITH record AS (
+	if !recordKnown {
+		guard.Queue(`WITH record AS (
  INSERT INTO records(organization,id,corpus_id,namespace,record_key,record_acl)
  SELECT $1,$2,$3,$4,$5,$6::text[]
  WHERE EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$3)
  AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$7)
  ON CONFLICT DO NOTHING RETURNING organization,corpus_id,namespace,record_acl
 )`+recordVisibilityAdmissionSQL+` SELECT 1`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.ACL, c.Key)
+	}
 	guard.Queue(`UPDATE records SET acceptance_order=acceptance_order+1
  WHERE organization=$1 AND id=$2
  AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$3)
@@ -175,9 +177,11 @@ WHERE a.organization=$1 AND a.record_id=$2 AND a.digest=$3 AND (a.slot=$4 OR a.s
 		_ = guardResults.Close()
 		return content.Receipt{}, err
 	}
-	if _, err = guardResults.Exec(); err != nil {
-		_ = guardResults.Close()
-		return content.Receipt{}, err
+	if !recordKnown {
+		if _, err = guardResults.Exec(); err != nil {
+			_ = guardResults.Close()
+			return content.Receipt{}, err
+		}
 	}
 	var order int64
 	var position string
@@ -279,7 +283,7 @@ func pendingReceipt(receiptID, recordID string, source content.Source, newRevisi
 // projection objects are hidden by canonical hydration.
 func (s SubmissionStore) Withdraw(ctx context.Context, scope corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
 	var result0 content.Receipt
-	err := retryJournalWrite(ctx, "Withdraw", func(ctx context.Context) error {
+	err := retryJournalWriteWithLimit(ctx, "Withdraw", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 		var err error
 		result0, err = s.withdrawAttempt(ctx, scope, w)
 		return err

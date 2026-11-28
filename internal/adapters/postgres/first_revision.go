@@ -11,21 +11,24 @@ import (
 
 // acceptFirstRevision writes a new Record's reservation, receipt, dispatch
 // intent, both journal facts, and queue observations in a single batch round
-// trip inside the caller's transaction. If a concurrent writer raced and
-// created the Record or Receipt first, created is false and the caller rolls
-// back this transaction before falling through to the general revision path.
+// trip inside the caller's transaction. The routing and claim fences precede
+// canonical writes; the legacy journal fence follows them so organization_journals
+// FOR UPDATE is never held across canonical inserts or taken out of order.
+// If a concurrent writer raced and created the Record or Receipt first, created
+// is false and the caller rolls back this transaction before falling through.
 func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.Command, canonical []byte, requestDigest [32]byte, recordID, receiptID, slot, digest string, retainDetail bool) (bool, error) {
 	versionID := content.StableID("version", org, recordID, slot)
 	pending := eventInput{Organization: org, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}
 	accepted := eventInput{Organization: org, CorpusID: c.Source.CorpusID, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID}
+	pendingEventID := eventID(pending)
+	acceptedEventID := eventID(accepted)
 	requestCopy, receiptCommand, execution := importRequestStorage(canonical, retainDetail)
+	traceContext := telemetry.Encode(ctx)
 	batch := &pgx.Batch{}
 	batch.Queue(`WITH mode AS MATERIALIZED (SELECT pg_advisory_xact_lock_shared($2))
  SELECT pg_advisory_xact_lock_shared($1) FROM mode`, projectionRoutingLock, journalModeLock)
 	queueJournalClaim(batch, org, "ingestion", c.Key)
 	queueJournalClaim(batch, org, "record", recordID)
-	batch.Queue(`INSERT INTO organization_journals(organization) SELECT $1 WHERE NOT `+parallelJournalSQL+` ON CONFLICT DO NOTHING`, org)
-	batch.Queue(`SELECT last_sequence FROM organization_journals WHERE organization=$1 AND NOT `+parallelJournalSQL+` FOR UPDATE`, org)
 	cteIndex := batch.Len()
 	batch.Queue(`WITH record AS (
  INSERT INTO records(organization,id,corpus_id,namespace,record_key,acceptance_order,desired_order,desired_position,desired_version_id,record_acl)
@@ -46,34 +49,44 @@ func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.C
 ), bulk_outbox AS (
  INSERT INTO bulk_ingestion_outbox(organization,receipt_id,trace_context,work_queue)
  SELECT $1,id,$15,$16 FROM receipt WHERE $16='bulk' RETURNING receipt_id
+) SELECT EXISTS(SELECT 1 FROM receipt)`,
+		org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID,
+		slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, traceContext, workqueue.Class(ctx),
+		receiptCommand, requestDigest[:], execution, c.ConnectorInstanceID, c.ACL,
+	)
+	// Acquire the journal fence and append events after canonical writes so
+	// organization_journals FOR UPDATE keeps its documented lock order and
+	// minimal critical section. Only append when this transaction created the
+	// receipt (its receipt.pending event does not exist yet).
+	batch.Queue(`INSERT INTO organization_journals(organization) SELECT $1 WHERE NOT `+parallelJournalSQL+` ON CONFLICT DO NOTHING`, org)
+	batch.Queue(`SELECT last_sequence FROM organization_journals WHERE organization=$1 AND NOT `+parallelJournalSQL+` FOR UPDATE`, org)
+	batch.Queue(`WITH should_append AS MATERIALIZED (
+ SELECT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND id=$2)
+ AND NOT EXISTS(SELECT 1 FROM change_events WHERE event_id=$3) AS ok
 ), mode AS MATERIALIZED (
  SELECT `+parallelJournalSQL+` AS parallel
 ), writer AS MATERIALIZED (
- SELECT pg_current_xact_id() AS xid FROM mode WHERE parallel AND EXISTS(SELECT 1 FROM receipt)
+ SELECT pg_current_xact_id() AS xid FROM mode WHERE parallel AND (SELECT ok FROM should_append)
 ), legacy AS (
  UPDATE organization_journals SET last_sequence=last_sequence+2
- WHERE organization=$1 AND NOT (SELECT parallel FROM mode) AND EXISTS(SELECT 1 FROM receipt)
+ WHERE organization=$1 AND NOT (SELECT parallel FROM mode) AND (SELECT ok FROM should_append)
  RETURNING last_sequence-2 AS base
 ), positions AS MATERIALIZED (
  SELECT base,NULL::xid8 AS xid,false AS parallel FROM legacy
  UNION ALL SELECT 0::bigint,xid,true FROM writer
 ), inputs AS MATERIALIZED (
- SELECT * FROM unnest($22::text[],$23::text[],$24::text[],$25::text[])
+ SELECT * FROM unnest($5::text[],$6::text[],$7::text[],$8::text[])
  WITH ORDINALITY e(id,kind,resource,resource_id,n) ORDER BY e.n
-), events AS (
- INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context,writer_xid)
+) INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context,writer_xid)
  SELECT $1,CASE WHEN p.parallel THEN nextval('change_event_positions') ELSE p.base+e.n END,
- e.id,$4,e.kind,e.resource,e.resource_id,NULL::text,$15,p.xid
- FROM inputs e CROSS JOIN positions p ORDER BY e.n
- RETURNING 1
-) SELECT EXISTS(SELECT 1 FROM receipt)`,
-		org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID,
-		slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx),
-		receiptCommand, requestDigest[:], execution, c.ConnectorInstanceID, c.ACL,
-		[]string{eventID(pending), eventID(accepted)},
+ e.id,$4,e.kind,e.resource,e.resource_id,NULL::text,$9,p.xid
+ FROM inputs e CROSS JOIN positions p ORDER BY e.n`,
+		org, receiptID, pendingEventID, c.Source.CorpusID,
+		[]string{pendingEventID, acceptedEventID},
 		[]string{pending.Kind, accepted.Kind},
 		[]string{pending.Resource, accepted.Resource},
 		[]string{pending.ResourceID, accepted.ResourceID},
+		traceContext,
 	)
 	queueRecordObservations(batch, []string{org}, []string{recordID})
 	results := tx.SendBatch(ctx, batch)

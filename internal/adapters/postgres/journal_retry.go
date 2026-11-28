@@ -13,20 +13,16 @@ import (
 type journalRetryKey struct{}
 
 const (
-	// journalRetryMaxAttempts bounds 40P01 deadlock retries (1 initial attempt + 7 retries).
-	journalRetryMaxAttempts = 8
-	// auditJournalRetryMaxAttempts preserves the 3-attempt bound for audited outer transactions.
-	auditJournalRetryMaxAttempts = 3
-	journalRetryBaseBackoff      = 5 * time.Millisecond
-	journalRetryMaxBackoff       = 250 * time.Millisecond
+	// defaultJournalRetryMaxAttempts preserves the 3-attempt bound for existing
+	// callers (including AuditStore.Record outer transactions) without keying
+	// behavior off operation label strings.
+	defaultJournalRetryMaxAttempts = 3
+	// acceptJournalRetryMaxAttempts bounds 40P01 deadlock retries on submission
+	// writes (1 initial attempt + 7 retries).
+	acceptJournalRetryMaxAttempts = 8
+	journalRetryBaseBackoff       = 5 * time.Millisecond
+	journalRetryMaxBackoff        = 250 * time.Millisecond
 )
-
-func journalRetryLimit(operation string) int {
-	if operation == "Audit.Record" {
-		return auditJournalRetryMaxAttempts
-	}
-	return journalRetryMaxAttempts
-}
 
 // journalRetryBackoff returns a bounded, jittered exponential backoff delay in
 // [1ms, min(journalRetryBaseBackoff << (attempt-1), journalRetryMaxBackoff)].
@@ -44,6 +40,10 @@ func journalRetryBackoff(attempt int) time.Duration {
 // commit. Connection errors and ambiguous commits must escape to the caller.
 // An audited command retries at its parent, never inside an aborted savepoint.
 func retryJournalWrite(ctx context.Context, operation string, write func(context.Context) error) error {
+	return retryJournalWriteWithLimit(ctx, operation, defaultJournalRetryMaxAttempts, write)
+}
+
+func retryJournalWriteWithLimit(ctx context.Context, operation string, maxAttempts int, write func(context.Context) error) error {
 	if current, ok := ctx.Value(auditTransactionKey{}).(auditTransaction); ok {
 		err := write(ctx)
 		if isDeadlock(err) {
@@ -54,7 +54,7 @@ func retryJournalWrite(ctx context.Context, operation string, write func(context
 	if ctx.Value(journalRetryKey{}) != nil {
 		return write(ctx)
 	}
-	maxAttempts := journalRetryLimit(operation)
+	maxAttempts = max(1, maxAttempts)
 	work := context.WithValue(ctx, journalRetryKey{}, true)
 	for attempt := 1; ; attempt++ {
 		err := write(work)

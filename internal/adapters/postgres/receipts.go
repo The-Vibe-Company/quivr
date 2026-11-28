@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -35,6 +36,7 @@ type replayReceiptRow struct {
 	enrichmentState string
 	enrichmentError string
 	enrichmentRaw   []byte
+	quarantineRaw   []byte
 	recordExists    bool
 	corpusExists    bool
 }
@@ -57,7 +59,7 @@ func buildAcceptLookupQuery(ctx context.Context, org, routeFamily, key, recordID
  coalesce(r.current_version_id=v.id,false),
  coalesce(v.processing,''),coalesce(v.error_code,''),
  coalesce(v.enrichment_state,''),coalesce(v.enrichment_error,''),
- v.enrichment_reason,
+ v.enrichment_reason,v.quarantine,
  EXISTS(SELECT 1 FROM records rec WHERE rec.organization=$1 AND rec.id=$4),
  EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=$1 AND cp.id=$5)
  FROM (VALUES(1)) seed(n)
@@ -76,7 +78,7 @@ func scanReplayReceiptRow(row pgx.Row) (replayReceiptRow, error) {
 		&out.receipt.Processing.State, &out.code, &out.visible,
 		&out.baseline, &out.quarantined, &out.withdrawn, &out.current,
 		&out.vProcessing, &out.vErrorCode,
-		&out.enrichmentState, &out.enrichmentError, &out.enrichmentRaw,
+		&out.enrichmentState, &out.enrichmentError, &out.enrichmentRaw, &out.quarantineRaw,
 		&out.recordExists, &out.corpusExists,
 	)
 	if err == nil && out.replayID != nil {
@@ -85,8 +87,52 @@ func scanReplayReceiptRow(row pgx.Row) (replayReceiptRow, error) {
 	return out, err
 }
 
+// quarantinedReceiptDiagnostic resolves the primary diagnostic of a quarantined
+// Version strictly through the caller's querier so pinned connections never
+// acquire a second pool connection (preventing deadlocks on 1-conn pools).
+func quarantinedReceiptDiagnostic(ctx context.Context, q querier, org, versionID, code string, quarantineRaw []byte) (*content.Diagnostic, error) {
+	if q != nil {
+		var evalRaw []byte
+		err := q.QueryRow(ctx, `SELECT diagnostic FROM ingestion_evaluations WHERE organization=$1 AND version_id=$2 AND state='failed' AND diagnostic IS NOT NULL ORDER BY plugin_id,created_at LIMIT 1`, org, versionID).Scan(&evalRaw)
+		if err == nil {
+			var d content.Diagnostic
+			if err := json.Unmarshal(evalRaw, &d); err != nil {
+				return nil, err
+			}
+			return &d, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	d := content.Diagnostic{Code: code, Message: "Processing could not complete safely; the Version is withheld from search."}
+	if len(quarantineRaw) > 0 {
+		if err := json.Unmarshal(quarantineRaw, &d); err != nil {
+			return nil, err
+		}
+	}
+	if d.Code != "" {
+		return &d, nil
+	}
+	if q != nil {
+		n, err := (NormalizationStore{}).scanNormalization(ctx, q.QueryRow(ctx, `SELECT `+normalizationMetadataColumns+`, '{}'::jsonb, '', '', 0 FROM normalizations WHERE organization=$1 AND version_id=$2`, org, versionID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if !n.Failed() {
+			if diags := n.Diagnostics(); len(diags) > 0 {
+				return &diags[0], nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // hydrateReceipt assembles the public Receipt from a joined receipt/version row
-// on the caller's existing querier, avoiding a second pool connection.
+// strictly on the caller's existing querier, avoiding a second pool connection.
 func (s ReceiptStore) hydrateReceipt(ctx context.Context, q querier, org string, row replayReceiptRow) (content.Receipt, error) {
 	r := row.receipt
 	r.Diagnostics = []content.Diagnostic{}
@@ -129,12 +175,11 @@ func (s ReceiptStore) hydrateReceipt(ctx context.Context, q querier, org string,
 		r.Availability = &a
 		r.Processing = p
 		if a.State == "quarantined" {
-			diagnostics, err := (VersionStore{Pool: s.Pool}).versionDiagnostics(ctx, org, r.VersionID, true, false, code)
+			d, err := quarantinedReceiptDiagnostic(ctx, q, org, r.VersionID, code, row.quarantineRaw)
 			if err != nil {
 				return r, err
 			}
-			if len(diagnostics) > 0 {
-				d := diagnostics[0]
+			if d != nil {
 				r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: d.Code, Message: d.Message, Retryable: false})
 				return r, nil
 			}
@@ -171,7 +216,7 @@ func (s ReceiptStore) Receipt(ctx context.Context, org, id string) (content.Rece
  r.corpus_id,r.namespace,r.record_key,rc.processing,rc.error_code,
  coalesce(v.baseline_ready,false),coalesce(v.quarantined,false),`+recordGoneSQL+`,
  coalesce(r.current_version_id=v.id,false),coalesce(v.processing,''),coalesce(v.error_code,''),
- coalesce(v.enrichment_state,''),coalesce(v.enrichment_error,''),v.enrichment_reason
+ coalesce(v.enrichment_state,''),coalesce(v.enrichment_error,''),v.enrichment_reason,v.quarantine
  FROM ingestion_receipts rc
  JOIN records r ON (r.organization,r.id)=(rc.organization,rc.record_id)
  LEFT JOIN record_versions v ON rc.version_id IS NOT NULL AND (v.organization,v.id)=(rc.organization,rc.version_id)
@@ -181,7 +226,7 @@ func (s ReceiptStore) Receipt(ctx context.Context, org, id string) (content.Rece
 		&row.receipt.Processing.State, &row.code,
 		&row.baseline, &row.quarantined, &row.withdrawn, &row.current,
 		&row.vProcessing, &row.vErrorCode,
-		&row.enrichmentState, &row.enrichmentError, &row.enrichmentRaw,
+		&row.enrichmentState, &row.enrichmentError, &row.enrichmentRaw, &row.quarantineRaw,
 	)
 	if err != nil {
 		return content.Receipt{Diagnostics: []content.Diagnostic{}}, notFound(err)

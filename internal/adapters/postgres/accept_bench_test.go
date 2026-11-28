@@ -313,6 +313,54 @@ func TestAcceptRoundTripsAndConnectionBudget(t *testing.T) {
 	if !bytes.Equal(wantJSON, gotJSON) {
 		t.Fatalf("resolved replay mismatch:\ngot:  %s\nwant: %s", gotJSON, wantJSON)
 	}
+
+	// 6. Quarantined replay on a 1-connection pool must never deadlock or
+	// acquire a second connection.
+	quarantineCmd := content.Command{
+		Key:      "quarantined-1conn-key",
+		Source:   content.Source{CorpusID: c.ID, Namespace: "rt", RecordKey: "doc-quarantined"},
+		Revision: "v1",
+		Content:  content.Text{Kind: "text", Text: "quarantined payload"},
+	}
+	qReceipt, err := store.Accept(ctx, scope, quarantineCmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qWork, _, err := mat.Work(ctx, org, qReceipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qPub := content.Publication{
+		Normalized: content.Blob{Key: "rt/q-text", SHA256: "rt-q-text-sha", Size: 19},
+		Manifest:   content.Blob{Key: "rt/q-manifest", SHA256: "rt-q-manifest-sha", Size: 2},
+		Parts:      []content.PartBlob{{Key: "body", Role: "body", Blob: content.Blob{Key: "rt/q-text", SHA256: "rt-q-text-sha", Size: 19}}},
+		Quarantine: &content.Diagnostic{Code: "policy_blocked", Message: "Quarantined in test"},
+	}
+	if err = mat.Publish(ctx, qWork, qPub); err != nil {
+		t.Fatal(err)
+	}
+	singleTracer := &acceptMetricsTracer{}
+	singleCfg := pool.Config().Copy()
+	singleCfg.MaxConns = 1
+	singleCfg.ConnConfig.Tracer = singleTracer
+	singlePool, err := pgxpool.NewWithConfig(ctx, singleCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singlePool.Close()
+	qCtx, qCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer qCancel()
+	singleTracer.reset()
+	qReplay, err := (SubmissionStore{Pool: singlePool}).Accept(qCtx, scope, quarantineCmd)
+	if err != nil {
+		t.Fatalf("quarantined replay on 1-conn pool failed: %v", err)
+	}
+	rt, conns, stmts = singleTracer.snapshot()
+	t.Logf("replay_quarantined_1conn: roundtrips=%d conns=%d stmts=%d", rt, conns, stmts)
+	if conns != 1 || qReplay.Availability == nil || qReplay.Availability.State != "quarantined" ||
+		len(qReplay.Diagnostics) != 1 || qReplay.Diagnostics[0].Code != "policy_blocked" {
+		t.Fatalf("quarantined replay got conns=%d receipt=%+v", conns, qReplay)
+	}
 }
 
 // TestAcceptConcurrentReplaysConverge verifies that 50 concurrent accepts of
@@ -516,7 +564,7 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 		t.Run(fmt.Sprintf("recovers-after-%d-deadlocks", injected), func(t *testing.T) {
 			attempts := 0
 			commits := 0
-			err := retryJournalWrite(t.Context(), "Accept", func(ctx context.Context) error {
+			err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 				attempts++
 				if attempts <= injected {
 					return deadlockErr()
@@ -533,32 +581,34 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 		})
 	}
 
-	t.Run("exhausts-at-max-attempts", func(t *testing.T) {
+	t.Run("exhausts-at-explicit-max-attempts", func(t *testing.T) {
 		attempts := 0
-		err := retryJournalWrite(t.Context(), "Accept", func(ctx context.Context) error {
+		err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 			attempts++
 			return deadlockErr()
 		})
-		if !isDeadlock(err) || attempts != journalRetryMaxAttempts {
-			t.Fatalf("attempts=%d err=%v, want %d and 40P01", attempts, err, journalRetryMaxAttempts)
+		if !isDeadlock(err) || attempts != acceptJournalRetryMaxAttempts {
+			t.Fatalf("attempts=%d err=%v, want %d and 40P01", attempts, err, acceptJournalRetryMaxAttempts)
 		}
 	})
 
-	t.Run("audit-record-preserves-3-attempt-bound", func(t *testing.T) {
-		attempts := 0
-		err := retryJournalWrite(t.Context(), "Audit.Record", func(ctx context.Context) error {
-			attempts++
-			return deadlockErr()
-		})
-		if !isDeadlock(err) || attempts != auditJournalRetryMaxAttempts {
-			t.Fatalf("Audit.Record attempts=%d err=%v, want %d and 40P01", attempts, err, auditJournalRetryMaxAttempts)
+	t.Run("default-retry-preserves-3-attempt-bound-regardless-of-label", func(t *testing.T) {
+		for _, op := range []string{"Audit.Record", "Renamed.Audit.Op"} {
+			attempts := 0
+			err := retryJournalWrite(t.Context(), op, func(ctx context.Context) error {
+				attempts++
+				return deadlockErr()
+			})
+			if !isDeadlock(err) || attempts != defaultJournalRetryMaxAttempts {
+				t.Fatalf("op=%q attempts=%d err=%v, want %d and 40P01", op, attempts, err, defaultJournalRetryMaxAttempts)
+			}
 		}
 	})
 
 	t.Run("non-deadlock-error-does-not-retry", func(t *testing.T) {
 		attempts := 0
 		want := &pgconn.PgError{Code: "23505", Message: "unique violation"}
-		err := retryJournalWrite(t.Context(), "Accept", func(ctx context.Context) error {
+		err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 			attempts++
 			return want
 		})
@@ -572,7 +622,7 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 		defer cancel()
 		openTxs := 0
 		attempts := 0
-		err := retryJournalWrite(ctx, "Accept", func(work context.Context) error {
+		err := retryJournalWriteWithLimit(ctx, "Accept", acceptJournalRetryMaxAttempts, func(work context.Context) error {
 			attempts++
 			openTxs++
 			defer func() { openTxs-- }() // mirrors defer rollbackTx(ctx, tx)
@@ -595,7 +645,7 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 	t.Run("already-canceled-context-does-not-retry", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		attempts := 0
-		err := retryJournalWrite(ctx, "Accept", func(work context.Context) error {
+		err := retryJournalWriteWithLimit(ctx, "Accept", acceptJournalRetryMaxAttempts, func(work context.Context) error {
 			attempts++
 			cancel()
 			return deadlockErr()
@@ -771,6 +821,26 @@ func TestAcceptLookupAndHydrationContracts(t *testing.T) {
 		if err != nil || r.Availability == nil || r.Availability.State != "building_baseline" || r.Availability.Searchable ||
 			r.Processing.Phase != "baseline" || len(r.Diagnostics) != 1 || !r.Diagnostics[0].Retryable {
 			t.Fatalf("retrying baseline receipt: %+v err=%v", r, err)
+		}
+		// Quarantined Version hydrates structured diagnostic without needing Pool.
+		qBytes, _ := json.Marshal(content.Diagnostic{Code: "unsafe_input", Message: "Blocked by policy"})
+		r, err = rs.hydrateReceipt(t.Context(), nil, "org", replayReceiptRow{
+			receipt: content.Receipt{
+				ID:        "rc-4",
+				State:     "resolved",
+				Outcome:   "created",
+				RecordID:  "rec-1",
+				VersionID: "ver-3",
+			},
+			quarantined:   true,
+			current:       true,
+			vProcessing:   "blocked",
+			vErrorCode:    "unsafe_input",
+			quarantineRaw: qBytes,
+		})
+		if err != nil || r.Availability == nil || r.Availability.State != "quarantined" || r.Availability.Current || r.Availability.Searchable ||
+			len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "unsafe_input" || r.Diagnostics[0].Message != "Blocked by policy" || r.Diagnostics[0].Retryable {
+			t.Fatalf("quarantined receipt: %+v err=%v", r, err)
 		}
 	})
 }
