@@ -246,16 +246,21 @@ const stageRunLatency = 10 * time.Millisecond
 const stageEnrichLatency = 100 * stageRunLatency
 
 // Slow enrichment must not stall ingestion: with Enrich a hundred times slower
-// than Run, enrichment stays inside its lane bound and every receipt is
-// enriched before its pin is released, with no goroutine left behind.
+// than Run, every receipt is retrieval_ready within the Stage-1 waves alone,
+// enrichment stays inside its own lane bound and every receipt is enriched
+// before its pin is released, with no goroutine left behind.
 func TestStage1NotBlockedByStage2(t *testing.T) {
 	const receipts = 64
 	r := simulateStages(t, stageScenario{receipts: receipts})
 	if len(r.steps.enriched) != receipts || len(r.steps.released) != receipts {
 		t.Fatalf("enriched %d and released %d of %d receipts", len(r.steps.enriched), len(r.steps.released), receipts)
 	}
-	if r.steps.peakEnrich > ingestionReceiptConcurrency {
-		t.Fatalf("peak concurrent enrichment %d exceeds its bound %d", r.steps.peakEnrich, ingestionReceiptConcurrency)
+	waves := time.Duration((receipts + ingestionReceiptConcurrency - 1) / ingestionReceiptConcurrency)
+	if last := slices.Max(slices.Collect(maps.Values(r.steps.ready))); last > waves*stageRunLatency {
+		t.Fatalf("last receipt retrieval_ready after %v, want within %d Stage-1 waves (%v): enrichment held Stage-1 slots", last, waves, waves*stageRunLatency)
+	}
+	if r.steps.peakEnrich > ingestionEnrichConcurrency {
+		t.Fatalf("peak concurrent enrichment %d exceeds its bound %d", r.steps.peakEnrich, ingestionEnrichConcurrency)
 	}
 	t.Logf("stage1 p50=%v p95=%v end-to-end=%v peak enrich=%d", r.stage1P50, r.stage1P95, r.total, r.steps.peakEnrich)
 }
@@ -289,6 +294,18 @@ func TestIngestionBatchConvergesAfterWorkerKill(t *testing.T) {
 				t.Fatalf("receipt 1 died before recording its enrichment but was enriched %d times, want a retry", s.enrichCalls["1"])
 			}
 		})
+	}
+}
+
+// Cancelling a batch stops each lane within its current step: a step that
+// still completes after the cancellation is not followed by another one.
+func TestIngestionBatchCancellationStopsWithinOneStep(t *testing.T) {
+	r := simulateStages(t, stageScenario{receipts: 32, cancelAt: stageRunLatency / 2})
+	if r.steps.runCalls["0"] == 0 {
+		t.Fatal("no step was running when the batch was cancelled")
+	}
+	if len(r.steps.enriched) != 0 {
+		t.Fatalf("receipts enriched after cancellation: %v", r.steps.enriched)
 	}
 }
 
