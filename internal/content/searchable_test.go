@@ -1,10 +1,12 @@
 package content_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -740,9 +742,12 @@ func (b blockingBlobReader) Read(ctx context.Context, blob content.Blob) ([]byte
 
 // One failing blob read fails its batch at once: the batch's other reads are
 // cancelled instead of awaited, and none is left running after Hydrate
-// returns, with or without a blob cache.
+// returns, with or without a blob cache. A panicking reader fails the batch
+// the same way instead of crashing the process, and its log never quotes the
+// panic value, which may hold canonical text.
 func TestHydrateFailFast(t *testing.T) {
 	const blobCount, slow = 20, 300 * time.Millisecond
+	const secret = "canonical text the panic quotes"
 	errStore := errors.New("blob store unavailable")
 	scope := corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
 	repo := &fixtureHydrationRepo{located: map[string]content.Located{}, withdrawn: map[string]bool{}, deniedOrg: map[string]bool{}}
@@ -755,38 +760,182 @@ func TestHydrateFailFast(t *testing.T) {
 			Blob:     content.Blob{Key: fmt.Sprintf("org/sha256/%d", i), SHA256: content.Hash([]byte("text")), Size: 4},
 		}
 	}
-	for _, cached := range []bool{false, true} {
-		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				var running atomic.Int64
-				reader := blockingBlobReader{read: func(ctx context.Context, b content.Blob) ([]byte, error) {
-					if b.Key == "org/sha256/0" {
-						return nil, errStore
+	var logs bytes.Buffer
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(defaultLogger) })
+	for _, panics := range []bool{false, true} {
+		for _, cached := range []bool{false, true} {
+			t.Run(fmt.Sprintf("panics=%t/cached=%t", panics, cached), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					logs.Reset()
+					var running atomic.Int64
+					reader := blockingBlobReader{read: func(ctx context.Context, b content.Blob) ([]byte, error) {
+						if b.Key == "org/sha256/0" {
+							if panics {
+								panic(errors.New(secret))
+							}
+							return nil, errStore
+						}
+						running.Add(1)
+						defer running.Add(-1)
+						select {
+						case <-time.After(slow):
+							return []byte("text"), nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					}}
+					svc := content.Service{Baseline: repo, Blobs: reader}
+					if cached {
+						svc.BlobCache = content.NewHydrationBlobCache(1 << 20)
 					}
-					running.Add(1)
-					defer running.Add(-1)
-					select {
-					case <-time.After(slow):
-						return []byte("text"), nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
+					start := time.Now()
+					_, err := svc.Hydrate(context.Background(), scope, candidates)
+					elapsed := time.Since(start)
+					synctest.Wait()
+					failed := errors.Is(err, errStore)
+					if panics {
+						failed = err != nil && !errors.Is(err, context.Canceled)
 					}
-				}}
-				svc := content.Service{Baseline: repo, Blobs: reader}
-				if cached {
-					svc.BlobCache = content.NewHydrationBlobCache(1 << 20)
-				}
-				start := time.Now()
-				_, err := svc.Hydrate(context.Background(), scope, candidates)
-				elapsed := time.Since(start)
-				synctest.Wait()
-				if !errors.Is(err, errStore) || elapsed > 30*time.Millisecond {
-					t.Fatalf("1 failing of %d blobs: err %v after %v; want %v within 30ms", blobCount, err, elapsed, errStore)
-				}
-				if n := running.Load(); n != 0 {
-					t.Fatalf("%d blob reads still running after Hydrate returned", n)
-				}
+					if !failed || elapsed > 30*time.Millisecond {
+						t.Fatalf("1 failing of %d blobs: err %v after %v; want its failure within 30ms", blobCount, err, elapsed)
+					}
+					if n := running.Load(); n != 0 {
+						t.Fatalf("%d blob reads still running after Hydrate returned", n)
+					}
+					if panics && (!strings.Contains(logs.String(), "panic_type=*errors.errorString") || strings.Contains(logs.String(), secret)) {
+						t.Fatalf("panic log must name the panic type and never quote its value:\n%s", logs.String())
+					}
+				})
 			})
-		})
+		}
+	}
+}
+
+// Excerpts cut through the rune index equal string([]rune(part)[start:end])
+// at every index stride boundary, for unpacked and packed Parts, warm or
+// cold, and for a blob that is not valid text as a whole. Ranges past their
+// Part and Parts cut inside a code point are refused as corrupt even when the
+// recorded digest matches the text a cut ignoring those bounds would return.
+func TestHydrateCutsCodePointsLikeRuneSlices(t *testing.T) {
+	var b strings.Builder
+	for i := 0; b.Len() < 4000; i++ {
+		b.WriteString([]string{"a", "é", "第", "🌌", "word "}[i%5])
+	}
+	long := b.String()
+	partA, partB := long, "第二段 naïve 🌌 tail"
+	packed := partA + "\n" + partB
+	broken := partA + "\x00" + partB // not valid text as a whole
+	pack := func(offset, length int) content.PackRange {
+		o, l := int64(offset), int64(length)
+		return content.PackRange{Offset: &o, Length: &l}
+	}
+	whole := content.PackRange{}
+	type cut struct {
+		blob       string
+		pack       content.PackRange
+		part       string
+		start, end int
+		corrupt    bool
+		// unchecked is the text of a corrupt cut that ignores the Part's
+		// bounds; its digest is recorded so only the bounds can refuse it.
+		unchecked string
+	}
+	runes := len([]rune(long))
+	var cuts []cut
+	for _, blob := range []string{long, packed, broken} {
+		p := whole
+		if blob != long {
+			p = pack(0, len(partA))
+		}
+		for _, r := range [][2]int{{0, 0}, {0, 1}, {0, 127}, {1, 128}, {127, 129}, {128, 256}, {255, 513}, {130, 140}, {runes - 3, runes}, {0, runes}} {
+			cuts = append(cuts, cut{blob: blob, pack: p, part: partA, start: r[0], end: r[1]})
+		}
+		cuts = append(cuts, cut{blob: blob, pack: p, part: partA, start: runes - 1, end: runes + 1, corrupt: true})
+	}
+	for _, blob := range []string{packed, broken} {
+		p := pack(len(partA)+1, len(partB))
+		n := len([]rune(partB))
+		cuts = append(cuts,
+			cut{blob: blob, pack: p, part: partB, start: 0, end: n},
+			cut{blob: blob, pack: p, part: partB, start: 2, end: 9},
+			cut{blob: blob, pack: p, part: partB, start: 0, end: n + 1, corrupt: true},
+		)
+	}
+	inside := strings.Index(packed, "é") + 1
+	cuts = append(cuts, cut{blob: packed, pack: pack(inside, 4), part: packed[inside : inside+4], start: 0, end: 1, corrupt: true, unchecked: "第"})
+	for i, c := range cuts {
+		if c.corrupt && c.unchecked == "" {
+			offset := 0
+			if c.pack.Offset != nil {
+				offset = int(*c.pack.Offset)
+			}
+			beyond := []rune(c.blob[offset:])
+			cuts[i].unchecked = string(beyond[min(c.start, len(beyond)):min(c.end, len(beyond))])
+		}
+	}
+
+	scope := corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
+	for _, cached := range []bool{false, true} {
+		for i, c := range cuts {
+			blob := content.Blob{Key: fmt.Sprintf("org/sha256/%d", i), SHA256: content.Hash([]byte(c.blob)), Size: int64(len(c.blob))}
+			want := c.unchecked
+			if !c.corrupt {
+				want = string([]rune(c.part)[c.start:c.end])
+			}
+			repo := &fixtureHydrationRepo{located: map[string]content.Located{"s": {
+				Hydrated: content.Hydrated{RecordID: "r", VersionID: "v", TextSHA256: content.Hash([]byte(want)), Segment: content.Segment{ID: "s", PartKey: "body", Start: c.start, End: c.end}},
+				Blob:     blob,
+				Pack:     c.pack,
+			}}, withdrawn: map[string]bool{}, deniedOrg: map[string]bool{}}
+			svc := content.Service{Baseline: repo, Blobs: &fixtureBlobStore{data: map[string][]byte{blob.Key: []byte(c.blob)}}}
+			if cached {
+				svc.BlobCache = content.NewHydrationBlobCache(1 << 20)
+			}
+			for pass := range 2 { // a cached second pass cuts through the resident entry's index
+				got, err := svc.Hydrate(context.Background(), scope, []content.Candidate{{SegmentID: "s"}})
+				if c.corrupt {
+					if !errors.Is(err, content.ErrArtifactCorrupt) {
+						t.Fatalf("cached=%t pass %d cut %d [%d,%d): err %v; want ErrArtifactCorrupt", cached, pass, i, c.start, c.end, err)
+					}
+					continue
+				}
+				if err != nil || got[0].Segment.Text != want {
+					t.Fatalf("cached=%t pass %d cut %d [%d,%d): got %q, %v; want %q", cached, pass, i, c.start, c.end, got[0].Segment.Text, err, want)
+				}
+			}
+		}
+	}
+}
+
+// A resident blob's rune index counts against the cache budget: when two
+// non-ASCII blobs fit the budget only without their indexes, indexing them
+// evicts one rather than exceeding the budget.
+func TestHydrationBlobCacheChargesRuneIndex(t *testing.T) {
+	text := strings.Repeat("é", 4096)
+	scope := corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
+	blobs := &fixtureBlobStore{data: map[string][]byte{}}
+	repo := &fixtureHydrationRepo{located: map[string]content.Located{}, withdrawn: map[string]bool{}, deniedOrg: map[string]bool{}}
+	for _, k := range []string{"k1", "k2"} {
+		body := k + text
+		blobs.data[k] = []byte(body)
+		repo.located[k] = content.Located{
+			Hydrated: content.Hydrated{RecordID: "r", VersionID: "v", TextSHA256: content.Hash([]byte("k")), Segment: content.Segment{ID: k, PartKey: "body", End: 1}},
+			Blob:     content.Blob{Key: k, SHA256: content.Hash([]byte(body)), Size: int64(len(body))},
+		}
+	}
+	// Each entry without its index: text + org + key + sha256 + overhead,
+	// as TestHydrationBlobCacheEnforcesMemoryCapLRUAndMetrics pins it.
+	entry := int64(len("k1"+text)+len("org")+len("k1")+64) + 160
+	cache := content.NewHydrationBlobCache(2*entry + 32)
+	svc := content.Service{Baseline: repo, Blobs: blobs, BlobCache: cache}
+	for _, k := range []string{"k1", "k2"} {
+		if got, err := svc.Hydrate(context.Background(), scope, []content.Candidate{{SegmentID: k}}); err != nil || got[0].Segment.Text != "k" {
+			t.Fatalf("hydrate %s = %+v, %v", k, got, err)
+		}
+	}
+	if stats := cache.Stats(); stats.Entries != 1 || stats.Bytes <= entry || stats.Bytes > stats.MaxBytes {
+		t.Fatalf("after indexing two blobs that fit only unindexed: %+v; want 1 entry charged for its index (> %d bytes) within budget", stats, entry)
 	}
 }
