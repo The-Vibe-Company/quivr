@@ -28,6 +28,7 @@ type writeGRPC struct {
 	pb.WeaviateClient
 	mu       sync.Mutex
 	calls    [][]string
+	record   bool // keep written objects; only tests that inspect payloads set it
 	objects  []*pb.BatchObject
 	failures func(call int, objects []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError
 	callErr  func(call int) error
@@ -44,7 +45,9 @@ func (f *writeGRPC) BatchObjects(ctx context.Context, req *pb.BatchObjectsReques
 		ids[i] = object.GetUuid()
 	}
 	f.calls = append(f.calls, ids)
-	f.objects = append(f.objects, req.GetObjects()...)
+	if f.record {
+		f.objects = append(f.objects, req.GetObjects()...)
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		f.deadline = append(f.deadline, time.Until(deadline))
 	}
@@ -191,31 +194,45 @@ func TestGRPCBatchResendsOnlyRejectedObjects(t *testing.T) {
 // Objects the provider keeps rejecting fail the publication after a bounded
 // number of re-sends, with an error that carries no provider text.
 func TestGRPCBatchPersistentRejectionIsBoundedAndSanitized(t *testing.T) {
+	objects := writeObjects(projectionBatch, 4)
+	poisoned := objects[1].ID
 	for _, tc := range []struct {
-		name  string
-		reply func(int, []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError
+		name      string
+		reply     func(int, []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError
+		wantCalls int
+		wantErr   string
 	}{
-		{"rejected", func(int, []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError {
-			return []*pb.BatchObjectsReply_BatchError{{Index: 1, Error: "https://weaviate.invalid/?api_key=secret"}}
-		}},
+		{"rejected", func(_ int, sent []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError {
+			for i, object := range sent {
+				if object.GetUuid() == poisoned {
+					return []*pb.BatchObjectsReply_BatchError{{Index: int32(i), Error: "https://weaviate.invalid/?api_key=secret"}}
+				}
+			}
+			return nil
+		}, grpcBatchAttempts, "projection publication failed (1 objects rejected)"},
 		{"index out of range", func(int, []*pb.BatchObject) []*pb.BatchObjectsReply_BatchError {
 			return []*pb.BatchObjectsReply_BatchError{{Index: projectionBatch, Error: "Bearer secret"}}
-		}},
+		}, 1, "projection publication response invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &writeGRPC{failures: tc.reply}
 			s := writeStore(&objectREST{}, client)
-			err := s.insertBatch(context.Background(), writeObjects(projectionBatch, 4))
-			if err == nil {
-				t.Fatal("persistently rejected object was accepted")
+			err := s.insertBatch(context.Background(), objects)
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("err=%v, want %q", err, tc.wantErr)
 			}
 			for _, leak := range []string{"https://", "weaviate.invalid", "api_key", "secret", "Bearer"} {
 				if strings.Contains(err.Error(), leak) {
 					t.Fatalf("error %q leaks provider text %q", err, leak)
 				}
 			}
-			if len(client.calls) > grpcBatchAttempts {
-				t.Fatalf("batch calls=%d, want at most %d", len(client.calls), grpcBatchAttempts)
+			if len(client.calls) != tc.wantCalls {
+				t.Fatalf("batch calls=%d, want %d", len(client.calls), tc.wantCalls)
+			}
+			for _, retry := range client.calls[1:] {
+				if len(retry) != 1 || retry[0] != poisoned {
+					t.Fatalf("re-sent %v, want only the rejected object %s", retry, poisoned)
+				}
 			}
 		})
 	}
@@ -279,7 +296,7 @@ func TestGRPCWriteDeadlineScalesWithBatchBytes(t *testing.T) {
 func TestGRPCEmbeddingWriteReplaysIdenticalPayload(t *testing.T) {
 	g := content.Generation{ID: "generation", Collection: "WriteObjects", SpaceID: "space"}
 	data, anchors := benchmarkEmbeddings(t, g, "organization", 2, 3)
-	client := &writeGRPC{anchors: anchors}
+	client := &writeGRPC{anchors: anchors, record: true}
 	s := writeStore(&objectREST{}, client)
 	for range 2 {
 		if err := s.PublishEmbeddings(context.Background(), g, "organization", data); err != nil {
