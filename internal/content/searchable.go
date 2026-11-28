@@ -51,17 +51,74 @@ func SourceSlices(v Version, ranges []SourceRange) ([]SourceRange, []SourceExcer
 	return newSourceParts(v).resolve(ranges)
 }
 
+// partText indexes one Part's text by code point once, so validating many
+// segments of a Part costs one pass over it rather than one per segment.
+//
+// Coordinates address the code points of []rune(raw): each invalid UTF-8 byte
+// decodes to its own U+FFFD. text is that decoding re-encoded, which is raw
+// itself whenever raw is valid UTF-8, and offsets[i] is the byte offset of
+// code point i in text, with offsets[len] == len(text).
+type partText struct {
+	raw     string
+	text    string
+	decoded bool
+	offsets []int
+	sha256  string
+}
+
+func (t *partText) canonical() string {
+	if !t.decoded {
+		t.text, t.decoded = t.raw, true
+		if !utf8.ValidString(t.raw) {
+			t.text = string([]rune(t.raw))
+		}
+	}
+	return t.text
+}
+
+func (t *partText) index() []int {
+	if t.offsets == nil {
+		text := t.canonical()
+		offsets := make([]int, 0, utf8.RuneCountInString(text)+1)
+		for i := range text {
+			offsets = append(offsets, i)
+		}
+		t.offsets = append(offsets, len(text))
+	}
+	return t.offsets
+}
+
+// runes is the Part's length in code points.
+func (t *partText) runes() int { return len(t.index()) - 1 }
+
+// slice is string([]rune(raw)[start:end]) for 0 <= start <= end <= runes().
+// It shares the Part's text; callers that retain it beyond the Version clone it.
+func (t *partText) slice(start, end int) string {
+	offsets := t.index()
+	return t.text[offsets[start]:offsets[end]]
+}
+
+// utf8Offset is len(string([]rune(raw)[:n])) for 0 <= n <= runes().
+func (t *partText) utf8Offset(n int) int { return t.index()[n] }
+
+// hash is Hash([]byte(string([]rune(raw)))).
+func (t *partText) hash() string {
+	if t.sha256 == "" {
+		t.sha256 = Hash([]byte(t.canonical()))
+	}
+	return t.sha256
+}
+
 type sourceParts struct {
-	texts map[string]string
-	runes map[string][]rune
+	texts map[string]*partText
 	order map[string]int
 }
 
 func newSourceParts(v Version) *sourceParts {
-	p := &sourceParts{texts: map[string]string{}, runes: map[string][]rune{}, order: map[string]int{}}
+	p := &sourceParts{texts: map[string]*partText{}, order: map[string]int{}}
 	for i, part := range v.Manifest.Parts {
 		if part.Content.Kind == "text" {
-			p.texts[part.Key] = part.Content.Text
+			p.texts[part.Key] = &partText{raw: part.Content.Text}
 			p.order[part.Key] = i
 		}
 	}
@@ -75,17 +132,13 @@ func (p *sourceParts) resolve(ranges []SourceRange) ([]SourceRange, []SourceExce
 	previous := -1
 	lastEnd := 0
 	for i, r := range ranges {
-		raw, ok := p.texts[r.PartKey]
-		text, decoded := p.runes[r.PartKey]
-		if ok && !decoded {
-			text = []rune(raw)
-			p.runes[r.PartKey] = text
-		}
+		text, ok := p.texts[r.PartKey]
 		pos := p.order[r.PartKey]
-		if !ok || r.Start < 0 || r.End <= r.Start || r.End > len(text) || r.End-r.Start > 4096 || pos < previous || pos == previous && r.Start < lastEnd {
+		if !ok || r.Start < 0 || r.End <= r.Start || r.End > text.runes() || r.End-r.Start > 4096 || pos < previous || pos == previous && r.Start < lastEnd {
 			return nil, nil, ErrInvalid
 		}
-		out[i] = SourceExcerpt{SourceRange: r, Text: string(text[r.Start:r.End])}
+		// Excerpts outlive the Version on plugin segments: do not pin its Part.
+		out[i] = SourceExcerpt{SourceRange: r, Text: strings.Clone(text.slice(r.Start, r.End))}
 		previous = pos
 		lastEnd = r.End
 	}
@@ -366,14 +419,20 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 	if result.VersionID != v.ID || result.Recipe == "" || len(result.Segments) == 0 {
 		return ErrInvalid
 	}
-	parts := map[string][]rune{}
+	// Index each Part once; per-segment checks below are proportional to the
+	// segment, not to its Part.
+	parts := map[string]*partText{}
 	blobParts := map[string]string{}
-	for _, p := range v.Manifest.Parts {
+	for i, p := range v.Manifest.Parts {
 		if p.Content.Kind == "blob" {
 			blobParts[p.Key] = p.Content.BlobSHA256
 			continue
 		}
-		parts[p.Key] = []rune(p.Content.Text)
+		if shared, ok := sources.texts[p.Key]; ok && sources.order[p.Key] == i {
+			parts[p.Key] = shared
+			continue
+		}
+		parts[p.Key] = &partText{raw: p.Content.Text}
 	}
 	for i := range result.Segments {
 		p := &result.Segments[i]
@@ -383,7 +442,7 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 			}
 			if p.TitleKey != "" {
 				title, ok := parts[p.TitleKey]
-				if !ok || string(title) != p.Title {
+				if !ok || title.canonical() != p.Title {
 					return ErrInvalid
 				}
 			}
@@ -401,10 +460,10 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 			return ErrInvalid
 		}
 		text, ok := parts[p.PartKey]
-		if !ok || p.Start < 0 || p.End < p.Start || p.End > len(text) {
+		if !ok || p.Start < 0 || p.End < p.Start || p.End > text.runes() {
 			return ErrInvalid
 		}
-		expectedText := string(text[p.Start:p.End])
+		expectedText := text.slice(p.Start, p.End)
 		if len(p.Derivation.SourceRanges) > 0 {
 			ranges, slices, err := sources.resolve(p.Derivation.SourceRanges)
 			if err != nil || ranges[0].PartKey != p.PartKey || ranges[0].Start != p.Start || ranges[0].End != p.End || !validSourceSeparator(p.Derivation.SourceSeparator) {
@@ -424,12 +483,12 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 		}
 		if p.TitleKey != "" {
 			title, ok := parts[p.TitleKey]
-			if !ok || string(title) != p.Title {
+			if !ok || title.canonical() != p.Title {
 				return ErrInvalid
 			}
 		}
 		d := p.Derivation
-		if d.UTF8Start != len(string(text[:p.Start])) || d.UTF8End != len(string(text[:p.End])) || d.NormalizedSHA256 != Hash([]byte(string(text))) || d.ModelInputSHA256 != Hash([]byte(d.ModelInput)) || d.ModelTokens > 512 {
+		if d.UTF8Start != text.utf8Offset(p.Start) || d.UTF8End != text.utf8Offset(p.End) || d.NormalizedSHA256 != text.hash() || d.ModelInputSHA256 != Hash([]byte(d.ModelInput)) || d.ModelTokens > 512 {
 			return ErrInvalid
 		}
 		expected := SegmentID(org, result.ID, *p)

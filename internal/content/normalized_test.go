@@ -199,15 +199,18 @@ func TestMaterializePublishesTheNormalizedManifestWithProvenance(t *testing.T) {
 			if _, leaked := command.Provenance["normalization"]; leaked {
 				t.Fatal("the accepted Command was mutated")
 			}
-			// The published Manifest and Part text come from the normalizer output.
-			var found bool
-			for _, data := range blobs {
-				if string(data) == "Title\nBody" {
-					found = true
-				}
+			// The published Manifest and Part text come from the normalizer
+			// output, each Part addressed by its exact range of the text.
+			publication := repo.publications[0]
+			normalized := blobs[publication.Normalized.Key]
+			if string(normalized) != "Title\nBody" || publication.Normalized.Size != int64(len(normalized)) || len(publication.Parts) != 2 {
+				t.Fatalf("normalized text not published: %q %+v", normalized, publication)
 			}
-			if !found {
-				t.Fatal("normalized text not published")
+			for i, want := range []string{"Title", "Body"} {
+				pack := publication.Parts[i].Pack
+				if got := string(normalized[*pack.Offset : *pack.Offset+*pack.Length]); got != want || publication.Parts[i].Blob != publication.Normalized {
+					t.Fatalf("part %d packs %q, want %q", i, got, want)
+				}
 			}
 		})
 	}

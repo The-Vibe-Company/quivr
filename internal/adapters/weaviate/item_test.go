@@ -19,6 +19,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // Real BM25 owns headline weighting, item frequency and query normalization.
@@ -1502,5 +1503,235 @@ func TestContainsAnyFiltersAndLegacyCallerDeadline(t *testing.T) {
 				t.Fatalf("legacy search did not use ContainsAny for sourceNamespace: %s", seenQuery)
 			}
 		})
+	})
+}
+
+type panicVisibilityResolver struct {
+	siblingStarted  chan struct{}
+	siblingCanceled chan struct{}
+	once            sync.Once
+}
+
+func (p *panicVisibilityResolver) Sources(ctx context.Context, _, corpusID string, _ []string) (visibility.Sources, error) {
+	if corpusID == "panic-corpus" {
+		<-p.siblingStarted
+		panic("injected visibility panic")
+	}
+	p.once.Do(func() { close(p.siblingStarted) })
+	<-ctx.Done()
+	close(p.siblingCanceled)
+	return visibility.Sources{}, ctx.Err()
+}
+
+func (p *panicVisibilityResolver) Current(context.Context, string, map[string]int64) (bool, error) {
+	return true, nil
+}
+
+func (p *panicVisibilityResolver) SourceVersions(context.Context, string, string, []string, int) ([]string, error) {
+	return nil, nil
+}
+
+func TestItemSearchErrgroupPanicRecovery(t *testing.T) {
+	t.Run("dense leg panic returns ErrUnavailable and cancels sparse sibling", func(t *testing.T) {
+		sparseStarted := make(chan struct{})
+		sparseCanceled := make(chan struct{})
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			if strings.Contains(query, "nearVector:") {
+				<-sparseStarted
+				panic("injected dense panic")
+			}
+			close(sparseStarted)
+			<-ctx.Done()
+			close(sparseCanceled)
+			return nil, ctx.Err()
+		})
+		_, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "hybrid", Vector: []float32{1}, GroupBy: "record", K: 10,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-sparseCanceled
+	})
+
+	t.Run("sparse BM25 leg panic returns ErrUnavailable and cancels sibling BM25 leg", func(t *testing.T) {
+		siblingStarted := make(chan struct{})
+		siblingCanceled := make(chan struct{})
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			if strings.Contains(query, "_folded^") {
+				<-siblingStarted
+				panic("injected bm25 panic")
+			}
+			close(siblingStarted)
+			<-ctx.Done()
+			close(siblingCanceled)
+			return nil, ctx.Err()
+		})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		g := content.Generation{
+			ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+			Fields: []corpus.Field{
+				{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}},
+				{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"},
+			},
+		}
+		_, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-siblingCanceled
+	})
+
+	t.Run("concurrent ambiguous text/tail leg panic returns ErrUnavailable and cancels sibling", func(t *testing.T) {
+		tailStarted := make(chan struct{})
+		tailCanceled := make(chan struct{})
+		bm25 := []itemSearchRow{
+			{Version: "v1", Score: "3"},
+			{Version: "v2", Score: "2"},
+			{Version: "v3", Score: "1"},
+		}
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(bm25), nil
+			case strings.Contains(query, "passageText"):
+				<-tailStarted
+				panic("injected ambiguous text panic")
+			case matchesFieldFilter(query, "versionId", "v3"):
+				close(tailStarted)
+				<-ctx.Done()
+				close(tailCanceled)
+				return nil, ctx.Err()
+			default:
+				return itemSearchResponse([]itemSearchRow{
+					{Segment: "s1a", Version: "v1"},
+					{Segment: "s1b", Version: "v1"},
+					{Segment: "s2a", Version: "v2"},
+				}), nil
+			}
+		})
+		_, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: 1, K: 10,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-tailCanceled
+	})
+
+	t.Run("recoverMissingPassages panic returns ErrUnavailable and cancels sibling recovery", func(t *testing.T) {
+		siblingStarted := make(chan struct{})
+		siblingCanceled := make(chan struct{})
+		bm25 := []itemSearchRow{
+			{Version: "v-huge", Score: "3"},
+			{Version: "v-miss-1", Score: "2"},
+			{Version: "v-miss-2", Score: "1"},
+		}
+		hugePassages := make([]itemSearchRow, 256)
+		for i := range hugePassages {
+			hugePassages[i] = itemSearchRow{Segment: fmt.Sprintf("aaa-%04d", i), Version: "v-huge"}
+		}
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse(bm25), nil
+			case strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:"v-miss-1"}`):
+				<-siblingStarted
+				panic("injected recovery panic")
+			case strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:"v-miss-2"}`):
+				close(siblingStarted)
+				<-ctx.Done()
+				close(siblingCanceled)
+				return nil, ctx.Err()
+			default:
+				return itemSearchResponse(hugePassages), nil
+			}
+		})
+		_, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour", Mode: "lexical", GroupBy: "record", Limit: 5, K: 10,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-siblingCanceled
+	})
+
+	t.Run("multi-route searchRouted panic returns ErrUnavailable and cancels sibling route", func(t *testing.T) {
+		siblingStarted := make(chan struct{})
+		siblingCanceled := make(chan struct{})
+		var mu sync.Mutex
+		firstTenant := ""
+		transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+			mu.Lock()
+			isFirst := firstTenant == ""
+			if isFirst {
+				firstTenant = query
+				mu.Unlock()
+				close(siblingStarted)
+				<-ctx.Done()
+				close(siblingCanceled)
+				return nil, ctx.Err()
+			}
+			mu.Unlock()
+			<-siblingStarted
+			panic("injected route search panic")
+		})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		g1 := content.Generation{ID: "gen-1", Collection: weaviate.InitialCollection}
+		g2 := content.Generation{ID: "gen-2", Collection: weaviate.InitialCollection}
+		routes := []retrieval.Route{{CorpusID: "c1", Generation: g1}, {CorpusID: "c2", Generation: g2}}
+		_, err := store.Search(t.Context(), routes, corpus.Scope{Organization: "org"}, retrieval.Request{
+			Query: "harbour", Mode: "lexical", K: 5,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-siblingCanceled
+	})
+
+	t.Run("resolveVisibility panic returns ErrUnavailable and cancels sibling route", func(t *testing.T) {
+		resolver := &panicVisibilityResolver{
+			siblingStarted:  make(chan struct{}),
+			siblingCanceled: make(chan struct{}),
+		}
+		store := weaviate.New("http://index.invalid")
+		store.Visibility = resolver
+		g := content.Generation{ID: "gen", Collection: weaviate.InitialCollection}
+		routes := []retrieval.Route{
+			{CorpusID: "wait-corpus", Generation: g},
+			{CorpusID: "panic-corpus", Generation: g},
+		}
+		ctx := visibility.WithPrincipals(t.Context(), []string{"group:reader"})
+		_, err := store.Search(ctx, routes, corpus.Scope{Organization: "org", Corpora: []string{"wait-corpus", "panic-corpus"}}, retrieval.Request{
+			Query: "harbour", Mode: "lexical", K: 5,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+		<-resolver.siblingCanceled
+	})
+
+	t.Run("single-route resolveVisibility panic returns ErrUnavailable", func(t *testing.T) {
+		siblingStarted := make(chan struct{})
+		close(siblingStarted)
+		resolver := &panicVisibilityResolver{
+			siblingStarted:  siblingStarted,
+			siblingCanceled: make(chan struct{}),
+		}
+		store := weaviate.New("http://index.invalid")
+		store.Visibility = resolver
+		g := content.Generation{ID: "gen", Collection: weaviate.InitialCollection}
+		routes := []retrieval.Route{{CorpusID: "panic-corpus", Generation: g}}
+		ctx := visibility.WithPrincipals(t.Context(), []string{"group:reader"})
+		_, err := store.Search(ctx, routes, corpus.Scope{Organization: "org", Corpora: []string{"panic-corpus"}}, retrieval.Request{
+			Query: "harbour", Mode: "lexical", K: 5,
+		})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
 	})
 }
