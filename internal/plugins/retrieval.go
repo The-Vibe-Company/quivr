@@ -1,12 +1,16 @@
 package plugins
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // SearchRoute is the route of the retrieval Contribution.
@@ -236,6 +240,15 @@ type Candidate struct {
 	LeadPassage     string          `json:"lead_passage,omitempty"`
 }
 
+// servedCache memoizes the canonical json.Marshal bytes of an immutable
+// ServedRequest produced by RetrievalSession.Serve so later rounds do not
+// re-encode earlier rounds' candidate transcripts.
+type servedCache struct {
+	once sync.Once
+	raw  []byte
+	err  error
+}
+
 // ServedRequest is a candidate request of an earlier round with what the core
 // served for it.
 type ServedRequest struct {
@@ -243,6 +256,262 @@ type ServedRequest struct {
 	RequestIndex int              `json:"request_index"`
 	Request      CandidateRequest `json:"request"`
 	Candidates   []Candidate      `json:"candidates"`
+
+	encoded *servedCache
+}
+
+// MarshalCachedJSON returns the canonical json.Marshal encoding of s. When s
+// was produced by RetrievalSession.Serve, the serialized bytes are cached once
+// and reused across subsequent rounds. Callers must treat the returned slice
+// as read-only.
+func (s ServedRequest) MarshalCachedJSON() ([]byte, error) {
+	if s.encoded == nil {
+		return marshalServedRequest(s)
+	}
+	s.encoded.once.Do(func() {
+		s.encoded.raw, s.encoded.err = marshalServedRequest(s)
+	})
+	return s.encoded.raw, s.encoded.err
+}
+
+const jsonHex = "0123456789abcdef"
+
+// marshalServedRequest encodes s into bytes identical to json.Marshal(s) using
+// a single pre-sized buffer without per-candidate reflection overhead.
+func marshalServedRequest(s ServedRequest) ([]byte, error) {
+	reqBytes, err := json.Marshal(s.Request)
+	if err != nil {
+		return nil, err
+	}
+	est := 64 + len(reqBytes)
+	for i := range s.Candidates {
+		c := &s.Candidates[i]
+		est += 224 + len(c.SegmentID) + len(c.RecordID) + len(c.VersionID) + len(c.PartKey) +
+			len(c.Text) + len(c.PassageText) + len(c.Title) + len(c.Explanation) +
+			len(c.CommonMetadata) + len(c.LeadPassage)
+	}
+	dst := make([]byte, 0, est)
+	dst = append(dst, `{"round":`...)
+	dst = strconv.AppendInt(dst, int64(s.Round), 10)
+	dst = append(dst, `,"request_index":`...)
+	dst = strconv.AppendInt(dst, int64(s.RequestIndex), 10)
+	dst = append(dst, `,"request":`...)
+	dst = append(dst, reqBytes...)
+	dst = append(dst, `,"candidates":`...)
+	if s.Candidates == nil {
+		dst = append(dst, "null}"...)
+		return dst, nil
+	}
+	dst = append(dst, '[')
+	var compactBuf, htmlBuf bytes.Buffer
+	for i := range s.Candidates {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		var ok bool
+		dst, ok = appendCandidateJSON(dst, &s.Candidates[i], &compactBuf, &htmlBuf)
+		if !ok {
+			return json.Marshal(s)
+		}
+	}
+	dst = append(dst, "]}"...)
+	return dst, nil
+}
+
+func appendCandidateJSON(dst []byte, c *Candidate, compactBuf, htmlBuf *bytes.Buffer) ([]byte, bool) {
+	dst = append(dst, `{"segment_id":`...)
+	dst = appendJSONString(dst, c.SegmentID)
+	dst = append(dst, `,"record_id":`...)
+	dst = appendJSONString(dst, c.RecordID)
+	dst = append(dst, `,"version_id":`...)
+	dst = appendJSONString(dst, c.VersionID)
+	dst = append(dst, `,"part_key":`...)
+	dst = appendJSONString(dst, c.PartKey)
+	dst = append(dst, `,"text":`...)
+	dst = appendJSONString(dst, c.Text)
+	dst = append(dst, `,"start":`...)
+	dst = strconv.AppendInt(dst, int64(c.Start), 10)
+	dst = append(dst, `,"end":`...)
+	dst = strconv.AppendInt(dst, int64(c.End), 10)
+	if c.PassageText != "" {
+		dst = append(dst, `,"passage_text":`...)
+		dst = appendJSONString(dst, c.PassageText)
+	}
+	if len(c.SourceRanges) > 0 {
+		dst = append(dst, `,"source_ranges":[`...)
+		for i, sr := range c.SourceRanges {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = append(dst, `{"part_key":`...)
+			dst = appendJSONString(dst, sr.PartKey)
+			dst = append(dst, `,"start":`...)
+			dst = strconv.AppendInt(dst, int64(sr.Start), 10)
+			dst = append(dst, `,"end":`...)
+			dst = strconv.AppendInt(dst, int64(sr.End), 10)
+			dst = append(dst, '}')
+		}
+		dst = append(dst, ']')
+	}
+	if c.SourceSeparator != "" {
+		dst = append(dst, `,"source_separator":`...)
+		dst = appendJSONString(dst, c.SourceSeparator)
+	}
+	if c.Region != nil {
+		raw, err := json.Marshal(c.Region)
+		if err != nil {
+			return nil, false
+		}
+		dst = append(dst, `,"region":`...)
+		dst = append(dst, raw...)
+	}
+	dst = append(dst, `,"score":`...)
+	var ok bool
+	dst, ok = appendJSONFloat(dst, c.Score)
+	if !ok {
+		return nil, false
+	}
+	if c.Explanation != "" {
+		dst = append(dst, `,"explanation":`...)
+		dst = appendJSONString(dst, c.Explanation)
+	}
+	if c.Title != "" {
+		dst = append(dst, `,"title":`...)
+		dst = appendJSONString(dst, c.Title)
+	}
+	if len(c.CommonMetadata) > 0 {
+		compactBuf.Reset()
+		if err := json.Compact(compactBuf, c.CommonMetadata); err != nil {
+			return nil, false
+		}
+		raw := compactBuf.Bytes()
+		dst = append(dst, `,"common_metadata":`...)
+		if needsJSONHTMLEscape(raw) {
+			htmlBuf.Reset()
+			json.HTMLEscape(htmlBuf, raw)
+			dst = append(dst, htmlBuf.Bytes()...)
+		} else {
+			dst = append(dst, raw...)
+		}
+	}
+	if c.PassageOrdinal != nil {
+		dst = append(dst, `,"passage_ordinal":`...)
+		dst = strconv.AppendInt(dst, int64(*c.PassageOrdinal), 10)
+	}
+	if c.TotalPassages != 0 {
+		dst = append(dst, `,"total_passages":`...)
+		dst = strconv.AppendInt(dst, int64(c.TotalPassages), 10)
+	}
+	if c.LeadPassage != "" {
+		dst = append(dst, `,"lead_passage":`...)
+		dst = appendJSONString(dst, c.LeadPassage)
+	}
+	dst = append(dst, '}')
+	return dst, true
+}
+
+var jsonSafeSet = func() [256]bool {
+	var t [256]bool
+	for i := 0x20; i < utf8.RuneSelf; i++ {
+		if i != '\\' && i != '"' && i != '<' && i != '>' && i != '&' {
+			t[i] = true
+		}
+	}
+	return t
+}()
+
+func needsJSONHTMLEscape(b []byte) bool {
+	for _, c := range b {
+		if c == '<' || c == '>' || c == '&' || c == 0xe2 {
+			return true
+		}
+	}
+	return false
+}
+
+func appendJSONFloat(dst []byte, f float64) ([]byte, bool) {
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return nil, false
+	}
+	abs := math.Abs(f)
+	fmtByte := byte('f')
+	if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+		fmtByte = 'e'
+	}
+	start := len(dst)
+	dst = strconv.AppendFloat(dst, f, fmtByte, -1, 64)
+	if fmtByte == 'e' {
+		n := len(dst)
+		if n-start >= 4 && dst[n-4] == 'e' && dst[n-3] == '-' && dst[n-2] == '0' {
+			dst[n-2] = dst[n-1]
+			dst = dst[:n-1]
+		}
+	}
+	return dst, true
+}
+
+func appendJSONString(dst []byte, s string) []byte {
+	dst = append(dst, '"')
+	start := 0
+	for i := 0; i < len(s); {
+		// Fast path: scan safe ASCII bytes with a single table lookup per byte.
+		for i < len(s) && jsonSafeSet[s[i]] {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		b := s[i]
+		if b < utf8.RuneSelf {
+			if start < i {
+				dst = append(dst, s[start:i]...)
+			}
+			switch b {
+			case '\\', '"':
+				dst = append(dst, '\\', b)
+			case '\b':
+				dst = append(dst, '\\', 'b')
+			case '\f':
+				dst = append(dst, '\\', 'f')
+			case '\n':
+				dst = append(dst, '\\', 'n')
+			case '\r':
+				dst = append(dst, '\\', 'r')
+			case '\t':
+				dst = append(dst, '\\', 't')
+			default:
+				dst = append(dst, '\\', 'u', '0', '0', jsonHex[b>>4], jsonHex[b&0xF])
+			}
+			i++
+			start = i
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			if start < i {
+				dst = append(dst, s[start:i]...)
+			}
+			dst = utf8.AppendRune(dst, utf8.RuneError)
+			i++
+			start = i
+			continue
+		}
+		if r == '\u2028' || r == '\u2029' {
+			if start < i {
+				dst = append(dst, s[start:i]...)
+			}
+			dst = append(dst, `\u202`...)
+			dst = append(dst, jsonHex[r&0xF])
+			i += size
+			start = i
+			continue
+		}
+		i += size
+	}
+	if start < len(s) {
+		dst = append(dst, s[start:]...)
+	}
+	return append(dst, '"')
 }
 
 // SpaceOwner is the owner of a search space: the engine or a plugin.
@@ -521,7 +790,13 @@ func (s *RetrievalSession) Serve(invocationID string, requests []CandidateReques
 		if c == nil {
 			c = []Candidate{}
 		}
-		served = append(served, ServedRequest{Round: s.request.Round, RequestIndex: i, Request: r, Candidates: c})
+		served = append(served, ServedRequest{
+			Round:        s.request.Round,
+			RequestIndex: i,
+			Request:      r,
+			Candidates:   c,
+			encoded:      &servedCache{},
+		})
 	}
 	s.request.Served = served
 	s.request.Round++

@@ -545,14 +545,115 @@ func InvokeNormalizerWith(ctx context.Context, baseURL string, request []byte, m
 	return invoke(ctx, baseURL, "/v0/contributions/normalizer", request, maxResponseBytes, check)
 }
 
+// maxResponsePrealloc bounds the upfront buffer allocated from a peer's
+// Content-Length header so an untrusted or oversized header cannot trigger OOM
+// before bytes actually arrive on the wire.
+const maxResponsePrealloc = 1 << 20
+
+// readBoundedBody reads at most maxResponseBytes+1 bytes from r, pre-sizing
+// the buffer from contentLength when known and safely bounded.
+func readBoundedBody(r io.Reader, contentLength int64, maxResponseBytes int) ([]byte, error) {
+	if maxResponseBytes < 0 {
+		maxResponseBytes = 0
+	}
+	limit := int64(maxResponseBytes) + 1
+	limited := io.LimitReader(r, limit)
+
+	var initialCap int
+	switch {
+	case contentLength >= 0 && contentLength <= int64(maxResponseBytes):
+		prealloc := min(contentLength, int64(maxResponsePrealloc))
+		// Add one spare byte when space allows so an exact-length response
+		// observes io.EOF without triggering a 2x slice growth.
+		if prealloc < limit {
+			prealloc++
+		}
+		initialCap = int(prealloc)
+	case contentLength > int64(maxResponseBytes):
+		// Peer declared a body larger than maxResponseBytes; do not trust the
+		// header for upfront allocation, start small while still reading up to
+		// limit to distinguish premature EOF from CodeResponseTooLarge.
+		initialCap = int(min(int64(4096), limit))
+	default:
+		initialCap = int(min(int64(512), limit))
+	}
+	if initialCap < 1 {
+		initialCap = 1
+	}
+
+	buf := make([]byte, 0, initialCap)
+	for {
+		if int64(len(buf)) == limit-1 {
+			// We have already read maxResponseBytes; probe for 1 overflow byte
+			// on the stack instead of doubling a full-size buffer before EOF.
+			var probe [1]byte
+			n, err := limited.Read(probe[:])
+			if n > 0 {
+				buf = append(buf, probe[0])
+				return buf, nil
+			}
+			if err == io.EOF {
+				return buf, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if len(buf) == cap(buf) {
+			if int64(len(buf)) >= limit {
+				return buf, nil
+			}
+			nextCap := int64(cap(buf)) * 2
+			if nextCap < 512 {
+				nextCap = 512
+			}
+			if nextCap > limit {
+				nextCap = limit
+			}
+			grown := make([]byte, len(buf), int(nextCap))
+			copy(grown, buf)
+			buf = grown
+		}
+		n, err := limited.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if err == io.EOF {
+				return buf, nil
+			}
+			return nil, err
+		}
+	}
+}
+
 func invoke(ctx context.Context, baseURL, route string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+route, bytes.NewReader(request))
+	var bodyReader io.Reader = bytes.NewReader(request)
+	var tracked *trackedBytesReader
+	if rr, ok := ctx.Value(requestReleaseKey{}).(*requestRelease); ok && !rr.claimed.Swap(true) {
+		tracker := newTrackedBytesBody(request, rr.fn)
+		tracked = tracker.newReader()
+		bodyReader = tracked
+		defer tracker.dec()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+route, bodyReader)
 	if err != nil {
+		if tracked != nil {
+			_ = tracked.Close()
+		}
 		return nil, err
+	}
+	if tracked != nil {
+		req.ContentLength = int64(len(request))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return tracked.tracker.newReader(), nil
+		}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	telemetry.Inject(ctx, req.Header)
 	if err := plugins.SignHTTPRequest(req, request); err != nil {
+		if tracked != nil {
+			_ = tracked.Close()
+		}
 		return nil, err
 	}
 	resp, err := httpClient().Do(req)
@@ -565,7 +666,7 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 			return nil, err
 		}
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
+	body, err := readBoundedBody(resp.Body, resp.ContentLength, maxResponseBytes)
 	if err != nil {
 		return nil, &TransportError{fmt.Errorf("read %s response: %w", route, err)}
 	}
