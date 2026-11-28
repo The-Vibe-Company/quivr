@@ -417,6 +417,11 @@ func parseBatchEnvelope(payload []byte) ([][]byte, error) {
 // contracts/http/v0/openapi.yaml#IngestCommand and
 // contracts/shared/v0/manifest.schema.json.
 //
+// Duplicate keys within any command object follow a consistent last-value-wins
+// policy (matching JSON Schema map decoding): an invalid value on a known key
+// is skipped (still syntax-validated) and only fails validation if no later
+// duplicate of that key supplies a valid value.
+//
 // When checkSyntaxOnError is true (single-record POST /v0/records), malformed
 // JSON syntax takes precedence over schema violations (returning
 // publicerr.MalformedJson vs publicerr.InvalidSchema). For batch entries whose
@@ -461,13 +466,19 @@ func (s *jsonScanner) parseIngestCommand() (content.Command, error) {
 	}
 
 	const (
-		cmdKey uint8 = 1 << iota
+		cmdKey uint16 = 1 << iota
 		cmdSource
 		cmdContent
+		cmdACL
+		cmdRevision
+		cmdPosition
+		cmdExtensions
+		cmdProvenance
 	)
 	var (
-		c        content.Command
-		required uint8
+		c       content.Command
+		seen    uint16
+		invalid uint16
 	)
 
 	for {
@@ -478,64 +489,89 @@ func (s *jsonScanner) parseIngestCommand() (content.Command, error) {
 		if err := s.expectColon(); err != nil {
 			return content.Command{}, err
 		}
+		valStart := s.pos
+		var bit uint16
 		switch string(key) {
 		case "idempotency_key":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdKey
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				c.Key = v
 			}
-			c.Key = v
-			required |= cmdKey
 		case "source":
-			src, err := s.parseSourceIdentity()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdSource
+			var src content.Source
+			src, err = s.parseSourceIdentity()
+			if err == nil {
+				c.Source = src
 			}
-			c.Source = src
-			required |= cmdSource
 		case "content":
-			text, manifest, err := s.parseCommandContent(true)
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdContent
+			var text content.Text
+			var manifest *content.Manifest
+			text, manifest, err = s.parseCommandContent(true)
+			if err == nil {
+				c.Content = text
+				c.Manifest = manifest
 			}
-			c.Content = text
-			c.Manifest = manifest
-			required |= cmdContent
 		case "record_acl":
-			acl, err := s.parseRecordACL()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdACL
+			var acl []string
+			acl, err = s.parseRecordACL()
+			if err == nil {
+				c.ACL = acl
 			}
-			c.ACL = acl
 		case "source_revision":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdRevision
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				c.Revision = v
 			}
-			c.Revision = v
 		case "source_position":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdPosition
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil && !isDecimalDigits(v) {
+				err = publicerr.InvalidSchema
 			}
-			if !isDecimalDigits(v) {
-				return content.Command{}, publicerr.InvalidSchema
+			if err == nil {
+				c.Position = v
 			}
-			c.Position = v
 		case "extensions":
-			ext, err := s.parseExtensions()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdExtensions
+			var ext content.Extensions
+			ext, err = s.parseExtensions()
+			if err == nil {
+				c.Extensions = ext
 			}
-			c.Extensions = ext
 		case "provenance":
-			prov, err := s.parseProvenance()
-			if err != nil {
-				return content.Command{}, err
+			bit = cmdProvenance
+			var prov map[string]any
+			prov, err = s.parseProvenance()
+			if err == nil {
+				c.Provenance = prov
 			}
-			c.Provenance = prov
 		default:
 			return content.Command{}, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Command{}, err
+			}
+			// Preserve legacy last-value-wins semantics on duplicate keys: skip
+			// this syntactically valid value and mark the field invalid unless a
+			// later duplicate key supplies a valid value.
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Command{}, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 
 		s.skipWS()
@@ -554,7 +590,8 @@ func (s *jsonScanner) parseIngestCommand() (content.Command, error) {
 		return content.Command{}, errMalformedJSON
 	}
 
-	if required != (cmdKey | cmdSource | cmdContent) {
+	const required = cmdKey | cmdSource | cmdContent
+	if invalid != 0 || seen&required != required {
 		return content.Command{}, publicerr.InvalidSchema
 	}
 	return c, nil
@@ -599,8 +636,9 @@ func (s *jsonScanner) parseSourceIdentity() (content.Source, error) {
 		srcRecordKey
 	)
 	var (
-		out      content.Source
-		required uint8
+		out     content.Source
+		seen    uint8
+		invalid uint8
 	)
 	for {
 		key, err := s.scanKey()
@@ -610,30 +648,46 @@ func (s *jsonScanner) parseSourceIdentity() (content.Source, error) {
 		if err := s.expectColon(); err != nil {
 			return content.Source{}, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "corpus_id":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Source{}, err
+			bit = srcCorpus
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.CorpusID = v
 			}
-			out.CorpusID = v
-			required |= srcCorpus
 		case "namespace":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Source{}, err
+			bit = srcNamespace
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.Namespace = v
 			}
-			out.Namespace = v
-			required |= srcNamespace
 		case "record_key":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Source{}, err
+			bit = srcRecordKey
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.RecordKey = v
 			}
-			out.RecordKey = v
-			required |= srcRecordKey
 		default:
 			return content.Source{}, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Source{}, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Source{}, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -650,7 +704,7 @@ func (s *jsonScanner) parseSourceIdentity() (content.Source, error) {
 		}
 		return content.Source{}, errMalformedJSON
 	}
-	if required != (srcCorpus | srcNamespace | srcRecordKey) {
+	if invalid != 0 || seen != (srcCorpus|srcNamespace|srcRecordKey) {
 		return content.Source{}, publicerr.InvalidSchema
 	}
 	return out, nil
@@ -682,6 +736,7 @@ func (s *jsonScanner) parseCommandContent(allowManifest bool) (content.Text, *co
 	)
 	var (
 		seen      uint8
+		invalid   uint8
 		kind      string
 		text      string
 		blobID    string
@@ -697,57 +752,73 @@ func (s *jsonScanner) parseCommandContent(allowManifest bool) (content.Text, *co
 		if err := s.expectColon(); err != nil {
 			return content.Text{}, nil, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "kind":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fKind
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				kind = v
 			}
-			kind = v
-			seen |= fKind
 		case "text":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fText
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				text = v
 			}
-			text = v
-			seen |= fText
 		case "blob_id":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fBlobID
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				blobID = v
 			}
-			blobID = v
-			seen |= fBlobID
 		case "media_type":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fMediaType
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				mediaType = v
 			}
-			mediaType = v
-			seen |= fMediaType
 		case "parts":
 			if !allowManifest {
 				return content.Text{}, nil, publicerr.InvalidSchema
 			}
-			p, err := s.parseParts()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fParts
+			var p []content.Part
+			p, err = s.parseParts()
+			if err == nil {
+				parts = p
 			}
-			parts = p
-			seen |= fParts
 		case "relations":
 			if !allowManifest {
 				return content.Text{}, nil, publicerr.InvalidSchema
 			}
-			r, err := s.parseRelations()
-			if err != nil {
-				return content.Text{}, nil, err
+			bit = fRelations
+			var r []content.Relation
+			r, err = s.parseRelations()
+			if err == nil {
+				relations = r
 			}
-			relations = r
-			seen |= fRelations
 		default:
 			return content.Text{}, nil, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Text{}, nil, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Text{}, nil, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -765,6 +836,9 @@ func (s *jsonScanner) parseCommandContent(allowManifest bool) (content.Text, *co
 		return content.Text{}, nil, errMalformedJSON
 	}
 
+	if invalid != 0 {
+		return content.Text{}, nil, publicerr.InvalidSchema
+	}
 	switch kind {
 	case "text":
 		if seen != (fKind | fText) {
@@ -848,12 +922,15 @@ func (s *jsonScanner) parsePart() (content.Part, error) {
 	}
 	const (
 		pKey uint8 = 1 << iota
+		pParentKey
 		pRole
 		pContent
+		pExtensions
 	)
 	var (
-		out      content.Part
-		required uint8
+		out     content.Part
+		seen    uint8
+		invalid uint8
 	)
 	for {
 		key, err := s.scanKey()
@@ -863,42 +940,60 @@ func (s *jsonScanner) parsePart() (content.Part, error) {
 		if err := s.expectColon(); err != nil {
 			return content.Part{}, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "key":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Part{}, err
+			bit = pKey
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.Key = v
 			}
-			out.Key = v
-			required |= pKey
 		case "parent_key":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Part{}, err
+			bit = pParentKey
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.ParentKey = v
 			}
-			out.ParentKey = v
 		case "role":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Part{}, err
+			bit = pRole
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.Role = v
 			}
-			out.Role = v
-			required |= pRole
 		case "content":
-			text, _, err := s.parseCommandContent(false)
-			if err != nil {
-				return content.Part{}, err
+			bit = pContent
+			var text content.Text
+			text, _, err = s.parseCommandContent(false)
+			if err == nil {
+				out.Content = text
 			}
-			out.Content = text
-			required |= pContent
 		case "extensions":
-			ext, err := s.parseExtensions()
-			if err != nil {
-				return content.Part{}, err
+			bit = pExtensions
+			var ext content.Extensions
+			ext, err = s.parseExtensions()
+			if err == nil {
+				out.Extensions = ext
 			}
-			out.Extensions = ext
 		default:
 			return content.Part{}, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Part{}, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Part{}, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -915,7 +1010,8 @@ func (s *jsonScanner) parsePart() (content.Part, error) {
 		}
 		return content.Part{}, errMalformedJSON
 	}
-	if required != (pKey | pRole | pContent) {
+	const required = pKey | pRole | pContent
+	if invalid != 0 || seen&required != required {
 		return content.Part{}, publicerr.InvalidSchema
 	}
 	return out, nil
@@ -981,10 +1077,12 @@ func (s *jsonScanner) parseRelation() (content.Relation, error) {
 	const (
 		rType uint8 = 1 << iota
 		rTarget
+		rRevision
 	)
 	var (
-		out      content.Relation
-		required uint8
+		out     content.Relation
+		seen    uint8
+		invalid uint8
 	)
 	for {
 		key, err := s.scanKey()
@@ -994,29 +1092,46 @@ func (s *jsonScanner) parseRelation() (content.Relation, error) {
 		if err := s.expectColon(); err != nil {
 			return content.Relation{}, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "type":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Relation{}, err
+			bit = rType
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.Type = v
 			}
-			out.Type = v
-			required |= rType
 		case "target":
-			src, err := s.parseSourceIdentity()
-			if err != nil {
-				return content.Relation{}, err
+			bit = rTarget
+			var src content.Source
+			src, err = s.parseSourceIdentity()
+			if err == nil {
+				out.Target = src
 			}
-			out.Target = src
-			required |= rTarget
 		case "source_target_revision":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Relation{}, err
+			bit = rRevision
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.SourceTargetRevision = v
 			}
-			out.SourceTargetRevision = v
 		default:
 			return content.Relation{}, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Relation{}, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Relation{}, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -1033,7 +1148,8 @@ func (s *jsonScanner) parseRelation() (content.Relation, error) {
 		}
 		return content.Relation{}, errMalformedJSON
 	}
-	if required != (rType | rTarget) {
+	const required = rType | rTarget
+	if invalid != 0 || seen&required != required {
 		return content.Relation{}, publicerr.InvalidSchema
 	}
 	return out, nil
@@ -1056,6 +1172,7 @@ func (s *jsonScanner) parseExtensions() (content.Extensions, error) {
 		s.pos++
 		return out, nil
 	}
+	var invalidKeys map[string]struct{}
 	for {
 		ns, err := s.decodeString()
 		if err != nil {
@@ -1064,11 +1181,26 @@ func (s *jsonScanner) parseExtensions() (content.Extensions, error) {
 		if err := s.expectColon(); err != nil {
 			return nil, err
 		}
+		valStart := s.pos
 		ext, err := s.parseExtensionValue()
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return nil, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return nil, skipErr
+			}
+			if invalidKeys == nil {
+				invalidKeys = make(map[string]struct{}, 2)
+			}
+			invalidKeys[ns] = struct{}{}
+		} else {
+			out[ns] = ext
+			if invalidKeys != nil {
+				delete(invalidKeys, ns)
+			}
 		}
-		out[ns] = ext
 		s.skipWS()
 		if s.pos >= len(s.data) {
 			return nil, errMalformedJSON
@@ -1083,6 +1215,9 @@ func (s *jsonScanner) parseExtensions() (content.Extensions, error) {
 			break
 		}
 		return nil, errMalformedJSON
+	}
+	if len(invalidKeys) > 0 {
+		return nil, publicerr.InvalidSchema
 	}
 	return out, nil
 }
@@ -1108,8 +1243,9 @@ func (s *jsonScanner) parseExtensionValue() (content.Extension, error) {
 		eData
 	)
 	var (
-		out      content.Extension
-		required uint8
+		out     content.Extension
+		seen    uint8
+		invalid uint8
 	)
 	for {
 		key, err := s.scanKey()
@@ -1119,33 +1255,49 @@ func (s *jsonScanner) parseExtensionValue() (content.Extension, error) {
 		if err := s.expectColon(); err != nil {
 			return content.Extension{}, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "schema_version":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return content.Extension{}, err
+			bit = eVersion
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out.SchemaVersion = v
 			}
-			out.SchemaVersion = v
-			required |= eVersion
 		case "data":
+			bit = eData
 			if s.pos >= len(s.data) {
-				return content.Extension{}, errMalformedJSON
+				err = errMalformedJSON
+			} else if s.data[s.pos] != '{' {
+				err = publicerr.InvalidSchema
+			} else {
+				start := s.pos
+				if err = s.skipValue(); err == nil {
+					var data map[string]any
+					if uErr := json.Unmarshal(s.data[start:s.pos], &data); uErr != nil {
+						err = errMalformedJSON
+					} else {
+						out.Data = data
+					}
+				}
 			}
-			if s.data[s.pos] != '{' {
-				return content.Extension{}, publicerr.InvalidSchema
-			}
-			start := s.pos
-			if err := s.skipValue(); err != nil {
-				return content.Extension{}, err
-			}
-			var data map[string]any
-			if err := json.Unmarshal(s.data[start:s.pos], &data); err != nil {
-				return content.Extension{}, errMalformedJSON
-			}
-			out.Data = data
-			required |= eData
 		default:
 			return content.Extension{}, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return content.Extension{}, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return content.Extension{}, skipErr
+			}
+			seen |= bit
+			invalid |= bit
+		} else {
+			seen |= bit
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -1162,7 +1314,7 @@ func (s *jsonScanner) parseExtensionValue() (content.Extension, error) {
 		}
 		return content.Extension{}, errMalformedJSON
 	}
-	if required != (eVersion | eData) {
+	if invalid != 0 || seen != (eVersion|eData) {
 		return content.Extension{}, publicerr.InvalidSchema
 	}
 	return out, nil
@@ -1185,6 +1337,13 @@ func (s *jsonScanner) parseProvenance() (map[string]any, error) {
 		s.pos++
 		return out, nil
 	}
+	const (
+		provProducer uint8 = 1 << iota
+		provVersion
+		provBlobIDs
+		provNormalization
+	)
+	var invalid uint8
 	for {
 		key, err := s.scanKey()
 		if err != nil {
@@ -1193,31 +1352,49 @@ func (s *jsonScanner) parseProvenance() (map[string]any, error) {
 		if err := s.expectColon(); err != nil {
 			return nil, err
 		}
+		valStart := s.pos
+		var bit uint8
 		switch string(key) {
 		case "producer":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return nil, err
+			bit = provProducer
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out["producer"] = v
 			}
-			out["producer"] = v
 		case "producer_version":
-			v, err := s.decodeNonEmptyString()
-			if err != nil {
-				return nil, err
+			bit = provVersion
+			var v string
+			v, err = s.decodeNonEmptyString()
+			if err == nil {
+				out["producer_version"] = v
 			}
-			out["producer_version"] = v
 		case "source_blob_ids":
-			ids, err := s.parseSourceBlobIDs()
-			if err != nil {
-				return nil, err
+			bit = provBlobIDs
+			var ids []any
+			ids, err = s.parseSourceBlobIDs()
+			if err == nil {
+				out["source_blob_ids"] = ids
 			}
-			out["source_blob_ids"] = ids
 		case "normalization":
 			// Engine-owned: rejected on input (same InvalidSchema outcome as
 			// commandFromTransport rejecting in.Provenance.Normalization != nil).
-			return nil, publicerr.InvalidSchema
+			bit = provNormalization
+			err = publicerr.InvalidSchema
 		default:
 			return nil, publicerr.InvalidSchema
+		}
+		if err != nil {
+			if !errors.Is(err, publicerr.InvalidSchema) {
+				return nil, err
+			}
+			s.pos = valStart
+			if skipErr := s.skipValue(); skipErr != nil {
+				return nil, skipErr
+			}
+			invalid |= bit
+		} else {
+			invalid &^= bit
 		}
 		s.skipWS()
 		if s.pos >= len(s.data) {
@@ -1233,6 +1410,9 @@ func (s *jsonScanner) parseProvenance() (map[string]any, error) {
 			break
 		}
 		return nil, errMalformedJSON
+	}
+	if invalid != 0 {
+		return nil, publicerr.InvalidSchema
 	}
 	return out, nil
 }

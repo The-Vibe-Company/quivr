@@ -154,6 +154,82 @@ func TestDecodeIngestCommandMatchesJSONSchemaAndWireMapping(t *testing.T) {
 		{name: "record_acl left too long", raw: `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"record_acl":["` + tooLongLeft + `:ok"]}`},
 		{name: "record_acl right too long", raw: `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"record_acl":["ok:` + tooLongRight + `"]}`},
 
+		// Duplicate top-level and nested command keys (last-value-wins parity
+		// with legacy JSON decode: invalid-before-valid and valid-before-invalid
+		// across every scalar and object field).
+		{
+			name: "duplicate idempotency_key invalid before valid",
+			raw:  `{"idempotency_key":"","idempotency_key":"k-ok","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+		},
+		{
+			name: "duplicate idempotency_key valid before invalid",
+			raw:  `{"idempotency_key":"k-ok","idempotency_key":123,"source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+		},
+		{
+			name: "duplicate source invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c"},"source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+		},
+		{
+			name: "duplicate source valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"source":{"corpus_id":"c"},"content":{"kind":"text","text":"x"}}`,
+		},
+		{
+			name: "duplicate content invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":""},"content":{"kind":"text","text":"ok"}}`,
+		},
+		{
+			name: "duplicate content valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"ok"},"content":{"kind":"text","text":42}}`,
+		},
+		{
+			name: "duplicate source_revision invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"source_revision":null,"source_revision":"rev-2"}`,
+		},
+		{
+			name: "duplicate source_revision valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"source_revision":"rev-2","source_revision":null}`,
+		},
+		{
+			name: "duplicate source_position invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"source_position":"bad","source_position":"42"}`,
+		},
+		{
+			name: "duplicate source_position valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"source_position":"42","source_position":"bad"}`,
+		},
+		{
+			name: "duplicate record_acl invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"record_acl":[],"record_acl":["user:alice"]}`,
+		},
+		{
+			name: "duplicate record_acl valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"record_acl":["user:alice"],"record_acl":[]}`,
+		},
+		{
+			name: "duplicate extensions invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"extensions":null,"extensions":{"ns":{"schema_version":"1","data":{"ok":true}}}}`,
+		},
+		{
+			name: "duplicate extensions valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"extensions":{"ns":{"schema_version":"1","data":{"ok":true}}},"extensions":null}`,
+		},
+		{
+			name: "duplicate provenance invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"provenance":null,"provenance":{"producer":"p"}}`,
+		},
+		{
+			name: "duplicate provenance valid before invalid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"provenance":{"producer":"p"},"provenance":123}`,
+		},
+		{
+			name: "duplicate nested source and content fields invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"","corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"","text":"ok"}}`,
+		},
+		{
+			name: "duplicate extension namespace invalid before valid",
+			raw:  `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"extensions":{"ns":null,"ns":{"schema_version":"1","data":{"a":1}}}}`,
+		},
+
 		// Syntax errors (must return MalformedJson when checkSyntax=true, InvalidSchema when false).
 		{name: "truncated object", raw: `{"idempotency_key":"k"`},
 		{name: "trailing document", raw: `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}} {}`},
@@ -178,6 +254,66 @@ func TestDecodeIngestCommandMatchesJSONSchemaAndWireMapping(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Owns consistent last-value-wins duplicate-key resolution even when an earlier
+// duplicate carried an incompatible JSON type (and confirms valid-before-invalid
+// still rejects cleanly).
+func TestDecodeIngestCommandDuplicateKeysConsistentLastValueWins(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr error
+		wantKey string
+	}{
+		{
+			name:    "scalar wrong JSON type overridden by valid string",
+			raw:     `{"idempotency_key":123,"idempotency_key":"k-final","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+			wantKey: "k-final",
+		},
+		{
+			name:    "object wrong JSON type overridden by valid provenance",
+			raw:     `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"},"provenance":123,"provenance":{"producer":"p"}}`,
+			wantKey: "k",
+		},
+		{
+			name:    "nested scalar wrong JSON types overridden by valid values",
+			raw:     `{"idempotency_key":"k","source":{"corpus_id":1,"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":false,"text":"ok"}}`,
+			wantKey: "k",
+		},
+		{
+			name:    "manifest content overwritten by inline text clears Manifest",
+			raw:     `{"idempotency_key":"k","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"manifest","parts":[{"key":"p1","role":"body","content":{"kind":"text","text":"m"}}]},"content":{"kind":"text","text":"inline"}}`,
+			wantKey: "k",
+		},
+		{
+			name:    "valid scalar overwritten by wrong JSON type rejects",
+			raw:     `{"idempotency_key":"k-first","idempotency_key":123,"source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+			wantErr: publicerr.InvalidSchema,
+		},
+		{
+			name:    "malformed syntax in overridden duplicate still rejects as malformed_json",
+			raw:     `{"idempotency_key":broken,"idempotency_key":"k-final","source":{"corpus_id":"c","namespace":"n","record_key":"r"},"content":{"kind":"text","text":"x"}}`,
+			wantErr: publicerr.MalformedJson,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := decodeIngestCommand([]byte(tc.raw), true)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err=%v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil {
+				if cmd.Key != tc.wantKey {
+					t.Fatalf("Key=%q, want %q", cmd.Key, tc.wantKey)
+				}
+				if tc.name == "manifest content overwritten by inline text clears Manifest" && (cmd.Manifest != nil || cmd.Content.Kind != "text" || cmd.Content.Text != "inline") {
+					t.Fatalf("expected clean inline text command, got content=%+v manifest=%+v", cmd.Content, cmd.Manifest)
+				}
+			}
+		})
 	}
 }
 

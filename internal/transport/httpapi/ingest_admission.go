@@ -364,13 +364,17 @@ func (a *API) acquireIngestPayload(w http.ResponseWriter, r *http.Request, limit
 			return nil, nil, false
 		}
 	}
-	payload, ok := readBoundedIngestBody(w, r, limit, estimated, lease)
-	if !ok {
-		if lease != nil {
+	transferred := false
+	defer func() {
+		if !transferred {
 			lease.Release()
 		}
+	}()
+	payload, ok := readBoundedIngestBody(w, r, limit, estimated, lease)
+	if !ok {
 		return nil, nil, false
 	}
+	transferred = true
 	return payload, lease, true
 }
 

@@ -259,6 +259,40 @@ func TestIngestAdmission1000AbortedMidBodyRequestsLeakZeroTokens(t *testing.T) {
 	}
 }
 
+type panickingReader struct{}
+
+func (panickingReader) Read([]byte) (int, error) { panic("injected body read panic") }
+func (panickingReader) Close() error             { return nil }
+
+// Owns panic-safety during body reading: a panic inside r.Body.Read must
+// release the acquired admission lease before unwinding.
+func TestIngestAdmissionPanicDuringBodyReadReleasesLease(t *testing.T) {
+	limiter := httpapi.NewIngestAdmission(httpapi.IngestAdmissionConfig{
+		MaxConcurrent: 4,
+		MaxBytes:      1 << 20,
+		MaxQueue:      -1,
+	})
+	handler := newAPI(t, &acceptancePort{}, httpapi.WithIngestAdmission(limiter))
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected injected panic from body reader")
+			}
+		}()
+		req := httptest.NewRequest(http.MethodPost, "/v0/records/batch", panickingReader{})
+		req.ContentLength = 4096
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+		req.Header.Set("Content-Type", "application/json")
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	stats := limiter.Stats()
+	if stats.InFlight != 0 || stats.InFlightBytes != 0 || stats.Queued != 0 {
+		t.Fatalf("after body-read panic, stats=%+v; want zero leaked tokens", stats)
+	}
+}
+
 // Owns generic concurrency/byte bounds, bounded FIFO queue cancellation,
 // chunked byte shedding, and single-record 429 + Retry-After under a virtual clock.
 func TestIngestAdmissionBoundsQueueChunkedAndSingleRecord(t *testing.T) {
