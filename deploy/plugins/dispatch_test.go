@@ -74,8 +74,8 @@ func TestRoleBinariesListExpectedPluginsAndConfigureTextEmbed(t *testing.T) {
 		pkg  string
 		want []string
 	}{
-		{pkg: "./cmd/quivr-plugins", want: []string{"core-ingest", "core-retrieve", "m365-mail", "object-storage-archive", "rss", "text-embed", "x-list"}},
-		{pkg: "./cmd/quivr-plugins-api", want: []string{"core-ingest", "core-retrieve", "text-embed", "x-list"}},
+		{pkg: "./cmd/quivr-plugins", want: []string{"core-ingest", "core-retrieve", "m365-mail", "newsroom-retrieve", "object-storage-archive", "rss", "text-embed", "x-list"}},
+		{pkg: "./cmd/quivr-plugins-api", want: []string{"core-ingest", "core-retrieve", "newsroom-retrieve", "text-embed", "x-list"}},
 		{pkg: "./cmd/quivr-plugins-worker", want: []string{"core-ingest", "m365-mail", "object-storage-archive", "rss", "text-embed", "x-list"}},
 	}
 
