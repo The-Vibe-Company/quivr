@@ -102,7 +102,6 @@ type queryVectorEntry struct {
 	key        string
 	vector     []float32
 	bytes      int
-	node       *list.Element
 	referenced atomic.Bool
 }
 
@@ -254,7 +253,7 @@ func (c *QueryVectorCache) store(key string, vector []float32) int64 {
 		evicted++
 	}
 	entry := &queryVectorEntry{key: key, vector: vector, bytes: size}
-	entry.node = c.lru.PushFront(entry)
+	c.lru.PushFront(entry)
 	c.entries.Store(key, entry)
 	c.bytes += size
 	return evicted
