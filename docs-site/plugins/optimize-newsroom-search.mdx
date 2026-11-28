@@ -14,17 +14,16 @@ Both retrieval tiers share a single Weaviate vector and lexical index backed by 
 
 | Tier | Profile | Query-time GPU | Target latency | What it runs |
 | --- | --- | --- | --- | --- |
-| **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25`, min-max convex fusion (`0.65 / 0.35`), and three `O(1)` editorial signals (title+lead IDF coverage, multi-passage corroboration, `FirstP/MaxP` lead ratio). |
-| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[LEAD] + [MATCHED DEEP PASSAGE]`), applies the configured reranker score space and ranking (optionally unsaturated logit margins `raw_score` with per-query Z-score fusion), stitches the tail past `K` to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
+| **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25`, boilerplate-stripped multi-view legs (`question` view on by default), min-max convex fusion (`0.65 / 0.35`), and three editorial aboutness signals (title+lead IDF coverage, multi-passage corroboration, `FirstP/MaxP` lead ratio). |
+| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[TITLE] + [LEAD] + [MATCHED DEEP PASSAGE]`, `rerank_top_k: 50`), scores in unsaturated logit margin space (`raw_score`) with per-query Z-score fusion, runs Recall Band `31–80` with `2` concurrent shards, stitches the tail to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
 
-### Optional high-recall extensions
+### High-performance defaults (opt-out to lighten)
 
-Every advanced lever in `newsroom.retrieve` is opt-in so the default configuration stays fast and predictable:
+`newsroom.retrieve` ships with the highest-performing settings enabled out of the box so operators do not need to tune dozens of parameters. To trade recall for lower latency or GPU cost, opt out selectively:
 
-- **Question-stripped multi-view legs** (`dense_view_mode: "question"`, `lexical_view_mode: "question"`): adds a compact query view stripped of interrogative phrasing alongside the full query.
-- **Unsaturated logit calibration** (`rerank_score_space: "logit"`, `rerank_ranking: "zscore"`): avoids probability saturation near `0.999` when scaling rerank depth from `K=30` to `K=50`.
-- **Recall band** (`rerank_band_start: 30`, `rerank_band_end: 80`, `rerank_band_max_chars: 900`): scores Stage-1 ranks 31–80 with compact lead views in the same rerank pass so relevant dispatches straddling the rank-50 cut can move up without touching the top-30 head.
-- **Interleaved sharding** (`rerank_parallel_requests: 2`): splits a single rerank batch across concurrent HTTP requests to saturate multi-container GPU endpoints within Quivr's search deadline.
+- **Disable secondary query views** (`dense_view_mode: "none"`, `lexical_view_mode: "none"`): reduces Round 1 to 2 legs (one dense, one BM25) when remote query-encoding latency dominates.
+- **Disable Recall Band or shrink `rerank_top_k`** (`rerank_band_end: 0`, `rerank_top_k: 30`): lowers cross-encoder GPU tokens per query while keeping top-30 logit/Z-score reranking and tail stitching.
+- **Single-container rerankers** (`rerank_parallel_requests: 1`): disables 2-way interleaved HTTP sharding when serving on a single GPU replica.
 - **Adaptive QPP cascade** (`adaptive_cascade: true`): early-exits high-confidence queries at Stage 1 (`$0` rerank cost) when dense/lexical agreement and score margin exceed configured thresholds.
 
 ## Storage representation: tuned `text.embed` packing

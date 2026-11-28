@@ -1,12 +1,11 @@
 package plugin
 
 import (
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+	"golang.org/x/text/unicode/norm"
 )
 
 // structuredSeparators are generic punctuation delimiters separating a headline
@@ -15,7 +14,7 @@ var structuredSeparators = []string{"\n", " — ", " – ", " | ", " -- "}
 
 // genericQueryPrefixes are strictly domain-neutral French and English
 // interrogative and meta-search framing prefixes stripped when constructing
-// focused dense query views. Ordered longest-first so multi-word prefixes match
+// focused query views. Ordered longest-first so multi-word prefixes match
 // before single-word prefixes.
 var genericQueryPrefixes = []string{
 	// French meta-search and interrogative prefixes
@@ -102,6 +101,8 @@ var genericQueryPrefixes = []string{
 	"who ",
 }
 
+var leadingArticles = []string{"les ", "des ", "la ", "le ", "du ", "l'", "d'", "the "}
+
 // splitQueryClauses splits a structured query into (subject, question, true)
 // along standard headline/clause delimiters.
 func splitQueryClauses(query string) (string, string, bool) {
@@ -121,40 +122,60 @@ func splitQueryClauses(query string) (string, string, bool) {
 	return "", "", false
 }
 
-// foldPrefixMatch returns the byte length in raw corresponding to matching a
-// folded lowercase ASCII prefix, or -1 if raw does not start with that prefix.
-func foldPrefixMatch(raw, foldedPrefix string) int {
-	// Walk raw rune-by-rune, folding letters while tracking byte offsets.
-	// Normalize apostrophe variants so l’ matches l'.
-	pRunes := []rune(foldedPrefix)
-	pi := 0
-	bytePos := 0
-	for bytePos < len(raw) && pi < len(pRunes) {
-		r, sz := utf8.DecodeRuneInString(raw[bytePos:])
-		bytePos += sz
+// foldWithOffsets folds raw once into a lowercase, diacritic-free string (with
+// curly apostrophes normalized to '\'') and returns byteEnd[i] = byte offset in
+// raw immediately after the character that emitted folded byte i. NFD-safe.
+func foldWithOffsets(raw string) (string, []int) {
+	var b strings.Builder
+	b.Grow(len(raw))
+	byteEnd := make([]int, 0, len(raw))
+
+	for pos := 0; pos < len(raw); {
+		r, sz := utf8.DecodeRuneInString(raw[pos:])
+		nextPos := pos + sz
+		// Consume any trailing combining marks attached to this base rune (NFD input).
+		for nextPos < len(raw) {
+			nr, nsz := utf8.DecodeRuneInString(raw[nextPos:])
+			if !unicode.Is(unicode.Mn, nr) {
+				break
+			}
+			nextPos += nsz
+		}
+		if unicode.Is(unicode.Mn, r) {
+			pos = nextPos
+			continue
+		}
 		if r == '’' {
 			r = '\''
 		}
-		var folded string
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			folded = foldWord(string(r))
+		if r < utf8.RuneSelf {
+			if r >= 'A' && r <= 'Z' {
+				r += 'a' - 'A'
+			}
+			b.WriteByte(byte(r))
+			byteEnd = append(byteEnd, nextPos)
+		} else if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			folded := ligatures.Replace(strings.ToLower(string(r)))
+			for _, fr := range norm.NFD.String(folded) {
+				if unicode.Is(unicode.Mn, fr) {
+					continue
+				}
+				startLen := b.Len()
+				b.WriteRune(fr)
+				for b.Len() > len(byteEnd) {
+					byteEnd = append(byteEnd, nextPos)
+				}
+				_ = startLen
+			}
 		} else {
-			folded = string(r)
-		}
-		for _, fr := range folded {
-			if pi >= len(pRunes) {
-				return -1
+			b.WriteRune(r)
+			for b.Len() > len(byteEnd) {
+				byteEnd = append(byteEnd, nextPos)
 			}
-			if unicode.ToLower(fr) != pRunes[pi] {
-				return -1
-			}
-			pi++
 		}
+		pos = nextPos
 	}
-	if pi == len(pRunes) {
-		return bytePos
-	}
-	return -1
+	return b.String(), byteEnd
 }
 
 // stripQueryBoilerplate removes generic French/English interrogative and
@@ -166,12 +187,12 @@ func stripQueryBoilerplate(text string) string {
 		return ""
 	}
 	s = strings.TrimRight(s, " \t\r\n?!.")
-	// Iteratively strip up to 2 nested boilerplate prefixes (e.g. "Quels articles sur ...").
 	for pass := 0; pass < 2; pass++ {
+		folded, byteEnd := foldWithOffsets(s)
 		changed := false
 		for _, pref := range genericQueryPrefixes {
-			if n := foldPrefixMatch(s, pref); n > 0 {
-				rest := strings.TrimSpace(s[n:])
+			if strings.HasPrefix(folded, pref) && len(pref) > 0 && len(pref) <= len(byteEnd) {
+				rest := strings.TrimSpace(s[byteEnd[len(pref)-1]:])
 				if len(tokenizeContent(rest)) >= 2 {
 					s = rest
 					changed = true
@@ -183,10 +204,10 @@ func stripQueryBoilerplate(text string) string {
 			break
 		}
 	}
-	// Strip leading French articles left behind after prefix removal only if substantial content remains.
-	for _, art := range []string{"les ", "des ", "la ", "le ", "du ", "l'", "d'", "the "} {
-		if n := foldPrefixMatch(s, art); n > 0 {
-			rest := strings.TrimSpace(s[n:])
+	folded, byteEnd := foldWithOffsets(s)
+	for _, art := range leadingArticles {
+		if strings.HasPrefix(folded, art) && len(art) > 0 && len(art) <= len(byteEnd) {
+			rest := strings.TrimSpace(s[byteEnd[len(art)-1]:])
 			if len(tokenizeContent(rest)) >= 2 {
 				s = rest
 				break
@@ -200,340 +221,69 @@ func stripQueryBoilerplate(text string) string {
 	return s
 }
 
-// extractCoreQuery constructs View 2 (core subject / stripped question /
-// boilerplate-stripped full query) for multi-query dense fan-out.
+// extractCoreQuery constructs a secondary query view stripped of interrogative
+// framing, returning ("", false) when it does not meaningfully differ from full.
 func extractCoreQuery(query, mode string) (string, bool) {
 	full := strings.TrimSpace(query)
 	if full == "" {
 		return "", false
 	}
 	subj, quest, hasSplit := splitQueryClauses(full)
-	var out string
+	var view string
 	switch mode {
+	case "subject":
+		if hasSplit {
+			view = stripQueryBoilerplate(subj)
+		} else {
+			view = stripQueryBoilerplate(full)
+		}
 	case "question":
 		if hasSplit {
-			out = stripQueryBoilerplate(quest)
+			view = stripQueryBoilerplate(quest)
 		} else {
-			out = stripQueryBoilerplate(full)
+			view = stripQueryBoilerplate(full)
 		}
-	case "stripped":
+	case "full_clean":
 		if hasSplit {
-			a := stripQueryBoilerplate(subj)
-			b := stripQueryBoilerplate(quest)
-			if a != "" && b != "" && !strings.EqualFold(a, b) {
-				out = a + " " + b
-			} else if a != "" {
-				out = a
-			} else {
-				out = b
-			}
+			view = strings.TrimSpace(stripQueryBoilerplate(subj) + " — " + stripQueryBoilerplate(quest))
 		} else {
-			out = stripQueryBoilerplate(full)
+			view = stripQueryBoilerplate(full)
 		}
-	default: // "subject"
-		if hasSplit {
-			out = stripQueryBoilerplate(subj)
-		} else {
-			out = stripQueryBoilerplate(full)
-		}
+	default:
+		return "", false
 	}
-	out = strings.TrimSpace(out)
-	if out == "" || strings.EqualFold(out, full) {
-		return out, false
+	view = strings.TrimSpace(view)
+	if view == "" || strings.EqualFold(view, full) {
+		return "", false
 	}
-	return out, true
+	if len(tokenizeContent(view)) < 2 {
+		return "", false
+	}
+	return view, true
 }
 
-// extractClausePair decomposes a query into two complementary semantic clauses
-// (subject/headline vs stripped question/second facet) for aspect-conjunction
-// dense view fusion.
-func extractClausePair(query string) (string, string, bool) {
-	full := strings.TrimSpace(query)
-	if full == "" {
-		return "", "", false
+func denseViewQuery(query string, cfg configuration) (string, bool) {
+	if cfg.DenseViewMode == "" || cfg.DenseViewMode == "none" || cfg.DenseViewWeight <= 0 {
+		return "", false
 	}
-	if subj, quest, ok := splitQueryClauses(full); ok {
-		a := stripQueryBoilerplate(subj)
-		b := stripQueryBoilerplate(quest)
-		if a != "" && b != "" && !strings.EqualFold(a, b) {
-			return a, b, true
-		}
-	}
-	// Fallback for unstructured multi-clause queries: split on colon, semicolon, or comma near middle.
-	cleaned := stripQueryBoilerplate(full)
-	for _, sep := range []string{": ", "; ", ", "} {
-		if idx := strings.Index(cleaned, sep); idx > 0 {
-			a := strings.TrimSpace(cleaned[:idx])
-			b := strings.TrimSpace(cleaned[idx+len(sep):])
-			if len(tokenizeContent(a)) >= 2 && len(tokenizeContent(b)) >= 2 {
-				return a, b, true
-			}
-		}
-	}
-	return "", "", false
+	return extractCoreQuery(query, cfg.DenseViewMode)
 }
 
-// extractDenseEntityQuery builds View 3: a compact noun-phrase dense query of
-// capitalized named entities, acronyms, years/numbers, and top high-specificity
-// content terms. Unlike extractEntityQuery, it recognizes em-dash/en-dash/pipe
-// headline delimiters in addition to newlines.
-func extractDenseEntityQuery(query string, maxTerms int) (string, bool) {
-	if maxTerms <= 0 {
-		maxTerms = 8
+func lexicalViewQuery(query string, cfg configuration) (string, bool) {
+	if cfg.LexicalViewMode == "" || cfg.LexicalViewMode == "none" || cfg.LexicalViewWeight <= 0 {
+		return "", false
 	}
-	normalized := query
-	for _, sep := range []string{" — ", " – ", " | ", " -- "} {
-		normalized = strings.ReplaceAll(normalized, sep, "\n")
+	core, ok := extractCoreQuery(query, cfg.LexicalViewMode)
+	if !ok {
+		return "", false
 	}
-	return extractEntityQuery(normalized, maxTerms)
-}
-
-// buildRound2ConsensusQuery implements conservative, zero-LLM Round-2 pseudo-
-// relevance dense expansion:
-//  1. Intersect Round-1 full dense top-N and full BM25 top-N to obtain high-
-//     consensus seed documents (requires >= 2 distinct consensus records).
-//  2. Extract capitalized entities, acronyms, and substantial content terms
-//     from the lead/opening 700 chars of each seed doc that are NOT already in
-//     the query.
-//  3. Keep ONLY terms shared by >= 2 seed docs and prioritize those co-occurring
-//     near query aspects in the seed docs.
-//  4. Append top expansion terms to the anchored base query ("core", "full", or "entity").
-func buildRound2ConsensusQuery(
-	query string,
-	cfg configuration,
-	denseGrouped, lexicalFull []quivrplugin.Candidate,
-) (string, []string, bool) {
-	topN := cfg.Round2ConsensusTopN
-	if topN <= 0 {
-		topN = 10
+	view := strings.TrimSpace(cleanLexicalQuery(core))
+	primary := strings.TrimSpace(query)
+	if cfg.CleanLexicalQuery {
+		primary = strings.TrimSpace(cleanLexicalQuery(query))
 	}
-	maxDocs := cfg.Round2ConsensusDocs
-	if maxDocs < 2 {
-		maxDocs = 2
+	if view == "" || strings.EqualFold(view, primary) {
+		return "", false
 	}
-	maxTerms := cfg.Round2MaxTerms
-	if maxTerms <= 0 {
-		maxTerms = 3
-	}
-
-	type seedDoc struct {
-		recID   string
-		rankSum int
-		cand    quivrplugin.Candidate
-	}
-	denseRank := make(map[string]int, topN)
-	denseCand := make(map[string]quivrplugin.Candidate, topN)
-	for i, c := range denseGrouped[:min(topN, len(denseGrouped))] {
-		k := recordKey(c)
-		if _, ok := denseRank[k]; !ok {
-			denseRank[k] = i + 1
-			denseCand[k] = c
-		}
-	}
-	var seeds []seedDoc
-	seenSeed := map[string]bool{}
-	for i, c := range lexicalFull[:min(topN, len(lexicalFull))] {
-		k := recordKey(c)
-		if dr, ok := denseRank[k]; ok && !seenSeed[k] {
-			seenSeed[k] = true
-			// Prefer the dense candidate text if it is a lead segment; else lexical candidate.
-			chosen := denseCand[k]
-			if !isLeadSegment(chosen) && isLeadSegment(c) {
-				chosen = c
-			}
-			seeds = append(seeds, seedDoc{recID: k, rankSum: dr + (i + 1), cand: chosen})
-		}
-	}
-	if len(seeds) < 2 {
-		return "", nil, false
-	}
-	sort.SliceStable(seeds, func(i, j int) bool {
-		if seeds[i].rankSum != seeds[j].rankSum {
-			return seeds[i].rankSum < seeds[j].rankSum
-		}
-		return seeds[i].recID < seeds[j].recID
-	})
-	if len(seeds) > maxDocs {
-		seeds = seeds[:maxDocs]
-	}
-
-	qAspectSet := map[string]bool{}
-	for _, a := range queryAspects(query) {
-		qAspectSet[a] = true
-	}
-
-	type expTerm struct {
-		stem     string
-		surface  string
-		docCount int
-		score    float64
-		coOccurs bool
-		isProper bool
-	}
-	byStem := map[string]*expTerm{}
-
-	for _, sd := range seeds {
-		txt := truncateRunes(strings.TrimSpace(candidateBodyText(sd.cand)), 700)
-		if txt == "" {
-			continue
-		}
-		// Track positions of query aspects inside this seed doc for co-occurrence filtering.
-		fields := strings.Fields(txt)
-		qPositions := make([]int, 0, 8)
-		type fieldInfo struct {
-			tok           string
-			stem          string
-			folded        string
-			pos           int
-			sentenceStart bool
-			isAcronym     bool
-			isProper      bool
-		}
-		var extracted []fieldInfo
-		sentenceStart := true
-		tokPos := 0
-		for _, field := range fields {
-			endsSentence := strings.HasSuffix(field, ".") || strings.HasSuffix(field, "?") || strings.HasSuffix(field, "!") || strings.HasSuffix(field, ":")
-			trimmed := strings.TrimFunc(field, func(r rune) bool {
-				return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-			})
-			subTokens := strings.FieldsFunc(trimmed, func(r rune) bool {
-				return r == '\'' || r == '’' || r == '/' || r == ',' || r == ';' || r == '(' || r == ')' || r == '"' || r == '«' || r == '»'
-			})
-			for subIdx, tok := range subTokens {
-				tok = strings.Trim(tok, "-–—.")
-				if tok == "" {
-					continue
-				}
-				folded := foldWord(tok)
-				if folded == "" || stopwords[folded] {
-					continue
-				}
-				rlen := utf8.RuneCountInString(folded)
-				if rlen < 3 && !isAllUpperAcronym(tok) {
-					continue
-				}
-				stem := frenchLightStem(folded)
-				if qAspectSet[stem] {
-					qPositions = append(qPositions, tokPos)
-					tokPos++
-					continue
-				}
-				isAcr := isAllUpperAcronym(tok)
-				isProp := startsUpper(tok) && (!sentenceStart || subIdx > 0) && !isAllDigits(folded)
-				// Skip generic all-caps dateline/agency headers at very beginning (first 3 tokens) unless mixed-case proper noun.
-				if tokPos < 3 && isAcr {
-					tokPos++
-					continue
-				}
-				if isAcr || isProp || rlen >= 6 {
-					extracted = append(extracted, fieldInfo{
-						tok:           tok,
-						stem:          stem,
-						folded:        folded,
-						pos:           tokPos,
-						sentenceStart: sentenceStart,
-						isAcronym:     isAcr,
-						isProper:      isProp,
-					})
-				}
-				tokPos++
-			}
-			sentenceStart = endsSentence
-		}
-
-		seenInDoc := map[string]bool{}
-		for _, fi := range extracted {
-			if seenInDoc[fi.stem] {
-				continue
-			}
-			seenInDoc[fi.stem] = true
-			nearQ := false
-			for _, qp := range qPositions {
-				d := fi.pos - qp
-				if d < 0 {
-					d = -d
-				}
-				if d <= 25 {
-					nearQ = true
-					break
-				}
-			}
-			termScore := 0.5
-			if fi.isAcronym {
-				termScore += 3.0
-			} else if fi.isProper {
-				termScore += 2.5
-			} else if utf8.RuneCountInString(fi.folded) >= 7 {
-				termScore += 1.2
-			}
-			if nearQ {
-				termScore += 2.0
-			}
-			if existing, ok := byStem[fi.stem]; ok {
-				existing.docCount++
-				existing.score += termScore
-				if nearQ {
-					existing.coOccurs = true
-				}
-				if fi.isProper {
-					existing.isProper = true
-					existing.surface = fi.tok
-				}
-			} else {
-				byStem[fi.stem] = &expTerm{
-					stem:     fi.stem,
-					surface:  fi.tok,
-					docCount: 1,
-					score:    termScore,
-					coOccurs: nearQ,
-					isProper: fi.isProper || fi.isAcronym,
-				}
-			}
-		}
-	}
-
-	// Strict consensus filter: must appear in >= 2 distinct seed docs AND co-occur near query terms.
-	var candidates []*expTerm
-	for _, t := range byStem {
-		if t.docCount >= 2 && (t.coOccurs || t.isProper) {
-			candidates = append(candidates, t)
-		}
-	}
-	if len(candidates) == 0 {
-		return "", nil, false
-	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].docCount != candidates[j].docCount {
-			return candidates[i].docCount > candidates[j].docCount
-		}
-		if candidates[i].score != candidates[j].score {
-			return candidates[i].score > candidates[j].score
-		}
-		return candidates[i].stem < candidates[j].stem
-	})
-	if len(candidates) > maxTerms {
-		candidates = candidates[:maxTerms]
-	}
-	added := make([]string, len(candidates))
-	for i, t := range candidates {
-		added[i] = t.surface
-	}
-
-	base := strings.TrimSpace(query)
-	switch cfg.Round2QueryBase {
-	case "core":
-		if c, ok := extractCoreQuery(query, "stripped"); ok && c != "" {
-			base = c
-		}
-	case "entity":
-		if e, ok := extractDenseEntityQuery(query, cfg.DenseEntityMaxTerms); ok && e != "" {
-			base = e
-		}
-	}
-	r2Query := strings.TrimSpace(base + " " + strings.Join(added, " "))
-	if r2Query == "" || strings.EqualFold(r2Query, strings.TrimSpace(query)) {
-		return "", nil, false
-	}
-	return r2Query, added, true
+	return view, true
 }

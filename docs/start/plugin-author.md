@@ -13,7 +13,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 - [Cross-Modal Image Enrichment and Embedding Plugin](../../plugins/crossmodal-image/README.md): normalize image Blobs and embed image regions into a Cross-modal Vector Space
 - [HTTP cross-encoder reranking](../../plugins/http-rerank/README.md): HTTP cross-encoder reranking with configurable protocols, fusion and fallback
 - [Jev reranking](../../plugins/jev-rerank/README.md): optional Jev reranking, bounded pair caching and hybrid fallback
-- [`newsroom.retrieve` — Unified Editorial Retrieval Plugin](../../plugins/newsroom-retrieve/README.md): editorial hybrid retrieval and open-source cross-encoder reranking plugin
+- [`newsroom.retrieve` — High-Performance Editorial Retrieval Plugin](../../plugins/newsroom-retrieve/README.md): editorial hybrid retrieval and open-source cross-encoder reranking plugin
 - [Object-storage archive connector](../../plugins/object-storage-archive/README.md): stream immutable object-storage archives through upload grants
 - [Object Storage Prefix Connector](../../plugins/object-storage-prefix/README.md): stream individual objects under an S3-compatible prefix with resumable checkpoints
 - [text.embed](../../plugins/text-embed/README.md): configure hosted text embeddings in OpenAI and Cohere formats

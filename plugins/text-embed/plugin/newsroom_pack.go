@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	// Generic wire dateline: e.g. "PARIS (Agency) - ", "NEW YORK, 12 mai (Wire) — "
-	reWireDateline = regexp.MustCompile(`^[A-ZÀ-Ÿ0-9][A-ZÀ-Ÿ0-9\s,'-]{1,35}\s*\([^)]{2,25}\)\s*[-–—]\s*`)
-	// Generic trailing wire desk/initials signature on its own line: e.g. "ab/cd" or "ab/cd/ef"
-	reTrailingCredit = regexp.MustCompile(`(?m)^[ \t]*[a-z]{2,4}/[a-z]{2,4}(?:/[a-z]{2,4})?[ \t]*$`)
+	// Generic wire dateline: uppercase city/date + agency parenthetical + dash, e.g. "PARIS (Agency) - ", "NEW YORK, 12 MAI (Wire) — "
+	reWireDateline = regexp.MustCompile(`^[A-Z0-9\x{00C0}-\x{00D6}\x{00D8}-\x{00DE}][A-Z0-9\x{00C0}-\x{00D6}\x{00D8}-\x{00DE}\s,'-]{1,35}\s*\([^)]{2,25}\)\s*[-–—]\s*`)
+	// Generic trailing wire desk/initials signature at end of text on its own line: e.g. "\nab/cd" or "\nab/cd/ef"
+	reTrailingCredit = regexp.MustCompile(`(?:\r?\n)[ \t]*[a-z]{2,4}/[a-z]{2,4}(?:/[a-z]{2,4})?[ \t]*$`)
 	// Generic CMS/Markdown syntax artifacts
 	reMarkdownHeading    = regexp.MustCompile(`(?m)^#{1,6}\s+`)
 	reMarkdownBlockquote = regexp.MustCompile(`(?m)^>\s+`)
@@ -24,14 +24,20 @@ var (
 )
 
 // normalizeWireText removes generic wire datelines, trailing desk signatures,
-// and CMS/Markdown formatting noise from text sent to the embedding model while
-// leaving canonical stored source offsets untouched.
+// and CMS/Markdown formatting noise from body text sent to the embedding model
+// while leaving canonical stored source offsets untouched.
 func normalizeWireText(raw string) string {
+	return normalizeEditorialText(raw, true)
+}
+
+func normalizeEditorialText(raw string, stripDateline bool) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return raw
 	}
-	s = reWireDateline.ReplaceAllString(s, "")
+	if stripDateline {
+		s = reWireDateline.ReplaceAllString(s, "")
+	}
 	s = reMarkdownLink.ReplaceAllString(s, "$1")
 	s = reBareURL.ReplaceAllString(s, "")
 	s = reMarkdownHeading.ReplaceAllString(s, "")
@@ -90,7 +96,7 @@ func (c configuration) buildAnchoredInput(title, leadSentence, body string, isLe
 	lead := leadSentence
 	if c.NormalizeWireText {
 		if t != "" {
-			t = normalizeWireText(t)
+			t = normalizeEditorialText(t, false)
 		}
 		if b != "" {
 			b = normalizeWireText(b)
@@ -151,10 +157,7 @@ func trailingOverlapUnits(ctx context.Context, t tokenCounter, prevGroup []parag
 		// If nothing has been selected yet and the final paragraph alone exceeds
 		// overlapTokens, extract a snapped trailing suffix of <= overlapTokens.
 		if len(selected) == 0 {
-			suffix, err := trailingParagraphSuffix(ctx, t, u, overlapTokens)
-			if err != nil {
-				return nil, err
-			}
+			suffix := trailingParagraphSuffixFromEncoding(u, e, overlapTokens)
 			if suffix != nil {
 				selected = []paragraph{*suffix}
 			}
@@ -164,28 +167,24 @@ func trailingOverlapUnits(ctx context.Context, t tokenCounter, prevGroup []parag
 	return selected, nil
 }
 
-// trailingParagraphSuffix slices the last <= overlapTokens runes of p, snapping
-// forward to a sentence or whitespace boundary so the overlap starts cleanly.
-func trailingParagraphSuffix(ctx context.Context, t tokenCounter, p paragraph, overlapTokens int) (*paragraph, error) {
-	e, err := encodeOne(ctx, t, p.text, false)
-	if err != nil {
-		return nil, err
-	}
+// trailingParagraphSuffixFromEncoding slices the last <= overlapTokens runes of p
+// using an existing token encoding, snapping forward to a sentence or word boundary.
+func trailingParagraphSuffixFromEncoding(p paragraph, e tokenEncoding, overlapTokens int) *paragraph {
 	if e.Tokens <= overlapTokens {
 		cp := p
-		return &cp, nil
+		return &cp
 	}
 	if e.Tokens < 2 || len(e.Offsets) != e.Tokens {
-		return nil, nil
+		return nil
 	}
 	startTok := e.Tokens - overlapTokens
 	if startTok <= 0 || startTok >= e.Tokens {
-		return nil, nil
+		return nil
 	}
 	runeStart := e.Offsets[startTok][0]
 	runes := []rune(p.text)
 	if runeStart <= 0 || runeStart >= len(runes) {
-		return nil, nil
+		return nil
 	}
 	// Snap forward up to half the suffix length to the first sentence boundary,
 	// falling back to the first word boundary so overlap stays close to target.
@@ -207,11 +206,11 @@ func trailingParagraphSuffix(ctx context.Context, t tokenCounter, p paragraph, o
 		snapped = firstWord
 	}
 	if snapped <= 0 || snapped >= len(runes) {
-		return nil, nil
+		return nil
 	}
 	tail := string(runes[snapped:])
 	if strings.TrimSpace(tail) == "" || utf8.RuneCountInString(tail) == 0 {
-		return nil, nil
+		return nil
 	}
 	out := paragraph{
 		key:   p.key,
@@ -220,5 +219,5 @@ func trailingParagraphSuffix(ctx context.Context, t tokenCounter, p paragraph, o
 		text:  tail,
 		run:   p.run,
 	}
-	return &out, nil
+	return &out
 }

@@ -1,10 +1,6 @@
-# Experimental editorial retrieval plugin implementing multi-branch entity
-# retrieval, calibrated fusion (DBSF/CombMNZ), proximity & query-aspect
-# coverage, inverted-pyramid lead-vs-body salience, and adaptive cascade
-# reranking with structured surrogates.
 id: newsroom.retrieve
 version: 0.1.0
-description: Multi-branch algorithmic retrieval with calibrated fusion, proximity/aspect coverage, inverted-pyramid salience, and optional adaptive cascade reranking.
+description: High-performance editorial hybrid retrieval and open-source cross-encoder reranking plugin with inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band reranking enabled by default.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.17.0 <0.21.0"
@@ -12,11 +8,11 @@ contributions:
   retrieval:
     profiles:
       default:
-        description: Zero-inference-cost algorithmic retrieval combining multi-branch lexical+dense legs, calibrated fusion, aspect coverage, proximity, and inverted-pyramid salience.
+        description: Zero-GPU editorial hybrid retrieval with stopword-cleaned BM25, boilerplate-stripped multi-view legs, convex fusion, and inverted-pyramid aboutness signals.
         max_latency_ms: 500
         max_cost_cents: 0
       deep:
-        description: Two-stage algorithmic retrieval with inverted-pyramid passage surrogates, optional adaptive confidence cascade, and tail-preserving HTTP reranking.
+        description: Full-performance open-source cross-encoder reranking over inverted-pyramid surrogates with unsaturated logit Z-score calibration, Recall Band 31-80, sharded requests, and graceful Stage-1 fallback.
         max_latency_ms: 3000
         max_cost_cents: 1
     limits:
@@ -28,170 +24,95 @@ configuration:
     type: object
     additionalProperties: false
     properties:
-      candidate_count:
+      dense_k:
         type: integer
         minimum: 1
         maximum: 100
         default: 100
-        description: Default candidates requested per retrieval leg.
+        description: Candidate count for the ungrouped dense passage leg.
       lexical_k:
         type: integer
-        minimum: 0
+        minimum: 1
         maximum: 100
         default: 60
-        description: Optional override for BM25 lexical leg candidate count (0 uses candidate_count).
-      dense_k:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 100
-        description: Optional override for ungrouped dense near_vector leg candidate count (0 uses candidate_count).
-      dense_grouped:
-        type: boolean
-        default: false
-        description: Issue an additional record-grouped dense near_vector leg (false uses a single ungrouped dense leg for lower latency and tighter MaxP floor).
+        description: Candidate count for the primary BM25 leg.
       clean_lexical_query:
         type: boolean
         default: true
-        description: Strip generic multilingual stopwords and elision prefixes from the BM25 leg query text so raw lexical branches do not mask analyzed stems.
+        description: Strip generic multilingual stopwords and French elisions before querying BM25.
       fusion:
         type: string
-        enum: [dbsf, convex, rrf]
+        enum: [convex, dbsf, rrf]
         default: convex
-        description: Multi-leg score fusion method.
+        description: Stage-1 fusion rule across retrieval legs.
       rrf_k:
         type: number
         minimum: 1
-        maximum: 1000
+        maximum: 500
         default: 60
-        description: Rank constant k for RRF fusion.
+        description: Rank constant when fusion is rrf.
       dense_weight:
         type: number
         minimum: 0
-        maximum: 5
+        maximum: 10
         default: 0.65
-        description: Weight for full-query dense near_vector leg.
-      query_adaptive_alpha:
-        type: boolean
-        default: false
-        description: Dynamically reduce dense weight on entity/digit-dense queries.
+        description: Fusion weight for the primary dense leg.
       lexical_weight:
         type: number
         minimum: 0
-        maximum: 5
+        maximum: 10
         default: 0.35
-        description: Weight for full-query lexical BM25 leg.
-      entity_leg:
-        type: boolean
-        default: false
-        description: Enable third retrieval leg issuing a focused entity/key-term BM25 sub-query.
-      entity_weight:
+        description: Fusion weight for the primary BM25 leg.
+      dense_view_mode:
+        type: string
+        enum: [none, question, subject, full_clean]
+        default: question
+        description: Secondary dense query view stripped of interrogative framing. Set to "none" to disable for lower query-encoding cost.
+      dense_view_weight:
         type: number
         minimum: 0
         maximum: 5
-        default: 0.25
-        description: Weight for the focused entity/key-term BM25 leg.
-      entity_max_terms:
-        type: integer
-        minimum: 2
-        maximum: 16
-        default: 6
-        description: Maximum distinct high-specificity terms in the focused entity sub-query.
-      combmnz_bonus:
+        default: 0.16
+        description: Fusion weight for the secondary dense query view.
+      dense_view_grouped:
+        type: boolean
+        default: true
+        description: Group the secondary dense query view by record to widen unique-record recall.
+      lexical_view_mode:
+        type: string
+        enum: [none, question, subject, full_clean]
+        default: question
+        description: Secondary BM25 query view stripped of interrogative framing. Set to "none" to disable.
+      lexical_view_weight:
         type: number
         minimum: 0
-        maximum: 2
-        default: 0
-        description: Consensus multiplier bonus per additional independent leg matching a record (0 disables; 1 equals classic CombMNZ).
+        maximum: 5
+        default: 0.10
+        description: Fusion weight for the secondary BM25 query view.
       title_lead_weight:
         type: number
         minimum: 0
         maximum: 5
         default: 0.12
-        description: Weight for pool-IDF-weighted query coverage in the record title and opening lead window.
-      aspect_coverage_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Weight for pool-IDF-weighted query-aspect coverage over top candidates.
-      missing_aspect_penalty:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Additional penalty applied when a candidate covers fewer than half of query aspects.
-      coverage_penalty_gamma:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Superlinear pool-IDF coverage deficit penalty gamma * (1 - cov)^rho.
-      coverage_penalty_rho:
-        type: number
-        minimum: 1
-        maximum: 4
-        default: 1.75
-        description: Exponent rho for superlinear coverage deficit penalty.
-      proximity_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Weight for query-term proximity (pairwise min-span or shortest-cover + SDM bigrams).
-      proximity_mode:
-        type: string
-        enum: [pairwise, sdm_span]
-        default: pairwise
-        description: Proximity formulation (pairwise log-decay vs shortest-cover span + ordered/unordered SDM bigrams).
-      proximity_window:
-        type: integer
-        minimum: 2
-        maximum: 200
-        default: 25
-        description: Maximum token span window for query-term pair proximity.
-      salience_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Weight for inverted-pyramid zone salience (title 3x, lead 2x, early body 1x, deep body 0.35x).
-      exp_salience_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Weight for continuous earliest-mention exponential decay exp(-pos_1/600).
-      tail_only_penalty:
-        type: number
-        minimum: 0
-        maximum: 2
-        default: 0
-        description: Penalty when primary query facet only appears once deep in body (pos_1 > 800, tf=1).
+        description: Weight for pool-IDF query aspect coverage in title and opening lead (set 0 to disable).
       lead_chars:
         type: integer
         minimum: 50
         maximum: 2000
         default: 250
         description: Character length of the inverted-pyramid lead zone at body offset 0.
-      deep_chunk_penalty:
-        type: number
-        minimum: 0
-        maximum: 2
-        default: 0
-        description: Penalty subtracted when the best matched segment starts past offset 0.
       passage_ratio_weight:
         type: number
         minimum: 0
         maximum: 5
         default: 0.10
-        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages.
+        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages (set 0 to disable).
       passage_support_weight:
         type: number
         minimum: 0
         maximum: 5
         default: 0.12
-        description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents).
+        description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents; set 0 to disable).
       rerank_endpoint:
         type: string
         format: uri
@@ -211,12 +132,18 @@ configuration:
         type: integer
         minimum: 1
         maximum: 100
-        default: 30
-        description: Number of top Stage-1 candidates to send to the reranker while preserving the remaining tail.
+        default: 50
+        description: Number of top Stage-1 candidates scored with full inverted-pyramid surrogates (lower to 30 for faster latency).
+      rerank_score_space:
+        type: string
+        enum: [logit, prob]
+        default: logit
+        description: Reranker score space. "logit" uses unsaturated raw margins (or log-odds fallback) to avoid probability saturation near 1.0.
       rerank_ranking:
         type: string
-        enum: [rerank_only, linear, rrf, zscore]
-        default: linear
+        enum: [zscore, linear, rrf, rerank_only]
+        default: zscore
+        description: Fusion rule combining reranker scores with Stage-1 scores.
       rerank_weight:
         type: number
         minimum: 0
@@ -230,229 +157,66 @@ configuration:
       rerank_timeout_ms:
         type: integer
         minimum: 100
-        maximum: 20000
+        maximum: 25000
         default: 12000
-      fallback_on_error:
-        type: boolean
-        default: true
-        description: Gracefully return Stage-1 default ranking when the deep reranker times out or errors.
-      surrogate_mode:
-        type: string
-        enum: [raw, inverted_pyramid, rich]
-        default: inverted_pyramid
-        description: Document surrogate representation sent to the deep reranker.
-      adaptive_cascade:
-        type: boolean
-        default: false
-        description: Skip deep reranking when Stage-1 dense/lexical agreement and score margin exceed thresholds.
-      cascade_jaccard_threshold:
-        type: number
-        minimum: 0
-        maximum: 1
-        default: 0.5
-      cascade_margin_threshold:
-        type: number
-        minimum: 0
-        maximum: 2
-        default: 0.15
-      cascade_dgap_threshold:
-        type: number
-        minimum: 0
-        maximum: 10
-        default: 2.25
-        description: Optional Stage-1 dense distribution-shape Gap threshold (mean(1..5)-mean(25..50))/std for adaptive early-exit.
-      dense_view_mode:
-        type: string
-        enum: [none, question, stripped, subject]
-        default: none
-        description: Wide-funnel boilerplate-stripped dense query view (question clause, stripped full query, or subject clause).
-      dense_view_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Convex weight of the stripped dense view leg (0 disables the request).
-      dense_view_grouped:
-        type: boolean
-        default: false
-        description: Group the stripped dense view by record (100 distinct records) instead of passages.
-      dense_view_k:
+      rerank_parallel_requests:
         type: integer
         minimum: 1
-        maximum: 100
-        default: 100
-      dense_recall_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Convex weight of an additional record-grouped full-query dense recall leg (0 disables the request).
-      dense_recall_k:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 100
-      lexical_view_mode:
-        type: string
-        enum: [none, question, stripped, subject]
-        default: none
-        description: Wide-funnel boilerplate-stripped lexical query view.
-      lexical_view_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-      lexical_view_k:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 60
-      lexical_norm_depth:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 0
-        description: Compute lexical min-max calibration over the first N hits only so deeper admission lists do not loosen the head floor (0 uses all).
-      dense_norm_depth:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 0
-        description: Compute dense min-max calibration over the first N records only (0 uses all).
-      round2_consensus_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Convex weight of the zero-LLM Round-2 consensus pseudo-relevance dense leg (0 disables Round 2 dense).
-      round2_consensus_top_n:
-        type: integer
-        minimum: 2
-        maximum: 100
-        default: 10
-      round2_consensus_docs:
-        type: integer
-        minimum: 2
-        maximum: 20
+        maximum: 8
         default: 2
-      round2_max_terms:
-        type: integer
-        minimum: 1
-        maximum: 16
-        default: 3
-      round2_query_base:
-        type: string
-        enum: [core, full, entity]
-        default: core
-      round2_dense_k:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 100
-      round2_lexical_weight:
-        type: number
-        minimum: 0
-        maximum: 5
-        default: 0
-        description: Convex weight of the Round-2 consensus-expanded BM25 leg (0 disables Round 2 lexical).
-      round2_lexical_k:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 60
-      dense_entity_max_terms:
-        type: integer
-        minimum: 2
-        maximum: 16
-        default: 8
-      dump_pool:
-        type: boolean
-        default: false
-        description: Emit the fused candidate pool with per-leg ranks to stderr (diagnostics only).
-      tail_fusion:
-        type: string
-        enum: [none, rrf]
-        default: none
-        description: Re-order positions after tail_start by weighted RRF over all leg ranks plus the convex position (recall-oriented tail, precision head untouched).
-      tail_start:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 10
-      tail_rrf_k:
-        type: number
-        minimum: 1
-        maximum: 1000
-        default: 60
-      tail_convex_weight:
-        type: number
-        minimum: 0
-        maximum: 10
-        default: 1
-      tail_extra_weight:
-        type: number
-        minimum: 0
-        maximum: 10
-        default: 1
-      rerank_score_space:
-        type: string
-        enum: [prob, logit]
-        default: prob
-        description: Calibrate reranker scores as raw probabilities or as log-odds before blending (log-odds preserve ordering among saturated top scores).
-      rerank_multi_passage_top_n:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 0
-        description: Score a separate title+lead view and title+best-body view for the top N reranked candidates and combine them (0 disables).
-      rerank_multi_passage_mode:
-        type: string
-        enum: [blend, max, lead_gated, maxmin]
-        default: blend
-      rerank_body_weight:
-        type: number
-        minimum: 0
-        maximum: 1
-        default: 0.35
-        description: Weight of the best-body view in multi-passage blending.
-      rerank_lead_chars:
-        type: integer
-        minimum: 200
-        maximum: 8000
-        default: 1200
-        description: Character budget of the lead zone inside rich surrogates and lead views.
-      rerank_band_end:
-        type: integer
-        minimum: 0
-        maximum: 100
-        default: 0
-        description: Also score Stage-1 ranks rerank_top_k+1..rerank_band_end with compact lead views and re-sort the region rerank_band_start..rerank_band_end that straddles the Recall@50 cut (0 disables).
+        description: Number of concurrent interleaved HTTP requests per rerank batch (set 1 to disable sharding).
       rerank_band_start:
         type: integer
         minimum: 0
         maximum: 100
-        default: 0
-        description: First position (0-based) of the re-sorted recall region; head records ranked below it compete with band records (0 uses rerank_top_k).
+        default: 30
+        description: Start offset (0-indexed) of the Recall Band region straddling the Recall@50 cut.
+      rerank_band_end:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 80
+        description: End offset of the Recall Band region scored with compact lead views (set 0 to disable Recall Band).
       rerank_band_max_chars:
         type: integer
         minimum: 200
-        maximum: 8000
+        maximum: 4000
         default: 900
       rerank_band_weight:
         type: number
         minimum: 0
         maximum: 1
         default: 0.85
-      rerank_parallel_requests:
-        type: integer
-        minimum: 1
-        maximum: 8
-        default: 1
-        description: Split one rerank call into N interleaved concurrent requests (lets multi-container endpoints score shards on separate GPUs).
-      log_diagnostics:
+      fallback_on_error:
+        type: boolean
+        default: true
+        description: Return Stage-1 ranking when the deep reranker fails or times out.
+      adaptive_cascade:
         type: boolean
         default: false
-        description: Emit per-query algorithmic diagnostics to stderr.
+        description: Optional QPP confidence early-exit that skips the deep reranker on high-agreement queries to save GPU cost.
+      cascade_jaccard_threshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.50
+      cascade_margin_threshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.15
+      cascade_dgap_threshold:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 2.25
+    if:
+      properties:
+        rerank_protocol:
+          const: cohere
+      required: [rerank_protocol]
+    then:
+      required: [rerank_model]
 secrets:
   - name: RERANKER_API_KEY
     required: false

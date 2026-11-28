@@ -397,7 +397,7 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	}
 	// This released identity included title text in each passage. Full-text
 	// pages embed titles separately and must never share its vector namespace.
-	if example.spaceID() == "text.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b" {
+	if example.spaceID() == "hosted.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b" {
 		t.Fatal("new passage semantics reused the released space")
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")

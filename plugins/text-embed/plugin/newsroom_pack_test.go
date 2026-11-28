@@ -103,3 +103,34 @@ func TestOverlapAndDualLeadSegment(t *testing.T) {
 		t.Fatalf("expected overlap between body chunks: seg1=[%d,%d) seg2=[%d,%d)", segs[1].Start, segs[1].End, segs[2].Start, segs[2].End)
 	}
 }
+
+func TestPagedIngestionDisablesOverlapAndLeadOverrides(t *testing.T) {
+	c := testConfig("openai", "http://127.0.0.1:9")
+	c.DocumentTemplate = "title: {title} | text: {text}"
+	c.MaxTokens = 1024
+	c.BodyTokens = 100
+	c.OverlapTokens = 30
+	c.LeadMaxTokens = 50
+	c.ContextualAnchor = "title_lead_slot"
+	c.IncludeTitleInLead = true
+	c.DualLeadSegment = true
+
+	ing := newIngester(c, "", nil)
+	body := "First paragraph introduces the new northern terminal project and budget.\n\nSecond paragraph describes dredging schedules and environmental permits.\n\nThird paragraph outlines rail connections to inland logistics hubs."
+	page, err := ing.SegmentAndEmbedPage(context.Background(), &quivrplugin.IngestRequest{
+		Parts: []quivrplugin.IngestPart{{Key: "body", Role: "body", Text: body}},
+		Page:  &quivrplugin.IngestPageRequest{Start: 0, MaxSegments: 16},
+	})
+	if err != nil {
+		t.Fatalf("paged ingestion failed with overlap/lead enabled: %v", err)
+	}
+	if len(page.Segments) < 2 {
+		t.Fatalf("expected >= 2 paged segments, got %d", len(page.Segments))
+	}
+	for i := 1; i < len(page.Segments); i++ {
+		if page.Segments[i].Start != page.Segments[i-1].End {
+			t.Fatalf("paged segments must cover code points contiguously without overlap: seg[%d]=[%d,%d) seg[%d]=[%d,%d)",
+				i-1, page.Segments[i-1].Start, page.Segments[i-1].End, i, page.Segments[i].Start, page.Segments[i].End)
+		}
+	}
+}

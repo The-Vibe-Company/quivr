@@ -150,7 +150,11 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	}
 	leadSentence := ""
 	if c.ContextualAnchor == "title_lead_text" || c.ContextualAnchor == "title_lead_slot" {
-		leadSentence = extractLeadSentence(firstBodyText)
+		leadSource := firstBodyText
+		if c.NormalizeWireText {
+			leadSource = normalizeWireText(leadSource)
+		}
+		leadSentence = extractLeadSentence(leadSource)
 	}
 	inputForBody := func(body string, isLeadChunk bool) string {
 		body = modelBody(body)
@@ -242,13 +246,15 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 			raw := paragraph{key: part.Key, start: start, end: end, text: string(runes[start:end]), run: run}
 			for raw.start < raw.end {
-				isFirstLead := len(units) == 0 && !titleOnly && c.LeadMaxTokens > 0
+				isFirstUnit := len(units) == 0 && !titleOnly
 				unitBudget := c.BodyTokens
-				if isFirstLead {
+				if isFirstUnit && c.LeadMaxTokens > 0 {
 					unitBudget = c.LeadMaxTokens
+				} else if isFirstUnit && c.DualLeadSegment {
+					unitBudget = min(180, c.BodyTokens)
 				}
 				fitsUnit := func(ps []paragraph) (bool, int, error) {
-					if isFirstLead {
+					if isFirstUnit {
 						return fitsBudget(ps, unitBudget, true)
 					}
 					return fits(ps)
@@ -264,37 +270,50 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				if titleOnly {
 					return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "title-only input exceeds model or excerpt limit")
 				}
-				// Only an oversized paragraph is split. Find the longest safe token
-				// boundary that fits both body and full-model budgets, then prefer an
-				// existing sentence/line break in that window.
+				// Only an oversized paragraph is split. Binary search the longest
+				// safe token boundary that fits both body and full-model budgets,
+				// then prefer an existing sentence/line break in that window.
 				e, err := encodeOne(ctx, t, raw.text, false)
 				if err != nil {
 					return nil, nil, err
 				}
+				local := []rune(raw.text)
 				limit := min(e.Tokens, unitBudget)
-				cut := 0
-				for k := limit; k > 0; k-- {
+				validCuts := make([]int, 0, limit)
+				for k := 1; k <= limit; k++ {
 					candidate := e.Offsets[k-1][1]
 					if k < e.Tokens && candidate > e.Offsets[k][0] {
 						continue
 					}
-					if candidate <= 0 || candidate >= utf8.RuneCountInString(raw.text) {
+					if candidate <= 0 || candidate >= len(local) {
 						continue
 					}
+					if len(validCuts) == 0 || validCuts[len(validCuts)-1] != candidate {
+						validCuts = append(validCuts, candidate)
+					}
+				}
+				cut := 0
+				lo, hi := 0, len(validCuts)-1
+				for lo <= hi {
+					mid := lo + (hi-lo)/2
+					cand := validCuts[mid]
 					piece := raw
-					piece.end = raw.start + candidate
-					piece.text = string([]rune(raw.text)[:candidate])
-					if ok, _, err := fitsUnit([]paragraph{piece}); err != nil {
+					piece.end = raw.start + cand
+					piece.text = string(local[:cand])
+					ok, _, err := fitsUnit([]paragraph{piece})
+					if err != nil {
 						return nil, nil, err
-					} else if ok {
-						cut = candidate
-						break
+					}
+					if ok {
+						cut = cand
+						lo = mid + 1
+					} else {
+						hi = mid - 1
 					}
 				}
 				if cut == 0 {
 					return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "title/template leaves no safe body token boundary")
 				}
-				local := []rune(raw.text)
 				snapped := snap(local, 0, cut)
 				if snapped > 0 {
 					candidate := raw
@@ -395,8 +414,10 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	}
 	canPrependTitle := c.TitleSource != "none" && !titleOnly && titlePartIdx >= 0 && firstBodyIdx >= 0 && titlePartIdx < firstBodyIdx
 	titleRuneLen := utf8.RuneCountInString(titlePart.Text)
+	sepRuneLen := utf8.RuneCountInString(sourceSeparator)
 	segments := make([]quivrplugin.Segment, 0, len(groups)+1)
 	inputs := make([]string, 0, len(groups)+1)
+	emittedDualLead := false
 
 	if c.DualLeadSegment && canPrependTitle && titleRuneLen <= 4096 && len(groups) >= 2 {
 		leadBudget := c.LeadMaxTokens
@@ -418,29 +439,33 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 			leadGroup = cand
 		}
-		leadRanges := append([]quivrplugin.SourceRange{{PartKey: titlePart.Key, Start: 0, End: titleRuneLen}}, paragraphRanges(leadGroup)...)
 		leadBody := paragraphText(leadGroup)
-		leadInput := inputForBody(leadBody, true)
-		e, err := encodeOne(ctx, t, leadInput, true)
-		if err != nil {
-			return nil, nil, err
+		if titleRuneLen+sepRuneLen+utf8.RuneCountInString(leadBody) <= 16384 {
+			leadRanges := append([]quivrplugin.SourceRange{{PartKey: titlePart.Key, Start: 0, End: titleRuneLen}}, paragraphRanges(leadGroup)...)
+			leadInput := inputForBody(leadBody, true)
+			e, err := encodeOne(ctx, t, leadInput, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			segments = append(segments, quivrplugin.Segment{
+				PartKey:         leadRanges[0].PartKey,
+				Start:           leadRanges[0].Start,
+				End:             leadRanges[0].End,
+				SourceRanges:    leadRanges,
+				SourceSeparator: sourceSeparator,
+				Vectors:         map[string][]float32{},
+				Provenance:      map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "lead_summary"},
+			})
+			inputs = append(inputs, leadInput)
+			emittedDualLead = true
 		}
-		segments = append(segments, quivrplugin.Segment{
-			PartKey:         leadRanges[0].PartKey,
-			Start:           leadRanges[0].Start,
-			End:             leadRanges[0].End,
-			SourceRanges:    leadRanges,
-			SourceSeparator: sourceSeparator,
-			Vectors:         map[string][]float32{},
-			Provenance:      map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "lead_summary"},
-		})
-		inputs = append(inputs, leadInput)
 	}
 
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
-		if n == 0 && c.IncludeTitleInLead && !c.DualLeadSegment && canPrependTitle && titleRuneLen <= 4096 {
+		if n == 0 && c.IncludeTitleInLead && !emittedDualLead && canPrependTitle && titleRuneLen <= 4096 &&
+			titleRuneLen+sepRuneLen+utf8.RuneCountInString(body) <= 16384 {
 			ranges = append([]quivrplugin.SourceRange{{PartKey: titlePart.Key, Start: 0, End: titleRuneLen}}, ranges...)
 		}
 		input := inputForBody(body, n == 0)

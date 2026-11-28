@@ -14,6 +14,14 @@ import (
 
 const pluginID = "text.embed"
 
+var (
+	rePluginID     = regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`)
+	reSHA256       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	reRevision     = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`)
+	reSemver       = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	reSlugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
 type configuration struct {
 	PluginID           string                  `json:"plugin_id"`
 	Format             string                  `json:"format"`
@@ -65,7 +73,7 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if dec.Decode(new(any)) != io.EOF {
 		return c, fmt.Errorf("configuration must be one JSON object")
 	}
-	if len(c.PluginID) > 40 || !regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`).MatchString(c.PluginID) {
+	if len(c.PluginID) > 40 || !rePluginID.MatchString(c.PluginID) {
 		return c, fmt.Errorf("plugin_id must be a plugin identifier of at most 40 characters")
 	}
 	if c.BodyTokens < 8 || c.BodyTokens > 32768 || c.MaxChunks < 1 || c.MaxChunks > 256 || c.TailMinFraction < 0 || c.TailMinFraction > 0.5 {
@@ -85,6 +93,9 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if c.TitleSource != "title" && c.TitleSource != "none" && c.TitleSource != "inline" {
 		return c, fmt.Errorf("invalid title_source")
 	}
+	if c.ContextualAnchor == "title_lead_slot" && !strings.Contains(c.DocumentTemplate, "{title}") && c.TitleSource != "inline" {
+		return c, fmt.Errorf("contextual_anchor title_lead_slot requires {title} in document_template or title_source inline")
+	}
 	if err := validateTemplate(c.DocumentTemplate, "text", c.DocumentPrefix, "title"); err != nil {
 		return c, fmt.Errorf("document_template: %w", err)
 	}
@@ -102,7 +113,7 @@ func parseConfiguration(raw []byte) (configuration, error) {
 			return c, fmt.Errorf("invalid title context key")
 		}
 	}
-	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
+	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !reSHA256.MatchString(c.Tokenizer.SHA256)) {
 		return c, fmt.Errorf("tokenizer requires python, model and sha256")
 	}
 	if c.TokenizerProcesses < 0 || c.TokenizerProcesses > 32 {
@@ -118,10 +129,10 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if c.Auth != "bearer" && c.Auth != "api-key" && c.Auth != "none" {
 		return c, fmt.Errorf("auth must be bearer, api-key or none")
 	}
-	if c.Model == "" || len(c.Model) > 256 || c.Revision == "" || !regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`).MatchString(c.Revision) {
+	if c.Model == "" || len(c.Model) > 256 || c.Revision == "" || !reRevision.MatchString(c.Revision) {
 		return c, fmt.Errorf("model and model_revision must be nonempty and bounded")
 	}
-	if !regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(c.PluginVersion) {
+	if !reSemver.MatchString(c.PluginVersion) {
 		return c, fmt.Errorf("plugin_version must be MAJOR.MINOR.PATCH")
 	}
 	if c.Dimensions < 1 || c.Dimensions > 4096 || (c.Metric != "cosine" && c.Metric != "dot" && c.Metric != "l2") {
@@ -177,7 +188,7 @@ func (c configuration) spaceID() string {
 	}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
-	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
+	slug := strings.Trim(reSlugNonAlnum.ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
 	if slug == "" {
 		slug = "model"
 	}

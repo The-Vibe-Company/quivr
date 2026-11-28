@@ -12,7 +12,10 @@ import (
 	"sync"
 )
 
-const maxRerankResponseBytes = 1 << 20
+const (
+	maxRerankResponseBytes = 1 << 20
+	maxErrorBodyDrainBytes = 4 << 10
+)
 
 type rerankResult struct {
 	Index          *int     `json:"index"`
@@ -21,42 +24,58 @@ type rerankResult struct {
 	RawScore       *float64 `json:"raw_score"`
 }
 
-// rerankScores carries calibrated probabilities plus, when the endpoint
-// exposes them, unsaturated raw relevance margins (e.g. logit(yes)-logit(no)).
+// rerankScores carries calibrated probabilities (or raw scores) plus, when the
+// endpoint exposes them, unsaturated raw relevance margins (e.g. logit(yes)-logit(no)).
 type rerankScores struct {
 	Prob []float64
 	Raw  []float64 // nil when the endpoint returns no raw margins
 }
 
-// logitSpace returns per-document log-odds: the raw margin when available,
-// else log(p/(1-p)) with p clamped away from 0 and 1. Log-odds keep the full
-// dynamic range among top candidates whose probabilities saturate near 1.
+// logitSpace returns per-document unsaturated relevance margins: the endpoint's
+// raw_score when present, s.Prob directly if the endpoint already emits raw
+// logits outside [0, 1], else log(p/(1-p)) with p clamped away from 0 and 1.
 func (s rerankScores) logitSpace() []float64 {
-	out := make([]float64, len(s.Prob))
-	for i, p := range s.Prob {
-		if s.Raw != nil {
-			out[i] = s.Raw[i]
-			continue
+	if s.Raw != nil {
+		out := make([]float64, len(s.Raw))
+		copy(out, s.Raw)
+		return out
+	}
+	alreadyLogits := false
+	for _, p := range s.Prob {
+		if p < 0 || p > 1 {
+			alreadyLogits = true
+			break
 		}
-		const eps = 1e-7
+	}
+	out := make([]float64, len(s.Prob))
+	if alreadyLogits {
+		copy(out, s.Prob)
+		return out
+	}
+	const eps = 1e-7
+	for i, p := range s.Prob {
 		p = math.Min(math.Max(p, eps), 1-eps)
 		out[i] = math.Log(p / (1 - p))
 	}
 	return out
 }
 
-func (r retriever) callReranker(ctx context.Context, cfg configuration, query string, docs []string) ([]float64, error) {
-	s, err := r.callRerankerScores(ctx, cfg, query, docs)
-	if err != nil {
-		return nil, err
+func newRerankHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 32
+	transport.MaxIdleConnsPerHost = 16
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
-	return s.Prob, nil
 }
 
 // callRerankerSharded splits docs into n interleaved shards scored by
 // concurrent requests (so a multi-container endpoint scores them on separate
 // GPUs) and merges the results back into document order. Any shard failure
-// fails the whole call so the caller's graceful fallback applies.
+// cancels sibling shards and returns the root error that triggered cancellation.
 func (r retriever) callRerankerSharded(ctx context.Context, cfg configuration, query string, docs []string, n int) (rerankScores, error) {
 	if n <= 1 || len(docs) < 2*n {
 		return r.callRerankerScores(ctx, cfg, query, docs)
@@ -68,7 +87,8 @@ func (r retriever) callRerankerSharded(ctx context.Context, cfg configuration, q
 	shardCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make([]rerankScores, n)
-	errs := make([]error, n)
+	var firstErr error
+	var errOnce sync.Once
 	var wg sync.WaitGroup
 	for s := range shards {
 		wg.Add(1)
@@ -78,18 +98,21 @@ func (r retriever) callRerankerSharded(ctx context.Context, cfg configuration, q
 			for j, idx := range shards[s] {
 				part[j] = docs[idx]
 			}
-			results[s], errs[s] = r.callRerankerScores(shardCtx, cfg, query, part)
-			if errs[s] != nil {
+			res, err := r.callRerankerScores(shardCtx, cfg, query, part)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err })
 				cancel()
+				return
 			}
+			results[s] = res
 		}(s)
 	}
 	wg.Wait()
+	if firstErr != nil {
+		return rerankScores{}, firstErr
+	}
 	out := rerankScores{Prob: make([]float64, len(docs)), Raw: make([]float64, len(docs))}
 	for s := range shards {
-		if errs[s] != nil {
-			return rerankScores{}, errs[s]
-		}
 		if results[s].Raw == nil {
 			out.Raw = nil
 		}
@@ -146,6 +169,7 @@ func (r retriever) callRerankerScores(ctx context.Context, cfg configuration, qu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyDrainBytes))
 		return rerankScores{}, fmt.Errorf("reranker returned HTTP %d", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRerankResponseBytes+1))
@@ -156,14 +180,6 @@ func (r retriever) callRerankerScores(ctx context.Context, cfg configuration, qu
 		return rerankScores{}, errors.New("reranker response exceeds size limit")
 	}
 	return decodeRerankScoresFull(raw, cfg.RerankProtocol, len(docs))
-}
-
-func decodeRerankScores(raw []byte, protocol string, count int) ([]float64, error) {
-	s, err := decodeRerankScoresFull(raw, protocol, count)
-	if err != nil {
-		return nil, err
-	}
-	return s.Prob, nil
 }
 
 func decodeRerankScoresFull(raw []byte, protocol string, count int) (rerankScores, error) {

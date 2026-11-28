@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -12,8 +11,8 @@ import (
 var ligatures = strings.NewReplacer("œ", "oe", "æ", "ae", "Œ", "oe", "Æ", "ae")
 
 // stopwords contains generic French and English functional and interrogative
-// words removed when building aspect sets, proximity streams, and focused
-// entity sub-queries. Strictly domain-neutral and topic-agnostic.
+// words (in folded, hyphen-free form) removed when building aspect sets and
+// cleaning BM25 queries. Strictly domain-neutral and topic-agnostic.
 var stopwords = func() map[string]bool {
 	words := strings.Fields(
 		// French articles, prepositions, pronouns, auxiliaries, conjunctions
@@ -29,7 +28,8 @@ var stopwords = func() map[string]bool {
 			"par parce pas pendant peut peux peuvent plus pour pourquoi " +
 			"qu quand que quel quelle quelles quels qui quoi " +
 			"comment combien depuis apres avant selon face chez ainsi aussi bien " +
-			"a-t-il a-t-elle est-il est-elle sont-ils sont-elles ont-ils ont-elles peut-il peut-elle peut-on est-ce " +
+			// Folded forms of French hyphenated inverted-verb interrogatives (a-t-il, est-ce, peut-on, ...)
+			"atil atelle estil estelle sontils sontelles ontils ontelles peutil peutelle peuton estce " +
 			"s sa sans se sera seront ses si soit son sont sous sur " +
 			"t ta te tes toi ton tous tout toute toutes tres tu " +
 			"un une " +
@@ -50,9 +50,31 @@ var stopwords = func() map[string]bool {
 	return out
 }()
 
-// foldWord normalizes a single word: expands ligatures, strips diacritics,
-// and lowercases.
+// foldWord normalizes a single word: expands ligatures, strips diacritics and
+// non-alphanumeric punctuation, and lowercases. Uses a zero-NFD ASCII fast path.
 func foldWord(s string) string {
+	allASCII := true
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			allASCII = false
+			break
+		}
+	}
+	if allASCII {
+		var b strings.Builder
+		b.Grow(len(s))
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			switch {
+			case c >= 'A' && c <= 'Z':
+				b.WriteByte(c + ('a' - 'A'))
+			case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'):
+				b.WriteByte(c)
+			}
+		}
+		return b.String()
+	}
+
 	s = ligatures.Replace(strings.ToLower(s))
 	var b strings.Builder
 	b.Grow(len(s))
@@ -65,6 +87,21 @@ func foldWord(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// hasASCIISuffix compares the tail of s[:n] against an ASCII suffix with zero allocations.
+func hasASCIISuffix(s []rune, n int, suffix string) bool {
+	m := len(suffix)
+	if n < m {
+		return false
+	}
+	base := n - m
+	for i := 0; i < m; i++ {
+		if s[base+i] != rune(suffix[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // frenchLightStem applies the Apache Lucene UniNE French light stemmer
@@ -86,7 +123,7 @@ func frenchLightStem(word string) string {
 	if allDigits {
 		return word
 	}
-	ends := func(suffix string) bool { return strings.HasSuffix(string(s[:n]), suffix) }
+	ends := func(suffix string) bool { return hasASCIISuffix(s, n, suffix) }
 	if n > 5 && s[n-1] == 'x' {
 		if s[n-3] == 'a' && s[n-2] == 'u' && s[n-4] != 'e' {
 			s[n-2] = 'l'
@@ -194,7 +231,7 @@ func frenchLightStem(word string) string {
 		}
 		s = out
 	}
-	if len(s) > 4 && strings.HasSuffix(string(s), "ie") {
+	if len(s) > 4 && hasASCIISuffix(s, len(s), "ie") {
 		s = s[:len(s)-2]
 	}
 	if len(s) > 4 {
@@ -215,8 +252,7 @@ func frenchLightStem(word string) string {
 }
 
 // tokenizeContent splits text into folded, lightly-stemmed content tokens
-// preserving order (for proximity scoring). Stopwords and 1-char tokens
-// (except digits) are filtered out.
+// preserving order. Stopwords and 1-char tokens (except digits) are filtered out.
 func tokenizeContent(text string) []string {
 	raw := strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
@@ -235,6 +271,28 @@ func tokenizeContent(text string) []string {
 	return out
 }
 
+func tokenSetOf(text string) map[string]bool {
+	toks := tokenizeContent(text)
+	set := make(map[string]bool, len(toks))
+	for _, t := range toks {
+		set[t] = true
+	}
+	return set
+}
+
+func queryAspects(query string) []string {
+	toks := tokenizeContent(query)
+	seen := make(map[string]bool, len(toks))
+	out := make([]string, 0, len(toks))
+	for _, t := range toks {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -245,183 +303,6 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
-}
-
-func hasDigit(s string) bool {
-	for _, r := range s {
-		if unicode.IsDigit(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func isAllUpperAcronym(s string) bool {
-	runes := []rune(s)
-	if len(runes) < 2 || len(runes) > 8 {
-		return false
-	}
-	letters := 0
-	for _, r := range runes {
-		if unicode.IsLetter(r) {
-			if !unicode.IsUpper(r) {
-				return false
-			}
-			letters++
-		} else if !unicode.IsDigit(r) {
-			return false
-		}
-	}
-	return letters >= 2
-}
-
-func startsUpper(s string) bool {
-	r, _ := utf8.DecodeRuneInString(s)
-	return unicode.IsUpper(r)
-}
-
-// extractEntityQuery extracts a focused, high-specificity lexical sub-query
-// from a natural-language or "headline\nquestion" query without any LLM.
-//
-// Specificity signals (strictly domain-neutral):
-//   - Acronyms (all-caps 2..8 chars) and numbers/years
-//   - Mid-sentence capitalized proper nouns (and consecutive proper-noun phrases)
-//   - Headline-line terms (when query has a title/question newline split)
-//   - Longest non-stopword content tokens as rare-term proxies
-//
-// Returns the focused sub-query string and true if it differs meaningfully
-// from the full query.
-func extractEntityQuery(query string, maxTerms int) (string, bool) {
-	if maxTerms <= 0 {
-		maxTerms = 6
-	}
-	type candidateTerm struct {
-		surface  string
-		stem     string
-		score    float64
-		firstPos int
-	}
-
-	lines := strings.Split(strings.TrimSpace(query), "\n")
-	byStem := map[string]*candidateTerm{}
-	pos := 0
-
-	for lineIdx, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Split on whitespace first to track sentence starts & hyphenated compounds.
-		fields := strings.Fields(line)
-		sentenceStart := true
-		for _, field := range fields {
-			trimmed := strings.TrimFunc(field, func(r rune) bool {
-				return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-			})
-			endsSentence := strings.HasSuffix(field, ".") || strings.HasSuffix(field, "?") || strings.HasSuffix(field, "!") || strings.HasSuffix(field, ":")
-
-			// Split elisions (l', d', qu', etc.) while keeping internal hyphens intact when useful.
-			subTokens := strings.FieldsFunc(trimmed, func(r rune) bool {
-				return r == '\'' || r == '’' || r == '/' || r == ',' || r == ';' || r == '(' || r == ')' || r == '"' || r == '«' || r == '»'
-			})
-			for subIdx, tok := range subTokens {
-				tok = strings.Trim(tok, "-–—.")
-				if tok == "" {
-					continue
-				}
-				folded := foldWord(tok)
-				if folded == "" || stopwords[folded] {
-					continue
-				}
-				rlen := utf8.RuneCountInString(folded)
-				if rlen < 2 && !isAllDigits(folded) {
-					continue
-				}
-				stem := frenchLightStem(folded)
-
-				score := 0.0
-				// 1. Acronyms (e.g., ONU, UE, OTAN, PIB, BCE)
-				if isAllUpperAcronym(tok) {
-					score += 4.0
-				}
-				// 2. Numbers / years / identifiers (e.g., 2024, G20, COP29)
-				if hasDigit(tok) {
-					score += 3.5
-				}
-				// 3. Capitalized proper nouns (stronger when mid-sentence)
-				if startsUpper(tok) {
-					if !sentenceStart || subIdx > 0 {
-						score += 3.2
-					} else {
-						score += 1.2
-					}
-				}
-				// 4. Hyphenated compound (often named entities or technical terms)
-				if strings.ContainsRune(tok, '-') {
-					score += 1.5
-				}
-				// 5. First-line headline salience in multi-line title+question queries
-				if len(lines) > 1 && lineIdx == 0 {
-					score += 1.4
-				}
-				// 6. Morphological specificity proxy: longer content words have higher IDF
-				if rlen >= 8 {
-					score += 1.6
-				} else if rlen >= 6 {
-					score += 0.9
-				} else {
-					score += 0.3
-				}
-
-				if existing, ok := byStem[stem]; ok {
-					// Repeated across title and question => core subject!
-					existing.score += score*0.5 + 1.5
-					if startsUpper(tok) && !startsUpper(existing.surface) {
-						existing.surface = tok
-					}
-				} else {
-					byStem[stem] = &candidateTerm{
-						surface:  tok,
-						stem:     stem,
-						score:    score,
-						firstPos: pos,
-					}
-				}
-				pos++
-			}
-			sentenceStart = endsSentence
-		}
-	}
-
-	if len(byStem) == 0 {
-		return "", false
-	}
-	terms := make([]*candidateTerm, 0, len(byStem))
-	for _, t := range byStem {
-		terms = append(terms, t)
-	}
-	sort.SliceStable(terms, func(i, j int) bool {
-		if terms[i].score != terms[j].score {
-			return terms[i].score > terms[j].score
-		}
-		return terms[i].firstPos < terms[j].firstPos
-	})
-	if len(terms) > maxTerms {
-		terms = terms[:maxTerms]
-	}
-	// Restore original query order for readability and deterministic BM25 queries.
-	sort.SliceStable(terms, func(i, j int) bool {
-		return terms[i].firstPos < terms[j].firstPos
-	})
-	parts := make([]string, len(terms))
-	for i, t := range terms {
-		parts[i] = t.surface
-	}
-	subQuery := strings.Join(parts, " ")
-	if strings.EqualFold(strings.TrimSpace(subQuery), strings.TrimSpace(query)) {
-		return subQuery, false
-	}
-	return subQuery, true
 }
 
 // cleanLexicalQuery removes generic multilingual stopwords and French elision
