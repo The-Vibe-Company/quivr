@@ -145,6 +145,7 @@ func TestSerialControlPlane(t *testing.T) {
 				if peak := cp.peak.Load(); peak > 4 {
 					t.Fatalf("%d control-plane reads in flight at once, want at most 4", peak)
 				}
+				t.Logf("%d corpora: control plane %v (budget %v), %d reads in flight at most", tc.corpora, elapsed, tc.budget, cp.peak.Load())
 				if elapsed > tc.budget {
 					t.Fatalf("control plane of %d corpora took %v at %v per read, want at most %v", tc.corpora, elapsed, latency, tc.budget)
 				}
@@ -284,6 +285,77 @@ func TestEnforcedFallbackDedupe(t *testing.T) {
 			}
 		})
 	}
+
+	// Request 0 waits for the fallback request 2 leads; request 1 then fails
+	// and cancels request 2. Request 0 must ask again rather than inherit that
+	// cancellation, so request 1's error is the search's, as when each request
+	// asked on its own.
+	t.Run("a canceled leader does not decide the error", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			healthy := pluginGeneration("healthy-generation", true, "space", "example.large@1")
+			healthy.Spaces[1].Role = content.SpaceServed
+			routes := spaceRouting{"healthy": healthy, "rebuilding": pluginGeneration("rebuilt-generation", true, "example.small@1")}
+			missing := map[string]bool{"rebuilding": true}
+			s := service(&fakeProjection{}, &fakeEmbeddings{})
+			s.Projection = &stallingKeywords{rebuildProjection: &rebuildProjection{missing: missing}}
+			s.Routing, s.Registry = routes, rebuildingRegistry{routing: routes, missing: missing}
+			s.Spaces = slowRefusal{}
+			s.Ranker = &wideRanker{scriptedRanker{answer: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+				return answer(map[string]any{"requests": []any{
+					map[string]any{"primitive": "hybrid", "space": "space", "query_text": q.Query.Text, "k": q.Limit},
+					map[string]any{"primitive": "near_vector", "space": "example.large@1", "query_text": "refused", "k": q.Limit},
+					map[string]any{"primitive": "hybrid", "space": "example.large@1", "query_text": q.Query.Text, "k": q.Limit},
+				}})
+			}}}
+			ctx := visibility.WithPrincipals(t.Context(), []string{"user:first"})
+			_, err := s.Search(ctx, searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"healthy", "rebuilding"}})
+			if !errors.Is(err, retrieval.ErrQueryTooLong) {
+				t.Fatalf("search error %v, want request 1's ErrQueryTooLong", err)
+			}
+		})
+	})
+}
+
+// wideRanker is a scriptedRanker that may ask three candidate requests a round.
+type wideRanker struct{ scriptedRanker }
+
+func (r *wideRanker) Manifest() *plugins.Manifest {
+	m := r.scriptedRanker.Manifest()
+	m.Contributions.Retrieval.Limits.MaxRequests = 3
+	return m
+}
+
+// slowRefusal encodes the example spaces at once, but refuses the query
+// "refused" as too long after 1 ms.
+type slowRefusal struct{}
+
+func (slowRefusal) Owns(space string) bool {
+	return space == "example.small@1" || space == "example.large@1"
+}
+func (slowRefusal) EncodeQuery(_ context.Context, _, _, query string) ([]float32, error) {
+	if query == "refused" {
+		time.Sleep(time.Millisecond)
+		return nil, retrieval.ErrQueryTooLong
+	}
+	return []float32{0.5, 0.5}, nil
+}
+
+// stallingKeywords answers vectors of the served space after 0.5 ms, and
+// stalls its first keyword query until that query is canceled.
+type stallingKeywords struct {
+	*rebuildProjection
+	keywordQueries atomic.Int64
+}
+
+func (p *stallingKeywords) Search(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+	switch {
+	case q.Mode == "lexical" && p.keywordQueries.Add(1) == 1:
+		<-ctx.Done()
+		return nil, ctx.Err()
+	case q.Mode != "lexical" && q.Space == "space":
+		time.Sleep(time.Millisecond / 2)
+	}
+	return p.rebuildProjection.Search(ctx, routes, scope, q)
 }
 
 // quietRanker is passthrough without a transcript, so a benchmark's memory
