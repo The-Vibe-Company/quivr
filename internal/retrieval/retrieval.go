@@ -341,7 +341,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		return out, err
 	}
 	started := time.Now()
-	if err := guard(ctx, "routing.authorize", func() error { return s.Routing.Authorize(ctx, scope, q.CorpusIDs) }); err != nil {
+	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		elapsed := time.Since(started)
 		out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}}
 		return out, err
