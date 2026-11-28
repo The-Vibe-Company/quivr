@@ -35,7 +35,9 @@ const (
 )
 
 func isSearchOverload(err error) bool {
-	if err == nil {
+	// A recovered dependency panic is a bug, not load: like a handler
+	// panic, it must not steer admission.
+	if err == nil || errors.Is(err, retrieval.ErrPanicked) {
 		return false
 	}
 	return errors.Is(err, retrieval.ErrUnavailable) ||
@@ -58,6 +60,13 @@ func (a *API) handleSearchPanic(w http.ResponseWriter, r *http.Request, rec any,
 	if wroteResponse {
 		return
 	}
+	a.panicHeaders(w)
+	writeError(w, publicerr.SearchUnavailable, nil)
+}
+
+// panicHeaders prepares a 503 for a search that panicked, in the handler or
+// in a dependency retrieval recovered (retrieval.ErrPanicked).
+func (a *API) panicHeaders(w http.ResponseWriter) {
 	retryAfter := 1
 	if a.searchAdmission != nil {
 		retryAfter = a.searchAdmission.retryAfter()
@@ -66,7 +75,6 @@ func (a *API) handleSearchPanic(w http.ResponseWriter, r *http.Request, rec any,
 	w.Header().Del("X-Quivr-Degraded-Reason")
 	w.Header().Del("Server-Timing")
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-	writeError(w, publicerr.SearchUnavailable, nil)
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
@@ -115,6 +123,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if err != nil {
 		if u := result.Usage; u != nil {
 			w.Header().Set("Server-Timing", serverTiming(u.Phases))
+		}
+		if errors.Is(err, retrieval.ErrPanicked) {
+			a.panicHeaders(w)
 		}
 		wroteResponse = true
 		writeError(w, err, publicerr.SearchUnavailable)

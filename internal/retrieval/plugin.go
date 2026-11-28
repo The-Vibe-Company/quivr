@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -142,6 +144,96 @@ func invocationID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return "search-" + hex.EncodeToString(b[:])
+}
+
+// ErrPanicked reports a search dependency that panicked and was recovered.
+// It is ErrUnavailable; transports answer it as their own panic guard does.
+var ErrPanicked = fmt.Errorf("%w: dependency panicked", ErrUnavailable)
+
+// unavailable is ErrUnavailable for a failed dependency call, keeping
+// ErrPanicked so a transport can tell a recovered panic from an outage.
+func unavailable(err error) error {
+	if errors.Is(err, ErrPanicked) {
+		return err
+	}
+	return ErrUnavailable
+}
+
+// recovered turns a panic of the call it is deferred in into ErrPanicked. The
+// log names the call site and the panic's type only: a panic value may quote
+// the query, the Organization or the caller's principals.
+func recovered(ctx context.Context, site string, err *error) {
+	if r := recover(); r != nil {
+		slog.ErrorContext(ctx, "search dependency panicked", "component", "search", "site", site, "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
+		*err = ErrPanicked
+	}
+}
+
+// guard calls fn on this goroutine, a panic being ErrPanicked.
+func guard(ctx context.Context, site string, fn func() error) (err error) {
+	defer recovered(ctx, site, &err)
+	return fn()
+}
+
+// recoverGo runs fn on a new goroutine of wg. Every search fan-out starts its
+// goroutines here: a panic is ErrPanicked instead of the end of the process,
+// and reaches failed, when set, like any error fn returns, so the caller fails
+// the request and cancels its siblings.
+func recoverGo(ctx context.Context, wg *sync.WaitGroup, site string, fn func() error, failed func(error)) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := guard(ctx, site, fn); err != nil && failed != nil {
+			failed(err)
+		}
+	}()
+}
+
+// maxControlPlaneReads bounds the per-Corpus routing or coverage reads one
+// search has in flight.
+const maxControlPlaneReads = 4
+
+// readEach calls read for indexes 0..n-1, taken in index order by at most
+// maxControlPlaneReads workers, the caller being one, and returns each
+// index's error. A failure cancels only the reads of higher indexes, so the
+// lowest failing index keeps the error a serial loop would have returned.
+func readEach(ctx context.Context, n int, site string, read func(context.Context, int) error) []error {
+	errs := make([]error, n)
+	if n == 1 {
+		errs[0] = guard(ctx, site, func() error { return read(ctx, 0) })
+		return errs
+	}
+	ctxs := make([]context.Context, n)
+	cancels := make([]context.CancelFunc, n)
+	for i := range n {
+		ctxs[i], cancels[i] = context.WithCancel(ctx)
+	}
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
+	var next atomic.Int64
+	work := func() error {
+		for i := int(next.Add(1) - 1); i < n; i = int(next.Add(1) - 1) {
+			if errs[i] = ctxs[i].Err(); errs[i] != nil {
+				continue
+			}
+			if errs[i] = guard(ctxs[i], site, func() error { return read(ctxs[i], i) }); errs[i] != nil {
+				for _, cancel := range cancels[i+1:] {
+					cancel()
+				}
+			}
+		}
+		return nil
+	}
+	var wg sync.WaitGroup
+	for range min(n, maxControlPlaneReads) - 1 {
+		recoverGo(ctx, &wg, site, work, nil)
+	}
+	_ = work()
+	wg.Wait()
+	return errs
 }
 
 func fallbackDisabledByConfig(raw json.RawMessage) bool {
@@ -277,7 +369,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	timing.Coverage += time.Since(phase)
 	if err != nil {
 		out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, 0)
-		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
+		return out, s.unserved(ctx, m.ID, unavailable(err), timing)
 	}
 	spaces := plan.spaces
 	if plan.empty && q.EvaluationPlugin == "" {
@@ -359,7 +451,11 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			deadline, _ := ctx.Deadline()
 			request.Budget = &plugins.SearchBudget{RemainingTimeMS: int(max(0, time.Until(deadline).Milliseconds())), RemainingCostCents: chain.remainingCost(frames)}
 		}
-		body, err := s.Ranker.Round(ctx, request)
+		var body []byte
+		err := guard(ctx, "ranker.round", func() (err error) {
+			body, err = s.Ranker.Round(ctx, request)
+			return err
+		})
 		timing.PluginRounds += time.Since(phase)
 		callerDone = parentCtx != nil && parentCtx.Err() != nil
 		switch {
@@ -388,7 +484,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 				}
 			}
 			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
-			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
+			return out, s.deadline(ctx, m.ID, unavailable(err), timing)
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
@@ -436,6 +532,11 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 // deadline turns a failure of the plugin's round caused by the profile's
 // hard bound into ErrDeadline: the plugin outran it.
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
+	// A recovered panic stays one even past the bound: it is a bug, not a
+	// plugin that outran its deadline.
+	if errors.Is(err, ErrPanicked) {
+		return fmt.Errorf("plugin %s: %w", plugin, err)
+	}
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return fmt.Errorf("plugin %s: %w", plugin, ErrDeadline)
@@ -538,13 +639,22 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route, h
 		plan.empty = false
 		return plan, nil
 	}
+	type coverage struct {
+		spaces []content.SpaceCoverage
+		total  int64
+	}
+	covered := make([]coverage, len(routes))
+	errs := readEach(ctx, len(routes), "registry.vector_spaces", func(ctx context.Context, i int) (err error) {
+		covered[i].spaces, covered[i].total, err = s.Coverage.spaces(ctx, s.Registry, org, routes[i])
+		return err
+	})
 	var out []plugins.SearchSpace
 	for i, r := range routes {
 		existing := len(out)
-		spaces, total, err := s.Coverage.spaces(ctx, s.Registry, org, r)
-		if err != nil {
-			return plan, err
+		if errs[i] != nil {
+			return plan, errs[i]
 		}
+		spaces, total := covered[i].spaces, covered[i].total
 		byID := map[string]content.SpaceCoverage{}
 		corpusEmpty := len(spaces) > 0 && spaces[0].CorpusEmpty
 		plan.emptyCorpora[r.CorpusID] = corpusEmpty
@@ -656,6 +766,61 @@ type keywordCall struct {
 	done chan struct{}
 	res  []content.Candidate
 	err  error
+	// abandoned reports a leader whose own request was canceled, as when a
+	// lower-index sibling failed: its error is not the waiters' to inherit.
+	abandoned bool
+}
+
+// sharedKeywords answers one keyword fallback request once per server: from
+// the cache, by waiting for the request already in flight, or by asking the
+// index. A waiter whose leader was canceled asks again under its own context,
+// so a sibling's cancellation never replaces a lower-index error.
+func (sv *server) sharedKeywords(ctx context.Context, key string, search func() ([]content.Candidate, error)) ([]content.Candidate, error) {
+	for {
+		sv.mu.Lock()
+		if cached, ok := sv.keywordCandidates[key]; ok {
+			sv.mu.Unlock()
+			return cached, nil
+		}
+		if flight, ok := sv.keywordFlights[key]; ok {
+			sv.mu.Unlock()
+			select {
+			case <-flight.done:
+			case <-ctx.Done():
+				return nil, ErrUnavailable
+			}
+			if flight.err == nil {
+				return flight.res, nil
+			}
+			if flight.abandoned && ctx.Err() == nil {
+				continue
+			}
+			return nil, unavailable(flight.err)
+		}
+		flight := &keywordCall{done: make(chan struct{})}
+		if sv.keywordFlights == nil {
+			sv.keywordFlights = map[string]*keywordCall{}
+		}
+		sv.keywordFlights[key] = flight
+		sv.mu.Unlock()
+
+		res, err := search()
+		flight.res, flight.err, flight.abandoned = res, err, err != nil && ctx.Err() != nil
+		sv.mu.Lock()
+		delete(sv.keywordFlights, key)
+		if err == nil {
+			if sv.keywordCandidates == nil {
+				sv.keywordCandidates = map[string][]content.Candidate{}
+			}
+			sv.keywordCandidates[key] = res
+		}
+		sv.mu.Unlock()
+		close(flight.done)
+		if err != nil {
+			return nil, unavailable(err)
+		}
+		return res, nil
+	}
 }
 
 type fetchedCandidates struct {
@@ -730,62 +895,59 @@ func (sv *server) serveRound(ctx context.Context, q Request, requests []plugins.
 	// concurrently alongside them.
 	serializeProfiles := len(profileIndices) > 1
 
+	// failed records request i's error and cancels only higher-index
+	// requests, so lower-index error precedence is never poisoned by a
+	// sibling cancellation.
+	failed := func(i int) func(error) {
+		return func(err error) {
+			errs[i] = err
+			for _, cancel := range cancels[i+1:] {
+				cancel()
+			}
+		}
+	}
 	fetchStart := time.Now()
 	var wg sync.WaitGroup
 	for i, c := range requests {
 		if serializeProfiles && c.Primitive == plugins.PrimitiveProfile {
 			continue
 		}
-		wg.Add(1)
-		go func(i int, c plugins.CandidateRequest) {
-			defer wg.Done()
-			var err error
+		recoverGo(ctxs[i], &wg, "candidate_request", func() error {
 			if c.Primitive == plugins.PrimitiveProfile {
+				var err error
 				served[i], fallbacks[i], legPhases[i], err = sv.serveProfile(ctxs[i], q, c)
-			} else {
-				var fc *fetchedCandidates
-				fc, err = sv.fetchCandidates(ctxs[i], q, c)
-				fetched[i] = fc
-				if fc != nil {
-					legPhases[i] = fc.phases
-				}
+				return err
 			}
-			if err != nil {
-				errs[i] = err
-				// Cancel only higher-index requests so lower-index error
-				// precedence is never poisoned by a sibling cancellation.
-				for j := i + 1; j < n; j++ {
-					cancels[j]()
-				}
+			fc, err := sv.fetchCandidates(ctxs[i], q, c)
+			fetched[i] = fc
+			if fc != nil {
+				legPhases[i] = fc.phases
 			}
-		}(i, c)
+			return err
+		}, failed(i))
 	}
 	if serializeProfiles {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		current := profileIndices[0]
+		recoverGo(ctx, &wg, "profile_requests", func() error {
 			var serialPhases Phases
+			// Attribute sequential profile legs as one summed concurrent lane
+			// so mergeWavePhases does not collapse their sequential durations via max.
+			defer func() { legPhases[profileIndices[0]] = serialPhases }()
 			for _, i := range profileIndices {
-				if ctxs[i].Err() != nil {
-					errs[i] = ctxs[i].Err()
-					break
+				current = i
+				if err := ctxs[i].Err(); err != nil {
+					return err
 				}
 				var ph Phases
 				var err error
 				served[i], fallbacks[i], ph, err = sv.serveProfile(ctxs[i], q, requests[i])
 				serialPhases.add(ph)
 				if err != nil {
-					errs[i] = err
-					for j := i + 1; j < n; j++ {
-						cancels[j]()
-					}
-					break
+					return err
 				}
 			}
-			// Attribute sequential profile legs as one summed concurrent lane
-			// so mergeWavePhases does not collapse their sequential durations via max.
-			legPhases[profileIndices[0]] = serialPhases
-		}()
+			return nil
+		}, func(err error) { failed(current)(err) })
 	}
 	wg.Wait()
 	sv.timing.add(mergeWavePhases(legPhases, time.Since(fetchStart)))
@@ -874,17 +1036,21 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 	if fusion, ok := sv.s.Projection.(RouteRankFusion); ok && len(fallback) > 0 {
 		pq.RankAcrossRoutes = fusion.UsesRouteRankFusion(sv.routes)
 	}
-	search := func(routes []Route, request Request) ([]content.Candidate, error) {
+	search := func(routes []Route, request Request) (found []content.Candidate, err error) {
 		phase := time.Now()
 		defer func() { fc.phases.IndexQuery += time.Since(phase) }()
-		return sv.s.Projection.Search(ctx, routes, sv.scope, request)
+		err = guard(ctx, "projection.search", func() (err error) {
+			found, err = sv.s.Projection.Search(ctx, routes, sv.scope, request)
+			return err
+		})
+		return found, err
 	}
 	found := []content.Candidate{}
 	if len(routes) > 0 {
 		var err error
 		found, err = search(routes, pq)
 		if err != nil {
-			return fc, ErrUnavailable
+			return fc, unavailable(err)
 		}
 		if q.EvaluationPlugin == "" && pq.Mode != "lexical" {
 			fc.vectorRoutes = routes
@@ -901,54 +1067,20 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 		if err != nil {
 			return fc, ErrUnsupported
 		}
-		var more []content.Candidate
-		if _, enforced := visibility.Principals(ctx); enforced {
-			more, err = search(fallback, keywords)
+		k := string(key)
+		if principals, enforced := visibility.Principals(ctx); enforced {
+			// The index filters these candidates by the caller's principals.
+			// They are shared only within this search (sv), under the same
+			// principals; hydration still rechecks each one, uncached.
+			who, err := json.Marshal(principals)
 			if err != nil {
-				return fc, ErrUnavailable
+				return fc, ErrUnsupported
 			}
-		} else {
-			k := string(key)
-			sv.mu.Lock()
-			if cached, ok := sv.keywordCandidates[k]; ok {
-				more = cached
-				sv.mu.Unlock()
-			} else if flight, ok := sv.keywordFlights[k]; ok {
-				sv.mu.Unlock()
-				select {
-				case <-flight.done:
-					if flight.err != nil {
-						return fc, ErrUnavailable
-					}
-					more = flight.res
-				case <-ctx.Done():
-					return fc, ErrUnavailable
-				}
-			} else {
-				flight := &keywordCall{done: make(chan struct{})}
-				if sv.keywordFlights == nil {
-					sv.keywordFlights = map[string]*keywordCall{}
-				}
-				sv.keywordFlights[k] = flight
-				sv.mu.Unlock()
-
-				res, searchErr := search(fallback, keywords)
-				flight.res, flight.err = res, searchErr
-				sv.mu.Lock()
-				delete(sv.keywordFlights, k)
-				if searchErr == nil {
-					if sv.keywordCandidates == nil {
-						sv.keywordCandidates = map[string][]content.Candidate{}
-					}
-					sv.keywordCandidates[k] = res
-				}
-				sv.mu.Unlock()
-				close(flight.done)
-				if searchErr != nil {
-					return fc, ErrUnavailable
-				}
-				more = res
-			}
+			k = string(who) + "\x00" + k
+		}
+		more, err := sv.sharedKeywords(ctx, k, func() ([]content.Candidate, error) { return search(fallback, keywords) })
+		if err != nil {
+			return fc, err
 		}
 		if !pq.RankAcrossRoutes {
 			found, more = NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)
@@ -1158,9 +1290,13 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 	if len(batch) == 0 {
 		return out, nil
 	}
-	hydrated, err := sv.s.Content.Hydrate(ctx, sv.scope, batch)
+	var hydrated map[int]content.Hydrated
+	err := guard(ctx, "content.hydrate", func() (err error) {
+		hydrated, err = sv.s.Content.Hydrate(ctx, sv.scope, batch)
+		return err
+	})
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, unavailable(err)
 	}
 	sv.mu.Lock()
 	for j, h := range hydrated {
@@ -1189,7 +1325,14 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, ti
 		}
 	}
 	started := time.Now()
-	vector, err := sv.s.encodeQuery(ctx, sv.scope.Organization, space, text)
+	// The shared query-vector cache recovers a panic on its own goroutine; this
+	// guard covers an encoder that runs on the search's goroutine. Either way
+	// the encoder did not answer: ErrModelUnavailable.
+	var vector []float32
+	err := guard(ctx, "query.encode", func() (err error) {
+		vector, err = sv.s.encodeQuery(ctx, sv.scope.Organization, space, text)
+		return err
+	})
 	elapsed := time.Since(started)
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) {
@@ -1205,8 +1348,15 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, ti
 	return vector, elapsed, nil
 }
 
-func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
-	return s.encodeQuery(ctx, org, space, text)
+// EncodeQuery encodes a query outside a search. An encoder that panics on the
+// caller's goroutine is ErrUnavailable; the shared query-vector cache recovers
+// a panic on its own flight goroutine.
+func (s Service) EncodeQuery(ctx context.Context, org, space, text string) (vector []float32, err error) {
+	err = guard(ctx, "query.encode", func() (err error) {
+		vector, err = s.encodeQuery(ctx, org, space, text)
+		return err
+	})
+	return vector, err
 }
 
 // A live encoder must return the actual serving encoder alongside its identity.
@@ -1368,10 +1518,14 @@ func (sv *server) attachLeadsBatch(ctx context.Context, q Request, outs [][]plug
 	}
 	var elapsed time.Duration
 	phase := time.Now()
-	leadIDs, err := sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+	var leadIDs map[string]string
+	err := guard(ctx, "content.lead_segments", func() (err error) {
+		leadIDs, err = sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+		return err
+	})
 	elapsed += time.Since(phase)
 	if err != nil {
-		return elapsed, ErrUnavailable
+		return elapsed, unavailable(err)
 	}
 	if len(leadIDs) == 0 {
 		return elapsed, nil

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -516,5 +517,45 @@ func TestSearchPanicRecoveryReturns503ReleasesAdmissionAndRedactsLogs(t *testing
 	}
 	if stats := limiter.Stats(); stats.InUse != 0 || stats.Queued != 0 {
 		t.Fatalf("post-recovery admission stats=%+v; want InUse=0 Queued=0", stats)
+	}
+}
+
+// panickedRanker is a ranker whose round failed with a panic retrieval
+// recovered.
+type panickedRanker struct{ noopSearchDep }
+
+func (panickedRanker) Round(context.Context, plugins.SearchRequest) ([]byte, error) {
+	return nil, fmt.Errorf("round: %w", retrieval.ErrPanicked)
+}
+
+// A dependency panic that retrieval recovers is answered as a handler panic:
+// 503 search_unavailable with Retry-After, no phase timings, and the
+// admission slot returned.
+func TestSearchRecoveredDependencyPanicReturns503WithRetryAfter(t *testing.T) {
+	limiter := NewSearchAdmission(SearchAdmissionConfig{InitialLimit: 1, MinLimit: 1, MaxLimit: 2, MaxQueue: 2})
+	const key = "search-key"
+	keys := map[string]corpus.Scope{key: {Organization: "org_a", Actions: []string{"search:query", "content:read"}, Corpora: []string{"*"}}}
+	handler, err := New(nil, content.Service{}, retrieval.Service{Routing: &panicSearchRouting{}, Projection: noopSearchDep{}, Ranker: panickedRanker{}}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), WithSearchAdmission(limiter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/v0/search", strings.NewReader(`{"query":"lanterne","corpus_ids":["corpus_a"],"mode":"lexical"}`))
+	r.Header.Set("Authorization", "Bearer "+key)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	apicontract.Handler(t, handler).ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), `"code":"search_unavailable"`) {
+		t.Fatalf("status=%d body=%s; want 503 search_unavailable", w.Code, w.Body.String())
+	}
+	if retryAfter, err := strconv.Atoi(w.Header().Get("Retry-After")); err != nil || retryAfter < 1 {
+		t.Fatalf("Retry-After=%q; want positive integer seconds", w.Header().Get("Retry-After"))
+	}
+	for _, header := range []string{"Server-Timing", "X-Quivr-Degraded", "X-Quivr-Degraded-Reason"} {
+		if got := w.Header().Get(header); got != "" {
+			t.Fatalf("%s=%q on a recovered panic; want none", header, got)
+		}
+	}
+	if stats := limiter.Stats(); stats.InUse != 0 || stats.Available != stats.Limit {
+		t.Fatalf("admission stats after a recovered panic = %+v; want the slot returned", stats)
 	}
 }
