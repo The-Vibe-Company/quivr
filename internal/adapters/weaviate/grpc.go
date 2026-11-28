@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
 	"google.golang.org/grpc"
@@ -42,6 +43,10 @@ func (s *Store) grpcBreaker() *circuitBreaker {
 }
 
 func (s *Store) rpcContext(ctx context.Context, operation string, callerDeadline bool) (context.Context, context.CancelFunc) {
+	return s.rpcContextTimeout(ctx, operation, callerDeadline, s.Client.Timeout)
+}
+
+func (s *Store) rpcContextTimeout(ctx context.Context, operation string, callerDeadline bool, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if metrics := s.metrics.Load(); metrics != nil {
 		metrics.Record(telemetry.DependencyWeaviate, telemetry.ProtocolGRPC, operation)
 	}
@@ -59,10 +64,10 @@ func (s *Store) rpcContext(ctx context.Context, operation string, callerDeadline
 			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
 	}
-	if _, bounded := ctx.Deadline(); callerDeadline && bounded || s.Client.Timeout == 0 {
+	if _, bounded := ctx.Deadline(); callerDeadline && bounded || timeout == 0 {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, s.Client.Timeout)
+	return context.WithTimeout(ctx, timeout)
 }
 
 func vectorMessage(name string, vector []float32) (*pb.Vectors, error) {
@@ -91,7 +96,14 @@ func batchObject(object projectionObject) (*pb.BatchObject, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(object.Vectors) > 0 {
+		out.Vectors = make([]*pb.Vectors, 0, len(object.Vectors))
+	}
 	for name, vector := range object.Vectors {
+		if raw, ok := object.encoded[name]; ok {
+			out.Vectors = append(out.Vectors, &pb.Vectors{Name: name, VectorBytes: raw, Type: pb.Vectors_VECTOR_TYPE_SINGLE_FP32})
+			continue
+		}
 		packed, err := vectorMessage(name, vector)
 		if err != nil {
 			return nil, err
@@ -101,30 +113,126 @@ func batchObject(object projectionObject) (*pb.BatchObject, error) {
 	return out, nil
 }
 
+// grpcBatchAttempts bounds the sends of one batch: the first send, then
+// re-sends of only the objects the provider rejected in its reply.
+const grpcBatchAttempts = 3
+
+var errBatchUnacknowledged = errors.New("projection batch unacknowledged")
+
+// grpcInsertBatch re-sends only the objects a reply rejects and reconciles a
+// lost reply by reading back the objects of the send that lost it.
 func (s *Store) grpcInsertBatch(ctx context.Context, objects []projectionObject) error {
-	request := &pb.BatchObjectsRequest{Objects: make([]*pb.BatchObject, 0, len(objects))}
-	for _, object := range objects {
-		packed, err := batchObject(object)
+	packed := make([]*pb.BatchObject, len(objects))
+	for i, object := range objects {
+		message, err := batchObject(object)
 		if err != nil {
 			return errors.New("invalid projection batch object")
 		}
-		request.Objects = append(request.Objects, packed)
+		packed[i] = message
 	}
-	rpcCtx, cancel := s.rpcContext(ctx, telemetry.OpWrite, false)
+	for attempt := 1; ; attempt++ {
+		rejected, err := s.grpcSendBatch(ctx, packed)
+		if errors.Is(err, errBatchUnacknowledged) {
+			return s.verifyBatch(ctx, objects)
+		}
+		if err != nil {
+			return err
+		}
+		if len(rejected) == 0 {
+			return nil
+		}
+		if attempt == grpcBatchAttempts {
+			// Provider messages can quote request data; report only the count.
+			return fmt.Errorf("projection publication failed (%d objects rejected)", len(rejected))
+		}
+		retryObjects := make([]projectionObject, len(rejected))
+		retryPacked := make([]*pb.BatchObject, len(rejected))
+		for j, i := range rejected {
+			retryObjects[j], retryPacked[j] = objects[i], packed[i]
+		}
+		objects, packed = retryObjects, retryPacked
+	}
+}
+
+// batchSize estimates the encoded size of a batch from what dominates it,
+// vector payloads and property text, without walking it through proto.Size.
+func batchSize(objects []*pb.BatchObject) int {
+	size := 0
+	for _, object := range objects {
+		size += len(object.GetUuid()) + len(object.GetCollection()) + len(object.GetTenant())
+		for _, vector := range object.GetVectors() {
+			size += len(vector.GetName()) + len(vector.GetVectorBytes())
+		}
+		for _, list := range object.GetProperties().GetTextArrayProperties() {
+			size += len(list.GetPropName())
+			for _, value := range list.GetValues() {
+				size += len(value)
+			}
+		}
+		size += structSize(object.GetProperties().GetNonRefProperties())
+	}
+	return size
+}
+
+func structSize(value *structpb.Struct) int {
+	size := 0
+	for key, field := range value.GetFields() {
+		size += len(key) + valueSize(field)
+	}
+	return size
+}
+
+func valueSize(value *structpb.Value) int {
+	switch kind := value.GetKind().(type) {
+	case *structpb.Value_StringValue:
+		return len(kind.StringValue)
+	case *structpb.Value_StructValue:
+		return structSize(kind.StructValue)
+	case *structpb.Value_ListValue:
+		size := 0
+		for _, item := range kind.ListValue.GetValues() {
+			size += valueSize(item)
+		}
+		return size
+	default:
+		return 8
+	}
+}
+
+// grpcSendBatch sends one batch under a deadline sized to its encoding and
+// returns the ascending, distinct indexes of the objects the reply rejects.
+func (s *Store) grpcSendBatch(ctx context.Context, objects []*pb.BatchObject) ([]int, error) {
+	request := &pb.BatchObjectsRequest{Objects: objects}
+	rpcCtx, cancel := s.rpcContextTimeout(ctx, telemetry.OpWrite, false, s.writeTimeout(batchSize(objects)))
 	defer cancel()
 	reply, err := s.grpc.BatchObjects(rpcCtx, request)
 	if err != nil {
 		switch status.Code(err) {
 		case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled, codes.Unknown, codes.Internal:
-			return s.verifyBatch(ctx, objects)
+			return nil, errBatchUnacknowledged
 		default:
-			return fmt.Errorf("projection batch request failed (gRPC %s)", status.Code(err))
+			return nil, fmt.Errorf("projection batch request failed (gRPC %s)", status.Code(err))
 		}
 	}
-	if len(reply.GetErrors()) > 0 {
-		return errors.New("projection publication failed")
+	replyErrors := reply.GetErrors()
+	if len(replyErrors) == 0 {
+		return nil, nil
 	}
-	return nil
+	failed := make([]bool, len(objects))
+	for _, rejected := range replyErrors {
+		i := int(rejected.GetIndex())
+		if i < 0 || i >= len(objects) {
+			return nil, errors.New("projection publication response invalid")
+		}
+		failed[i] = true
+	}
+	indexes := make([]int, 0, len(replyErrors))
+	for i, bad := range failed {
+		if bad {
+			indexes = append(indexes, i)
+		}
+	}
+	return indexes, nil
 }
 
 func searchRequest(collection string, branch searchBranch, where filter, order searchOrder, limit int, fields []string) (*pb.SearchRequest, error) {
