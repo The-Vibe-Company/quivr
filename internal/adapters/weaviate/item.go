@@ -608,51 +608,53 @@ func (s *jsonStream) readStringSlow() ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				if utf16.IsSurrogate(r1) {
-					if r1 >= 0xD800 && r1 <= 0xDBFF {
-						if b1, err := s.nextByte(); err == nil {
-							if b1 == '\\' {
-								b2, err := s.nextByte()
-								if err != nil {
-									return nil, err
-								}
-								if b2 == 'u' {
-									r2, err := parseHex4(s)
-									if err != nil {
-										return nil, err
-									}
-									if r2 >= 0xDC00 && r2 <= 0xDFFF {
-										s.scratch = utf8.AppendRune(s.scratch, utf16.DecodeRune(r1, r2))
-										continue
-									}
-									s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
-									s.scratch = utf8.AppendRune(s.scratch, r2)
-									continue
-								}
-								// Not \u: emit replacement for r1, then handle \b2.
-								s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
-								if err := s.appendSimpleEscape(b2); err != nil {
-									return nil, err
-								}
-								continue
-							}
-							// Put back non-backslash byte by handling it directly.
-							s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
-							if b1 == '"' {
-								return s.scratch, nil
-							}
-							if b1 < 0x20 {
-								return nil, errors.New(errInvalidJSONSyntax)
-							}
-							s.scratch = append(s.scratch, b1)
-							continue
-						} else {
+				for {
+					if r1 < 0xD800 || r1 > 0xDFFF {
+						s.scratch = utf8.AppendRune(s.scratch, r1)
+						break
+					}
+					if r1 >= 0xDC00 {
+						s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+						break
+					}
+					b1, err := s.nextByte()
+					if err != nil {
+						return nil, err
+					}
+					if b1 != '\\' {
+						s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+						if b1 == '"' {
+							return s.scratch, nil
+						}
+						if b1 < 0x20 {
+							return nil, errors.New(errInvalidJSONSyntax)
+						}
+						s.scratch = append(s.scratch, b1)
+						break
+					}
+					b2, err := s.nextByte()
+					if err != nil {
+						return nil, err
+					}
+					if b2 != 'u' {
+						s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+						if err := s.appendSimpleEscape(b2); err != nil {
 							return nil, err
 						}
+						break
 					}
+					r2, err := parseHex4(s)
+					if err != nil {
+						return nil, err
+					}
+					if r2 >= 0xDC00 && r2 <= 0xDFFF {
+						s.scratch = utf8.AppendRune(s.scratch, utf16.DecodeRune(r1, r2))
+						break
+					}
+					// r1 was an unpaired high surrogate; emit U+FFFD and re-dispatch r2
+					// so a subsequent high surrogate can still pair with a following low surrogate.
 					s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
-				} else {
-					s.scratch = utf8.AppendRune(s.scratch, r1)
+					r1 = r2
 				}
 			default:
 				return nil, errors.New(errInvalidJSONSyntax)
@@ -728,6 +730,54 @@ func isNumberChar(c byte) bool {
 	return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
 }
 
+// validJSONNumber reports whether b conforms strictly to RFC 8259 Section 6:
+// number = [ "-" ] ( "0" / ( [1-9] *[0-9] ) ) [ "." 1*[0-9] ] [ ( "e" / "E" ) [ "+" / "-" ] 1*[0-9] ]
+func validJSONNumber(b []byte) bool {
+	n := len(b)
+	if n == 0 {
+		return false
+	}
+	i := 0
+	if b[i] == '-' {
+		i++
+		if i == n {
+			return false
+		}
+	}
+	if b[i] == '0' {
+		i++
+	} else if b[i] >= '1' && b[i] <= '9' {
+		i++
+		for i < n && b[i] >= '0' && b[i] <= '9' {
+			i++
+		}
+	} else {
+		return false
+	}
+	if i < n && b[i] == '.' {
+		i++
+		if i == n || b[i] < '0' || b[i] > '9' {
+			return false
+		}
+		for i < n && b[i] >= '0' && b[i] <= '9' {
+			i++
+		}
+	}
+	if i < n && (b[i] == 'e' || b[i] == 'E') {
+		i++
+		if i < n && (b[i] == '+' || b[i] == '-') {
+			i++
+		}
+		if i == n || b[i] < '0' || b[i] > '9' {
+			return false
+		}
+		for i < n && b[i] >= '0' && b[i] <= '9' {
+			i++
+		}
+	}
+	return i == n
+}
+
 func (s *jsonStream) readNumberBytes() ([]byte, error) {
 	c, err := s.peek()
 	if err != nil {
@@ -744,7 +794,11 @@ func (s *jsonStream) readNumberBytes() ([]byte, error) {
 	}
 	if i < len(buf) {
 		s.pos = i
-		return buf[start:i], nil
+		raw := buf[start:i]
+		if !validJSONNumber(raw) {
+			return nil, errors.New(errInvalidJSONSyntax)
+		}
+		return raw, nil
 	}
 	s.scratch = append(s.scratch[:0], buf[start:]...)
 	s.pos = s.end
@@ -752,6 +806,9 @@ func (s *jsonStream) readNumberBytes() ([]byte, error) {
 		if !s.fill() {
 			if s.err != nil {
 				return nil, s.err
+			}
+			if !validJSONNumber(s.scratch) {
+				return nil, errors.New(errInvalidJSONSyntax)
 			}
 			return s.scratch, nil
 		}
@@ -763,6 +820,9 @@ func (s *jsonStream) readNumberBytes() ([]byte, error) {
 		s.scratch = append(s.scratch, buf[:i]...)
 		s.pos = i
 		if i < len(buf) {
+			if !validJSONNumber(s.scratch) {
+				return nil, errors.New(errInvalidJSONSyntax)
+			}
 			return s.scratch, nil
 		}
 	}
@@ -845,14 +905,8 @@ func (s *jsonStream) skipValue(depth int) error {
 		return s.expectLiteral("null")
 	default:
 		if c == '-' || (c >= '0' && c <= '9') {
-			raw, err := s.readNumberBytes()
-			if err != nil {
-				return err
-			}
-			if _, err := strconv.ParseFloat(bytesAsString(raw), 64); err != nil {
-				return errors.New(errInvalidJSONSyntax)
-			}
-			return nil
+			_, err := s.readNumberBytes()
+			return err
 		}
 		return errors.New(errInvalidJSONSyntax)
 	}
@@ -919,6 +973,9 @@ func (s *jsonStream) decodeAdditional(row *itemRow) error {
 				if err := s.expectLiteral("null"); err != nil {
 					return err
 				}
+				row.scoreVal = 0
+				row.hasScore = false
+				row.Additional.Score = nil
 			} else {
 				raw, err := s.readStringBytes()
 				if err != nil {
@@ -926,6 +983,7 @@ func (s *jsonStream) decodeAdditional(row *itemRow) error {
 				}
 				row.scoreVal, _ = strconv.ParseFloat(bytesAsString(raw), 64)
 				row.hasScore = true
+				row.Additional.Score = nil
 			}
 		case "distance":
 			vc, err := s.peek()
@@ -936,6 +994,9 @@ func (s *jsonStream) decodeAdditional(row *itemRow) error {
 				if err := s.expectLiteral("null"); err != nil {
 					return err
 				}
+				row.distanceVal = 0
+				row.hasDistance = false
+				row.Additional.Distance = nil
 			} else {
 				raw, err := s.readNumberBytes()
 				if err != nil {
@@ -947,6 +1008,7 @@ func (s *jsonStream) decodeAdditional(row *itemRow) error {
 				}
 				row.distanceVal = val
 				row.hasDistance = true
+				row.Additional.Distance = nil
 			}
 		default:
 			if err := s.skipValue(0); err != nil {
@@ -997,11 +1059,13 @@ func (s *jsonStream) decodeItemRow(wantItem, wantText bool, lastGenID *string) (
 		}
 		switch string(key) {
 		case "segmentId":
-			val, _, err := s.readOptionalString()
+			val, ok, err := s.readOptionalString()
 			if err != nil {
 				return row, err
 			}
-			row.SegmentID = val
+			if ok {
+				row.SegmentID = val
+			}
 		case "generationId":
 			vc, err := s.peek()
 			if err != nil {
@@ -1026,11 +1090,13 @@ func (s *jsonStream) decodeItemRow(wantItem, wantText bool, lastGenID *string) (
 			}
 		case "versionId":
 			if wantItem {
-				val, _, err := s.readOptionalString()
+				val, ok, err := s.readOptionalString()
 				if err != nil {
 					return row, err
 				}
-				row.VersionID = val
+				if ok {
+					row.VersionID = val
+				}
 			} else {
 				if err := s.skipValue(0); err != nil {
 					return row, err
@@ -1038,11 +1104,13 @@ func (s *jsonStream) decodeItemRow(wantItem, wantText bool, lastGenID *string) (
 			}
 		case passageText:
 			if wantText {
-				val, _, err := s.readOptionalString()
+				val, ok, err := s.readOptionalString()
 				if err != nil {
 					return row, err
 				}
-				row.Text = val
+				if ok {
+					row.Text = val
+				}
 			} else {
 				if err := s.skipValue(0); err != nil {
 					return row, err
@@ -1148,6 +1216,7 @@ func decodeItemRows(r io.Reader, collection string, wantItem, wantText bool, lim
 					if err := s.expectLiteral("null"); err != nil {
 						return nil, err
 					}
+					hasErrors = false
 				} else {
 					if err := s.expectByte('['); err != nil {
 						return nil, err
@@ -1158,6 +1227,7 @@ func decodeItemRows(r io.Reader, collection string, wantItem, wantText bool, lim
 					}
 					if enext == ']' {
 						s.pos++
+						hasErrors = false
 					} else {
 						hasErrors = true
 						for {

@@ -488,18 +488,93 @@ func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
 	}
 }
 
+type trackingListener struct {
+	net.Listener
+	accepting     chan struct{}
+	acceptingOnce sync.Once
+
+	mu     sync.Mutex
+	active int
+	zeroCh chan struct{}
+}
+
+func (l *trackingListener) Accept() (net.Conn, error) {
+	l.acceptingOnce.Do(func() { close(l.accepting) })
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	l.active++
+	l.mu.Unlock()
+	return &trackedConn{Conn: c, done: l.connClosed}, nil
+}
+
+func (l *trackingListener) connClosed() {
+	l.mu.Lock()
+	l.active--
+	if l.active == 0 && l.zeroCh != nil {
+		close(l.zeroCh)
+		l.zeroCh = nil
+	}
+	l.mu.Unlock()
+}
+
+func (l *trackingListener) waitConnsClosed(timeout time.Duration) bool {
+	l.mu.Lock()
+	if l.active == 0 {
+		l.mu.Unlock()
+		return true
+	}
+	ch := make(chan struct{})
+	l.zeroCh = ch
+	l.mu.Unlock()
+
+	select {
+	case <-ch:
+		return true
+	case <-time.After(timeout):
+		l.mu.Lock()
+		if l.zeroCh == ch {
+			l.zeroCh = nil
+		}
+		l.mu.Unlock()
+		return false
+	}
+}
+
+type trackedConn struct {
+	net.Conn
+	done func()
+	once sync.Once
+}
+
+func (c *trackedConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.done)
+	return err
+}
+
 func TestGRPCPoolCloseReleasesGoroutines(t *testing.T) {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	rawLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	lis := &trackingListener{
+		Listener:  rawLis,
+		accepting: make(chan struct{}),
 	}
 	srv := grpc.NewServer()
 	pb.RegisterWeaviateServer(srv, &blockingSearchFixture{reply: searchFixtureReply()})
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 
+	select {
+	case <-lis.accepting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gRPC server did not enter Accept")
+	}
 	runtime.GC()
-	time.Sleep(20 * time.Millisecond)
 	baseline := runtime.NumGoroutine()
 
 	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
@@ -546,6 +621,10 @@ func TestGRPCPoolCloseReleasesGoroutines(t *testing.T) {
 	closeStore()
 	closeStore()
 
+	if !lis.waitConnsClosed(2 * time.Second) {
+		t.Fatal("server-side connections did not close after closeStore")
+	}
+
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		runtime.GC()
@@ -556,6 +635,6 @@ func TestGRPCPoolCloseReleasesGoroutines(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("goroutine leak after closeFn: baseline=%d current=%d (want <= %d)", baseline, runtime.NumGoroutine(), baseline+2)
 		}
-		time.Sleep(20 * time.Millisecond)
+		runtime.Gosched()
 	}
 }

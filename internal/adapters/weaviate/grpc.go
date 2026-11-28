@@ -9,7 +9,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
@@ -23,10 +22,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
-
-// grpcDecodeRowHook is nil in production; white-box tests may install a hook
-// to inject a decode-path panic and verify recovery to retrieval.ErrUnavailable.
-var grpcDecodeRowHook atomic.Pointer[func(*pb.SearchResult)]
 
 func (s *Store) grpcPooled() *grpcPooledClient {
 	if pooled, ok := s.grpc.(*grpcPooledClient); ok {
@@ -387,12 +382,6 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
 		}
 	}()
-	if hook := grpcDecodeRowHook.Load(); hook != nil {
-		fn := *hook
-		for _, result := range results {
-			fn(result)
-		}
-	}
 	rows = make([]itemRow, len(results))
 	var scores []string
 	var distances []float64

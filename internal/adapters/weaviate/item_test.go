@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 	"time"
 
@@ -1732,6 +1733,268 @@ func TestItemSearchErrgroupPanicRecovery(t *testing.T) {
 		})
 		if !errors.Is(err, retrieval.ErrUnavailable) {
 			t.Fatalf("err = %v, want retrieval.ErrUnavailable", err)
+		}
+	})
+}
+
+// TestJSONStreamRFC8259ParityWithEncodingJSON verifies that the streaming HTTP
+// GraphQL decoder in item.go matches encoding/json on RFC-8259 surrogate
+// resync, null field semantics, and strict JSON number validation across both
+// full-buffer and 1-byte chunked reads.
+func TestJSONStreamRFC8259ParityWithEncodingJSON(t *testing.T) {
+	type refRow struct {
+		SegmentID    string `json:"segmentId"`
+		GenerationID string `json:"generationId"`
+		VersionID    string `json:"versionId"`
+		Text         string `json:"passageText"`
+		Additional   struct {
+			Score    *string  `json:"score"`
+			Distance *float64 `json:"distance"`
+		} `json:"_additional"`
+	}
+	decodeWithStdJSON := func(raw string, dense bool) ([]content.Candidate, error) {
+		var out struct {
+			Data   struct{ Get map[string][]refRow } `json:"data"`
+			Errors []any                             `json:"errors"`
+		}
+		if err := json.NewDecoder(strings.NewReader(raw)).Decode(&out); err != nil {
+			return nil, err
+		}
+		if len(out.Errors) > 0 {
+			return nil, errors.New("graphql errors")
+		}
+		rows, ok := out.Data.Get["ItemSearch"]
+		if !ok {
+			return nil, errors.New("missing collection")
+		}
+		candidates := make([]content.Candidate, 0, len(rows))
+		for _, r := range rows {
+			score := 0.0
+			if dense {
+				if r.Additional.Distance != nil {
+					score = 1 - *r.Additional.Distance
+				} else if r.Additional.Score != nil {
+					score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+				}
+			} else if r.Additional.Score != nil {
+				score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+			}
+			candidates = append(candidates, content.Candidate{
+				SegmentID:    r.SegmentID,
+				GenerationID: r.GenerationID,
+				VersionID:    r.VersionID,
+				Score:        score,
+			})
+		}
+		return candidates, nil
+	}
+
+	runStreaming := func(raw string, dense, oneByte bool) ([]content.Candidate, error) {
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			var body io.Reader = strings.NewReader(raw)
+			if oneByte {
+				body = iotest.OneByteReader(body)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(body),
+				Request:    r,
+			}, nil
+		})
+		g := content.Generation{ID: "generation", Collection: "ItemSearch"}
+		req := retrieval.Request{Query: "harbour", Mode: "lexical", K: 10}
+		if dense {
+			req = retrieval.Request{Mode: "semantic", Vector: []float32{1}, K: 10}
+		}
+		return store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, req)
+	}
+
+	wrap := func(rowsJSON string) string {
+		return `{"data":{"Get":{"ItemSearch":[` + rowsJSON + `]}}}`
+	}
+
+	t.Run("surrogate resync matches encoding/json", func(t *testing.T) {
+		const fffd = "\xef\xbf\xbd"
+		cases := []struct {
+			name    string
+			segJSON string
+			wantSeg string
+			wantErr bool
+		}{
+			{name: "lone high before valid surrogate pair", segJSON: `"\uD800\uD83D\uDE00"`, wantSeg: fffd + "😀"},
+			{name: "two lone highs before valid surrogate pair", segJSON: `"\uD800\uD801\uD83D\uDE00"`, wantSeg: fffd + fffd + "😀"},
+			{name: "lone high before newline escape", segJSON: `"\uD800\n"`, wantSeg: fffd + "\n"},
+			{name: "lone high before escaped quote", segJSON: `"\uD800\""`, wantSeg: fffd + `"`},
+			{name: "lone high before escaped backslash", segJSON: `"\uD800\\uDE00"`, wantSeg: fffd + `\uDE00`},
+			{name: "lone high before BMP unicode escape", segJSON: `"\uD800\u0041"`, wantSeg: fffd + "A"},
+			{name: "lone high before multibyte UTF-8", segJSON: "\"\\uD800\u00e9\"", wantSeg: fffd + "é"},
+			{name: "lone high at end of string", segJSON: `"\uD800"`, wantSeg: fffd},
+			{name: "two lone highs at end of string", segJSON: `"\uD800\uD801"`, wantSeg: fffd + fffd},
+			{name: "lone low before valid surrogate pair", segJSON: `"\uDC00\uD83D\uDE00"`, wantSeg: fffd + "😀"},
+			{name: "lone high before invalid escape", segJSON: `"\uD800\x"`, wantErr: true},
+			{name: "lone high before raw control byte", segJSON: "\"\\uD800\x01\"", wantErr: true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				raw := wrap(`{"segmentId":` + tc.segJSON + `,"generationId":"generation","_additional":{"score":"1.5"}}`)
+				wantHits, stdErr := decodeWithStdJSON(raw, false)
+				if (stdErr != nil) != tc.wantErr {
+					t.Fatalf("encoding/json err = %v, wantErr=%v", stdErr, tc.wantErr)
+				}
+				for _, oneByte := range []bool{false, true} {
+					gotHits, err := runStreaming(raw, false, oneByte)
+					if (err != nil) != tc.wantErr {
+						t.Fatalf("oneByte=%v err = %v, wantErr=%v", oneByte, err, tc.wantErr)
+					}
+					if tc.wantErr {
+						continue
+					}
+					if len(gotHits) != 1 || gotHits[0].SegmentID != tc.wantSeg || gotHits[0].SegmentID != wantHits[0].SegmentID {
+						t.Fatalf("oneByte=%v seg = %q (% x), std=%q, want=%q",
+							oneByte, gotHits[0].SegmentID, []byte(gotHits[0].SegmentID), wantHits[0].SegmentID, tc.wantSeg)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("null fields match encoding/json semantics", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			row   string
+			dense bool
+		}{
+			{
+				name:  "score null clears prior score pointer",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"score":"1.5","score":null}}`,
+				dense: false,
+			},
+			{
+				name:  "distance null clears prior distance pointer",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"distance":0.25,"distance":null}}`,
+				dense: true,
+			},
+			{
+				name:  "distance null falls back to remaining score in dense mode",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"score":"0.8","distance":0.25,"distance":null}}`,
+				dense: true,
+			},
+			{
+				name:  "additional null is no-op on non-pointer struct (lexical)",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"score":"1.5","distance":0.25},"_additional":null}`,
+				dense: false,
+			},
+			{
+				name:  "additional null is no-op on non-pointer struct (dense)",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"score":"1.5","distance":0.25},"_additional":null}`,
+				dense: true,
+			},
+			{
+				name:  "null score alongside valid distance",
+				row:   `{"segmentId":"s1","generationId":"g1","_additional":{"score":null,"distance":0.25}}`,
+				dense: true,
+			},
+			{
+				name:  "null string fields do not overwrite prior string values",
+				row:   `{"segmentId":"s1","segmentId":null,"generationId":"g1","generationId":null,"_additional":{"score":"2.0"}}`,
+				dense: false,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				raw := wrap(tc.row)
+				wantHits, stdErr := decodeWithStdJSON(raw, tc.dense)
+				if stdErr != nil {
+					t.Fatalf("encoding/json failed: %v", stdErr)
+				}
+				for _, oneByte := range []bool{false, true} {
+					gotHits, err := runStreaming(raw, tc.dense, oneByte)
+					if err != nil {
+						t.Fatalf("oneByte=%v streaming failed: %v", oneByte, err)
+					}
+					if len(gotHits) != len(wantHits) {
+						t.Fatalf("oneByte=%v len=%d, want %d", oneByte, len(gotHits), len(wantHits))
+					}
+					if gotHits[0] != wantHits[0] {
+						t.Fatalf("oneByte=%v got %+v, want encoding/json %+v", oneByte, gotHits[0], wantHits[0])
+					}
+				}
+			})
+		}
+
+		// passageText null after valid string must preserve passageText during grouped selection.
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse([]itemSearchRow{{Version: "v1", Score: "2.0"}}), nil
+			case strings.Contains(query, "passageText"):
+				return []byte(`{"data":{"Get":{"ItemSearch":[` +
+					`{"segmentId":"aaa-plain","generationId":"generation","versionId":"v1","versionId":null,"passageText":"other text"},` +
+					`{"segmentId":"zzz-match","generationId":"generation","versionId":"v1","passageText":"harbour ferries","passageText":null}` +
+					`]}}}`), nil
+			default:
+				return itemSearchResponse([]itemSearchRow{
+					{Segment: "aaa-plain", Version: "v1"},
+					{Segment: "zzz-match", Version: "v1"},
+				}), nil
+			}
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query: "harbour ferries", Mode: "lexical", GroupBy: "record", K: 5,
+		})
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != "zzz-match" {
+			t.Fatalf("passageText null preservation: hits=%+v err=%v, want zzz-match", hits, err)
+		}
+	})
+
+	t.Run("strict RFC-8259 number validation matches encoding/json", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			raw     string
+			dense   bool
+			wantErr bool
+		}{
+			{name: "valid zero", raw: wrap(`{"segmentId":"s","generationId":"g","ignored":0,"_additional":{"score":"1"}}`)},
+			{name: "valid negative zero", raw: wrap(`{"segmentId":"s","generationId":"g","ignored":-0,"_additional":{"score":"1"}}`)},
+			{name: "valid decimals and exponents", raw: wrap(`{"segmentId":"s","generationId":"g","ignored":[0.0,-0.0,42,-123.45e-6,1e+10,1E0,1e999],"_additional":{"score":"1"}}`)},
+			{name: "reject leading zero 01", raw: wrap(`{"segmentId":"s","ignored":01}`), wantErr: true},
+			{name: "reject negative leading zero -01", raw: wrap(`{"segmentId":"s","ignored":-01}`), wantErr: true},
+			{name: "reject double zero 00", raw: wrap(`{"segmentId":"s","ignored":00}`), wantErr: true},
+			{name: "reject trailing dot 1.", raw: wrap(`{"segmentId":"s","ignored":1.}`), wantErr: true},
+			{name: "reject negative trailing dot -1.", raw: wrap(`{"segmentId":"s","ignored":-1.}`), wantErr: true},
+			{name: "reject zero trailing dot 0.", raw: wrap(`{"segmentId":"s","ignored":0.}`), wantErr: true},
+			{name: "reject dot before exponent 1.e5", raw: wrap(`{"segmentId":"s","ignored":1.e5}`), wantErr: true},
+			{name: "reject leading dot -.5", raw: wrap(`{"segmentId":"s","ignored":-.5}`), wantErr: true},
+			{name: "reject leading dot .5", raw: wrap(`{"segmentId":"s","ignored":.5}`), wantErr: true},
+			{name: "reject leading plus +1", raw: wrap(`{"segmentId":"s","ignored":+1}`), wantErr: true},
+			{name: "reject bare exponent 1e", raw: wrap(`{"segmentId":"s","ignored":1e}`), wantErr: true},
+			{name: "reject signed empty exponent 1e+", raw: wrap(`{"segmentId":"s","ignored":1e+}`), wantErr: true},
+			{name: "reject signed empty exponent 1e-", raw: wrap(`{"segmentId":"s","ignored":1e-}`), wantErr: true},
+			{name: "reject bare minus -", raw: wrap(`{"segmentId":"s","ignored":-}`), wantErr: true},
+			{name: "reject double dot 1.2.3", raw: wrap(`{"segmentId":"s","ignored":1.2.3}`), wantErr: true},
+			{name: "reject double exponent 1e1e1", raw: wrap(`{"segmentId":"s","ignored":1e1e1}`), wantErr: true},
+			{name: "reject trailing garbage 123abc", raw: wrap(`{"segmentId":"s","ignored":123abc}`), wantErr: true},
+			{name: "reject hex literal 0x10", raw: wrap(`{"segmentId":"s","ignored":0x10}`), wantErr: true},
+			{name: "reject malformed distance 01", raw: wrap(`{"segmentId":"s","_additional":{"distance":01}}`), dense: true, wantErr: true},
+			{name: "reject malformed distance 1.", raw: wrap(`{"segmentId":"s","_additional":{"distance":1.}}`), dense: true, wantErr: true},
+			{name: "reject malformed distance -.5", raw: wrap(`{"segmentId":"s","_additional":{"distance":-.5}}`), dense: true, wantErr: true},
+			{name: "reject overflow distance 1e999", raw: wrap(`{"segmentId":"s","_additional":{"distance":1e999}}`), dense: true, wantErr: true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, stdErr := decodeWithStdJSON(tc.raw, tc.dense)
+				if (stdErr != nil) != tc.wantErr {
+					t.Fatalf("encoding/json err = %v, wantErr=%v", stdErr, tc.wantErr)
+				}
+				for _, oneByte := range []bool{false, true} {
+					_, err := runStreaming(tc.raw, tc.dense, oneByte)
+					if (err != nil) != tc.wantErr {
+						t.Fatalf("oneByte=%v err = %v, wantErr=%v", oneByte, err, tc.wantErr)
+					}
+				}
+			})
 		}
 	})
 }

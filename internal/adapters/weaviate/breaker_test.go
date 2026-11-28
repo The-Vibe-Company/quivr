@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -307,44 +308,40 @@ func (panickingWeaviateClient) Search(context.Context, *pb.SearchRequest, ...grp
 	panic("simulated grpc client panic")
 }
 
-func TestGRPCDecodePanicRecoveredToErrUnavailable(t *testing.T) {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := grpc.NewServer()
-	pb.RegisterWeaviateServer(srv, &controllableGRPCServer{})
-	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(srv.Stop)
+// malformedRowWeaviateClient returns a SearchReply whose protobuf Value carries
+// a typed-nil *pb.Value_TextValue oneof wrapper so decoding the row panics
+// inside grpcSearchRows without any production test hook.
+type malformedRowWeaviateClient struct {
+	pb.WeaviateClient
+}
 
-	store, closeStore, err := NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(closeStore)
+func (malformedRowWeaviateClient) Search(context.Context, *pb.SearchRequest, ...grpc.CallOption) (*pb.SearchReply, error) {
+	return &pb.SearchReply{Results: []*pb.SearchResult{{
+		Properties: &pb.PropertiesResult{NonRefProps: &pb.Properties{Fields: map[string]*pb.Value{
+			"segmentId": {Kind: (*pb.Value_TextValue)(nil)},
+		}}},
+	}}}, nil
+}
+
+func TestGRPCDecodePanicRecoveredToErrUnavailable(t *testing.T) {
+	store := New("http://weaviate.test")
 
 	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "gen-1", Collection: "Example"}}}
 	scope := corpus.Scope{Organization: "org"}
 	req := retrieval.Request{Mode: "lexical", Query: "harbour"}
 
 	// 1. Panic inside result decode path recovers to retrieval.ErrUnavailable.
-	panicFn := func(*pb.SearchResult) {
-		panic("simulated decode panic")
+	store.grpc = malformedRowWeaviateClient{}
+	_, err := store.Search(context.Background(), routes, scope, req)
+	if !errors.Is(err, retrieval.ErrUnavailable) || !strings.Contains(err.Error(), "projection decode panic") {
+		t.Fatalf("decode panic err = %v, want projection decode panic wrapping retrieval.ErrUnavailable", err)
 	}
-	grpcDecodeRowHook.Store(&panicFn)
-	t.Cleanup(func() { grpcDecodeRowHook.Store(nil) })
-
-	_, err = store.Search(context.Background(), routes, scope, req)
-	if !errors.Is(err, retrieval.ErrUnavailable) {
-		t.Fatalf("decode panic err = %v, want retrieval.ErrUnavailable", err)
-	}
-	grpcDecodeRowHook.Store(nil)
 
 	// 2. Panic inside grpc client Search recovers to retrieval.ErrUnavailable.
 	store.grpc = panickingWeaviateClient{}
 	_, err = store.Search(context.Background(), routes, scope, req)
-	if !errors.Is(err, retrieval.ErrUnavailable) {
-		t.Fatalf("client panic err = %v, want retrieval.ErrUnavailable", err)
+	if !errors.Is(err, retrieval.ErrUnavailable) || !strings.Contains(err.Error(), "projection query panic") {
+		t.Fatalf("client panic err = %v, want projection query panic wrapping retrieval.ErrUnavailable", err)
 	}
 }
 
