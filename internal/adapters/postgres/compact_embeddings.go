@@ -101,14 +101,15 @@ const upsertEmbeddingFileAndSegmentsSQL = `WITH ef AS (
 SELECT id FROM ef`
 
 // insertCompactEmbeddingsSQL maps external segment IDs to interned numeric IDs
-// and inserts compact_embeddings in ascending k.id primary-key order with
-// ON CONFLICT DO NOTHING for deadlock-free idempotent replay.
+// and inserts compact_embeddings in ascending (k.id, x.pos) order so lock
+// acquisition follows primary-key order while duplicate segment IDs in a single
+// batch deterministically keep the first input artifact on ON CONFLICT DO NOTHING.
 const insertCompactEmbeddingsSQL = `INSERT INTO compact_embeddings(organization_id,segment_id,space_id,file_id,ordinal,vector_sha256,artifact_sha256)
 SELECT $1,k.id,$3,$4,x.ordinal,x.vector_sha256,x.artifact_sha256
 FROM unnest($2::text[],$5::integer[],$6::bytea[],$7::bytea[])
- AS x(segment_id,ordinal,vector_sha256,artifact_sha256)
+ WITH ORDINALITY AS x(segment_id,ordinal,vector_sha256,artifact_sha256,pos)
 JOIN storage_segments k ON k.organization_id=$1 AND k.segment_id=x.segment_id
-ORDER BY k.id
+ORDER BY k.id, x.pos
 ON CONFLICT(organization_id,segment_id,space_id) DO NOTHING`
 
 type compactEmbeddingBatch struct {

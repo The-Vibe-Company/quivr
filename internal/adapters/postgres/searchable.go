@@ -1,11 +1,9 @@
 package postgres
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 	"sync"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -183,9 +181,9 @@ func insertSegmentation(ctx context.Context, tx pgx.Tx, org string, result conte
 }
 
 // saveSegmentationSQL inserts the segmentation header and all of its segments
-// in a single sorted unnest statement. Ordering by segment ID keeps primary-key
-// lock acquisition deterministic across concurrent writers, while ON CONFLICT
-// DO NOTHING preserves idempotent replay.
+// in a single unnest statement. Ordering by (x.id, x.pos) enforces database
+// collation primary-key lock order across concurrent writers while preserving
+// first-input tie-breaking on ON CONFLICT DO NOTHING replay.
 const saveSegmentationSQL = `WITH seg AS (
  INSERT INTO segmentations(organization,id,version_id,recipe,digest,provenance,segment_count)
  VALUES($1,$2,$3,$4,$5,$6,$7)
@@ -196,8 +194,8 @@ const saveSegmentationSQL = `WITH seg AS (
  SELECT $1,x.id,seg.id,$3,x.part_key,x.start_offset,x.end_offset,x.text_sha256,x.derivation
  FROM seg
  CROSS JOIN unnest($8::text[],$9::text[],$10::integer[],$11::integer[],$12::text[],$13::jsonb[])
-  AS x(id,part_key,start_offset,end_offset,text_sha256,derivation)
- ORDER BY x.id
+  WITH ORDINALITY AS x(id,part_key,start_offset,end_offset,text_sha256,derivation,pos)
+ ORDER BY x.id, x.pos
  ON CONFLICT(organization,id) DO NOTHING
 )
 SELECT EXISTS(SELECT 1 FROM seg),
@@ -224,13 +222,6 @@ func prepareSegmentInsertBatch(segments []content.Segment) (segmentInsertBatch, 
 			Derivations: []string{},
 		}, nil
 	}
-	order := make([]int, n)
-	for i := range order {
-		order[i] = i
-	}
-	slices.SortStableFunc(order, func(a, b int) int {
-		return cmp.Compare(segments[a].ID, segments[b].ID)
-	})
 	batch := segmentInsertBatch{
 		IDs:         make([]string, n),
 		PartKeys:    make([]string, n),
@@ -239,18 +230,17 @@ func prepareSegmentInsertBatch(segments []content.Segment) (segmentInsertBatch, 
 		TextSHA256s: make([]string, n),
 		Derivations: make([]string, n),
 	}
-	for dst, src := range order {
-		p := segments[src]
+	for i, p := range segments {
 		metadata, err := compactSegmentDerivation(p.Derivation)
 		if err != nil {
 			return segmentInsertBatch{}, err
 		}
-		batch.IDs[dst] = p.ID
-		batch.PartKeys[dst] = p.PartKey
-		batch.Starts[dst] = p.Start
-		batch.Ends[dst] = p.End
-		batch.TextSHA256s[dst] = content.Hash([]byte(p.Text))
-		batch.Derivations[dst] = string(metadata)
+		batch.IDs[i] = p.ID
+		batch.PartKeys[i] = p.PartKey
+		batch.Starts[i] = p.Start
+		batch.Ends[i] = p.End
+		batch.TextSHA256s[i] = content.Hash([]byte(p.Text))
+		batch.Derivations[i] = string(metadata)
 	}
 	return batch, nil
 }

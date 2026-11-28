@@ -116,7 +116,8 @@ func TestSegmentWriteUnnestSQLContracts(t *testing.T) {
 				"ON CONFLICT(organization,id) DO NOTHING",
 				"INSERT INTO segments(organization,id,segmentation_id,version_id,part_key,start_offset,end_offset,text_sha256,derivation)",
 				"CROSS JOIN unnest($8::text[],$9::text[],$10::integer[],$11::integer[],$12::text[],$13::jsonb[])",
-				"ORDER BY x.id",
+				"WITH ORDINALITY AS x(id,part_key,start_offset,end_offset,text_sha256,derivation,pos)",
+				"ORDER BY x.id, x.pos",
 			},
 		},
 		{
@@ -156,8 +157,9 @@ func TestSegmentWriteUnnestSQLContracts(t *testing.T) {
 			fragments: []string{
 				"INSERT INTO compact_embeddings(organization_id,segment_id,space_id,file_id,ordinal,vector_sha256,artifact_sha256)",
 				"FROM unnest($2::text[],$5::integer[],$6::bytea[],$7::bytea[])",
+				"WITH ORDINALITY AS x(segment_id,ordinal,vector_sha256,artifact_sha256,pos)",
 				"JOIN storage_segments k ON k.organization_id=$1 AND k.segment_id=x.segment_id",
-				"ORDER BY k.id",
+				"ORDER BY k.id, x.pos",
 				"ON CONFLICT(organization_id,segment_id,space_id) DO NOTHING",
 			},
 		},
@@ -208,7 +210,7 @@ func TestSegmentWriteUnnestSQLContracts(t *testing.T) {
 	}
 }
 
-func TestPrepareSegmentInsertBatchSortsDeterministicallyWithoutMutatingInput(t *testing.T) {
+func TestPrepareSegmentInsertBatchBuildsAlignedArraysWithoutMutatingInput(t *testing.T) {
 	empty, err := prepareSegmentInsertBatch(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -231,20 +233,22 @@ func TestPrepareSegmentInsertBatchSortsDeterministicallyWithoutMutatingInput(t *
 	if got := []string{input[0].ID, input[1].ID, input[2].ID}; !slices.Equal(got, origOrder) {
 		t.Fatalf("caller slice mutated: got %v, want %v", got, origOrder)
 	}
-	wantIDs := []string{"seg-a", "seg-b", "seg-c"}
-	if !slices.Equal(batch.IDs, wantIDs) {
-		t.Fatalf("IDs = %v, want %v", batch.IDs, wantIDs)
+	// Input order is preserved so WITH ORDINALITY tie-breaks duplicate IDs
+	// deterministically while SQL ORDER BY x.id, x.pos enforces DB-collation
+	// primary-key lock order.
+	if !slices.Equal(batch.IDs, origOrder) {
+		t.Fatalf("IDs = %v, want %v", batch.IDs, origOrder)
 	}
-	if !slices.Equal(batch.PartKeys, []string{"body", "head", "body"}) ||
-		!slices.Equal(batch.Starts, []int{0, 10, 20}) ||
-		!slices.Equal(batch.Ends, []int{10, 20, 30}) {
-		t.Fatalf("columns misaligned after sort: %+v", batch)
+	if !slices.Equal(batch.PartKeys, []string{"body", "body", "head"}) ||
+		!slices.Equal(batch.Starts, []int{20, 0, 10}) ||
+		!slices.Equal(batch.Ends, []int{30, 10, 20}) {
+		t.Fatalf("columns misaligned: %+v", batch)
 	}
-	wantHashes := []string{content.Hash([]byte("alpha")), content.Hash([]byte("beta")), content.Hash([]byte("gamma"))}
+	wantHashes := []string{content.Hash([]byte("gamma")), content.Hash([]byte("alpha")), content.Hash([]byte("beta"))}
 	if !slices.Equal(batch.TextSHA256s, wantHashes) {
 		t.Fatalf("TextSHA256s = %v, want %v", batch.TextSHA256s, wantHashes)
 	}
-	for i, seg := range []content.Segment{input[1], input[2], input[0]} {
+	for i, seg := range input {
 		wantJSON, err := compactSegmentDerivation(seg.Derivation)
 		if err != nil {
 			t.Fatal(err)
@@ -436,7 +440,12 @@ func seedSegmentWriteVersion(tb testing.TB, ctx context.Context, pool *pgxpool.P
 		tb.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO corpora(organization,id,request_key,canonical_request,name,retrieval)
- VALUES($1,$2,$2,'','Segment Bench','{}') ON CONFLICT DO NOTHING`, org, corpusID); err != nil {
+ VALUES($1,$2,$2,decode('','hex'),'Segment Bench','{}') ON CONFLICT DO NOTHING`, org, corpusID); err != nil {
+		tb.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO content_blobs(organization,blob_id,object_key,sha256,byte_length)
+ VALUES($1,'blob-text','bench-text','bench-text',1),($1,'blob-manifest','bench-manifest','bench-manifest',1)
+ ON CONFLICT DO NOTHING`, org); err != nil {
 		tb.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key)
