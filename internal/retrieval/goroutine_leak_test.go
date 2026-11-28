@@ -2,6 +2,8 @@ package retrieval_test
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"runtime"
@@ -10,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -33,28 +35,31 @@ const (
 type cancelPlanKey struct{}
 
 type cancelPlan struct {
-	target cancelPhase
-	cancel context.CancelFunc
-	async  bool
+	target   cancelPhase
+	cancel   context.CancelFunc
+	canceled <-chan struct{}
+	async    bool
 }
 
 // maybeCancel triggers cancellation when a search reaches its randomly assigned
-// lifecycle phase. Half of the plans cancel synchronously inside the dependency;
-// the other half signal an already-waiting canceller goroutine to race against
-// active concurrent legs.
+// lifecycle phase. Half of the plans yield after cancelling to race against
+// active concurrent legs; the other half wait on the caller's own cancellation
+// channel (never a detached context.WithoutCancel context) and return an error.
 func maybeCancel(ctx context.Context, phase cancelPhase) error {
 	plan, ok := ctx.Value(cancelPlanKey{}).(*cancelPlan)
 	if !ok || plan.target != phase {
 		return ctx.Err()
 	}
-	if plan.async {
-		plan.cancel()
-		runtime.Gosched()
-		return ctx.Err()
-	}
 	plan.cancel()
-	<-ctx.Done()
-	return ctx.Err()
+	if plan.async {
+		runtime.Gosched()
+	} else {
+		<-plan.canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return context.Canceled
 }
 
 type cancelAwareRouting struct{}
@@ -252,19 +257,24 @@ func (cancelAwareRouter) Resolve(name string) (retrieval.Ranker, string, bool) {
 	}
 }
 
-func openFDCount() (int, bool) {
+func openFDCount() (int, error) {
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
-		return 0, false
+		return 0, err
 	}
-	return len(entries), true
+	return len(entries), nil
 }
 
 // Owns leak-freedom across 500 concurrent searches cancelled at randomly chosen
 // lifecycle phases (routing, coverage, ranker round 1, shared QueryVectorCache
-// encoding, multi-leg projection search, and canonical hydration): both
-// NumGoroutine delta and open FD delta must settle to <= 2 within 200 ms.
+// encoding, multi-leg projection search, and canonical hydration): runs inside
+// a deterministic synctest bubble so every spawned goroutine must quiesce and
+// exit cleanly with NumGoroutine delta <= 2 and open FD delta <= 2.
 func TestCancelledSearchesDoNotLeakGoroutinesOrFDs(t *testing.T) {
+	synctest.Test(t, testCancelledSearchesDoNotLeakGoroutinesOrFDs)
+}
+
+func testCancelledSearchesDoNotLeakGoroutinesOrFDs(t *testing.T) {
 	const (
 		totalSearches = 500
 		workers       = 16
@@ -293,11 +303,19 @@ func TestCancelledSearchesDoNotLeakGoroutinesOrFDs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("warmup search failed: %v", err)
 	}
+	synctest.Wait()
 
 	runtime.GC()
-	runtime.Gosched()
 	baseGoroutines := runtime.NumGoroutine()
-	baseFDs, hasFDs := openFDCount()
+	baseFDs, fdErr := openFDCount()
+	hasFDs := true
+	if fdErr != nil {
+		if errors.Is(fdErr, fs.ErrNotExist) {
+			hasFDs = false
+		} else {
+			t.Fatalf("read baseline open FD count: %v", fdErr)
+		}
+	}
 
 	rng := rand.New(rand.NewPCG(2591, 9001))
 	plans := make([]struct {
@@ -346,8 +364,13 @@ func TestCancelledSearchesDoNotLeakGoroutinesOrFDs(t *testing.T) {
 					return
 				}
 				p := plans[idx]
-				ctx, cancel := context.WithCancel(context.Background())
-				plan := &cancelPlan{target: p.phase, cancel: cancel, async: p.async}
+				ctx, cancel := context.WithCancel(t.Context())
+				plan := &cancelPlan{
+					target:   p.phase,
+					cancel:   cancel,
+					canceled: ctx.Done(),
+					async:    p.async,
+				}
 				ctx = context.WithValue(ctx, cancelPlanKey{}, plan)
 				_, _ = svc.Search(ctx, searchScope, retrieval.Request{
 					Query:     p.query,
@@ -367,22 +390,24 @@ func TestCancelledSearchesDoNotLeakGoroutinesOrFDs(t *testing.T) {
 		t.Fatalf("completed=%d; want %d", got, totalSearches)
 	}
 
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for {
-		runtime.GC()
-		runtime.Gosched()
-		gDelta := runtime.NumGoroutine() - baseGoroutines
-		fdDelta := 0
-		if hasFDs {
-			curFDs, _ := openFDCount()
-			fdDelta = curFDs - baseFDs
+	// Deterministic quiescence: every spawned search leg and QueryVectorCache
+	// flight goroutine in the bubble must exit before synctest.Wait returns.
+	synctest.Wait()
+	runtime.GC()
+
+	curGoroutines := runtime.NumGoroutine()
+	if gDelta := curGoroutines - baseGoroutines; gDelta > 2 {
+		t.Fatalf("goroutine leak after %d cancelled searches: baseline=%d current=%d delta=%d (want <= 2)",
+			totalSearches, baseGoroutines, curGoroutines, gDelta)
+	}
+	if hasFDs {
+		curFDs, err := openFDCount()
+		if err != nil {
+			t.Fatalf("read open FD count after %d cancelled searches: %v", totalSearches, err)
 		}
-		if gDelta <= 2 && fdDelta <= 2 {
-			return
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("resource leak after %d cancelled searches: goroutine delta=%d (baseline=%d, current=%d, want <= 2), fd delta=%d (want <= 2)",
-				totalSearches, gDelta, baseGoroutines, runtime.NumGoroutine(), fdDelta)
+		if fdDelta := curFDs - baseFDs; fdDelta > 2 {
+			t.Fatalf("open FD leak after %d cancelled searches: baseline=%d current=%d delta=%d (want <= 2)",
+				totalSearches, baseFDs, curFDs, fdDelta)
 		}
 	}
 }
