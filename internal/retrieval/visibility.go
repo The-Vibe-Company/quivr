@@ -23,6 +23,7 @@ func (sv *server) recheckServed(ctx context.Context, q Request, served []plugins
 	}
 	start := time.Now()
 	defer func() { sv.timing.Hydration += time.Since(start) }()
+	sv.mu.Lock()
 	candidates := make([]content.Candidate, 0, len(sv.hydrated))
 	seen := make(map[string]bool, len(sv.hydrated))
 	for _, batch := range served {
@@ -33,6 +34,7 @@ func (sv *server) recheckServed(ctx context.Context, q Request, served []plugins
 			}
 		}
 	}
+	sv.mu.Unlock()
 	allowed, err := sv.s.Content.RecheckHydration(ctx, sv.scope, candidates)
 	if err != nil {
 		return false, ErrUnavailable

@@ -61,7 +61,9 @@ type rebuildProjection struct {
 func (p *rebuildProjection) UsesRouteRankFusion([]retrieval.Route) bool { return p.tenantRanks }
 
 func (p *rebuildProjection) Search(_ context.Context, routes []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+	p.mu.Lock()
 	p.searched = append(p.searched, q)
+	p.mu.Unlock()
 	if p.err != nil {
 		return nil, p.err
 	}

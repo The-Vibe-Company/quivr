@@ -252,3 +252,121 @@ func TestBearerRequiresHTTPS(t *testing.T) {
 		t.Fatal("expected a safe error explaining the HTTPS requirement")
 	}
 }
+
+func TestTailPreservationWhenCandidateCountBelowLimit(t *testing.T) {
+	baseCandidates := []quivrplugin.Candidate{
+		{SegmentID: "s1", Text: "first", Score: 10},
+		{SegmentID: "s2", Text: "second", Score: 9},
+		{SegmentID: "s3", Text: "third", Score: 8},
+		{SegmentID: "s4", Text: "fourth", Score: 7},
+		{SegmentID: "s5", Text: "fifth", Score: 6},
+	}
+
+	// Round 1 must fetch max(candidate_count, req.Limit) capped at profileLimit.
+	for _, tc := range []struct {
+		name      string
+		candCount int
+		reqLimit  int
+		wantDepth int
+	}{
+		{"candidate_count below limit", 2, 5, 5},
+		{"limit capped at profileLimit", 10, 80, 50},
+	} {
+		t.Run("round1/"+tc.name, func(t *testing.T) {
+			req := searchRequest("https://rerank.example/rerank", fmt.Sprintf(`,"candidate_count":%d`, tc.candCount))
+			req.Round = 1
+			req.Limit = tc.reqLimit
+			answer, err := New().Search(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(answer.Requests) != 1 || answer.Requests[0].Profile == nil || answer.Requests[0].Profile.Limit != tc.wantDepth {
+				t.Fatalf("round 1 profile limit = %+v, want %d", answer.Requests, tc.wantDepth)
+			}
+		})
+	}
+
+	// Round 2 must send only the top candidate_count to the HTTP reranker, stitch
+	// the untouched tail below the reranked head preserving base order, and assign
+	// strictly monotonic descending finite scores across positive, zero, and negative floors.
+	for _, tc := range []struct {
+		name     string
+		options  string
+		response string
+	}{
+		{
+			name:     "positive rerank scores",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":0.2},{"index":1,"score":0.8}]`,
+		},
+		{
+			name:     "negative rerank logits",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":-5.0},{"index":1,"score":-1.5}]`,
+		},
+		{
+			name:     "zero rerank floor",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":0.0},{"index":1,"score":0.5}]`,
+		},
+		{
+			name:     "rrf ranking",
+			options:  `,"candidate_count":2,"ranking":"rrf"`,
+			response: `[{"index":0,"score":0.1},{"index":1,"score":0.9}]`,
+		},
+		{
+			name:     "linear ranking",
+			options:  `,"candidate_count":2,"ranking":"linear","rerank_weight":0.7`,
+			response: `[{"index":0,"score":0.1},{"index":1,"score":0.9}]`,
+		},
+	} {
+		t.Run("round2/"+tc.name, func(t *testing.T) {
+			t.Setenv("RERANKER_API_KEY", "")
+			var sentDocs int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Texts []string `json:"texts"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+					return
+				}
+				sentDocs = len(payload.Texts)
+				io.WriteString(w, tc.response)
+			}))
+			defer server.Close()
+
+			req := searchRequest(server.URL+"/rerank", tc.options)
+			req.Limit = 5
+			req.Served[0].Candidates = baseCandidates
+			answer, err := New().Search(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sentDocs != 2 {
+				t.Fatalf("sent %d docs to reranker, want 2 (candidate_count)", sentDocs)
+			}
+			if len(answer.Ranking) != 5 {
+				t.Fatalf("returned %d hits, want 5 (2 reranked + 3 tail)", len(answer.Ranking))
+			}
+			// Tail must preserve untouched base order [s3, s4, s5].
+			tailIDs := []string{answer.Ranking[2].SegmentID, answer.Ranking[3].SegmentID, answer.Ranking[4].SegmentID}
+			if !reflect.DeepEqual(tailIDs, []string{"s3", "s4", "s5"}) {
+				t.Fatalf("tail order = %v, want [s3 s4 s5]", tailIDs)
+			}
+			// Head must be {s1, s2}, and the full tail must be strictly monotonic descending
+			// below the lowest reranked head hit with finite scores.
+			for i, hit := range answer.Ranking {
+				if math.IsNaN(hit.Score) || math.IsInf(hit.Score, 0) {
+					t.Fatalf("hit %d has non-finite score %v", i, hit.Score)
+				}
+			}
+			for i := 2; i < len(answer.Ranking); i++ {
+				if !(answer.Ranking[i].Score < answer.Ranking[i-1].Score) {
+					t.Fatalf("non-strictly-descending tail at index %d: %g >= %g (ranking=%+v)",
+						i, answer.Ranking[i].Score, answer.Ranking[i-1].Score, answer.Ranking)
+				}
+			}
+		})
+	}
+}

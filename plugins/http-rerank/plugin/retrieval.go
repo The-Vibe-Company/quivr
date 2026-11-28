@@ -85,23 +85,30 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 	if err != nil {
 		return nil, err
 	}
-	depth := min(cfg.CandidateCount, profileLimit)
+	fetchDepth := min(max(cfg.CandidateCount, req.Limit), profileLimit)
 	if req.Round == 1 {
 		return quivrplugin.Ask(quivrplugin.CandidateRequest{
 			Primitive: quivrplugin.PrimitiveProfile,
-			Profile:   &quivrplugin.ProfileCandidates{Name: cfg.BaseProfile, Limit: depth},
+			Profile:   &quivrplugin.ProfileCandidates{Name: cfg.BaseProfile, Limit: fetchDepth},
 		}), nil
 	}
-	var candidates []quivrplugin.Candidate
+	var servedCandidates []quivrplugin.Candidate
 	for _, served := range req.Served {
 		p := served.Request.Profile
 		if served.Round == 1 && served.Request.Primitive == quivrplugin.PrimitiveProfile && p != nil && p.Name == cfg.BaseProfile {
-			candidates = served.Candidates[:min(depth, len(served.Candidates))]
+			servedCandidates = served.Candidates[:min(fetchDepth, len(served.Candidates))]
 			break
 		}
 	}
-	if len(candidates) == 0 {
+	if len(servedCandidates) == 0 {
 		return quivrplugin.Rank(), nil
+	}
+	rerankCount := min(max(cfg.CandidateCount, 0), len(servedCandidates))
+	candidates := servedCandidates[:rerankCount]
+	tail := servedCandidates[rerankCount:]
+	if len(candidates) == 0 {
+		hits := appendTail(nil, tail)
+		return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
 	}
 
 	deadline := time.Now().Add(time.Duration(cfg.TimeoutMS) * time.Millisecond)
@@ -130,14 +137,51 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		if !cfg.FallbackOnError {
 			return nil, &quivrplugin.SearchError{Code: "reranker_unavailable", Message: err.Error(), Retryable: true}
 		}
-		hits := make([]quivrplugin.RankedHit, min(len(candidates), req.Limit))
-		for i, c := range candidates[:len(hits)] {
+		hits := make([]quivrplugin.RankedHit, min(len(servedCandidates), req.Limit))
+		for i, c := range servedCandidates[:len(hits)] {
 			hits[i] = quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: "base profile fallback: " + err.Error()}
 		}
 		return quivrplugin.Rank(hits...), nil
 	}
-	hits := rank(cfg, candidates, scores)
+	hits := appendTail(rank(cfg, candidates, scores), tail)
 	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
+}
+
+// appendTail appends untouched base-ranker tail candidates below the reranked
+// head with strictly monotonic descending scores so Recall@K is never truncated
+// when candidate_count < limit.
+func appendTail(hits []quivrplugin.RankedHit, tail []quivrplugin.Candidate) []quivrplugin.RankedHit {
+	if len(tail) == 0 {
+		return hits
+	}
+	if len(hits) == 0 {
+		out := make([]quivrplugin.RankedHit, 0, len(tail))
+		for _, c := range tail {
+			out = append(out, quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: "base profile tail"})
+		}
+		return out
+	}
+	floor := hits[len(hits)-1].Score
+	step := max(1e-6, math.Abs(floor)*1e-6)
+	if floor > 0 {
+		if scaled := floor / float64(len(tail)+1); scaled < step && scaled > 0 {
+			step = scaled
+		}
+	}
+	prev := floor
+	for i, c := range tail {
+		score := floor - float64(i+1)*step
+		if !(score < prev) {
+			score = math.Nextafter(prev, math.Inf(-1))
+		}
+		prev = score
+		hits = append(hits, quivrplugin.RankedHit{
+			SegmentID:   c.SegmentID,
+			Score:       score,
+			Explanation: "base profile tail",
+		})
+	}
+	return hits
 }
 
 func document(c quivrplugin.Candidate, cfg configuration) string {

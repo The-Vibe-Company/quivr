@@ -187,9 +187,10 @@ func (r *fixtureHydrationRepo) RecheckHydration(_ context.Context, scope corpus.
 }
 
 // Repeated hydration on multi-paragraph packed segments hits the content-addressed
-// LRU cache with zero additional blob reads, enforces strict (organization, key, sha256)
-// isolation, never caches mismatched digests, and never bypasses Postgres Hydrate or
-// RecheckHydration authorization/tombstone fences.
+// LRU cache with zero additional blob reads, skips the redundant RecheckHydration
+// round-trip when there are zero misses, enforces strict (organization, key, sha256)
+// isolation, never caches mismatched digests, and never bypasses Postgres Hydrate
+// authorization/tombstone fences or RecheckHydration when external blob reads occur.
 func TestHydrationBlobCacheReusesImmutableBlobsWithoutBypassingFences(t *testing.T) {
 	partA := "één 🌌 first paragraph"
 	partB := "第二段 second paragraph"
@@ -271,25 +272,28 @@ func TestHydrationBlobCacheReusesImmutableBlobsWithoutBypassingFences(t *testing
 		t.Fatalf("cold counts: reads=%d lookups=%d rechecks=%d; want 2, 1, 1", blobs.reads.Load(), repo.lookups.Load(), repo.rechecks.Load())
 	}
 
-	// Warm repeat: zero blob reads, but canonical lookup + recheck still run.
+	// Warm repeat: zero blob misses, so canonical lookup still runs while the
+	// redundant second RecheckHydration round-trip is skipped.
 	got, err = svc.Hydrate(context.Background(), orgA, []content.Candidate{{SegmentID: "packed"}})
 	if err != nil || got[0].Segment.Text != joined {
 		t.Fatalf("warm packed hydration = %+v, %v", got, err)
 	}
-	if blobs.reads.Load() != 2 || repo.lookups.Load() != 2 || repo.rechecks.Load() != 2 {
-		t.Fatalf("warm counts: reads=%d lookups=%d rechecks=%d; want 2, 2, 2", blobs.reads.Load(), repo.lookups.Load(), repo.rechecks.Load())
+	if blobs.reads.Load() != 2 || repo.lookups.Load() != 2 || repo.rechecks.Load() != 1 {
+		t.Fatalf("warm counts: reads=%d lookups=%d rechecks=%d; want 2, 2, 1", blobs.reads.Load(), repo.lookups.Load(), repo.rechecks.Load())
 	}
 
-	// Cross-organization isolation: org-b with the same blob keys & digests must miss.
+	// Cross-organization isolation: org-b with the same blob keys & digests must miss
+	// and trigger RecheckHydration because external blob reads occurred.
 	got, err = svc.Hydrate(context.Background(), orgB, []content.Candidate{{SegmentID: "packed"}})
 	if err != nil || got[0].Segment.Text != joined {
 		t.Fatalf("org-b hydration = %+v, %v", got, err)
 	}
-	if blobs.reads.Load() != 4 {
-		t.Fatalf("org-b shared org-a cache entry: reads=%d, want 4", blobs.reads.Load())
+	if blobs.reads.Load() != 4 || repo.rechecks.Load() != 2 {
+		t.Fatalf("org-b counts: reads=%d rechecks=%d; want 4, 2", blobs.reads.Load(), repo.rechecks.Load())
 	}
 
-	// SHA-256 isolation: same org and blob key with a different digest must miss.
+	// SHA-256 isolation: same org and blob key with a different digest must miss
+	// and trigger RecheckHydration.
 	blobs.mu.Lock()
 	blobs.data[blobAlt.Key] = []byte(partAlt)
 	blobs.mu.Unlock()
@@ -297,8 +301,34 @@ func TestHydrationBlobCacheReusesImmutableBlobsWithoutBypassingFences(t *testing
 	if err != nil || got[0].Segment.Text != partAlt {
 		t.Fatalf("alt-sha hydration = %+v, %v", got, err)
 	}
-	if blobs.reads.Load() != 5 {
-		t.Fatalf("different sha256 collided in cache: reads=%d, want 5", blobs.reads.Load())
+	if blobs.reads.Load() != 5 || repo.rechecks.Load() != 3 {
+		t.Fatalf("different sha256 counts: reads=%d rechecks=%d; want 5, 3", blobs.reads.Load(), repo.rechecks.Load())
+	}
+
+	// Mixed batch (1 cached blob + 1 distinct uncached blob) has non-zero misses,
+	// so RecheckHydration runs.
+	partC := "third uncached paragraph"
+	blobC := content.Blob{Key: "shared/part-c", SHA256: content.Hash([]byte(partC)), Size: int64(len(partC))}
+	blobs.mu.Lock()
+	blobs.data[blobC.Key] = []byte(partC)
+	blobs.mu.Unlock()
+	repo.mu.Lock()
+	repo.located["part-c"] = content.Located{
+		Hydrated: content.Hydrated{
+			RecordID:   "r4",
+			VersionID:  "v4",
+			TextSHA256: content.Hash([]byte(partC)),
+			Segment:    content.Segment{ID: "part-c", PartKey: "a", Start: 0, End: len([]rune(partC))},
+		},
+		Blob: blobC,
+	}
+	repo.mu.Unlock()
+	got, err = svc.Hydrate(context.Background(), orgA, []content.Candidate{{SegmentID: "packed"}, {SegmentID: "part-c"}})
+	if err != nil || got[0].Segment.Text != joined || got[1].Segment.Text != partC {
+		t.Fatalf("mixed hydration = %+v, %v", got, err)
+	}
+	if blobs.reads.Load() != 6 || repo.rechecks.Load() != 4 {
+		t.Fatalf("mixed batch counts: reads=%d rechecks=%d; want 6, 4", blobs.reads.Load(), repo.rechecks.Load())
 	}
 
 	// Digest mismatch against blob.SHA256 must never populate the cache.

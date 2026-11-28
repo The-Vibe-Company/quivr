@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -30,6 +31,7 @@ func (fakeEmbedder) Embed(context.Context, string) ([]float32, error) { return [
 func (fakeEmbedder) Space() content.VectorSpace                       { return content.VectorSpace{ID: "space"} }
 
 type fakeProjection struct {
+	mu         sync.Mutex
 	candidates []content.Candidate
 	fetch      int
 	attachErr  error
@@ -41,18 +43,24 @@ func (f *fakeProjection) Publish(context.Context, content.Generation, string, st
 	return nil
 }
 func (f *fakeProjection) PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error {
+	f.mu.Lock()
 	f.attached++
-	return f.attachErr
+	err := f.attachErr
+	f.mu.Unlock()
+	return err
 }
 
 // Search returns at most CandidateLimit candidates, as the adapter does.
 func (f *fakeProjection) Search(_ context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+	f.mu.Lock()
 	f.searched = append(f.searched, q)
 	f.fetch = retrieval.CandidateLimit
-	if len(f.candidates) > retrieval.CandidateLimit {
-		return f.candidates[:retrieval.CandidateLimit], nil
+	candidates := f.candidates
+	f.mu.Unlock()
+	if len(candidates) > retrieval.CandidateLimit {
+		return candidates[:retrieval.CandidateLimit], nil
 	}
-	return f.candidates, nil
+	return candidates, nil
 }
 
 type fakeRecords struct{ content.RecordReader }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -21,6 +22,7 @@ type profileSpend struct {
 }
 
 type searchChain struct {
+	mu                sync.Mutex
 	profiles          []*profileSpend
 	paidCalls         int
 	totalCost         plugins.SearchCost
@@ -31,7 +33,80 @@ type searchChain struct {
 	visibleCandidates map[content.Candidate]struct{}
 }
 
+func (c *searchChain) setEnforce(enforce bool) {
+	c.mu.Lock()
+	c.enforce = enforce
+	c.mu.Unlock()
+}
+
+func (c *searchChain) addProfile(spend *profileSpend) {
+	c.mu.Lock()
+	c.profiles = append(c.profiles, spend)
+	c.mu.Unlock()
+}
+
+func (c *searchChain) setRounds(spend *profileSpend, rounds int) {
+	c.mu.Lock()
+	spend.usage.Rounds = rounds
+	c.mu.Unlock()
+}
+
+func (c *searchChain) addDegraded(routes []Route) {
+	if len(routes) == 0 {
+		return
+	}
+	c.mu.Lock()
+	if c.degraded == nil {
+		c.degraded = map[string]bool{}
+	}
+	for _, route := range routes {
+		c.degraded[route.CorpusID] = true
+	}
+	c.mu.Unlock()
+}
+
+func (c *searchChain) addVectors(routes []Route) {
+	if len(routes) == 0 {
+		return
+	}
+	c.mu.Lock()
+	if c.vectors == nil {
+		c.vectors = map[string]bool{}
+	}
+	for _, route := range routes {
+		c.vectors[route.CorpusID] = true
+	}
+	c.mu.Unlock()
+}
+
+func (c *searchChain) hasVisibleCandidates() bool {
+	c.mu.Lock()
+	has := c.visibleCandidates != nil
+	c.mu.Unlock()
+	return has
+}
+
+func (c *searchChain) addVisibleCandidate(candidate content.Candidate) {
+	c.mu.Lock()
+	if c.visibleCandidates != nil {
+		c.visibleCandidates[candidate] = struct{}{}
+	}
+	c.mu.Unlock()
+}
+
+func (c *searchChain) snapshotUsage() (paidCalls int, costCents float64, profiles []ProfileUsage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	profiles = make([]ProfileUsage, 0, len(c.profiles))
+	for _, f := range c.profiles {
+		profiles = append(profiles, f.usage)
+	}
+	return c.paidCalls, c.costCents, profiles
+}
+
 func (c *searchChain) degradations() []Degradation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if len(c.degraded) == 0 {
 		return nil
 	}
@@ -70,7 +145,9 @@ func appendDegradation(existing []Degradation, reason string, routes []Route) []
 	return append(existing, Degradation{Reason: reason, CorpusIDs: ids})
 }
 
-func remainingCost(frames []*profileSpend) float64 {
+func (c *searchChain) remainingCost(frames []*profileSpend) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	remaining := math.Inf(1)
 	for _, f := range frames {
 		remaining = min(remaining, max(0, f.max-f.cost.Cents()))
@@ -82,6 +159,8 @@ func (c *searchChain) record(frames []*profileSpend, u *plugins.SearchUsage) err
 	if u == nil {
 		return nil
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	own := frames[len(frames)-1]
 	own.usage.PaidCalls += u.PaidCalls
 	own.ownCost.Add(u.CostCents)
@@ -98,18 +177,18 @@ func (c *searchChain) record(frames []*profileSpend, u *plugins.SearchUsage) err
 	return nil
 }
 
-func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.CandidateRequest) ([]plugins.Candidate, error) {
+func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.CandidateRequest) ([]plugins.Candidate, *Result, Phases, error) {
 	if len(sv.frames) >= plugins.MaxProfileDepth || c.Profile == nil || !sv.s.Ranker.Manifest().RequiresProfile(c.Profile.Name) {
-		return nil, fmt.Errorf("%w: %s or depth exceeds %d", ErrPluginInvalid, plugins.CodePluginDependency, plugins.MaxProfileDepth)
+		return nil, nil, Phases{}, fmt.Errorf("%w: %s or depth exceeds %d", ErrPluginInvalid, plugins.CodePluginDependency, plugins.MaxProfileDepth)
 	}
 	ranker, local, ok := sv.s.resolveProfile(c.Profile.Name)
 	if !ok {
-		return nil, fmt.Errorf("%w: required profile unavailable", ErrPluginInvalid)
+		return nil, nil, Phases{}, fmt.Errorf("%w: required profile unavailable", ErrPluginInvalid)
 	}
 	full := ranker.Manifest().ID + "/" + local
 	for _, f := range sv.frames {
 		if f.usage.Profile == full {
-			return nil, fmt.Errorf("%w: profile cycle", ErrPluginInvalid)
+			return nil, nil, Phases{}, fmt.Errorf("%w: profile cycle", ErrPluginInvalid)
 		}
 	}
 	origQuery := q.Query
@@ -129,13 +208,13 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	if len(q.SourceNamespaces) > 0 {
 		for _, route := range sv.routes {
 			if !route.Generation.SourceNamespaceProjected {
-				return nil, ErrSourceFilterUnavailable
+				return nil, nil, Phases{}, ErrSourceFilterUnavailable
 			}
 		}
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok || time.Until(deadline) <= profileReturnMargin {
-		return nil, ErrDeadline
+		return nil, nil, Phases{}, ErrDeadline
 	}
 	innerDeadline := deadline.Add(-profileReturnMargin)
 	if bound := time.Now().Add(ranker.Manifest().Contributions.Retrieval.Profiles[local].Deadline()); bound.Before(innerDeadline) {
@@ -147,8 +226,9 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	inner.Ranker = ranker
 	result, err := inner.rankProfile(innerCtx, innerCtx, sv.scope, q, sv.routes, Result{Hits: []Hit{}, Profile: full}, time.Now(), sv.chain, sv.frames, nil, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, Phases{}, err
 	}
+	var fallback *Result
 	defaultRanker, defaultLocal, hasDefault := sv.s.resolveProfile(DefaultProfile)
 	sameQuery := c.Profile.Query == "" || c.Profile.Query == origQuery
 	sameMode := c.Profile.Mode == "" || c.Profile.Mode == origMode || c.Profile.Mode == "hybrid"
@@ -156,22 +236,27 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	sameNamespaces := c.Filter == nil || len(c.Filter.SourceNamespaces) == 0 || slices.Equal(c.Filter.SourceNamespaces, origNamespaces)
 	if hasDefault && len(sv.frames) == 1 && isDeepProfile(sv.requestedProfile, sv.localProfile) &&
 		sameQuery && sameMode && enoughLimit && sameNamespaces &&
-		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal && sv.fallback == nil {
+		ranker.Manifest().ID == defaultRanker.Manifest().ID && ranker.Manifest().Version == defaultRanker.Manifest().Version && local == defaultLocal {
 		saved := result
 		saved.Hits = slices.Clone(result.Hits)
-		sv.fallback = &saved
+		fallback = &saved
 	}
+	var phases Phases
 	if u := result.Usage; u != nil {
-		sv.timing.Coverage += u.Phases.Coverage
-		sv.timing.PluginRounds += u.Phases.PluginRounds
-		sv.timing.QueryEncoding += u.Phases.QueryEncoding
-		sv.timing.IndexQuery += u.Phases.IndexQuery
-		sv.timing.Hydration += u.Phases.Hydration
+		phases = Phases{
+			Coverage:      u.Phases.Coverage,
+			PluginRounds:  u.Phases.PluginRounds,
+			QueryEncoding: u.Phases.QueryEncoding,
+			IndexQuery:    u.Phases.IndexQuery,
+			Hydration:     u.Phases.Hydration,
+		}
 	}
 	out := make([]plugins.Candidate, 0, len(result.Hits))
+	sv.mu.Lock()
 	for _, h := range result.Hits {
 		sv.hydrated[h.Segment.ID] = h.Hydrated
 		out = append(out, sv.candidate(h.Hydrated, h.Score, h.Explanation))
 	}
-	return out, nil
+	sv.mu.Unlock()
+	return out, fallback, phases, nil
 }
