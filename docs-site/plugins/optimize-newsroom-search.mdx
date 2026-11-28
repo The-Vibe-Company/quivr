@@ -14,14 +14,16 @@ Both retrieval tiers share a single Weaviate vector and lexical index backed by 
 
 | Tier | Profile | Query-time GPU | Target latency | What it runs |
 | --- | --- | --- | --- | --- |
-| **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25`, boilerplate-stripped multi-view legs (`question` view on by default), min-max convex fusion (`0.65 / 0.35`), and three editorial aboutness signals (title+lead IDF coverage, multi-passage corroboration, `FirstP/MaxP` lead ratio). |
-| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[TITLE] + [LEAD] + [MATCHED DEEP PASSAGE]`, `rerank_top_k: 50`), scores in unsaturated logit margin space (`raw_score`) with per-query Z-score fusion, runs Recall Band `31–80` with `2` concurrent shards, stitches the tail to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
+| **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25` (up to `400` candidates/leg, `include_lead: true`), boilerplate-stripped multi-view legs (`question` view on by default), min-max convex fusion (`0.65 / 0.35`), editorial aboutness signals using explicit `title`, `passage_ordinal`/`total_passages`, and hydrated `lead_passage`, plus default-safe `CommonMetadata` facet overlap and date-mention alignment. |
+| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[TITLE] + [LEAD] + [MATCHED DEEP PASSAGE]` using explicit `title` and hydrated `lead_passage` on deep hits, `rerank_top_k: 50`, up to `400`), scores in unsaturated logit margin space (`raw_score`) with per-query Z-score fusion, runs Recall Band `31–80` with `2` concurrent shards, stitches the tail to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
 
 ### High-performance defaults (opt-out to lighten)
 
-`newsroom.retrieve` ships with the highest-performing settings enabled out of the box so operators do not need to tune dozens of parameters. To trade recall for lower latency or GPU cost, opt out selectively:
+`newsroom.retrieve` (`0.2.0`, Plugin API `0.21.0`) ships with the highest-performing settings enabled out of the box so operators do not need to tune dozens of parameters. To trade recall for lower latency or GPU cost—or opt into deeper pools and live-news recency—override selectively:
 
 - **Disable secondary query views** (`dense_view_mode: "none"`, `lexical_view_mode: "none"`): reduces Round 1 to 2 legs (one dense, one BM25) when remote query-encoding latency dominates.
+- **Tune candidate pool depth & lead hydration** (`dense_k` / `lexical_k` / `rerank_top_k` / `rerank_band_end` up to `400`, `include_lead: false` to skip lead hydration): widen recall on long archives or turn off `include_lead` to minimize hydration work.
+- **Metadata & temporal signals** (`metadata_overlap_weight: 0.08`, `date_alignment_weight: 0.06`, `recency_weight: 0` with `recency_half_life_days: 30`): set any weight to `0` to disable, or raise `recency_weight` above `0` on breaking-news feeds for deterministic pool-relative freshness decay.
 - **Disable Recall Band or shrink `rerank_top_k`** (`rerank_band_end: 0`, `rerank_top_k: 30`): lowers cross-encoder GPU tokens per query while keeping top-30 logit/Z-score reranking and tail stitching.
 - **Single-container rerankers** (`rerank_parallel_requests: 1`): disables 2-way interleaved HTTP sharding when serving on a single GPU replica.
 - **Adaptive QPP cascade** (`adaptive_cascade: true`): early-exits high-confidence queries at Stage 1 (`$0` rerank cost) when dense/lexical agreement and score margin exceed configured thresholds.

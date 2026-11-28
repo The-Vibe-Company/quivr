@@ -1,0 +1,90 @@
+{
+  "description": "Plugin API 0.21 rich candidate fields (explicit title, hydrated lead_passage on deep hits, passage_ordinal/total_passages, and CommonMetadata facet/date alignment) promote a deep 2025 Marseille harbour strike dispatch above a stale 2021 summary.",
+  "retrieval": {
+    "query": "Marseille harbour strike 2025",
+    "mode": "hybrid",
+    "limit": 3,
+    "candidates": [
+      {
+        "segment_id": "seg_top",
+        "record_id": "rec_top",
+        "title": "Marseille harbour strike halts 2025 freight",
+        "text": "A harbour strike in Marseille halted container vessels in March 2025.",
+        "passage_ordinal": 0,
+        "total_passages": 2,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2025-03-14T08:00:00Z",
+          "subjects": ["maritime transport"],
+          "tags": ["harbour", "strike"],
+          "place": ["Marseille"]
+        }
+      },
+      {
+        "segment_id": "seg_target",
+        "record_id": "rec_target",
+        "title": "Marseille harbour strike negotiations continue",
+        "text": "Union delegates confirmed port talks continued into the evening.",
+        "passage_ordinal": 1,
+        "total_passages": 3,
+        "lead_passage": "Dockers launched a harbour strike in Marseille in March 2025, halting container ships.",
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2025-03-14T14:30:00Z",
+          "subjects": ["maritime transport"],
+          "tags": ["harbour", "strike"],
+          "place": ["Marseille"],
+          "author": ["Claire Moreau"]
+        }
+      },
+      {
+        "segment_id": "seg_stale",
+        "record_id": "rec_stale",
+        "title": "Port maintenance schedule updated",
+        "text": "Dockers discussed past harbour strike rules from 2021.",
+        "passage_ordinal": 0,
+        "total_passages": 1,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2021-06-02T10:00:00Z",
+          "subjects": ["infrastructure"],
+          "place": ["Lyon"]
+        }
+      },
+      {
+        "segment_id": "seg_other",
+        "record_id": "rec_other",
+        "title": "Regional rail timetable",
+        "text": "Commuter trains ran normally across the region.",
+        "passage_ordinal": 0,
+        "total_passages": 1,
+        "common_metadata": {
+          "language": "en",
+          "published_at": "2024-01-15T10:00:00Z",
+          "subjects": ["rail"]
+        }
+      }
+    ],
+    "order": {
+      "near_vector": [
+        "seg_top",
+        "seg_stale",
+        "seg_target",
+        "seg_other"
+      ],
+      "bm25": [
+        "seg_top",
+        "seg_target",
+        "seg_stale",
+        "seg_other"
+      ]
+    },
+    "expect": {
+      "top": [
+        "seg_top",
+        "seg_target",
+        "seg_stale"
+      ]
+    }
+  }
+}
