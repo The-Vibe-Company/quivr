@@ -263,9 +263,6 @@ func computePoolIDF(aspects []string, docSets []map[string]bool) []float64 {
 			}
 		}
 		idfs[i] = math.Log((n+1.0)/(df+0.5)) + 0.5
-		if idfs[i] < 0.1 {
-			idfs[i] = 0.1
-		}
 	}
 	return idfs
 }

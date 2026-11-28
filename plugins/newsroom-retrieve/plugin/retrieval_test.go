@@ -36,6 +36,12 @@ func TestHighPerfDefaultsEnabledOutOfTheBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg.DenseK != 100 || cfg.LexicalK != 60 || !cfg.CleanLexicalQuery || cfg.Fusion != "convex" {
+		t.Fatalf("unexpected Stage-1 retrieval defaults: %+v", cfg)
+	}
+	if cfg.DenseWeight != 0.65 || cfg.LexicalWeight != 0.35 || cfg.TitleLeadWeight != 0.12 || cfg.LeadChars != 250 || cfg.PassageRatioWeight != 0.10 || cfg.PassageSupportWeight != 0.12 {
+		t.Fatalf("unexpected Stage-1 fusion/aboutness defaults: %+v", cfg)
+	}
 	if cfg.DenseViewMode != "question" || cfg.LexicalViewMode != "question" {
 		t.Fatalf("expected multi-view question defaults ON, got dense=%q lex=%q", cfg.DenseViewMode, cfg.LexicalViewMode)
 	}
@@ -151,7 +157,10 @@ func TestFirstPMaxPRatioDoesNotPenalizeSinglePassage(t *testing.T) {
 		{SegmentID: "floor_seg", RecordID: "rec_other", PartKey: "body", Start: 0, End: 500, Text: "Autre dépêche.", Score: 0.40},
 	}
 	bundles, _ := fuseAndScore(req, cfg, dense, nil, nil)
-	if len(bundles) < 2 || bundles[0].RecordID != "rec_lead" {
+	if len(bundles) < 2 {
+		t.Fatalf("expected >= 2 bundles, got %d", len(bundles))
+	}
+	if bundles[0].RecordID != "rec_lead" {
 		t.Fatalf("expected single-passage lead doc to outrank deep passing mention; got %+v", bundles[0].RecordID)
 	}
 }
@@ -362,7 +371,7 @@ func TestDeepFallbackAndStrictErrorModes(t *testing.T) {
 }
 
 func TestRerankEndpointRejectsUserinfoAndFragment(t *testing.T) {
-	for _, bad := range []string{"https://user:pass@example.org/rerank", "https://example.org/rerank#frag", "ftp://example.org/rerank"} {
+	for _, bad := range []string{"https://user:pass@example.org/rerank", "https://example.org/rerank#frag", "ftp://example.org/rerank", "https:///rerank", "http://:8080/rerank"} {
 		if _, err := readConfig(json.RawMessage(`{"rerank_endpoint":"` + bad + `"}`)); err == nil {
 			t.Fatalf("expected invalid rerank_endpoint %q to be rejected", bad)
 		}

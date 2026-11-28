@@ -1,6 +1,6 @@
 id: newsroom.retrieve
 version: 0.1.0
-description: High-performance editorial hybrid retrieval and open-source cross-encoder reranking plugin with inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band reranking enabled by default.
+description: High-performance editorial hybrid retrieval with optional HTTP cross-encoder reranking, inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band support.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.17.0 <0.21.0"
@@ -170,7 +170,7 @@ configuration:
         minimum: 0
         maximum: 100
         default: 30
-        description: Start offset (0-indexed) of the Recall Band region straddling the Recall@50 cut.
+        description: Start offset (0-indexed) of the Recall Band region straddling the Recall@50 cut (0 uses rerank_top_k).
       rerank_band_end:
         type: integer
         minimum: 0
@@ -217,6 +217,10 @@ configuration:
       required: [rerank_protocol]
     then:
       required: [rerank_model]
+      properties:
+        rerank_model:
+          minLength: 1
+          pattern: '\S'
 secrets:
   - name: RERANKER_API_KEY
     required: false

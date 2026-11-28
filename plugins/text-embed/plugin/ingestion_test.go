@@ -667,10 +667,14 @@ func TestConfigAndContentRefusals(t *testing.T) {
 		{`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`, "configuration must contain only declared fields"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "configuration must contain only declared fields"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"model_revision":"has spaces"}`, "model and model_revision must be nonempty and bounded"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"contextual_anchor":"title_lead_slot"}`, "contextual_anchor title_lead_slot requires {title} in document_template or title_source inline"},
 	} {
 		if _, err := parseConfiguration([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.reason) {
 			t.Errorf("configuration %s: got %v, want reason %q", tc.raw, err, tc.reason)
 		}
+	}
+	if _, err := parseConfiguration([]byte(`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"contextual_anchor":"title_lead_slot","title_source":"inline"}`)); err != nil {
+		t.Fatalf("expected title_lead_slot with title_source inline to succeed, got %v", err)
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
 	i := newIngester(c, "", slog.Default())

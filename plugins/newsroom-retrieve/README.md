@@ -5,7 +5,7 @@
 ## Profiles
 
 - **`newsroom.retrieve/default`** (`max_latency_ms: 500`, `max_cost_cents: 0`):
-  1. **Multi-View Editorial Hybrid Retrieval (bounded candidate-pool cost):** Issues an ungrouped `near_vector` leg (`dense_k: 100`), a stopword/elision-cleaned `bm25` leg (`lexical_k: 60`), and boilerplate-stripped question views (`dense_view_mode: "question"`, `lexical_view_mode: "question"`) when the query contains interrogative framing. Set `dense_view_mode: "none"` and `lexical_view_mode: "none"` to reduce to 2 legs.
+  1. **Multi-View Editorial Hybrid Retrieval (bounded candidate-pool cost):** Issues an ungrouped `near_vector` leg (`dense_k: 100`), a stopword/elision-cleaned `bm25` leg (`lexical_k: 60`), and boilerplate-stripped question views (`dense_view_mode: "question"`, `lexical_view_mode: "question"`) when the query has a structured clause delimiter or interrogative framing. Set `dense_view_mode: "none"` and `lexical_view_mode: "none"` to reduce to 2 legs.
   2. **Bruch Min-Max Convex Fusion (`0.65` dense / `0.35` lexical + calibrated view weights):** Score-calibrated convex combination over top-K candidate pools (also supports `dbsf` and `rrf`).
   3. **Three Orthogonal Editorial Aboutness Signals (all enabled by default):**
      - **Title + Lead Pool-IDF Coverage (`title_lead_weight: 0.12`, `lead_chars: 250`):** Rewards dispatches whose headline and opening lead cover query facets weighted by in-pool IDF.
