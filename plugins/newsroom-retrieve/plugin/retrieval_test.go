@@ -40,7 +40,7 @@ func TestExtractEntityQuery(t *testing.T) {
 func TestProximityAndAspectCoverage(t *testing.T) {
 	aspects := queryAspects("accord commercial agricole Union européenne")
 	tight := tokenizeContent("Un accord commercial agricole majeur a été signé par l'Union européenne mardi.")
-	scattered := tokenizeContent("Un accord a été évoqué. Plusieurs paragraphes sur le sport et la météo puis un mot sur le commerce et ailleurs l'agriculture loin de l'Union.")
+	scattered := tokenizeContent("Un accord a été évoqué. Plusieurs paragraphes détaillent le sport, la météo, la culture, les musées, le théâtre, les concerts, les transports régionaux, les routes départementales, les trains, les ports, les écoles, les universités, les hôpitaux, les mairies et les festivals locaux avant de mentionner le commerce puis de nombreux autres sujets sur le cinéma, la littérature, la gastronomie, le tourisme, l'énergie, les forêts, les montagnes, les rivières, les plages et enfin l'agriculture bien plus loin encore de l'Union.")
 	missing := tokenizeContent("Le gouvernement présente son budget annuel au Parlement européen.")
 
 	sets := []map[string]bool{tokenSetOf(strings.Join(tight, " ")), tokenSetOf(strings.Join(scattered, " ")), tokenSetOf(strings.Join(missing, " "))}
@@ -53,7 +53,7 @@ func TestProximityAndAspectCoverage(t *testing.T) {
 	}
 
 	proxTight := scoreProximity(aspects, idfs, tight, 25)
-	proxScattered := scoreProximity(aspects, idfs, scattered, 10)
+	proxScattered := scoreProximity(aspects, idfs, scattered, 25)
 	if proxTight <= proxScattered {
 		t.Fatalf("expected tight proximity (%.3f) > scattered proximity (%.3f)", proxTight, proxScattered)
 	}

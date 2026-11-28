@@ -190,8 +190,8 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 	}
 	if cfg.RerankEndpoint != "" {
 		u, err := url.Parse(cfg.RerankEndpoint)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-			return cfg, quivrplugin.TerminalSearchError("invalid_configuration", "rerank_endpoint must be an absolute HTTP(S) URL")
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+			return cfg, quivrplugin.TerminalSearchError("invalid_configuration", "rerank_endpoint must be an absolute HTTP(S) URL without embedded credentials or fragment")
 		}
 	}
 	return cfg, nil

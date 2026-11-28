@@ -195,6 +195,8 @@ configuration:
       rerank_endpoint:
         type: string
         format: uri
+        # Exclude embedded userinfo and fragments; allow optional ports 0-65535 and valid percent escapes.
+        pattern: '^https?://(?:\[[0-9A-Fa-f:.]+(?:%25[-A-Za-z0-9._~]+)?\]|[-A-Za-z0-9._~]+)(?::0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?](?:%[0-9A-Fa-f]{2}|[^%#\s])*)?$'
         description: Optional HTTP(S) reranker endpoint for the deep profile.
       rerank_protocol:
         type: string

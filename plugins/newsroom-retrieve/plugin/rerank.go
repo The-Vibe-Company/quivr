@@ -65,6 +65,8 @@ func (r retriever) callRerankerSharded(ctx context.Context, cfg configuration, q
 	for i := range docs {
 		shards[i%n] = append(shards[i%n], i)
 	}
+	shardCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	results := make([]rerankScores, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
@@ -76,7 +78,10 @@ func (r retriever) callRerankerSharded(ctx context.Context, cfg configuration, q
 			for j, idx := range shards[s] {
 				part[j] = docs[idx]
 			}
-			results[s], errs[s] = r.callRerankerScores(ctx, cfg, query, part)
+			results[s], errs[s] = r.callRerankerScores(shardCtx, cfg, query, part)
+			if errs[s] != nil {
+				cancel()
+			}
 		}(s)
 	}
 	wg.Wait()

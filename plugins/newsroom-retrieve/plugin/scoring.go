@@ -624,8 +624,8 @@ func scoreExpSalience(aspects []string, idfs []float64, b *recordBundle) (sal fl
 	if den > 0 {
 		sal = clamp01(num / den)
 	}
-	// Single-tail-mention detector: primary facet absent from first 800 chars, tf <= 1, and not corroborated across multiple passages.
-	if b.PassageCount <= 1 && earliest[primaryIdx] > 800 && tf[primaryIdx] <= 1 {
+	// Single-tail-mention detector: primary facet appears exactly once, past char 800, and is not corroborated across multiple passages.
+	if b.PassageCount <= 1 && earliest[primaryIdx] < math.MaxInt && earliest[primaryIdx] > 800 && tf[primaryIdx] == 1 {
 		tailOnly = true
 	}
 	return sal, tailOnly

@@ -18,14 +18,14 @@
     ],
     "order": {
       "near_vector": [
-        "seg_harbour",
-        "seg_ferry"
+        "seg_ferry",
+        "seg_harbour"
       ]
     },
     "expect": {
       "top": [
-        "seg_harbour",
-        "seg_ferry"
+        "seg_ferry",
+        "seg_harbour"
       ]
     }
   }

@@ -28,9 +28,6 @@ func recordZones(b *recordBundle) (title, opening, body string) {
 	if body != "" && opening != "" && body == opening {
 		body = ""
 	}
-	if title != "" && opening != "" && strings.HasPrefix(opening, title) {
-		title = ""
-	}
 	return title, opening, body
 }
 
@@ -66,7 +63,10 @@ func buildRichSurrogate(b *recordBundle, maxChars, leadChars int) string {
 	}
 	title, opening, body := recordZones(b)
 	var out strings.Builder
-	budget := writeTitle(&out, title, maxChars)
+	budget := maxChars
+	if title != "" && !(opening != "" && strings.HasPrefix(opening, title)) {
+		budget = writeTitle(&out, title, budget)
+	}
 	if opening != "" {
 		leadBudget := leadChars
 		if body == "" {
@@ -89,7 +89,10 @@ func buildLeadView(b *recordBundle, maxChars int) string {
 		return buildRichSurrogate(b, maxChars, maxChars)
 	}
 	var out strings.Builder
-	budget := writeTitle(&out, title, maxChars)
+	budget := maxChars
+	if title != "" && !strings.HasPrefix(opening, title) {
+		budget = writeTitle(&out, title, budget)
+	}
 	writeZone(&out, "[LEAD]: ", opening, budget)
 	return out.String()
 }

@@ -15,7 +15,7 @@ Both retrieval tiers share a single Weaviate vector and lexical index backed by 
 | Tier | Profile | Query-time GPU | Target latency | What it runs |
 | --- | --- | --- | --- | --- |
 | **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25`, min-max convex fusion (`0.65 / 0.35`), and three `O(1)` editorial signals (title+lead IDF coverage, multi-passage corroboration, `FirstP/MaxP` lead ratio). |
-| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[LEAD] + [MATCHED DEEP PASSAGE]`), scores top-K in unsaturated logit margin space (`raw_score`) with per-query Z-score fusion, stitches the tail past `K` to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
+| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[LEAD] + [MATCHED DEEP PASSAGE]`), applies the configured reranker score space and ranking (optionally unsaturated logit margins `raw_score` with per-query Z-score fusion), stitches the tail past `K` to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
 
 ### Optional high-recall extensions
 
@@ -43,6 +43,8 @@ Storage choices compound with retrieval. For inverted-pyramid articles embedded 
   "rebalance_tail": true
 }
 ```
+
+Attach the model's `tokenizer` configuration (generated with `plugins/hosted-embed/scripts/prepare_tokenizer.py`) before running in production so `body_tokens: 768` counts exact model tokens rather than conservative UTF-8 byte estimates.
 
 Three design principles come out of controlled chunking and storage ablations:
 
@@ -96,4 +98,4 @@ When adapting a plugin to a new domain, follow a strict anti-overfit loop:
 2. **Track a full Pareto tuple, not a single metric.** Record `nDCG@10`, human-graded `Gold nDCG@10`, `Recall@50`, `MRR@10`, false-positive taxonomy counts (such as passing mentions vs missing required elements), warm `p95` latency, segment multiplier (`M_seg`), and estimated `10M`-document RAM and inference cost.
 3. **Test one hypothesis per run against a keep/discard gate.** Keep a change only if it beats the current champion by a meaningful margin without regressing human gold grades or blowing the latency or storage budget.
 4. **Run public generalization guardrails before shipping.** Evaluate finalists on public datasets such as `miracl-fr` and `xpqa-fr` via `scripts/eval/run.py` to confirm zero regression outside your target domain.
-5. **Confirm once on locked `heldout` and certify the plugin contract.** Run `go test -race ./...`, `quivr plugin inspect`, and `quivr plugin test` before opening a pull request.
+5. **Confirm once on locked `heldout` and certify the plugin contract.** Run `go test -race ./...`, `quivr plugin inspect .`, and `quivr plugin test .` before opening a pull request.

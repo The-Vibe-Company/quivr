@@ -242,7 +242,18 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 			raw := paragraph{key: part.Key, start: start, end: end, text: string(runes[start:end]), run: run}
 			for raw.start < raw.end {
-				ok, _, err := fits([]paragraph{raw})
+				isFirstLead := len(units) == 0 && !titleOnly && c.LeadMaxTokens > 0
+				unitBudget := c.BodyTokens
+				if isFirstLead {
+					unitBudget = c.LeadMaxTokens
+				}
+				fitsUnit := func(ps []paragraph) (bool, int, error) {
+					if isFirstLead {
+						return fitsBudget(ps, unitBudget, true)
+					}
+					return fits(ps)
+				}
+				ok, _, err := fitsUnit([]paragraph{raw})
 				if err != nil {
 					return nil, nil, err
 				}
@@ -260,7 +271,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				if err != nil {
 					return nil, nil, err
 				}
-				limit := min(e.Tokens, c.BodyTokens)
+				limit := min(e.Tokens, unitBudget)
 				cut := 0
 				for k := limit; k > 0; k-- {
 					candidate := e.Offsets[k-1][1]
@@ -273,7 +284,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 					piece := raw
 					piece.end = raw.start + candidate
 					piece.text = string([]rune(raw.text)[:candidate])
-					if ok, _, err := fits([]paragraph{piece}); err != nil {
+					if ok, _, err := fitsUnit([]paragraph{piece}); err != nil {
 						return nil, nil, err
 					} else if ok {
 						cut = candidate
@@ -289,7 +300,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 					candidate := raw
 					candidate.end = raw.start + snapped
 					candidate.text = string(local[:snapped])
-					if ok, _, err := fits([]paragraph{candidate}); err != nil {
+					if ok, _, err := fitsUnit([]paragraph{candidate}); err != nil {
 						return nil, nil, err
 					} else if ok {
 						cut = snapped
@@ -382,7 +393,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 		}
 	}
-	canPrependTitle := !titleOnly && titlePartIdx >= 0 && firstBodyIdx >= 0 && titlePartIdx < firstBodyIdx
+	canPrependTitle := c.TitleSource != "none" && !titleOnly && titlePartIdx >= 0 && firstBodyIdx >= 0 && titlePartIdx < firstBodyIdx
 	titleRuneLen := utf8.RuneCountInString(titlePart.Text)
 	segments := make([]quivrplugin.Segment, 0, len(groups)+1)
 	inputs := make([]string, 0, len(groups)+1)

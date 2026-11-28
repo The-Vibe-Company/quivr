@@ -11,8 +11,8 @@ import (
 var (
 	// Generic wire dateline: e.g. "PARIS (Agency) - ", "NEW YORK, 12 mai (Wire) — "
 	reWireDateline = regexp.MustCompile(`^[A-ZÀ-Ÿ0-9][A-ZÀ-Ÿ0-9\s,'-]{1,35}\s*\([^)]{2,25}\)\s*[-–—]\s*`)
-	// Generic trailing wire desk/initials signature: e.g. "ab/cd" or "ab/cd/ef"
-	reTrailingCredit = regexp.MustCompile(`(?m)\s*\b[a-z]{2,4}/[a-z]{2,4}(?:/[a-z]{2,4})?\s*$`)
+	// Generic trailing wire desk/initials signature on its own line: e.g. "ab/cd" or "ab/cd/ef"
+	reTrailingCredit = regexp.MustCompile(`(?m)^[ \t]*[a-z]{2,4}/[a-z]{2,4}(?:/[a-z]{2,4})?[ \t]*$`)
 	// Generic CMS/Markdown syntax artifacts
 	reMarkdownHeading    = regexp.MustCompile(`(?m)^#{1,6}\s+`)
 	reMarkdownBlockquote = regexp.MustCompile(`(?m)^>\s+`)
@@ -178,16 +178,24 @@ func trailingParagraphSuffix(ctx context.Context, t tokenCounter, p paragraph, o
 	if runeStart <= 0 || runeStart >= len(runes) {
 		return nil, nil
 	}
-	// Snap forward up to half the suffix length to a sentence or word boundary.
+	// Snap forward up to half the suffix length to the first sentence boundary,
+	// falling back to the first word boundary so overlap stays close to target.
 	maxSnap := runeStart + (len(runes)-runeStart)/2
 	snapped := runeStart
+	firstWord := 0
 	for k := runeStart; k < maxSnap; k++ {
 		if k > 0 && unicode.IsSpace(runes[k-1]) && !unicode.IsSpace(runes[k]) {
-			snapped = k
+			if firstWord == 0 {
+				firstWord = k
+			}
 			if k >= 2 && strings.ContainsRune(".!?。！？", runes[k-2]) {
+				snapped = k
 				break
 			}
 		}
+	}
+	if snapped == runeStart && firstWord > 0 {
+		snapped = firstWord
 	}
 	if snapped <= 0 || snapped >= len(runes) {
 		return nil, nil

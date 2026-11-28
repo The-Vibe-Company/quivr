@@ -215,6 +215,20 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	if c.InputPrice == nil {
 		props["usd_per_million_tokens"] = map[string]any{"const": nil}
 	}
+	// Keep optional packing fields valid in schema even when serialized with
+	// omitempty zero values so explicit default keys pass additionalProperties: false.
+	for k, def := range map[string]any{
+		"overlap_tokens":        0,
+		"lead_max_tokens":       0,
+		"include_title_in_lead": false,
+		"contextual_anchor":     "",
+		"normalize_wire_text":   false,
+		"dual_lead_segment":     false,
+	} {
+		if _, ok := props[k]; !ok {
+			props[k] = map[string]any{"const": def}
+		}
+	}
 	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"format", "base_url", "auth", "model", "dimensions"}, "properties": props}
 	space := map[string]any{"version": c.Revision, "model": c.Model, "dimensions": c.Dimensions, "metric": c.Metric, "indexes": []string{"text"}, "query_modalities": []string{"text"}}
 	if c.InputPrice != nil {
