@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -332,20 +333,62 @@ var responseBufPool = sync.Pool{
 }
 
 func (s *Store) callLimit(ctx context.Context, method, path string, in, out any, responseLimit int64) (int, error) {
-	var body []byte
-	var err error
-	if in != nil {
-		body, err = json.Marshal(in)
-		if err != nil {
-			return 0, err
-		}
+	body, err := requestBody(in)
+	if err != nil {
+		return 0, err
 	}
+	return s.send(ctx, s.Client, method, path, body, out, responseLimit)
+}
+
+// writeCall sends a write whose deadline grows with its encoded size.
+func (s *Store) writeCall(ctx context.Context, method, path string, in, out any) (int, error) {
+	body, err := requestBody(in)
+	if err != nil {
+		return 0, err
+	}
+	client := s.Client
+	if timeout := s.writeTimeout(len(body)); timeout != client.Timeout {
+		sized := *client
+		sized.Timeout = timeout
+		client = &sized
+	}
+	return s.send(ctx, client, method, path, body, out, 2<<20)
+}
+
+func requestBody(in any) ([]byte, error) {
+	if in == nil {
+		return nil, nil
+	}
+	return json.Marshal(in)
+}
+
+// writeThroughputFloor is the slowest sustained upload, in bytes per second,
+// a write deadline allows on top of the request timeout.
+const writeThroughputFloor = 1 << 20
+
+// maxWriteTimeout caps a size-scaled write deadline; a request timeout
+// configured above it is kept as is.
+const maxWriteTimeout = 60 * time.Second
+
+// writeTimeout extends the request timeout by the time size bytes take at
+// writeThroughputFloor. A zero request timeout stays unbounded.
+func (s *Store) writeTimeout(size int) time.Duration {
+	base := s.Client.Timeout
+	if base <= 0 || size <= 0 {
+		return base
+	}
+	transfer := time.Duration(size/writeThroughputFloor)*time.Second +
+		time.Duration(size%writeThroughputFloor)*time.Second/writeThroughputFloor
+	return min(base+transfer, max(base, maxWriteTimeout))
+}
+
+func (s *Store) send(ctx context.Context, client *http.Client, method, path string, body []byte, out any, responseLimit int64) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, method, s.Endpoint+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, s.safeError(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := s.Client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return 0, errors.New("projection connection unavailable")
 	}
@@ -652,6 +695,9 @@ type projectionObject struct {
 	ID         string               `json:"id"`
 	Properties map[string]any       `json:"properties"`
 	Vectors    map[string][]float32 `json:"vectors,omitempty"`
+	// encoded holds the validated little-endian payload of each named vector,
+	// so the gRPC write and verification reuse it instead of encoding again.
+	encoded map[string][]byte
 }
 
 const embeddingRevision = "embeddingRevision"
@@ -741,30 +787,64 @@ func (s *Store) verifyObject(ctx context.Context, want projectionObject) error {
 	if !found || !sameProperties(stored.Properties, want.Properties) {
 		return errors.New("projection verification mismatch")
 	}
-	if !sameVectors(stored.Vectors, want.Vectors) {
+	if !sameVectors(stored.Vectors, want) {
 		return errors.New("embedding projection verification failed")
 	}
 	return nil
 }
 
-func sameVectors(stored, want map[string][]float32) bool {
-	for name, vector := range want {
-		expected, expectedErr := content.VectorBytes(vector)
-		recovered, err := content.VectorBytes(stored[name])
-		if expectedErr != nil || err != nil || !bytes.Equal(recovered, expected) {
+// sameVectors reports whether every stored named vector has exactly the bits
+// of the wanted one, comparing against the payload encoded at validation.
+func sameVectors(stored map[string][]float32, want projectionObject) bool {
+	for name, vector := range want.Vectors {
+		expected, ok := want.encoded[name]
+		if !ok {
+			var err error
+			if expected, err = content.VectorBytes(vector); err != nil {
+				return false
+			}
+		}
+		if !vectorBits(stored[name], expected) {
 			return false
 		}
 	}
 	return true
 }
 
-func (s *Store) verifyBatch(ctx context.Context, objects []projectionObject) error {
-	for _, object := range objects {
-		if err := s.verifyObject(ctx, object); err != nil {
-			return err
+// vectorBits compares a decoded vector with a valid little-endian payload.
+// The payload holds only finite values, so equal bits also reject NaN and
+// infinities, as encoding the stored vector would.
+func vectorBits(stored []float32, expected []byte) bool {
+	if len(stored) == 0 || len(expected) != 4*len(stored) {
+		return false
+	}
+	for i, x := range stored {
+		if math.Float32bits(x) != binary.LittleEndian.Uint32(expected[4*i:]) {
+			return false
 		}
 	}
-	return nil
+	return true
+}
+
+// verifyConcurrency bounds the parallel identity reads that reconcile a
+// batch whose acknowledgement was lost.
+const verifyConcurrency = 8
+
+func (s *Store) verifyBatch(ctx context.Context, objects []projectionObject) error {
+	if len(objects) == 1 {
+		return s.verifyObject(ctx, objects[0])
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(verifyConcurrency)
+	for _, object := range objects {
+		goRecover(gctx, g, "verify_batch", func() error {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+			return s.verifyObject(gctx, object)
+		})
+	}
+	return g.Wait()
 }
 
 // insertBatch trusts per-object success and reconciles lost responses by
@@ -788,7 +868,7 @@ func (s *Store) insertBatch(ctx context.Context, objects []projectionObject) err
 	}
 	// Request only identities; returning properties/vectors can exceed the
 	// bounded response decoder even for a modest number of large objects.
-	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
+	status, err := s.writeCall(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
 	if err != nil {
 		if status == 0 {
 			return s.verifyBatch(ctx, objects)
@@ -1210,7 +1290,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	}
 	// One enriched object per segment, in the order segments first appear.
 	var order []string
-	bySegment := map[string][]content.EmbeddingData{}
+	bySegment := map[string][]encodedEmbedding{}
 	for _, p := range data {
 		e := p.Artifact
 		if e.Organization != org || !g.Carries(e.SpaceID) {
@@ -1223,7 +1303,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		if _, ok := bySegment[e.SegmentID]; !ok {
 			order = append(order, e.SegmentID)
 		}
-		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], p)
+		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], encodedEmbedding{EmbeddingData: p, raw: raw})
 	}
 
 	if len(order) == 0 {
@@ -1255,9 +1335,17 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	return nil
 }
 
-func (s *Store) embeddingObject(g content.Generation, org, segment string, vectors []content.EmbeddingData) (projectionObject, error) {
+// encodedEmbedding pairs an embedding with the payload validated against its
+// checksum, which is exactly the payload the gRPC write sends.
+type encodedEmbedding struct {
+	content.EmbeddingData
+	raw []byte
+}
+
+func (s *Store) embeddingObject(g content.Generation, org, segment string, vectors []encodedEmbedding) (projectionObject, error) {
 	keys := make([]string, 0, len(vectors))
 	named := make(map[string][]float32, len(vectors))
+	encoded := make(map[string][]byte, len(vectors))
 	checksums := make(map[string]string, len(vectors))
 	for _, p := range vectors {
 		name := s.VectorName(g, p.Artifact.SpaceID)
@@ -1267,6 +1355,7 @@ func (s *Store) embeddingObject(g content.Generation, org, segment string, vecto
 		}
 		checksums[name] = checksum
 		named[name] = p.Vector
+		encoded[name] = p.raw
 		keys = append(keys, p.Artifact.SpaceID+"="+checksum)
 	}
 	payload := vectors[0].Artifact.Payload.SHA256
@@ -1277,7 +1366,7 @@ func (s *Store) embeddingObject(g content.Generation, org, segment string, vecto
 	}
 	return projectionObject{
 		Class: g.Collection, ID: enrichedID(org, g.ID, segment, payload),
-		Properties: map[string]any{"segmentId": segment}, Vectors: named,
+		Properties: map[string]any{"segmentId": segment}, Vectors: named, encoded: encoded,
 	}, nil
 }
 
@@ -1302,7 +1391,7 @@ func (s *Store) embeddingRows(ctx context.Context, g content.Generation, where f
 	return rows, nil
 }
 
-func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]content.EmbeddingData) error {
+func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation, org string, segments []string, bySegment map[string][]encodedEmbedding) error {
 	scope := generationFilter(ctx, org, g.ID)
 	inventory := func(segments []string) ([]projectionRow, error) {
 		return s.embeddingRows(ctx, g, and(scope, containsAny("segmentId", segments)), searchOrder{})
@@ -1415,12 +1504,10 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 	if err := s.insertBatch(ctx, pending); err != nil {
 		return err
 	}
-	for _, object := range existing {
-		// Verify replayed identities before destructive cleanup so a corrupt
-		// winner cannot trigger deletion of older objects.
-		if err := s.verifyObject(ctx, object); err != nil {
-			return err
-		}
+	// Verify replayed identities before destructive cleanup so a corrupt
+	// winner cannot trigger deletion of older objects.
+	if err := s.verifyBatch(ctx, existing); err != nil {
+		return err
 	}
 	if len(replacements) > 0 {
 		// Read the replacements together after the write. Concurrent publishers
@@ -1439,12 +1526,10 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		} else if err := s.removeStaleEnriched(ctx, g, org, rows); err != nil {
 			return err
 		}
-		for _, object := range existing {
-			// Re-verify after cleanup so a superseded replayed identity that was
-			// just retired cannot return nil and commit deleted vectors.
-			if err := s.verifyObject(ctx, object); err != nil {
-				return err
-			}
+		// Re-verify after cleanup so a superseded replayed identity that was
+		// just retired cannot return nil and commit deleted vectors.
+		if err := s.verifyBatch(ctx, existing); err != nil {
+			return err
 		}
 	}
 	return nil
