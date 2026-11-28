@@ -42,7 +42,7 @@ func TestMergeLexicalTextDeduplicatesBoundsAndStaysIdempotent(t *testing.T) {
 		t.Fatalf("MergeLexicalText not idempotent:\nfirst: %q\nretry: %q", got, retry)
 	}
 
-	// Multi-byte UTF-8 truncation respects rune budget and stays valid UTF-8 and idempotent.
+	// Over-budget multi-byte additions are dropped, not cut; the rune budget and UTF-8 validity hold and the merge stays idempotent.
 	bounded := content.MergeLexicalText("éàü", []string{"longue phrase qui dépasse la limite", "court"}, 12)
 	if !utf8.ValidString(bounded) || utf8.RuneCountInString(bounded) > 12 {
 		t.Fatalf("bounded merge violated UTF-8 or rune limit: %q (%d runes)", bounded, utf8.RuneCountInString(bounded))
@@ -52,6 +52,11 @@ func TestMergeLexicalTextDeduplicatesBoundsAndStaysIdempotent(t *testing.T) {
 	}
 	if retry := content.MergeLexicalText(bounded, []string{"longue phrase qui dépasse la limite", "court"}, 12); retry != bounded {
 		t.Fatalf("bounded merge not idempotent: %q vs %q", bounded, retry)
+	}
+
+	// An oversized multi-byte base is truncated on a UTF-8 rune boundary to maxRunes.
+	if trunc := content.MergeLexicalText("éàüabcdef", []string{"extra"}, 5); trunc != "éàüab" || !utf8.ValidString(trunc) {
+		t.Fatalf("oversized base truncation = %q, want %q", trunc, "éàüab")
 	}
 
 	// Empty base appends additions cleanly without a leading newline.

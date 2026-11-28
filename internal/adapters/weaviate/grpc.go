@@ -187,14 +187,14 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 	return rows, nil
 }
 
-func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
+func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool, responseLimit int) ([]projectionRow, error) {
 	request, err := searchRequest(collection, searchBranch{}, where, order, limit, properties)
 	if err != nil {
 		return nil, err
 	}
 	request.Metadata.Uuid = true
 	request.Metadata.CreationTimeUnix = created
-	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, 2<<20, false)
+	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, responseLimit, false)
 	if err != nil {
 		return nil, err
 	}

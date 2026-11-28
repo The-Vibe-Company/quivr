@@ -13,7 +13,11 @@ import (
 )
 
 // lexicalPatchConcurrency bounds parallel property-only PATCH calls to Weaviate.
-const lexicalPatchConcurrency = 16
+const (
+	lexicalPatchConcurrency  = 16
+	lexicalProjectionBatch   = 25
+	lexicalInventoryMaxBytes = 16 << 20
+)
 
 // UpdateLexicalText updates only the searchable lexicalText property on each
 // segment's projected Weaviate object(s) using merge PATCH. It never modifies
@@ -45,7 +49,7 @@ func (s *Store) UpdateLexicalText(ctx context.Context, g content.Generation, org
 		target[u.SegmentID] = u.LexicalText
 		order = append(order, u.SegmentID)
 	}
-	for segments := range slices.Chunk(order, projectionBatch) {
+	for segments := range slices.Chunk(order, lexicalProjectionBatch) {
 		if err := s.updateLexicalBatch(ctx, g, org, segments, target); err != nil {
 			return err
 		}
@@ -55,8 +59,8 @@ func (s *Store) UpdateLexicalText(ctx context.Context, g content.Generation, org
 
 func (s *Store) updateLexicalBatch(ctx context.Context, g content.Generation, org string, segments []string, target map[string]string) error {
 	scope := generationFilter(ctx, org, g.ID)
-	rows, err := s.projectionRows(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
-		embeddingInventoryLimit, searchOrder{}, []string{"segmentId", lexicalProperty}, false)
+	rows, err := s.projectionRowsLimit(ctx, g.Collection, and(scope, containsAny("segmentId", segments)),
+		embeddingInventoryLimit, searchOrder{}, []string{"segmentId", lexicalProperty}, false, lexicalInventoryMaxBytes)
 	if err != nil {
 		return err
 	}
@@ -74,8 +78,8 @@ func (s *Store) updateLexicalBatch(ctx context.Context, g content.Generation, or
 	for _, segmentID := range segments {
 		segRows := rowsBySegment[segmentID]
 		if full {
-			segRows, err = s.projectionRows(ctx, g.Collection, and(scope, equal("segmentId", segmentID)),
-				embeddingInventoryLimit, searchOrder{}, []string{"segmentId", lexicalProperty}, false)
+			segRows, err = s.projectionRowsLimit(ctx, g.Collection, and(scope, equal("segmentId", segmentID)),
+				embeddingInventoryLimit, searchOrder{}, []string{"segmentId", lexicalProperty}, false, lexicalInventoryMaxBytes)
 			if err != nil {
 				return err
 			}

@@ -252,8 +252,9 @@ func NewSynonymLexicalEnricher(synonyms map[string][]string) (*SynonymLexicalEnr
 	return &SynonymLexicalEnricher{rules: rules}, nil
 }
 
-// EnrichLexical matches configured synonym keys against each segment's text and
-// existing lexical text on whole-token boundaries.
+// EnrichLexical matches configured synonym keys against each segment's
+// canonical source text on whole-token boundaries. Matching only immutable
+// Segment.Text guarantees retries never cascade on previously appended terms.
 func (e *SynonymLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalEnrichmentRequest) (map[string]SegmentLexicalExpansion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -261,9 +262,6 @@ func (e *SynonymLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalE
 	out := map[string]SegmentLexicalExpansion{}
 	for _, p := range req.Segmentation.Segments {
 		tokens := content.LexicalTokens(p.Text)
-		if p.Derivation.LexicalText != "" {
-			tokens = append(tokens, content.LexicalTokens(p.Derivation.LexicalText)...)
-		}
 		if len(tokens) == 0 {
 			continue
 		}
@@ -353,13 +351,19 @@ func NewHTTPLexicalEnricher(cfg HTTPLexicalEnricherConfig) (*HTTPLexicalEnricher
 	if maxQueries <= 0 {
 		maxQueries = DefaultMaxSyntheticQueries
 	}
-	client := cfg.Client
-	if client == nil {
+	var client *http.Client
+	if cfg.Client == nil {
 		client = &http.Client{
 			Timeout:       timeout,
 			Transport:     outbound.DefaultTransport(),
 			CheckRedirect: outbound.CheckRedirect,
 		}
+	} else {
+		copied := *cfg.Client
+		if copied.Timeout <= 0 || copied.Timeout > timeout {
+			copied.Timeout = timeout
+		}
+		client = &copied
 	}
 	return &HTTPLexicalEnricher{
 		endpoint:   u.String(),
@@ -511,6 +515,15 @@ func (s Service) applyLexicalEnrichment(
 ) (content.Segmentation, []content.SegmentLexicalUpdate, error) {
 	if s.LexicalEnricher == nil || len(seg.Segments) == 0 {
 		return seg, nil, nil
+	}
+	if s.Content.Embeddings != nil {
+		eligible, err := s.Content.EnrichmentEligible(ctx, org, v.ID)
+		if err != nil {
+			return seg, nil, err
+		}
+		if !eligible {
+			return seg, nil, nil
+		}
 	}
 	expansions, err := s.LexicalEnricher.EnrichLexical(ctx, LexicalEnrichmentRequest{
 		Organization: org,

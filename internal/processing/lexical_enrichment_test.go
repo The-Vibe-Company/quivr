@@ -77,6 +77,28 @@ func TestSynonymLexicalEnricherMatchesWholeTokenBoundariesDeterministically(t *t
 	}); err == nil {
 		t.Fatal("normalized synonym key collision must be rejected")
 	}
+
+	// Synonyms match only immutable Segment.Text, so previously appended
+	// Derivation.LexicalText terms never cascade into new rules on retry.
+	chained, err := processing.NewSynonymLexicalEnricher(map[string][]string{
+		"solar":        {"photovoltaic"},
+		"photovoltaic": {"pv cell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrySeg := content.Segmentation{
+		ID: "seg-2", VersionID: "ver-2",
+		Segments: []content.Segment{{
+			ID:         "s-retry",
+			Text:       "solar output",
+			Derivation: content.SegmentDerivation{LexicalText: "solar output\nphotovoltaic"},
+		}},
+	}
+	retryOut, err := chained.EnrichLexical(t.Context(), processing.LexicalEnrichmentRequest{Segmentation: retrySeg})
+	if err != nil || !slices.Equal(retryOut["s-retry"].Terms, []string{"photovoltaic"}) {
+		t.Fatalf("chained synonym retry = %+v, %v; want only [photovoltaic]", retryOut, err)
+	}
 }
 
 func TestHTTPLexicalEnricherParsesObjectAndStringQueriesAndHandlesErrors(t *testing.T) {
@@ -414,5 +436,19 @@ func TestEnrichTransientQueryEncoderErrorSkipsPostgresWrite(t *testing.T) {
 	if baseline.updateCalls != 0 || indexer.lexicalCalls != 0 || indexer.indexCalls != 0 {
 		t.Fatalf("failed query encoding wrote storage or projection: pg=%d lexical=%d index=%d",
 			baseline.updateCalls, indexer.lexicalCalls, indexer.indexCalls)
+	}
+
+	// An ineligible (withdrawn/superseded) Version skips LexicalEnricher and Postgres writes.
+	store.ineligible = true
+	called := 0
+	service.LexicalEnricher = &staticLexicalEnricher{fn: func(processing.LexicalEnrichmentRequest) map[string]processing.SegmentLexicalExpansion {
+		called++
+		return nil
+	}}
+	if err := service.Enrich(t.Context(), "org", "receipt"); err != nil {
+		t.Fatalf("ineligible Enrich returned error: %v", err)
+	}
+	if called != 0 || baseline.updateCalls != 0 {
+		t.Fatalf("ineligible version invoked lexical enricher: calls=%d pgUpdates=%d", called, baseline.updateCalls)
 	}
 }

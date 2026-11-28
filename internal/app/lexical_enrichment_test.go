@@ -51,6 +51,34 @@ func TestLexicalEnrichmentConfiguration(t *testing.T) {
 		}
 	})
 
+	t.Run("inline_api_key_and_endpoint_userinfo_redacted", func(t *testing.T) {
+		var cfg Config
+		raw := `{"lexical_enrichment":{"enabled":true,"endpoint":"https://lexuser:lexpass@expand.example.test/v1","api_key":"tok_inline_lexical_secret"}}`
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		secrets := cfg.logSecrets()
+		for _, want := range []string{"tok_inline_lexical_secret", "lexuser", "lexpass"} {
+			if !slices.Contains(secrets, want) {
+				t.Fatalf("secret %q missing from logSecrets redaction list", want)
+			}
+		}
+	})
+
+	t.Run("invalid_api_key_env_reports_env_field", func(t *testing.T) {
+		t.Setenv("TEST_INVALID_LEXICAL_KEY", "has whitespace")
+		var cfg Config
+		raw := `{"lexical_enrichment":{"enabled":true,"endpoint":"https://expand.example.test/v1","api_key_env":"TEST_INVALID_LEXICAL_KEY"}}`
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := cfg.LexicalEnrichment.build(nil)
+		var ce *configError
+		if !errors.As(err, &ce) || ce.field != "lexical_enrichment.api_key_env" {
+			t.Fatalf("invalid env key err = %#v, want configError on lexical_enrichment.api_key_env", err)
+		}
+	})
+
 	t.Run("non_worker_validate_skips_worker_env_secret", func(t *testing.T) {
 		t.Setenv("UNSET_WORKER_LEXICAL_KEY", "")
 		var cfg Config

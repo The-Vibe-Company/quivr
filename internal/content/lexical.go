@@ -126,6 +126,9 @@ func MergeLexicalText(base string, additions []string, maxRunes int) string {
 		}
 	}
 	for _, raw := range additions {
+		if usedRunes >= limit {
+			break
+		}
 		cleaned := sanitizeLexicalAddition(raw)
 		if cleaned == "" {
 			continue

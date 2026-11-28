@@ -39,18 +39,20 @@ func (c LexicalEnrichmentConfig) resolveAPIKey(resolveEnv bool) (string, error) 
 		return "", badConfig(configConflict, "lexical_enrichment.api_key", "set either lexical_enrichment.api_key or lexical_enrichment.api_key_env, not both")
 	}
 	key := c.APIKey
+	field := "lexical_enrichment.api_key"
 	if c.APIKeyEnv != "" && resolveEnv {
+		field = "lexical_enrichment.api_key_env"
 		var err error
-		key, err = boundSecret(c.APIKeyEnv, "lexical_enrichment.api_key_env")
+		key, err = boundSecret(c.APIKeyEnv, field)
 		if err != nil {
 			return "", err
 		}
 		if key == "" {
-			return "", badConfig(configMissing, "lexical_enrichment.api_key_env", "lexical_enrichment.api_key_env must resolve to a non-empty value")
+			return "", badConfig(configMissing, field, "lexical_enrichment.api_key_env must resolve to a non-empty value")
 		}
 	}
 	if key != "" && invalidBearerToken(key) {
-		return "", badConfig(configInvalid, "lexical_enrichment.api_key", "lexical_enrichment API key must not contain whitespace or control characters")
+		return "", badConfig(configInvalid, field, "lexical_enrichment API key must not contain whitespace or control characters")
 	}
 	return key, nil
 }
