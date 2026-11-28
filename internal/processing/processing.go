@@ -42,6 +42,13 @@ type Service struct {
 	// serves gets its new Versions segmented by the pinned plugin, searchable
 	// by keyword, while their vectors wait for the Corpus's rebuild.
 	LegacySpace string
+	// LexicalEnricher runs opt-in async Phase-2 lexical enrichment during
+	// Stage-2 enrichment (never during Stage-1 retrieval_ready). Nil disables
+	// Phase-2 lexical enrichment with zero overhead.
+	LexicalEnricher LexicalEnricher
+	// LexicalOptions configures bounds and cosine-salience gating for
+	// LexicalEnricher.
+	LexicalOptions LexicalEnrichmentOptions
 }
 
 // GenerationRouter resolves the generation PostgreSQL routes a Corpus to.

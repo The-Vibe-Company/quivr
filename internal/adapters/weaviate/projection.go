@@ -641,19 +641,25 @@ func embeddingRevisionProperty() map[string]any {
 }
 
 type projectionRow struct {
-	SegmentID  string `json:"segmentId"`
-	Kind       string `json:"itemKind"`
-	Revision   int64  `json:"embeddingRevision"`
-	Additional struct {
+	SegmentID   string `json:"segmentId"`
+	Kind        string `json:"itemKind"`
+	Revision    int64  `json:"embeddingRevision"`
+	LexicalText string `json:"lexicalText"`
+	Additional  struct {
 		ID      string `json:"id"`
 		Created int64  `json:"creationTimeUnix,string"`
 	} `json:"_additional"`
 }
 
-// projectionRows lists identities without fetching text or vectors.
+// projectionRows lists identities and only the requested properties without
+// fetching vectors.
 func (s *Store) projectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
+	return s.projectionRowsLimit(ctx, collection, where, limit, order, properties, created, 2<<20)
+}
+
+func (s *Store) projectionRowsLimit(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool, responseLimit int) ([]projectionRow, error) {
 	if s.grpc != nil {
-		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created)
+		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created, responseLimit)
 	}
 	sortClause := strings.TrimSuffix(order.graphql(), ",")
 	if sortClause != "" {
@@ -672,7 +678,7 @@ func (s *Store) projectionRows(ctx context.Context, collection string, where fil
 		} `json:"data"`
 		Errors []any `json:"errors"`
 	}
-	if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
+	if _, err := s.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response, int64(responseLimit)); err != nil {
 		return nil, err
 	}
 	rows := response.Data.Get[collection]

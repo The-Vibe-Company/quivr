@@ -24,6 +24,8 @@ type oneVersion struct {
 	timeouts int
 	// enriched is when the Version's enrichment succeeded; nil until then.
 	enriched *time.Time
+	// ineligible simulates a withdrawn or superseded Version.
+	ineligible bool
 }
 
 var manifest = content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a long article"}}}}
@@ -59,6 +61,9 @@ func (s *oneVersion) CountEnrichmentTimeout(context.Context, string, string) (in
 func (s *oneVersion) BlockEnrichment(_ context.Context, _, _ string, reason content.Diagnostic) error {
 	s.progress = append(s.progress, "blocked "+reason.Code)
 	return nil
+}
+func (s *oneVersion) EnrichmentEligible(context.Context, string, string) (bool, error) {
+	return !s.ineligible, nil
 }
 
 // plugin is an ingestion plugin whose next calls fail with the given errors.

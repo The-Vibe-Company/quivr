@@ -177,6 +177,13 @@ type Projection interface {
 	Search(context.Context, []Route, corpus.Scope, Request) ([]content.Candidate, error)
 }
 
+// LexicalProjection is an optional Projection capability that updates only
+// Segment.LexicalText on projected objects without modifying vectors or
+// re-chunking the document.
+type LexicalProjection interface {
+	UpdateLexicalText(ctx context.Context, g content.Generation, org, corpusID string, updates []content.SegmentLexicalUpdate) error
+}
+
 // RouteRankFusion is implemented by projections with independent corpus indexes.
 type RouteRankFusion interface {
 	UsesRouteRankFusion([]Route) bool
@@ -430,6 +437,13 @@ func normalizeQuery(q string) (string, error) {
 // enrichment ends here instead of retrying against objects a rebuild never
 // projected.
 func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData) error {
+	return s.IndexEmbeddingsWithLexical(ctx, org, v, seg, data, nil)
+}
+
+// IndexEmbeddingsWithLexical attaches a Version's vectors and, when lexical is
+// non-empty, updates only Segment.LexicalText on the projected objects without
+// recreating vectors or re-chunking before committing enrichment.
+func (s Service) IndexEmbeddingsWithLexical(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData, lexical []content.SegmentLexicalUpdate) error {
 	eligible, err := s.Content.EnrichmentEligible(ctx, org, v.ID)
 	if err != nil {
 		return err
@@ -437,7 +451,7 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 	if !eligible {
 		return s.Content.EnrichmentProgress(ctx, org, v.ID, "idle", "")
 	}
-	_, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
+	r, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
 	if err != nil {
 		return err
 	}
@@ -457,6 +471,20 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 			}
 		}
 		return err
+	}
+	if len(lexical) > 0 {
+		updater, ok := s.Projection.(LexicalProjection)
+		if !ok {
+			return errors.New("projection does not support lexical text updates")
+		}
+		if err = updater.UpdateLexicalText(ctx, g, org, r.Source.CorpusID, lexical); err != nil {
+			if errors.Is(err, ErrProjectionMissing) {
+				if eligible, recheck := s.Content.EnrichmentEligible(ctx, org, v.ID); recheck == nil && !eligible {
+					return s.Content.EnrichmentProgress(ctx, org, v.ID, "idle", "")
+				}
+			}
+			return err
+		}
 	}
 	return s.Content.CommitEnrichment(ctx, org, seg, g, data)
 }

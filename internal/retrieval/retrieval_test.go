@@ -3,6 +3,7 @@ package retrieval_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,12 +32,15 @@ func (fakeEmbedder) Embed(context.Context, string) ([]float32, error) { return [
 func (fakeEmbedder) Space() content.VectorSpace                       { return content.VectorSpace{ID: "space"} }
 
 type fakeProjection struct {
-	mu         sync.Mutex
-	candidates []content.Candidate
-	fetch      int
-	attachErr  error
-	attached   int
-	searched   []retrieval.Request
+	mu             sync.Mutex
+	candidates     []content.Candidate
+	fetch          int
+	attachErr      error
+	attached       int
+	lexicalErr     error
+	lexicalUpdates []content.SegmentLexicalUpdate
+	lexicalCalls   int
+	searched       []retrieval.Request
 }
 
 func (f *fakeProjection) Publish(context.Context, content.Generation, string, string, string, content.Version, content.Segmentation) error {
@@ -46,6 +50,14 @@ func (f *fakeProjection) PublishEmbeddings(context.Context, content.Generation, 
 	f.mu.Lock()
 	f.attached++
 	err := f.attachErr
+	f.mu.Unlock()
+	return err
+}
+func (f *fakeProjection) UpdateLexicalText(_ context.Context, _ content.Generation, _, _ string, updates []content.SegmentLexicalUpdate) error {
+	f.mu.Lock()
+	f.lexicalCalls++
+	f.lexicalUpdates = append([]content.SegmentLexicalUpdate(nil), updates...)
+	err := f.lexicalErr
 	f.mu.Unlock()
 	return err
 }
@@ -319,7 +331,50 @@ func TestEnrichmentOfEligibleVersionCommits(t *testing.T) {
 	if err := service(p, e).IndexEmbeddings(context.Background(), "org", v, seg, data); err != nil {
 		t.Fatal(err)
 	}
-	if p.attached != 1 || e.commits != 1 {
-		t.Fatalf("attached %d, committed %d; want 1 and 1", p.attached, e.commits)
+	if p.attached != 1 || p.lexicalCalls != 0 || e.commits != 1 {
+		t.Fatalf("attached %d, lexicalCalls %d, committed %d; want 1, 0, 1", p.attached, p.lexicalCalls, e.commits)
+	}
+}
+
+func TestIndexEmbeddingsWithLexicalUpdatesProjectionBeforeCommit(t *testing.T) {
+	v, seg, data := attachment(t)
+	updates := []content.SegmentLexicalUpdate{{SegmentID: "segment", LexicalText: "une lanterne\nphare"}}
+
+	// MetadataProjection delegates UpdateLexicalText to the underlying Projection.
+	p, e := &fakeProjection{}, &fakeEmbeddings{eligible: []bool{true}}
+	svc := service(p, e)
+	svc.Projection = retrieval.MetadataProjection{Projection: p}
+	if err := svc.IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); err != nil {
+		t.Fatalf("IndexEmbeddingsWithLexical failed: %v", err)
+	}
+	if p.attached != 1 || p.lexicalCalls != 1 || !slices.Equal(p.lexicalUpdates, updates) || e.commits != 1 {
+		t.Fatalf("attached=%d lexicalCalls=%d updates=%+v want=%+v commits=%d", p.attached, p.lexicalCalls, p.lexicalUpdates, updates, e.commits)
+	}
+
+	// Transient lexical update failure must not commit enrichment.
+	pFail, eFail := &fakeProjection{lexicalErr: errors.New("weaviate patch failed")}, &fakeEmbeddings{eligible: []bool{true}}
+	if err := service(pFail, eFail).IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); err == nil {
+		t.Fatal("expected error when lexical projection update fails")
+	}
+	if eFail.commits != 0 {
+		t.Fatal("failed lexical update must not commit enrichment")
+	}
+
+	// Eligible version with missing projection during lexical update must retry.
+	pRetry, eRetry := &fakeProjection{lexicalErr: retrieval.ErrProjectionMissing}, &fakeEmbeddings{eligible: []bool{true}}
+	if err := service(pRetry, eRetry).IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); !errors.Is(err, retrieval.ErrProjectionMissing) {
+		t.Fatalf("eligible version missing projection during lexical update = %v, want ErrProjectionMissing", err)
+	}
+	if eRetry.commits != 0 {
+		t.Fatal("missing projection during lexical update must not commit enrichment")
+	}
+
+	// Withdrawn version during lexical update settles cleanly without committing.
+	pGone, eGone := &fakeProjection{lexicalErr: retrieval.ErrProjectionMissing}, &fakeEmbeddings{eligible: []bool{true, false}}
+	if err := service(pGone, eGone).IndexEmbeddingsWithLexical(context.Background(), "org", v, seg, data, updates); err != nil {
+		t.Fatalf("withdrawn version during lexical update = %v, want nil", err)
+	}
+	if eGone.commits != 0 {
+		t.Fatal("withdrawn version must not commit enrichment")
 	}
 }

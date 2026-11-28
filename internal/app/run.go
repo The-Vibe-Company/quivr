@@ -158,6 +158,9 @@ type Config struct {
 	Backfill BackfillConfig `json:"backfill"`
 	// Rebuild bounds parallel Version coverage inside each rebuild activity.
 	Rebuild RebuildConfig `json:"rebuild"`
+	// LexicalEnrichment configures opt-in async Phase-2 lexical enrichment
+	// during Stage-2 enrichment (disabled by default).
+	LexicalEnrichment LexicalEnrichmentConfig `json:"lexical_enrichment"`
 }
 
 // RetrievalConfig names the search profiles selected by this deployment.
@@ -411,6 +414,9 @@ func Run(command string, args ...string) error {
 	}
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
+		return err
+	}
+	if err := cfg.LexicalEnrichment.validate(command == "worker"); err != nil {
 		return err
 	}
 	if cfg.IngestionEvaluationConcurrency < 0 || cfg.IngestionEvaluationConcurrency > 32 {
@@ -928,6 +934,14 @@ func Run(command string, args ...string) error {
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
+	if command == "worker" && cfg.LexicalEnrichment.Enabled {
+		lexicalEnricher, lexicalOptions, err := cfg.LexicalEnrichment.build(ingestor)
+		if err != nil {
+			return err
+		}
+		processor.LexicalEnricher = lexicalEnricher
+		processor.LexicalOptions = lexicalOptions
+	}
 	processor.Evaluation = &processing.Evaluator{Store: ingestionEvaluations, Serving: servingProjections, Content: contents, Plugin: deriver, Projection: metadataProjection}
 	rebuilder.Plugin = deriver
 	// Backfills fill spaces through the plan each one is pinned to, paced

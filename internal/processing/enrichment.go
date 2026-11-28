@@ -108,6 +108,27 @@ func (s Service) enrich(ctx context.Context, org string, v content.Version) Deri
 		return DerivationResult{Terminal: reason, Cause: out.Cause}
 	}
 	if out.Terminal == nil && out.Retry == nil {
+		if s.LexicalEnricher != nil {
+			// Opt-in Phase-2 lexical enrichment runs before CommitEnrichment so
+			// transient failures retry idempotently (reusing stored vectors) and
+			// record.enrichment_available only fires once both vectors and
+			// lexical updates are live. Stage-1 retrieval_ready is unaffected.
+			updated, lexicalUpdates, lexErr := s.applyLexicalEnrichment(ctx, org, rt.corpusID, v, rt.generation, out.Segmentation, out.Data)
+			if lexErr != nil {
+				out.Retry = lexErr
+				out.Cause = lexErr
+				return out
+			}
+			out.Segmentation = updated
+			if len(lexicalUpdates) > 0 {
+				if idx, ok := s.Enrichment.(LexicalEnrichmentIndexer); ok {
+					out.Retry = idx.IndexEmbeddingsWithLexical(ctx, org, v, out.Segmentation, out.Data, lexicalUpdates)
+					return out
+				}
+				out.Retry = errors.New("enrichment indexer does not support lexical text updates")
+				return out
+			}
+		}
 		out.Retry = s.Enrichment.IndexEmbeddings(ctx, org, v, out.Segmentation, out.Data)
 	}
 	return out

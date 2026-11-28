@@ -78,6 +78,7 @@ Required fields can come from a secret binding where listed above. Existing inli
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
 | `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
 | `rebuild` | no | Parallel Version coverage during Corpus rebuilds. See [Rebuild](#rebuild). |
+| `lexical_enrichment` | no | Opt-in async Phase-2 lexical enrichment during Stage-2 enrichment (default off). See [Lexical enrichment](#lexical-enrichment). |
 | `backfill` | no | How backfills run and when their cost needs a confirmation. See [Backfill](#backfill). |
 | `migration_wait` | no | How long a worker that starts before the api has applied its migrations waits for them, unready, before it exits. `0s` exits at once. Worker only. Default `5m`. |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
@@ -465,6 +466,22 @@ cancellation cannot activate the target.
 | `max_cost_without_confirmation` | `0` | The estimated cost, in US dollars, above which starting a backfill needs `confirm_cost`. With `0`, any backfill into a priced space needs it. Api only. |
 
 Backfill concurrency controls overlap; `rate` still paces each batch. These limits apply per worker process. For hosted embeddings, also configure the plugin's `max_concurrent_requests`; provider `Retry-After` delays apply across that plugin process. Lower the limits for constrained providers or databases. Restart the worker after changing these engine limits.
+
+## Lexical enrichment
+
+`lexical_enrichment` enables opt-in asynchronous Phase-2 lexical enrichment during Stage-2 Temporal enrichment (`record.retrieval_ready` to `record.enrichment_available`). When omitted or `enabled` is `false`, Quivr adds zero overhead and performs no lexical updates. When enabled, Quivr appends configured synonyms and/or cosine-salience-gated synthetic queries to `Segment.LexicalText`, persists the updated derivation in PostgreSQL, and updates only `lexicalText` in Weaviate without modifying `Segment.Text`, dense embeddings, or HNSW memory.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Enables Phase-2 lexical enrichment. Requires `synonyms` and/or `endpoint`. |
+| `max_lexical_text_runes` | `16384` | Maximum Unicode code points in `Segment.LexicalText` (`0` uses `16384`). |
+| `min_cosine_salience` | `0.55` | Minimum cosine similarity (in `[-1, 1]`) between a synthetic query vector and the segment's served embedding required to keep the query. |
+| `max_synthetic_queries` | `8` | Maximum cosine-gated synthetic queries appended per segment (`0` uses `8`, maximum `64`). |
+| `synonyms` | `{}` | Generic map of source terms or phrases to expansion terms matched on whole-token boundaries. |
+| `endpoint` | empty | Optional `http` or `https` URL of an external lexical expansion or synthetic query service. |
+| `api_key` | empty | Optional bearer token for `endpoint` (mutually exclusive with `api_key_env`). |
+| `api_key_env` | empty | Environment variable (or `<NAME>_FILE` secret mount) holding the bearer token for `endpoint`. |
+| `timeout` | `15s` | Positive Go duration (at most `60s`) bounding each call to `endpoint`. |
 
 ## Observability
 

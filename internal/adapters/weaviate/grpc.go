@@ -187,14 +187,14 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 	return rows, nil
 }
 
-func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool) ([]projectionRow, error) {
+func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool, responseLimit int) ([]projectionRow, error) {
 	request, err := searchRequest(collection, searchBranch{}, where, order, limit, properties)
 	if err != nil {
 		return nil, err
 	}
 	request.Metadata.Uuid = true
 	request.Metadata.CreationTimeUnix = created
-	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, 2<<20, false)
+	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, responseLimit, false)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 		fields := result.GetProperties().GetNonRefProps().GetFields()
 		row := projectionRow{
 			SegmentID: fields["segmentId"].GetTextValue(), Revision: fields[embeddingRevision].GetIntValue(),
-			Kind: fields[itemKind].GetTextValue(),
+			Kind: fields[itemKind].GetTextValue(), LexicalText: fields[lexicalProperty].GetTextValue(),
 		}
 		m := result.GetMetadata()
 		row.Additional.ID = m.GetId()
@@ -223,12 +223,12 @@ const grpcAnchorBatchLimit = 16 << 20
 
 func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids []string) (map[string]map[string]any, error) {
 	request := &pb.SearchRequest{
-		Collection: collection,
-		Limit:      uint32(len(ids)),
-		Filters:    containsAny("id", ids).proto(),
+		Collection:  collection,
+		Limit:       uint32(len(ids)),
+		Filters:     containsAny("id", ids).proto(),
 		Uses_127Api: true,
-		Properties: &pb.PropertiesRequest{ReturnAllNonrefProperties: true},
-		Metadata:   &pb.MetadataRequest{Uuid: true},
+		Properties:  &pb.PropertiesRequest{ReturnAllNonrefProperties: true},
+		Metadata:    &pb.MetadataRequest{Uuid: true},
 	}
 	results, err := s.grpcSearch(ctx, request, telemetry.OpRead, grpcAnchorBatchLimit, false)
 	if err != nil {
