@@ -39,8 +39,12 @@ type blobFlight struct {
 
 // do returns the shared result of read for key, starting it when no read of
 // key is in flight. A waiter whose ctx ends leaves with ctx.Err(); the read
-// goes on for the others and is cancelled with the last one.
+// goes on for the others and is cancelled with the last one. A waiter whose
+// ctx has already ended neither joins nor starts a read.
 func (g *blobFlights) do(ctx context.Context, key blobCacheKey, read func(context.Context) (*blobCacheEntry, error)) (*blobCacheEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	g.mu.Lock()
 	f, ok := g.calls[key]
 	if !ok {
@@ -56,6 +60,10 @@ func (g *blobFlights) do(ctx context.Context, key blobCacheKey, read func(contex
 	g.mu.Unlock()
 	select {
 	case <-f.done:
+		// Both may be ready at once: a waiter that has left gets its own error.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f.entry, f.err
 	case <-ctx.Done():
 		g.mu.Lock()

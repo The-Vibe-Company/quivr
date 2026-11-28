@@ -721,6 +721,20 @@ func (c *HydrationBlobCache) getBatch(groups []blobGroup) int {
 	return hitCount
 }
 
+// resident returns the cached entry for key without counting a lookup, or nil.
+func (c *HydrationBlobCache) resident(key blobCacheKey) *blobCacheEntry {
+	if c == nil || !key.cacheable() {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.entries[key]
+	if e != nil {
+		c.moveToFront(e)
+	}
+	return e
+}
+
 // put admits a new, unshared entry and returns the resident entry for its
 // key: e, or the one already cached. An entry over the budget stays transient.
 func (c *HydrationBlobCache) put(e *blobCacheEntry) *blobCacheEntry {
@@ -1338,6 +1352,10 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 // the size and SHA-256 that canonical storage recorded.
 func (s Service) readBlob(ctx context.Context, key blobCacheKey) (*blobCacheEntry, error) {
 	read := func(ctx context.Context) (*blobCacheEntry, error) {
+		// An earlier flight may have admitted the blob since this batch missed.
+		if e := s.BlobCache.resident(key); e != nil {
+			return e, nil
+		}
 		data, err := s.Blobs.Read(ctx, Blob{Key: key.key, SHA256: key.sha256, Size: key.size})
 		if err != nil {
 			return nil, err
