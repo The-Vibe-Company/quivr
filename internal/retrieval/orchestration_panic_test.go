@@ -2,10 +2,12 @@ package retrieval_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -59,6 +61,39 @@ func (panickingEmbedder) Embed(context.Context, string) ([]float32, error) {
 	return nil, nil
 }
 
+var bubbleTag = regexp.MustCompile(`synctest bubble (\d+)[,\]]`)
+
+// bubbleGoroutines counts the goroutines of the caller's synctest bubble, from
+// the bubble each goroutine's stack header names.
+func bubbleGoroutines(t *testing.T) int {
+	t.Helper()
+	self := make([]byte, 4096)
+	self = self[:runtime.Stack(self, false)]
+	own := bubbleTag.FindSubmatch(self)
+	if own == nil {
+		t.Fatal("bubbleGoroutines called outside a synctest bubble")
+	}
+	all := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(all, true)
+		if n < len(all) {
+			all = all[:n]
+			break
+		}
+		all = make([]byte, 2*len(all))
+	}
+	count := 0
+	for _, line := range bytes.Split(all, []byte("\n")) {
+		if !bytes.HasPrefix(line, []byte("goroutine ")) {
+			continue
+		}
+		if m := bubbleTag.FindSubmatch(line); m != nil && bytes.Equal(m[1], own[1]) {
+			count++
+		}
+	}
+	return count
+}
+
 // syncBuffer is a log sink the search's goroutines may write concurrently.
 type syncBuffer struct {
 	mu sync.Mutex
@@ -86,6 +121,9 @@ func TestOrchestrationPanic(t *testing.T) {
 		name  string
 		mode  string
 		setup func(*retrieval.Service)
+		// want is ErrUnavailable unless set: a panicking query encoder did not
+		// answer, as when it fails.
+		want error
 	}{
 		{name: "projection search", mode: "lexical", setup: func(s *retrieval.Service) { s.Projection = &panickingProjection{} }},
 		{name: "projection search in a concurrent round", setup: func(s *retrieval.Service) {
@@ -106,7 +144,8 @@ func TestOrchestrationPanic(t *testing.T) {
 			s.Ranker = &richRanker{id: "example.rich", apiRange: ">=0.21.0 <0.22.0", includeLead: true}
 			s.Content = content.Service{Baseline: panickingLeads{&richBaseline{}}, Blobs: richBlobs{}}
 		}},
-		{name: "query embedder", setup: func(s *retrieval.Service) {
+		{name: "query embedder", want: retrieval.ErrModelUnavailable, setup: func(s *retrieval.Service) { s.Embedder = panickingEmbedder{} }},
+		{name: "query embedder behind the shared cache", want: retrieval.ErrModelUnavailable, setup: func(s *retrieval.Service) {
 			// The shared query-vector cache encodes on its own goroutine.
 			s.Embedder, s.QueryVectors = panickingEmbedder{}, retrieval.NewQueryVectorCache()
 		}},
@@ -117,7 +156,7 @@ func TestOrchestrationPanic(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
 			synctest.Test(t, func(t *testing.T) {
-				baseline := runtime.NumGoroutine()
+				baseline := bubbleGoroutines(t)
 				p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "vec-a", GenerationID: "gen", Score: 1}}}
 				s := service(p, &fakeEmbeddings{})
 				tc.setup(&s)
@@ -125,15 +164,17 @@ func TestOrchestrationPanic(t *testing.T) {
 				scope := searchScope
 				scope.Organization = panicOrg
 				_, err := s.Search(ctx, scope, retrieval.Request{Query: panicQuery, Mode: tc.mode, CorpusIDs: []string{"corpus"}})
-				if !errors.Is(err, retrieval.ErrUnavailable) {
-					t.Fatalf("search with a panicking dependency = %v, want ErrUnavailable", err)
+				want := cmp.Or[error](tc.want, retrieval.ErrUnavailable)
+				if !errors.Is(err, want) {
+					t.Fatalf("search with a panicking dependency = %v, want %v", err, want)
 				}
 				// Wait until every goroutine the search started, such as the
 				// query-vector cache's encoding goroutine, has exited or is
-				// durably blocked: none may remain.
+				// durably blocked: none may remain. Only this bubble is counted;
+				// goroutines left by earlier tests come and go.
 				synctest.Wait()
-				if n := runtime.NumGoroutine(); n != baseline {
-					t.Fatalf("%d goroutines after the search settled, want the %d before it", n, baseline)
+				if n := bubbleGoroutines(t); n != baseline {
+					t.Fatalf("%d goroutines in the bubble after the search settled, want the %d before it", n, baseline)
 				}
 			})
 			out := logs.String()

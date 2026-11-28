@@ -146,8 +146,7 @@ func invocationID() string {
 	return "search-" + hex.EncodeToString(b[:])
 }
 
-// errPanicked is a dependency call that panicked. It is ErrUnavailable, and
-// stays that error through the mappings of query encoding.
+// errPanicked is a dependency call that panicked. It is ErrUnavailable.
 var errPanicked = fmt.Errorf("%w: dependency panicked", ErrUnavailable)
 
 // recovered turns a panic of the call it is deferred in into errPanicked. The
@@ -1311,10 +1310,17 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, ti
 		}
 	}
 	started := time.Now()
-	vector, err := sv.s.encodeQuery(ctx, sv.scope.Organization, space, text)
+	// The shared query-vector cache recovers a panic on its own goroutine; this
+	// guard covers an encoder that runs on the search's goroutine. Either way
+	// the encoder did not answer: ErrModelUnavailable.
+	var vector []float32
+	err := guard(ctx, "query.encode", func() (err error) {
+		vector, err = sv.s.encodeQuery(ctx, sv.scope.Organization, space, text)
+		return err
+	})
 	elapsed := time.Since(started)
 	if err != nil {
-		if errors.Is(err, ErrUnavailable) && !errors.Is(err, errPanicked) {
+		if errors.Is(err, ErrUnavailable) {
 			return nil, elapsed, ErrModelUnavailable
 		}
 		return nil, elapsed, err
@@ -1346,14 +1352,7 @@ func (s Service) encodeQuery(ctx context.Context, org, space, text string) ([]fl
 	case s.Embedder != nil && space == s.Embedder.Space().ID:
 		// The legacy space ID identifies the engine's pinned model and template.
 		return s.QueryVectors.encode(ctx, queryVectorKey("engine", org, space, text), func(ctx context.Context) ([]float32, error) {
-			var vector []float32
-			err := guard(ctx, "embedder.embed", func() (err error) {
-				vector, err = s.Embedder.Embed(ctx, "query: "+text)
-				return err
-			})
-			if errors.Is(err, errPanicked) {
-				return nil, err
-			}
+			vector, err := s.Embedder.Embed(ctx, "query: "+text)
 			if err != nil {
 				return nil, ErrUnavailable
 			}
@@ -1383,14 +1382,8 @@ func (s Service) encodeQuery(ctx context.Context, org, space, text string) ([]fl
 }
 
 func encodePluginQuery(ctx context.Context, encoder QueryEncoder, org, space, text string) ([]float32, error) {
-	var vector []float32
-	err := guard(ctx, "encoder.encode_query", func() (err error) {
-		vector, err = encoder.EncodeQuery(ctx, org, space, text)
-		return err
-	})
+	vector, err := encoder.EncodeQuery(ctx, org, space, text)
 	switch {
-	case errors.Is(err, errPanicked):
-		return nil, err
 	case errors.Is(err, ErrQueryTooLong):
 		return nil, err
 	case errors.Is(err, content.ErrInvalid):
