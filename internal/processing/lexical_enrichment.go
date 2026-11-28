@@ -189,12 +189,21 @@ func GateByCosineSalience(segmentVector []float32, candidates []ScoredLexicalCan
 		}
 		return survivors[i].order < survivors[j].order
 	})
-	if maxKeep > 0 && len(survivors) > maxKeep {
-		survivors = survivors[:maxKeep]
-	}
-	out := make([]string, len(survivors))
-	for i, s := range survivors {
-		out[i] = s.text
+	seen := make(map[string]struct{}, len(survivors))
+	out := make([]string, 0, len(survivors))
+	for _, s := range survivors {
+		key := strings.ToLower(strings.Join(strings.Fields(s.text), " "))
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, s.text)
+		if maxKeep > 0 && len(out) >= maxKeep {
+			break
+		}
 	}
 	return out
 }
@@ -479,19 +488,37 @@ func (e *HTTPLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalEnri
 		return nil, errors.New("lexical enrichment response invalid JSON")
 	}
 	out := make(map[string]SegmentLexicalExpansion, len(decoded.Segments))
+	seenBySeg := make(map[string]map[string]struct{}, len(decoded.Segments))
 	for _, seg := range decoded.Segments {
 		if _, ok := known[seg.SegmentID]; !ok {
 			continue
 		}
+		seen := seenBySeg[seg.SegmentID]
+		if seen == nil {
+			seen = map[string]struct{}{}
+			seenBySeg[seg.SegmentID] = seen
+		}
 		exp := out[seg.SegmentID]
+		addCandidate := func(raw string) {
+			cleaned := strings.Join(strings.Fields(raw), " ")
+			if cleaned == "" {
+				return
+			}
+			key := strings.ToLower(cleaned)
+			if _, dup := seen[key]; dup {
+				return
+			}
+			seen[key] = struct{}{}
+			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: cleaned})
+		}
 		// All remote HTTP output (terms and synthetic queries) passes through
 		// cosine-salience gating using engine-encoded served-space vectors so
 		// an untrusted sidecar cannot bypass hallucination filtering.
 		for _, term := range seg.Terms {
-			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: term})
+			addCandidate(term)
 		}
 		for _, q := range seg.Queries {
-			exp.Queries = append(exp.Queries, ScoredLexicalCandidate{Text: q.Text})
+			addCandidate(q.Text)
 		}
 		if len(exp.Queries) > 0 {
 			out[seg.SegmentID] = exp

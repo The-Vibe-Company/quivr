@@ -23,6 +23,7 @@ func TestGateByCosineSalienceFiltersHallucinationsAndOrdersDeterministically(t *
 		{Text: "off-topic recipe", Vector: []float32{0, 1, 0}},             // cos 0.0 -> rejected
 		{Text: "medium match", Vector: []float32{0.6, 0.8, 0}},             // cos 0.6 -> kept
 		{Text: "strong match", Vector: []float32{0.9, 0.4358899, 0}},       // cos ~0.9 -> kept first
+		{Text: "STRONG   Match", Vector: []float32{0.9, 0.4358899, 0}},     // duplicate must not consume maxKeep
 		{Text: "exact tie a", Vector: []float32{0.8, 0.6, 0}},              // cos 0.8
 		{Text: "exact tie b", Vector: []float32{0.8, -0.6, 0}},             // cos 0.8 (keeps input order)
 		{Text: "missing vector"},                                           // fail-closed -> rejected
@@ -122,7 +123,7 @@ func TestHTTPLexicalEnricherParsesObjectAndStringQueriesAndHandlesErrors(t *test
 
 	var gotAuth string
 	status := http.StatusOK
-	body := `{"segments":[{"segment_id":"s1","terms":["synonym one"],"queries":[{"text":"precomputed query","vector":[1,0]}, "plain query"]},{"segment_id":"unknown","terms":["ignored"]}]}`
+	body := `{"segments":[{"segment_id":"s1","terms":["synonym one","Synonym   One"],"queries":[{"text":"precomputed query","vector":[1,0]}, "plain query", "PLAIN QUERY"]},{"segment_id":"unknown","terms":["ignored"]}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(status)
