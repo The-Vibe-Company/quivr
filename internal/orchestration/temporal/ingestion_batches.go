@@ -132,6 +132,11 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 			wg.Go(func() {
 				lanes := receiptLanes{retrievalReady: sync.OnceFunc(func() { <-stage1 }), enrich: enrich}
 				defer lanes.retrievalReady()
+				// Cancellation between admission and this goroutine starting
+				// must not claim a lease, pin or step; the activity reports it.
+				if ctx.Err() != nil {
+					return
+				}
 				err := processBatchedReceipt(ctx, steps, pins, in.Receipts[i], lanes)
 				mu.Lock()
 				if err == nil {
