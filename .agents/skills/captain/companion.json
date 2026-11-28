@@ -1,0 +1,76 @@
+{
+  "$schema": "https://skillpack.app/schemas/companion-manifest.v2.schema.json",
+  "name": "captain",
+  "version": "0.2.1",
+  "icon": "boxes",
+  "title": "Captain",
+  "description": "Lean multi-agent delivery orchestrator combining OpenBoard (task DAG and source of truth) with Armada sandboxes (parallel worker fleet).",
+  "notes": "## Captain\n\nLean, zero-Python multi-agent delivery orchestrator for OpenBoard + Armada across five modes (`init`, `plan`, `run`, `resume`, `challenge`). Uses OpenBoard, Armada, and GitHub directly as the live source of truth — zero shadow databases.\n\n### Prerequisites\n- **OpenBoard CLI (`ob`)** connected to a board reachable from your Armada sandboxes (HTTPS for remote Modal sandboxes; local SQLite only with local Docker hosts).\n- **Armada CLI (`>= 14.x`, or `npx -y @the-vibe-company/armada@latest`)** authenticated with an org, GitHub connection, provider, and model credentials.\n- **GitHub CLI (`gh`)** authenticated for GitHub pull request supervision.\n\n### Modes\n- **`init`**: CLI preflight (including MCP `defaultForLaunch` / `needs_reconnect` check), monorepo/solo/team + harness readiness inspection, adopts existing review workflows (or offers `ship-pr-dev`), sets up OpenBoard (`AGENTS.md`, channel), provisions Modal OpenBoard auth via Armada Vault (`variables/set`, `secrets/set`) + Launch Templates (`armada template launch`) with harness smoke test, and writes minimal `.captain/config.json`.\n- **`plan`**: delegated discovery, `grilling`, atomic OpenBoard `plan.json` DAG (JSON object `labels`, `needs`, DB migration serialization, anti-slop & observable verification).\n- **`run`**: live Armada `>= 14.x` Launch Template / `--no-connections` workers, single or round-robin Builder + optional Scout/Light with auto-escalation, hard circuit breakers, `MAIN_RED` freeze, zero-Python `armada-modal.sh` + `watchdog.sh` (or native host timer).\n- **`challenge`**: objective git/gh/ob metrics dossier + independent read-only Challenger every 10/20 PRs with progressive authority (`ON_TRACK` / `DRIFTING` / `OFF_THE_RAILS`) and `.captain/rules.md` STOP rules.\n- **`resume`**: live OpenBoard/Armada/GitHub reconciliation (including orphan sandboxes) and secret-free `.captain/HANDOFF.md`.",
+  "metadata": {
+    "companionSkillId": "20f68ccd-7807-4cc8-82f0-2ce45282b23b",
+    "usage": {
+      "schemaVersion": 1,
+      "skillId": "20f68ccd-7807-4cc8-82f0-2ce45282b23b",
+      "version": "0.2.1",
+      "origin": "https://skillpack.app"
+    },
+    "changelog": [
+      {
+        "version": "0.2.1",
+        "date": "2026-11-27",
+        "changes": [
+          "Fixed Modal OpenBoard authentication: documented and wired Armada 14.x Vault (`secrets/set` via stdin + `variables/set`) + Launch Templates (`armada template launch`) with native `ob connect \"$BOARD_URL\" --as <profile>` reading `OPENBOARD_SECRET` from harness env and one-turn harness smoke test (replacing Docker-only `--secret`/`--variable` assumptions).",
+          "Added zero-Python `scripts/armada-modal.sh` helper (`preflight-mcp`, `wait-build`, `wait-ready`, `launch-template`, `launch-raw`) absorbing real Modal CLI traps: `needs_reconnect` defaultForLaunch MCP 409 conflicts (`--no-connections` / `connections: []`), `snapshot new --wait` returning during `phase: secret_scan`, `snapshot show --build` refusing `--org`, and `armada exec` `not_found` while `status: starting`.",
+          "Updated `evals/evals.json` to match the zero-Python Captain architecture and Modal Launch Template flow."
+        ]
+      },
+      {
+        "version": "0.2.0",
+        "date": "2026-11-26",
+        "changes": [
+          "Slimmed architecture to zero-Python: removed heavy local state-mirroring scripts and kept a single hardened POSIX bash watchdog (`scripts/watchdog.sh`).",
+          "Extracted multi-angle exploration into standalone `deep-dive` skill for clean MECE boundaries.",
+          "Fixed real OpenBoard 0.9 (`ob tasks counts`, JSON object `labels`, worker-owned `ob tasks block`) and Armada 14.8 (`--org`, `--`, version >= 14, sandbox OpenBoard auth, root+user `ob` install) compatibility.",
+          "Added hard circuit breakers, `MAIN_RED` freeze, DB migration exclusive serialization, anti-slop worker briefs, objective Challenger metrics, and Skillpack dependencies on `grilling` and `ship-pr-dev`."
+        ]
+      },
+      {
+        "version": "0.1.0",
+        "date": "2026-11-26",
+        "changes": [
+          "Initial release."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {
+    "grilling": "4232efaf-3767-4a3b-85e7-d138981436e0",
+    "ship-pr-dev": "bccb0c35-71bf-4fe8-ad7c-7a931889fa84"
+  },
+  "commands": [
+    {
+      "name": "init",
+      "desc": "Preflight CLIs and onboard a repo for OpenBoard + Armada (monorepo/solo/team & harness readiness aware)."
+    },
+    {
+      "name": "plan",
+      "desc": "Delegate discovery, grill decisions, and publish an atomic OpenBoard task DAG."
+    },
+    {
+      "name": "run",
+      "desc": "Negotiate the run contract (models/round-robin/scout, circuit breakers, merge mode, wakeup, challenger) and supervise the fleet."
+    },
+    {
+      "name": "resume",
+      "desc": "Reconcile live OpenBoard/Armada/GitHub state and resume or generate HANDOFF.md."
+    },
+    {
+      "name": "challenge",
+      "desc": "Gather objective batch metrics, run an independent read-only Challenger audit, and update STOP rules."
+    }
+  ]
+}

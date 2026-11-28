@@ -1,0 +1,26 @@
+{
+  "skill_name": "captain",
+  "description": "20 trigger-routing evals (10 should-trigger EN/FR across all 6 modes + 10 tricky should-not-trigger near-misses).",
+  "queries": [
+    {"id": 1, "should_trigger": true, "mode": "init", "query": "Set up OpenBoard and Armada on this new Turborepo so we can run parallel coding agents safely."},
+    {"id": 2, "should_trigger": true, "mode": "init", "query": "Prépare ce repo pour orchestrer des workers Armada avec OpenBoard, j'ai pas encore de board ni de snapshot."},
+    {"id": 3, "should_trigger": true, "mode": "explore", "query": "Creuse comment réduire la latence de notre pipeline RAG — lance plein de sous-agents sur les axes indexation, cache, et coûts avant qu'on tranche."},
+    {"id": 4, "should_trigger": true, "mode": "explore", "query": "Launch multiple parallel read-only subagents to red-team our billing architecture from security, scale, and DX angles and give me your candid recommendation."},
+    {"id": 5, "should_trigger": true, "mode": "plan", "query": "On veut refondre tout le module permissions : aide-moi à cadrer la spec et créer le graphe de tâches dans OpenBoard pour envoyer ça dans Armada."},
+    {"id": 6, "should_trigger": true, "mode": "run", "query": "We have 18 ready tasks in OpenBoard — launch parallel Armada sandboxes with round-robin builders, a cheap model for leaf tasks, a 2-minute wakeup loop, and a challenger every 10 PRs."},
+    {"id": 7, "should_trigger": true, "mode": "run", "query": "Lance une flotte en mode captain sur le channel api cette nuit, tu merges en auto sauf les releases."},
+    {"id": 8, "should_trigger": true, "mode": "resume", "query": "Reprends l'orchestration OpenBoard + Armada sur ce repo depuis .captain/HANDOFF.md, ma session précédente a compacté."},
+    {"id": 9, "should_trigger": true, "mode": "challenge", "query": "We just merged 20 PRs from our Armada fleet — run an independent Challenger audit to check if we're converging or drifting into slop."},
+    {"id": 10, "should_trigger": true, "mode": "run", "query": "Supervise our active OpenBoard + Armada workers and generate a clean handoff before I switch laptops."},
+    {"id": 11, "should_trigger": false, "expected_owner": "openboard", "query": "Run ob read dev and add a webhook subscription on our OpenBoard instance."},
+    {"id": 12, "should_trigger": false, "expected_owner": "armada-manager", "query": "Recover my 6 Armada sandboxes working on GitHub Issues in this repo (we don't use OpenBoard)."},
+    {"id": 13, "should_trigger": false, "expected_owner": "autopilot", "query": "Build all the local .veebee/tickets/ files one after another locally tonight and merge each PR."},
+    {"id": 14, "should_trigger": false, "expected_owner": "grilling", "query": "Grill me relentlessly on my pricing page strategy before I talk to investors."},
+    {"id": 15, "should_trigger": false, "expected_owner": "ship-pr-dev", "query": "Run a final code review, fix CI, and ship my current local branch as a PR."},
+    {"id": 16, "should_trigger": false, "expected_owner": "local-coding", "query": "Fix this 3-line TypeScript null check bug in src/utils/date.ts and run the unit test."},
+    {"id": 17, "should_trigger": false, "expected_owner": "native-swarm", "query": "/swarm spin up 2 local git worktree agents here to refactor our CSS tokens."},
+    {"id": 18, "should_trigger": false, "expected_owner": "eureka", "query": "I have a blank page — help me find a fun side-project SaaS idea to build this weekend."},
+    {"id": 19, "should_trigger": false, "expected_owner": "openboard", "query": "What is the exact ob CLI command to cancel a scheduled reply on a thread?"},
+    {"id": 20, "should_trigger": false, "expected_owner": "tdd", "query": "Help me implement a CSV parser locally using strict red-green-refactor TDD."}
+  ]
+}
