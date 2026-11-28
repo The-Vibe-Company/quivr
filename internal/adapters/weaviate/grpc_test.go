@@ -492,7 +492,10 @@ type trackingListener struct {
 	net.Listener
 	accepting     chan struct{}
 	acceptingOnce sync.Once
-	conns         sync.WaitGroup
+
+	mu     sync.Mutex
+	active int
+	zeroCh chan struct{}
 }
 
 func (l *trackingListener) Accept() (net.Conn, error) {
@@ -501,8 +504,43 @@ func (l *trackingListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	l.conns.Add(1)
-	return &trackedConn{Conn: c, done: l.conns.Done}, nil
+	l.mu.Lock()
+	l.active++
+	l.mu.Unlock()
+	return &trackedConn{Conn: c, done: l.connClosed}, nil
+}
+
+func (l *trackingListener) connClosed() {
+	l.mu.Lock()
+	l.active--
+	if l.active == 0 && l.zeroCh != nil {
+		close(l.zeroCh)
+		l.zeroCh = nil
+	}
+	l.mu.Unlock()
+}
+
+func (l *trackingListener) waitConnsClosed(timeout time.Duration) bool {
+	l.mu.Lock()
+	if l.active == 0 {
+		l.mu.Unlock()
+		return true
+	}
+	ch := make(chan struct{})
+	l.zeroCh = ch
+	l.mu.Unlock()
+
+	select {
+	case <-ch:
+		return true
+	case <-time.After(timeout):
+		l.mu.Lock()
+		if l.zeroCh == ch {
+			l.zeroCh = nil
+		}
+		l.mu.Unlock()
+		return false
+	}
 }
 
 type trackedConn struct {
@@ -583,14 +621,7 @@ func TestGRPCPoolCloseReleasesGoroutines(t *testing.T) {
 	closeStore()
 	closeStore()
 
-	connsClosed := make(chan struct{})
-	go func() {
-		lis.conns.Wait()
-		close(connsClosed)
-	}()
-	select {
-	case <-connsClosed:
-	case <-time.After(2 * time.Second):
+	if !lis.waitConnsClosed(2 * time.Second) {
 		t.Fatal("server-side connections did not close after closeStore")
 	}
 
