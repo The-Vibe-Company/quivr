@@ -1,6 +1,6 @@
 # Measure open-source embeddings
 
-Compare embedding models on public samples with `hosted.embed` and `direct_bakeoff.py`; operators can start with [Choose an embedding model](../../docs-site/run-quivr/choose-an-embedding-model.mdx).
+Compare embedding models on public samples with `text.embed` and `direct_bakeoff.py`; operators can start with [Choose an embedding model](../../docs-site/run-quivr/choose-an-embedding-model.mdx).
 Python 3.12+ and the requirements below install the Modal CLI; paid runs need operator authentication.
 The coordinator dispatches paid runs; CI uses offline fixtures only.
 
@@ -19,7 +19,7 @@ The plan previews ten sets, four models and two hardware choices without Modal.
 Candidates use Apache-2.0 weights: [Qwen3 0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B),
 [Granite 311M multilingual r2](https://huggingface.co/ibm-granite/granite-embedding-311m-multilingual-r2)
 and [Arctic l v2](https://huggingface.co/Snowflake/snowflake-arctic-embed-l-v2.0).
-Configurations live in `plugins/hosted-embed/examples/`; `oss_bakeoff.py` pins weight revisions.
+Configurations live in `plugins/text-embed/examples/`; `oss_bakeoff.py` pins weight revisions.
 TEI 1.9.3 uses its OpenAI-compatible API. CPU uses float32; L4 uses float16.
 Qwen3 CPU is excluded pending validation: its pinned serving combination exited
 before readiness in the operator run. Upstream includes CPU architecture support.

@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/visibility"
 )
 
 // scriptedRanker answers each round with answer(request) and records what it
@@ -112,8 +115,20 @@ func TestPluginRanksServedCandidates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(p.searched) != 2 || p.searched[0].Mode != "lexical" || p.searched[0].K != retrieval.CandidateLimit || p.searched[1].Mode != "semantic" || p.searched[1].Space != "space" || len(p.searched[1].Vector) != 1 {
-				t.Fatalf("projection searched %+v; want bm25 then near_vector, k oversampled", p.searched)
+			if len(p.searched) != 2 {
+				t.Fatalf("projection searched %+v; want 2 requests", p.searched)
+			}
+			var hasLexical, hasSemantic bool
+			for _, sq := range p.searched {
+				if sq.Mode == "lexical" && sq.K == retrieval.CandidateLimit {
+					hasLexical = true
+				}
+				if sq.Mode == "semantic" && sq.Space == "space" && len(sq.Vector) == 1 {
+					hasSemantic = true
+				}
+			}
+			if !hasLexical || !hasSemantic {
+				t.Fatalf("projection searched %+v; want bm25 and near_vector, k oversampled", p.searched)
 			}
 			first := r.sent[0]
 			if first.Profile != "default" || first.Query.Text != "lanterne" || first.Query.Mode != "hybrid" || len(first.Spaces) != 1 || first.Spaces[0].Coverage != (plugins.SpaceCoverage{Segments: 3, Total: 4}) || len(first.Served) != 0 {
@@ -299,3 +314,247 @@ func TestAStalledQueryModelKeepsItsUnavailableCodeAtTheDeadline(t *testing.T) {
 		}
 	})
 }
+
+type barrierSpaceEncoder struct {
+	space  string
+	encode func(context.Context) ([]float32, error)
+}
+
+func (b barrierSpaceEncoder) Owns(space string) bool { return space == b.space }
+func (b barrierSpaceEncoder) EncodeQuery(ctx context.Context, _, _, _ string) ([]float32, error) {
+	return b.encode(ctx)
+}
+
+type barrierProjection struct {
+	search func(context.Context, []retrieval.Route, corpus.Scope, retrieval.Request) ([]content.Candidate, error)
+}
+
+func (barrierProjection) Publish(context.Context, content.Generation, string, string, string, content.Version, content.Segmentation) error {
+	return nil
+}
+func (barrierProjection) PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error {
+	return nil
+}
+func (b barrierProjection) Search(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+	return b.search(ctx, routes, scope, q)
+}
+
+// Multi-request rounds execute candidate fetching concurrently (proven via a
+// synchronization barrier), coalesce overlapping SegmentIDs into one hydration
+// batch per wave, preserve deterministic served order and lowest-index error
+// precedence, and keep wall-clock phase totals within Elapsed.
+func TestMultiRequestRoundExecutesConcurrentlyAndCoalescesHydration(t *testing.T) {
+	t.Run("concurrent fetch, deterministic order, and coalesced hydration", func(t *testing.T) {
+		for _, enforced := range []bool{false, true} {
+			name := "unrestricted"
+			if enforced {
+				name = "enforced_visibility"
+			}
+			t.Run(name, func(t *testing.T) {
+				var arrived atomic.Int32
+				bothArrived := make(chan struct{})
+				proj := barrierProjection{
+					search: func(ctx context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+						if arrived.Add(1) == 2 {
+							close(bothArrived)
+						}
+						select {
+						case <-bothArrived:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+						if q.Mode == "lexical" {
+							return []content.Candidate{
+								{SegmentID: "vec-shared", GenerationID: "gen", Score: 3},
+								{SegmentID: "lex-only", GenerationID: "gen", Score: 1},
+							}, nil
+						}
+						return []content.Candidate{
+							{SegmentID: "vec-shared", GenerationID: "gen", Score: 0.9},
+							{SegmentID: "vec-only", GenerationID: "gen", Score: 0.8},
+						}, nil
+					},
+				}
+				lookups := &atomic.Int64{}
+				reads := &atomic.Int64{}
+				r := &scriptedRanker{answer: fusion}
+				s := retrieval.Service{
+					Embedder:   fakeEmbedder{},
+					Routing:    fakeRouting{},
+					Projection: proj,
+					Ranker:     r,
+					Registry:   spaceList{},
+					Content: content.Service{
+						RecordStore: fakeRecords{},
+						Baseline:    fakeBaseline{lookups: lookups},
+						Blobs:       countingBlobs{reads: reads},
+						Embeddings:  &fakeEmbeddings{},
+					},
+				}
+				ctx := t.Context()
+				if enforced {
+					ctx = visibility.WithPrincipals(ctx, []string{"user:reader"})
+				}
+				res, err := s.Search(ctx, searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "default"})
+				if err != nil {
+					t.Fatalf("search failed: %v", err)
+				}
+				// Served[0] must be bm25 and Served[1] must be near_vector regardless of completion order.
+				served := r.sent[1].Served
+				if len(served) != 2 || served[0].Request.Primitive != plugins.PrimitiveBM25 || served[1].Request.Primitive != plugins.PrimitiveNearVector {
+					t.Fatalf("served order = %+v, want [bm25, near_vector]", served)
+				}
+				// Final ranking must be deterministic: vec-shared, vec-only, lex-only.
+				var gotIDs []string
+				for _, h := range res.Hits {
+					gotIDs = append(gotIDs, h.Segment.ID)
+				}
+				if want := []string{"vec-shared", "vec-only", "lex-only"}; !slices.Equal(gotIDs, want) {
+					t.Fatalf("hits = %v, want %v", gotIDs, want)
+				}
+				// Three distinct segments across 2 overlapping requests must read each blob once
+				// (not 4 times) via one unified wave hydration.
+				if got := reads.Load(); got != 3 {
+					t.Fatalf("blob reads = %d, want 3 (vec-shared coalesced across both requests)", got)
+				}
+				// fakeBaseline does not implement HydrationRechecker, so Content.Hydrate calls
+				// Baseline.Hydrate twice (lookup + recheck) for the single unified wave, plus
+				// recheckServed and recheckResult when visibility is enforced.
+				wantLookups := int64(2)
+				if enforced {
+					wantLookups = 4
+				}
+				if got := lookups.Load(); got != wantLookups {
+					t.Fatalf("baseline lookups = %d, want %d (single coalesced hydration wave)", got, wantLookups)
+				}
+			})
+		}
+	})
+
+	t.Run("lowest failing request index wins error precedence", func(t *testing.T) {
+		newFailingLeg1Projection := func() barrierProjection {
+			leg1Failed := make(chan struct{})
+			return barrierProjection{
+				search: func(ctx context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+					if q.Mode == "semantic" {
+						close(leg1Failed)
+						return nil, errors.New("index leg 1 failed")
+					}
+					select {
+					case <-leg1Failed:
+						if ctx.Err() != nil {
+							return nil, fmt.Errorf("leg 0 was canceled by higher-index failure: %w", ctx.Err())
+						}
+						return []content.Candidate{{SegmentID: "a", GenerationID: "gen", Score: 1}}, nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				},
+			}
+		}
+		// Case A: index 1 fails first in Projection.Search and signals leg1Failed;
+		// index 0 waits on leg1Failed before returning ErrQueryTooLong. Index 0 must win.
+		leg1Failed := make(chan struct{})
+		s := retrieval.Service{
+			Spaces: barrierSpaceEncoder{
+				space: "space",
+				encode: func(ctx context.Context) ([]float32, error) {
+					select {
+					case <-leg1Failed:
+						return nil, retrieval.ErrQueryTooLong
+					case <-ctx.Done():
+						return nil, fmt.Errorf("leg 0 canceled before returning: %w", ctx.Err())
+					}
+				},
+			},
+			Routing: fakeRouting{},
+			Projection: barrierProjection{
+				search: func(_ context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+					if q.Mode == "lexical" {
+						close(leg1Failed)
+						return nil, errors.New("index leg 1 failed")
+					}
+					return nil, errors.New("unexpected semantic projection call")
+				},
+			},
+			Registry: spaceList{},
+			Ranker: &scriptedRanker{answer: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+				return answer(map[string]any{"requests": []any{
+					map[string]any{"primitive": "near_vector", "space": "space", "query_text": q.Query.Text, "k": 2},
+					map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": 2},
+				}})
+			}},
+			Content: content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}},
+		}
+		_, err := s.Search(t.Context(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "default"})
+		if !errors.Is(err, retrieval.ErrQueryTooLong) {
+			t.Fatalf("error = %v, want ErrQueryTooLong from index 0 after index 1 failed first", err)
+		}
+
+		// Case B: index 0 succeeds after leg 1 fails -> index 1's ErrUnavailable is returned.
+		s.Spaces = nil
+		s.Embedder = fakeEmbedder{}
+		s.Routing = fakeRouting{}
+		s.Projection = newFailingLeg1Projection()
+		s.Ranker = &scriptedRanker{answer: fusion}
+		_, err = s.Search(t.Context(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "default"})
+		if !errors.Is(err, retrieval.ErrUnavailable) {
+			t.Fatalf("error = %v, want ErrUnavailable from index 1", err)
+		}
+	})
+
+	t.Run("concurrent wave phases never exceed elapsed time", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			proj := barrierProjection{
+				search: func(ctx context.Context, _ []retrieval.Route, _ corpus.Scope, _ retrieval.Request) ([]content.Candidate, error) {
+					select {
+					case <-time.After(40 * time.Millisecond):
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return []content.Candidate{{SegmentID: "vec-a", GenerationID: "gen", Score: 1}}, nil
+				},
+			}
+			slowEmb := testQueryEmbedder{
+				run: func(ctx context.Context, _ string) ([]float32, error) {
+					select {
+					case <-time.After(30 * time.Millisecond):
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return []float32{1}, nil
+				},
+			}
+			s := retrieval.Service{
+				Embedder:   slowEmb,
+				Routing:    fakeRouting{},
+				Projection: proj,
+				Ranker:     &scriptedRanker{answer: fusion},
+				Registry:   spaceList{},
+				Content:    content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}},
+			}
+			res, err := s.Search(t.Context(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "default"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ph := res.Usage.Phases
+			sum := ph.Routing + ph.Coverage + ph.PluginRounds + ph.QueryEncoding + ph.IndexQuery + ph.Hydration
+			if sum > res.Usage.Elapsed {
+				t.Fatalf("phase sum %s exceeds elapsed %s (phases=%+v)", sum, res.Usage.Elapsed, ph)
+			}
+			if ph.QueryEncoding <= 0 || ph.IndexQuery <= 0 {
+				t.Fatalf("expected non-zero encoding and index phases, got %+v", ph)
+			}
+		})
+	})
+}
+
+type testQueryEmbedder struct {
+	run func(context.Context, string) ([]float32, error)
+}
+
+func (e testQueryEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	return e.run(ctx, text)
+}
+
+func (testQueryEmbedder) Space() content.VectorSpace { return content.VectorSpace{ID: "space"} }

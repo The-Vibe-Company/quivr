@@ -94,11 +94,17 @@ contributions:
 
 type profileRanker struct {
 	m     plugins.Manifest
+	cfg   json.RawMessage
 	round func(context.Context, plugins.SearchRequest) ([]byte, error)
 }
 
-func (r *profileRanker) Manifest() *plugins.Manifest    { return &r.m }
-func (r *profileRanker) Configuration() json.RawMessage { return []byte(`{}`) }
+func (r *profileRanker) Manifest() *plugins.Manifest { return &r.m }
+func (r *profileRanker) Configuration() json.RawMessage {
+	if len(r.cfg) > 0 {
+		return r.cfg
+	}
+	return []byte(`{}`)
+}
 func (r *profileRanker) Round(ctx context.Context, q plugins.SearchRequest) ([]byte, error) {
 	return r.round(ctx, q)
 }

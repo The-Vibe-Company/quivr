@@ -21,6 +21,7 @@ import (
 	"time"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -49,6 +50,9 @@ type Store struct {
 	// had before named spaces (legacyVector), so generations built before and
 	// after them stay searchable in one query.
 	LegacySpace string
+	// DefaultIndex configures the legacy named vector created and reconciled
+	// during Bootstrap; nil preserves content.DefaultVectorIndex (rq-8, rescoreLimit 0).
+	DefaultIndex *content.VectorIndex
 	// vectors remembers the named vectors known to exist, by collection.
 	vectors            *sync.Map
 	vectorSchema       *semaphore.Weighted
@@ -112,6 +116,9 @@ func vectorConfig(metric string, index *content.VectorIndex) map[string]any {
 		index = &content.DefaultVectorIndex
 	}
 	config := map[string]any{"distance": distance(metric)}
+	if index.EF != 0 {
+		config["ef"] = index.EF
+	}
 	switch index.Quantization {
 	case content.QuantizationRQ8, content.QuantizationRQ1:
 		rq := map[string]any{"enabled": true, "bits": 8}
@@ -145,6 +152,43 @@ func rq8Setting(raw any, index *content.VectorIndex) (map[string]any, int, bool)
 		limit = index.RescoreLimit
 	}
 	return rq, limit, true
+}
+
+// hnswEFSetting identifies a mutable HNSW query-time ef setting. When index
+// requests ef=0 (index default), it matches only if an explicit non-default
+// ef override is currently present so reconciliation removes it cleanly.
+func hnswEFSetting(raw any, index *content.VectorIndex) (map[string]any, int, bool) {
+	if index == nil {
+		return nil, 0, false
+	}
+	vector, _ := raw.(map[string]any)
+	config, _ := vector["vectorIndexConfig"].(map[string]any)
+	if vector["vectorIndexType"] != "hnsw" || config == nil {
+		return nil, 0, false
+	}
+	if index.EF == 0 {
+		if val, ok := config["ef"]; !ok || val == nil || val == float64(-1) {
+			return nil, 0, false
+		}
+		return config, 0, true
+	}
+	return config, index.EF, true
+}
+
+func hnswEFMatches(config map[string]any, want int) bool {
+	if want == 0 {
+		val, ok := config["ef"]
+		return !ok || val == nil || val == float64(-1)
+	}
+	return config["ef"] == float64(want)
+}
+
+func applyHNSWEF(config map[string]any, want int) {
+	if want == 0 {
+		delete(config, "ef")
+		return
+	}
+	config["ef"] = want
 }
 
 // ensureVectors adds missing spaces and reconciles mutable RQ-8 limits before
@@ -190,6 +234,7 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 	}
 	changed := false
 	limits := map[string]int{}
+	efs := map[string]int{}
 	for _, sp := range g.Spaces {
 		name := s.VectorName(g, sp.ID)
 		if _, ok := configs[name]; !ok {
@@ -202,11 +247,23 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 				}
 				limits[name] = limit
 			}
-		} else if rq, limit, ok := rq8Setting(configs[name], sp.Index); ok {
-			limits[name] = limit
-			if rq["rescoreLimit"] != float64(limit) {
-				rq["rescoreLimit"] = limit
-				changed = true
+			if sp.Index != nil && sp.Index.EF != 0 {
+				efs[name] = sp.Index.EF
+			}
+		} else {
+			if rq, limit, ok := rq8Setting(configs[name], sp.Index); ok {
+				limits[name] = limit
+				if rq["rescoreLimit"] != float64(limit) {
+					rq["rescoreLimit"] = limit
+					changed = true
+				}
+			}
+			if cfg, ef, ok := hnswEFSetting(configs[name], sp.Index); ok {
+				efs[name] = ef
+				if !hnswEFMatches(cfg, ef) {
+					applyHNSWEF(cfg, ef)
+					changed = true
+				}
 			}
 		}
 	}
@@ -230,6 +287,13 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 			rq, _, ok := rq8Setting(configs[name], sp.Index)
 			if !ok || rq["rescoreLimit"] != float64(limit) {
 				return errors.New("projection named vector rescore setting differs")
+			}
+		}
+		if ef, check := efs[name]; check {
+			vec, _ := configs[name].(map[string]any)
+			cfg, _ := vec["vectorIndexConfig"].(map[string]any)
+			if cfg == nil || !hnswEFMatches(cfg, ef) {
+				return errors.New("projection named vector ef setting differs")
 			}
 		}
 	}
@@ -339,26 +403,48 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 		}
 		// Bootstrap owns only the legacy default. Other named vectors require
 		// their generation's recorded settings, reconciled by ensureVectors.
-		if rq, _, ok := rq8Setting(existing.VectorConfig[legacyVector], nil); ok && rq["rescoreLimit"] != float64(0) {
+		rq, wantRescore, checkRescore := rq8Setting(existing.VectorConfig[legacyVector], s.DefaultIndex)
+		needRescore := checkRescore && rq["rescoreLimit"] != float64(wantRescore)
+		cfg, wantEF, checkEF := hnswEFSetting(existing.VectorConfig[legacyVector], s.DefaultIndex)
+		needEF := checkEF && !hnswEFMatches(cfg, wantEF)
+		if needRescore || needEF {
 			var class map[string]any
 			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &class); err != nil {
 				return err
 			}
 			configs, _ := class["vectorConfig"].(map[string]any)
-			rq, _, ok = rq8Setting(configs[legacyVector], nil)
-			if !ok {
-				return errors.New("projection legacy vector setting changed")
+			if needRescore {
+				rq, _, ok := rq8Setting(configs[legacyVector], s.DefaultIndex)
+				if !ok {
+					return errors.New("projection legacy vector setting changed")
+				}
+				rq["rescoreLimit"] = wantRescore
 			}
-			rq["rescoreLimit"] = 0
+			if needEF {
+				cfg, _, ok := hnswEFSetting(configs[legacyVector], s.DefaultIndex)
+				if !ok {
+					return errors.New("projection legacy vector setting changed")
+				}
+				applyHNSWEF(cfg, wantEF)
+			}
 			if _, err = s.call(ctx, "PUT", "/v1/schema/"+collection, class, nil); err != nil {
 				return err
 			}
 			if _, err = s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing); err != nil {
 				return err
 			}
-			rq, _, ok = rq8Setting(existing.VectorConfig[legacyVector], nil)
-			if !ok || rq["rescoreLimit"] != float64(0) {
-				return errors.New("projection legacy vector rescore setting differs")
+			if needRescore {
+				rq, _, ok := rq8Setting(existing.VectorConfig[legacyVector], s.DefaultIndex)
+				if !ok || rq["rescoreLimit"] != float64(wantRescore) {
+					return errors.New("projection legacy vector rescore setting differs")
+				}
+			}
+			if needEF {
+				vec, _ := existing.VectorConfig[legacyVector].(map[string]any)
+				cfg, _ := vec["vectorIndexConfig"].(map[string]any)
+				if cfg == nil || !hnswEFMatches(cfg, wantEF) {
+					return errors.New("projection legacy vector ef setting differs")
+				}
 			}
 		}
 		return nil
@@ -378,7 +464,7 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	for _, name := range []string{"title", "body", lexicalProperty} {
 		properties = append(properties, searchable(name))
 	}
-	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine", nil)}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
+	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine", s.DefaultIndex)}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
 	if collection == InitialCollection {
 		// A read already admitted before archive may still reach its shard.
 		// Canonical routing rejects new reads while the Corpus is archived.
@@ -442,6 +528,79 @@ func (s *Store) object(ctx context.Context, collection, id string) (storedObject
 		return stored, false, nil
 	}
 	return stored, err == nil, err
+}
+
+// anchorProperties reads one anchor object's properties without fetching vector payloads.
+func (s *Store) anchorProperties(ctx context.Context, collection, id string) (storedObject, bool, error) {
+	var stored storedObject
+	status, err := s.call(ctx, "GET", tenantPath(ctx, "/v1/objects/"+collection+"/"+id), nil, &stored)
+	if status == http.StatusNotFound {
+		return stored, false, nil
+	}
+	return stored, err == nil, err
+}
+
+// anchorFetchConcurrency bounds parallel REST fallback reads when gRPC is unavailable.
+const anchorFetchConcurrency = 16
+
+// fetchAnchors deduplicates anchor IDs and retrieves their properties in one
+// gRPC batch query when available, falling back to bounded parallel REST GETs
+// for any IDs not returned or when operating over HTTP only.
+func (s *Store) fetchAnchors(ctx context.Context, collection string, ids []string) (map[string]storedObject, error) {
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	anchors := make(map[string]storedObject, len(unique))
+	if len(unique) == 0 {
+		return anchors, nil
+	}
+	missing := unique
+	if s.grpc != nil {
+		propsByID, err := s.grpcAnchorProperties(ctx, collection, unique)
+		if err != nil && !errors.Is(err, errResponseLimit) {
+			return nil, err
+		}
+		if err == nil {
+			missing = missing[:0]
+			for _, id := range unique {
+				if props, ok := propsByID[id]; ok {
+					anchors[id] = storedObject{Properties: props}
+				} else {
+					missing = append(missing, id)
+				}
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return anchors, nil
+	}
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(anchorFetchConcurrency)
+	for _, id := range missing {
+		g.Go(func() error {
+			anchor, projected, err := s.anchorProperties(gctx, collection, id)
+			if err != nil {
+				return err
+			}
+			if !projected {
+				return retrieval.ErrProjectionMissing
+			}
+			mu.Lock()
+			anchors[id] = anchor
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return anchors, nil
 }
 
 func sameProperties(stored, want map[string]any) bool {
@@ -928,11 +1087,7 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	// The source filter is part of the candidate query, so ranking and the
 	// candidate limit apply within it in every mode.
 	if len(q.SourceNamespaces) > 0 {
-		sources := make([]filter, 0, len(q.SourceNamespaces))
-		for _, ns := range q.SourceNamespaces {
-			sources = append(sources, equal(sourceNamespaceProperty, ns))
-		}
-		operands = append(operands, or(sources...))
+		operands = append(operands, containsAny(sourceNamespaceProperty, q.SourceNamespaces))
 	}
 	operands = append(operands, identityConditions(q)...)
 	where := and(operands...)
@@ -1116,8 +1271,15 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		rowsBySegment[row.SegmentID] = append(rowsBySegment[row.SegmentID], row)
 	}
 
+	type pendingSpec struct {
+		object    projectionObject
+		anchorID  string
+		replacing bool
+		revision  int64
+	}
 	var replacements []string
-	pending := make([]projectionObject, 0, len(segments))
+	specs := make([]pendingSpec, 0, len(segments))
+	anchorIDs := make([]string, 0, len(segments))
 	var existing []projectionObject
 	for _, segment := range segments {
 		object, err := s.embeddingObject(g, org, segment, bySegment[segment])
@@ -1168,13 +1330,23 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 		if snapshot.Additional.ID != "" {
 			anchorID = snapshot.Additional.ID
 		}
-		anchor, projected, err := s.object(ctx, g.Collection, anchorID)
-		if err != nil {
-			return err
+		if replacing && revision >= math.MaxInt32 {
+			return errors.New("embedding revision exhausted")
 		}
+		specs = append(specs, pendingSpec{object: object, anchorID: anchorID, replacing: replacing, revision: revision})
+		anchorIDs = append(anchorIDs, anchorID)
+	}
+	anchors, err := s.fetchAnchors(ctx, g.Collection, anchorIDs)
+	if err != nil {
+		return err
+	}
+	pending := make([]projectionObject, 0, len(specs))
+	for _, spec := range specs {
+		anchor, projected := anchors[spec.anchorID]
 		if !projected {
 			return retrieval.ErrProjectionMissing
 		}
+		object := spec.object
 		for _, key := range lexicalProperties {
 			// A legacy anchor may have no value to copy.
 			if value, ok := anchor.Properties[key]; ok {
@@ -1189,11 +1361,8 @@ func (s *Store) publishEmbeddingBatch(ctx context.Context, g content.Generation,
 				object.Properties[key] = value
 			}
 		}
-		if replacing {
-			if revision >= math.MaxInt32 {
-				return errors.New("embedding revision exhausted")
-			}
-			object.Properties[embeddingRevision] = revision + 1
+		if spec.replacing {
+			object.Properties[embeddingRevision] = spec.revision + 1
 		}
 		pending = append(pending, object)
 	}

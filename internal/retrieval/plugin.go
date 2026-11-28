@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -143,11 +144,42 @@ func invocationID() string {
 	return "search-" + hex.EncodeToString(b[:])
 }
 
-func isDeepProfile(requested, local string) bool {
-	if requested == DefaultProfile {
+func fallbackDisabledByConfig(raw json.RawMessage) bool {
+	if len(raw) == 0 {
 		return false
 	}
-	return requested == "deep" || local == "deep" || strings.HasSuffix(requested, "/deep")
+	var cfg struct {
+		FallbackOnError *bool `json:"fallback_on_error"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return false
+	}
+	return cfg.FallbackOnError != nil && !*cfg.FallbackOnError
+}
+
+func (s Service) canFallbackToDefault(defRanker Ranker, defLocal, local string) bool {
+	if s.DisableProfileFallback || defRanker == nil || s.Ranker == nil {
+		return false
+	}
+	dm := defRanker.Manifest()
+	m := s.Ranker.Manifest()
+	if dm.ID == m.ID && defLocal == local {
+		return false
+	}
+	if fallbackDisabledByConfig(s.Ranker.Configuration()) {
+		return false
+	}
+	return true
+}
+
+// fallbackContext bounds a fallback default search to both the default
+// profile's deadline and the remaining whole-search cap under HTTP WriteTimeout.
+func fallbackContext(parentCtx context.Context, started time.Time, defRanker Ranker, defLocal string) (context.Context, context.CancelFunc) {
+	bound := time.Now().Add(defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+	if searchCap := started.Add(plugins.RetrievalDeadlineCap); searchCap.Before(bound) {
+		bound = searchCap
+	}
+	return context.WithDeadline(parentCtx, bound)
 }
 
 // rank answers a search through the pinned retrieval plugin: each round the
@@ -160,18 +192,17 @@ func isDeepProfile(requested, local string) bool {
 // began authorizing and routing.
 func (s Service) rank(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain) (Result, error) {
 	defRanker, defLocal, hasDefault := s.resolveProfile(DefaultProfile)
-	canFallback := isDeepProfile(out.Profile, q.Profile) && hasDefault &&
-		(defRanker.Manifest().ID != s.Ranker.Manifest().ID || defLocal != q.Profile)
+	canFallback := hasDefault && s.canFallbackToDefault(defRanker, defLocal, q.Profile)
 	if canFallback && (parentCtx == nil || parentCtx.Err() == nil) {
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < s.minRerankBudget() {
-			slog.WarnContext(ctx, "deep search degraded to default before reranking due to tight deadline",
+			slog.WarnContext(ctx, "search profile degraded to default before reranking due to tight deadline",
 				"component", "search", "profile", out.Profile, "remaining_ms", max(0, time.Until(deadline).Milliseconds()))
-			fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+			fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 			defer cancel()
 			return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, nil, defRanker, defLocal, DegradationRerankerBudgetExceeded)
 		}
 	}
-	chain.enforce = s.Ranker.Manifest().SupportsSearchBudget()
+	chain.setEnforce(s.Ranker.Manifest().SupportsSearchBudget())
 	return s.rankProfile(ctx, parentCtx, scope, q, routes, out, started, chain, nil, nil, canFallback)
 }
 
@@ -182,7 +213,7 @@ func (s Service) runDefaultFallback(ctx context.Context, scope corpus.Scope, q R
 	if chain == nil {
 		chain = &searchChain{}
 	}
-	chain.enforce = defRanker.Manifest().SupportsSearchBudget()
+	chain.setEnforce(defRanker.Manifest().SupportsSearchBudget())
 	res, err := fb.rankProfile(ctx, ctx, scope, q, routes, out, started, chain, nil, timing, false)
 	if err != nil {
 		return res, err
@@ -200,16 +231,30 @@ func (s Service) isDefaultResolved(m *plugins.Manifest, localProfile string) boo
 }
 
 func (s Service) degradeToSavedFallback(ctx context.Context, out Result, q Request, routes []Route, fallback *Result, reason string, chain *searchChain, timing *Phases, started time.Time, rounds int, profile plugins.RetrievalProfile) Result {
-	slog.WarnContext(ctx, "deep search degraded to default hybrid results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
+	slog.WarnContext(ctx, "search profile degraded to default results", "component", "search", "profile", out.Profile, "fallback_version", fallback.ProfileVersion, "reason", reason)
 	out.ProfileVersion = fallback.ProfileVersion
 	out.Hits = append([]Hit{}, fallback.Hits[:min(len(fallback.Hits), q.Limit)]...)
 	out.Degraded = appendDegradation(chain.degradations(), reason, routes)
-	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), DefaultProfile: false, Phases: *timing}
-	for _, f := range chain.profiles {
-		out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
-	}
+	paidCalls, costCents, profiles := chain.snapshotUsage()
+	out.Usage = &Usage{Rounds: max(rounds, 1), Elapsed: time.Since(started), PaidCalls: paidCalls, CostCents: costCents, Objective: profile.Objective(), DefaultProfile: false, Phases: *timing, Profiles: profiles}
 	out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective()
 	return out
+}
+
+func (s Service) buildUsage(m *plugins.Manifest, localProfile string, started time.Time, timing *Phases, chain *searchChain, profile plugins.RetrievalProfile, rounds int) *Usage {
+	paidCalls, costCents, profiles := chain.snapshotUsage()
+	u := &Usage{
+		Rounds:         rounds,
+		Elapsed:        time.Since(started),
+		PaidCalls:      paidCalls,
+		CostCents:      costCents,
+		Objective:      profile.Objective(),
+		DefaultProfile: s.isDefaultResolved(m, localProfile),
+		Phases:         *timing,
+		Profiles:       profiles,
+	}
+	u.OverObjective = u.Elapsed > profile.Objective()
+	return u
 }
 
 func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend, carriedTiming *Phases, canFallback bool) (Result, error) {
@@ -221,7 +266,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	}
 	out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
 	spend := &profileSpend{max: profile.MaxCostCents, usage: ProfileUsage{Profile: m.ID + "/" + q.Profile, PluginVersion: m.Version}}
-	chain.profiles = append(chain.profiles, spend)
+	chain.addProfile(spend)
 	frames := append(slices.Clone(ancestors), spend)
 	query, err := normalizeQuery(q.Query)
 	if err != nil {
@@ -231,6 +276,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	plan, err := s.searchSpaces(ctx, scope.Organization, routes, q.Mode == "hybrid" && q.EvaluationPlugin == "")
 	timing.Coverage += time.Since(phase)
 	if err != nil {
+		out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, 0)
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
 	spaces := plan.spaces
@@ -260,12 +306,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		return out, ErrUnsupported
 	}
 	if q.Mode == "hybrid" && q.EvaluationPlugin == "" && len(plan.fallback) > 0 {
-		if chain.degraded == nil {
-			chain.degraded = map[string]bool{}
-		}
-		for _, route := range plan.fallback {
-			chain.degraded[route.CorpusID] = true
-		}
+		chain.addDegraded(plan.fallback)
 		if !slices.ContainsFunc(spaces, func(sp plugins.SearchSpace) bool { return sp.Role == content.SpaceServed }) {
 			q.Mode = "lexical"
 		}
@@ -280,7 +321,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, plan: plan, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames, requestedProfile: out.Profile, localProfile: q.Profile, canFallback: canFallback}
 	for {
 		callerDone := parentCtx != nil && parentCtx.Err() != nil
 		if sv.fallback != nil && !callerDone {
@@ -292,11 +333,13 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			}
 		}
 		if ctx.Err() != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round()-1)
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
-		if sv.chain.visibleCandidates != nil {
+		if sv.chain.hasVisibleCandidates() {
 			allowed, err := sv.recheckServed(ctx, q, session.Request().Served)
 			if err != nil {
+				out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round()-1)
 				return out, s.unserved(ctx, m.ID, err, timing)
 			}
 			if !allowed {
@@ -314,7 +357,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		}
 		if m.SupportsSearchBudget() {
 			deadline, _ := ctx.Deadline()
-			request.Budget = &plugins.SearchBudget{RemainingTimeMS: int(max(0, time.Until(deadline).Milliseconds())), RemainingCostCents: remainingCost(frames)}
+			request.Budget = &plugins.SearchBudget{RemainingTimeMS: int(max(0, time.Until(deadline).Milliseconds())), RemainingCostCents: chain.remainingCost(frames)}
 		}
 		body, err := s.Ranker.Round(ctx, request)
 		timing.PluginRounds += time.Since(phase)
@@ -323,8 +366,10 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
 			// The plugin refuses this query: it can never be answered.
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, ErrUnsupported
 		case errors.Is(err, ErrPluginInvalid):
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, err
 		default:
 			reason := DegradationRerankerUnavailable
@@ -336,21 +381,24 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			}
 			if canFallback && len(ancestors) == 0 && !callerDone && parentCtx != nil {
 				if defRanker, defLocal, ok := s.resolveProfile(DefaultProfile); ok {
-					slog.WarnContext(ctx, "deep search degraded to default after reranker failure", "component", "search", "profile", out.Profile, "reason", reason)
-					fallbackCtx, cancel := context.WithTimeout(parentCtx, defRanker.Manifest().Contributions.Retrieval.Profiles[defLocal].Deadline())
+					slog.WarnContext(ctx, "search profile degraded to default after reranker failure", "component", "search", "profile", out.Profile, "plugin", m.ID, "reason", reason)
+					fallbackCtx, cancel := fallbackContext(parentCtx, started, defRanker, defLocal)
 					defer cancel()
 					return s.runDefaultFallback(fallbackCtx, scope, q, routes, out, started, chain, timing, defRanker, defLocal, reason)
 				}
 			}
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
 			slog.WarnContext(ctx, "retrieval plugin answer refused", "component", "search", "plugin", m.ID, "round", session.Round(), "code", issues[0].Code, "path", issues[0].Path, "detail", issues[0].Message)
-			return out, fmt.Errorf("%w: %s %s", ErrPluginInvalid, issues[0].Code, issues[0].Message)
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
+			return out, fmt.Errorf("%w: plugin %s: %s %s", ErrPluginInvalid, m.ID, issues[0].Code, issues[0].Message)
 		}
-		spend.usage.Rounds = session.Round()
+		chain.setRounds(spend, session.Round())
 		if err := chain.record(frames, answer.Usage); err != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, err
 		}
 		if ctx.Err() != nil {
@@ -358,6 +406,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			if sv.fallback != nil && !callerDone && errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 				return s.degradeToSavedFallback(ctx, out, q, routes, sv.fallback, DegradationRerankerBudgetExceeded, chain, timing, started, session.Round(), profile), nil
 			}
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
 			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		if answer.Ranking != nil {
@@ -365,11 +414,8 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			for _, h := range answer.Ranking.Hits {
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Objective: profile.Objective(), DefaultProfile: s.isDefaultResolved(m, q.Profile), Phases: *timing}
-			for _, f := range chain.profiles {
-				out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
-			}
-			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
+			if out.Usage.OverObjective {
 				slog.WarnContext(ctx, "search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
 			}
@@ -378,11 +424,10 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 			}
 			return out, nil
 		}
-		served := make([][]plugins.Candidate, len(answer.Requests))
-		for i, request := range answer.Requests {
-			if served[i], err = sv.serve(ctx, q, request); err != nil {
-				return out, s.unserved(ctx, m.ID, err, timing)
-			}
+		served, err := sv.serveRound(ctx, q, answer.Requests)
+		if err != nil {
+			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
+			return out, s.unserved(ctx, m.ID, err, timing)
 		}
 		session.Serve(invocationID(), answer.Requests, served)
 	}
@@ -393,9 +438,9 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
-		return ErrDeadline
+		return fmt.Errorf("plugin %s: %w", plugin, ErrDeadline)
 	}
-	return err
+	return fmt.Errorf("plugin %s: %w", plugin, err)
 }
 
 // unserved reports a failure of the engine to serve candidates as it is,
@@ -407,7 +452,7 @@ func (s Service) unserved(ctx context.Context, plugin string, err error, timing 
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
-	return err
+	return fmt.Errorf("plugin %s: %w", plugin, err)
 }
 
 // Phases is the time one search spent in each of its phases: authorizing and
@@ -416,6 +461,45 @@ func (s Service) unserved(ctx context.Context, plugin string, err error, timing 
 // from canonical storage.
 type Phases struct {
 	Routing, Coverage, PluginRounds, QueryEncoding, IndexQuery, Hydration time.Duration
+}
+
+// add accumulates phase durations into p.
+func (p *Phases) add(other Phases) {
+	p.Routing += other.Routing
+	p.Coverage += other.Coverage
+	p.PluginRounds += other.PluginRounds
+	p.QueryEncoding += other.QueryEncoding
+	p.IndexQuery += other.IndexQuery
+	p.Hydration += other.Hydration
+}
+
+// mergeWavePhases summarizes a concurrent wave of per-leg phases without
+// exceeding the wave's wall-clock elapsed time.
+func mergeWavePhases(legs []Phases, wall time.Duration) Phases {
+	var merged Phases
+	for _, leg := range legs {
+		merged.Coverage = max(merged.Coverage, leg.Coverage)
+		merged.PluginRounds = max(merged.PluginRounds, leg.PluginRounds)
+		merged.QueryEncoding = max(merged.QueryEncoding, leg.QueryEncoding)
+		merged.IndexQuery = max(merged.IndexQuery, leg.IndexQuery)
+		merged.Hydration = max(merged.Hydration, leg.Hydration)
+	}
+	total := merged.Coverage + merged.PluginRounds + merged.QueryEncoding + merged.IndexQuery + merged.Hydration
+	if total <= wall || total <= 0 {
+		return merged
+	}
+	if wall <= 0 {
+		return Phases{}
+	}
+	scale := func(d time.Duration) time.Duration {
+		return time.Duration(float64(d) * float64(wall) / float64(total))
+	}
+	merged.Coverage = scale(merged.Coverage)
+	merged.PluginRounds = scale(merged.PluginRounds)
+	merged.QueryEncoding = scale(merged.QueryEncoding)
+	merged.IndexQuery = scale(merged.IndexQuery)
+	merged.Hydration = scale(merged.Hydration)
+	return merged
 }
 
 // attrs are the phases as log attributes, preceded by the slowest one.
@@ -543,13 +627,14 @@ func nonNil(v []string) []string {
 // maxHydrationBatches bounds the hydration batches of one candidate request.
 const maxHydrationBatches = 3
 
-// server serves the candidate requests of one search, one at a time.
+// server serves the candidate requests of one search.
 type server struct {
 	s      Service
 	scope  corpus.Scope
 	routes []Route
 	spaces []plugins.SearchSpace
 	plan   spacePlan
+	mu     sync.Mutex
 	// hydrated caches the segments hydrated earlier in the search.
 	hydrated map[string]content.Hydrated
 	// vectors caches query encodings when no pin-aware encoder is configured.
@@ -557,26 +642,184 @@ type server struct {
 	// keywordCandidates avoids querying the same fallback partition for every
 	// healthy space. Keys include the full effective lexical request.
 	keywordCandidates map[string][]content.Candidate
+	keywordFlights    map[string]*keywordCall
 	timing            *Phases
 	chain             *searchChain
 	frames            []*profileSpend
 	requestedProfile  string
 	localProfile      string
+	canFallback       bool
 	fallback          *Result
 }
 
-// serve runs one candidate request through the projection and hydrates what
-// it finds: only authorized, current segments of the routed generations
-// reach the plugin, best first, once each.
-func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateRequest) ([]plugins.Candidate, error) {
-	if c.Primitive == plugins.PrimitiveProfile {
-		return sv.serveProfile(ctx, q, c)
+type keywordCall struct {
+	done chan struct{}
+	res  []content.Candidate
+	err  error
+}
+
+type fetchedCandidates struct {
+	unique         []content.Candidate
+	vectorRoutes   []Route
+	fallbackRoutes []Route
+	phases         Phases
+}
+
+// serveRound executes all candidate requests of one round. When a round issues
+// multiple requests, candidate fetching (encoding, index search, composed
+// profiles) runs concurrently while preserving deterministic served order and
+// lowest-index error precedence, and overlapping segments across requests are
+// hydrated together per wave.
+func (sv *server) serveRound(ctx context.Context, q Request, requests []plugins.CandidateRequest) ([][]plugins.Candidate, error) {
+	if len(requests) == 0 {
+		return [][]plugins.Candidate{}, nil
 	}
+	if len(requests) == 1 {
+		c := requests[0]
+		if c.Primitive == plugins.PrimitiveProfile {
+			cands, fb, phases, err := sv.serveProfile(ctx, q, c)
+			if err != nil {
+				return nil, err
+			}
+			if fb != nil && sv.fallback == nil {
+				sv.fallback = fb
+			}
+			sv.timing.add(phases)
+			return [][]plugins.Candidate{cands}, nil
+		}
+		fc, err := sv.fetchCandidates(ctx, q, c)
+		sv.timing.add(fc.phases)
+		if err != nil {
+			return nil, err
+		}
+		sv.chain.addVectors(fc.vectorRoutes)
+		sv.chain.addDegraded(fc.fallbackRoutes)
+		served := make([][]plugins.Candidate, 1)
+		if err := sv.hydrateRound(ctx, q, requests, []*fetchedCandidates{fc}, served); err != nil {
+			return nil, err
+		}
+		return served, nil
+	}
+
+	n := len(requests)
+	served := make([][]plugins.Candidate, n)
+	fetched := make([]*fetchedCandidates, n)
+	fallbacks := make([]*Result, n)
+	legPhases := make([]Phases, n)
+	errs := make([]error, n)
+	ctxs := make([]context.Context, n)
+	cancels := make([]context.CancelFunc, n)
+	for i := range n {
+		ctxs[i], cancels[i] = context.WithCancel(ctx)
+	}
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
+
+	profileIndices := make([]int, 0, n)
+	for i, c := range requests {
+		if c.Primitive == plugins.PrimitiveProfile {
+			profileIndices = append(profileIndices, i)
+		}
+	}
+	// When a round composes multiple profile requests, execute those profile
+	// calls sequentially in index order so each sees the exact remaining cost
+	// allowance after preceding paid work, while still running primitive legs
+	// concurrently alongside them.
+	serializeProfiles := len(profileIndices) > 1
+
+	fetchStart := time.Now()
+	var wg sync.WaitGroup
+	for i, c := range requests {
+		if serializeProfiles && c.Primitive == plugins.PrimitiveProfile {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, c plugins.CandidateRequest) {
+			defer wg.Done()
+			var err error
+			if c.Primitive == plugins.PrimitiveProfile {
+				served[i], fallbacks[i], legPhases[i], err = sv.serveProfile(ctxs[i], q, c)
+			} else {
+				var fc *fetchedCandidates
+				fc, err = sv.fetchCandidates(ctxs[i], q, c)
+				fetched[i] = fc
+				if fc != nil {
+					legPhases[i] = fc.phases
+				}
+			}
+			if err != nil {
+				errs[i] = err
+				// Cancel only higher-index requests so lower-index error
+				// precedence is never poisoned by a sibling cancellation.
+				for j := i + 1; j < n; j++ {
+					cancels[j]()
+				}
+			}
+		}(i, c)
+	}
+	if serializeProfiles {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var serialPhases Phases
+			for _, i := range profileIndices {
+				if ctxs[i].Err() != nil {
+					errs[i] = ctxs[i].Err()
+					break
+				}
+				var ph Phases
+				var err error
+				served[i], fallbacks[i], ph, err = sv.serveProfile(ctxs[i], q, requests[i])
+				serialPhases.add(ph)
+				if err != nil {
+					errs[i] = err
+					for j := i + 1; j < n; j++ {
+						cancels[j]()
+					}
+					break
+				}
+			}
+			// Attribute sequential profile legs as one summed concurrent lane
+			// so mergeWavePhases does not collapse their sequential durations via max.
+			legPhases[profileIndices[0]] = serialPhases
+		}()
+	}
+	wg.Wait()
+	sv.timing.add(mergeWavePhases(legPhases, time.Since(fetchStart)))
+
+	for i := range n {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+	}
+	for i := range n {
+		if fallbacks[i] != nil && sv.fallback == nil {
+			sv.fallback = fallbacks[i]
+		}
+		if fc := fetched[i]; fc != nil {
+			sv.chain.addVectors(fc.vectorRoutes)
+			sv.chain.addDegraded(fc.fallbackRoutes)
+		}
+	}
+	if err := sv.hydrateRound(ctx, q, requests, fetched, served); err != nil {
+		return nil, err
+	}
+	return served, nil
+}
+
+// fetchCandidates runs one non-profile candidate request through query
+// encoding and the projection, returning deduplicated index candidates in best-
+// first order without mutating sv.timing or sv.chain.
+func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.CandidateRequest) (*fetchedCandidates, error) {
+	fc := &fetchedCandidates{}
 	text := c.QueryText
 	if text != "" {
 		normalized, err := normalizeQuery(text)
 		if err != nil {
-			return nil, ErrUnsupported
+			return fc, ErrUnsupported
 		}
 		text = normalized
 	}
@@ -585,7 +828,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		pq.SourceNamespaces = c.Filter.SourceNamespaces
 		for _, r := range sv.routes {
 			if !r.Generation.SourceNamespaceProjected {
-				return nil, ErrSourceFilterUnavailable
+				return fc, ErrSourceFilterUnavailable
 			}
 		}
 	}
@@ -620,9 +863,10 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		if c.Vector != nil {
 			pq.Vector = plugins.Float32s(c.Vector)
 		} else {
-			vector, err := sv.encode(ctx, c.Space, text, routes)
+			vector, elapsed, err := sv.encode(ctx, c.Space, text)
+			fc.phases.QueryEncoding += elapsed
 			if err != nil {
-				return nil, err
+				return fc, err
 			}
 			pq.Vector = vector
 		}
@@ -632,7 +876,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 	}
 	search := func(routes []Route, request Request) ([]content.Candidate, error) {
 		phase := time.Now()
-		defer func() { sv.timing.IndexQuery += time.Since(phase) }()
+		defer func() { fc.phases.IndexQuery += time.Since(phase) }()
 		return sv.s.Projection.Search(ctx, routes, sv.scope, request)
 	}
 	found := []content.Candidate{}
@@ -640,15 +884,10 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		var err error
 		found, err = search(routes, pq)
 		if err != nil {
-			return nil, ErrUnavailable
+			return fc, ErrUnavailable
 		}
 		if q.EvaluationPlugin == "" && pq.Mode != "lexical" {
-			if sv.chain.vectors == nil {
-				sv.chain.vectors = map[string]bool{}
-			}
-			for _, route := range routes {
-				sv.chain.vectors[route.CorpusID] = true
-			}
+			fc.vectorRoutes = routes
 		}
 	}
 	if len(fallback) > 0 {
@@ -660,29 +899,62 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		}
 		key, err := json.Marshal(keywords)
 		if err != nil {
-			return nil, ErrUnsupported
+			return fc, ErrUnsupported
 		}
-		more, cached := sv.keywordCandidates[string(key)]
-		if _, enforced := visibility.Principals(ctx); !cached || enforced {
+		var more []content.Candidate
+		if _, enforced := visibility.Principals(ctx); enforced {
 			more, err = search(fallback, keywords)
 			if err != nil {
-				return nil, ErrUnavailable
+				return fc, ErrUnavailable
 			}
-			if sv.keywordCandidates == nil {
-				sv.keywordCandidates = map[string][]content.Candidate{}
+		} else {
+			k := string(key)
+			sv.mu.Lock()
+			if cached, ok := sv.keywordCandidates[k]; ok {
+				more = cached
+				sv.mu.Unlock()
+			} else if flight, ok := sv.keywordFlights[k]; ok {
+				sv.mu.Unlock()
+				select {
+				case <-flight.done:
+					if flight.err != nil {
+						return fc, ErrUnavailable
+					}
+					more = flight.res
+				case <-ctx.Done():
+					return fc, ErrUnavailable
+				}
+			} else {
+				flight := &keywordCall{done: make(chan struct{})}
+				if sv.keywordFlights == nil {
+					sv.keywordFlights = map[string]*keywordCall{}
+				}
+				sv.keywordFlights[k] = flight
+				sv.mu.Unlock()
+
+				res, searchErr := search(fallback, keywords)
+				flight.res, flight.err = res, searchErr
+				sv.mu.Lock()
+				delete(sv.keywordFlights, k)
+				if searchErr == nil {
+					if sv.keywordCandidates == nil {
+						sv.keywordCandidates = map[string][]content.Candidate{}
+					}
+					sv.keywordCandidates[k] = res
+				}
+				sv.mu.Unlock()
+				close(flight.done)
+				if searchErr != nil {
+					return fc, ErrUnavailable
+				}
+				more = res
 			}
-			sv.keywordCandidates[string(key)] = more
 		}
 		if !pq.RankAcrossRoutes {
 			found, more = NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)
 		}
 		found = append(found, more...)
-		if sv.chain.degraded == nil {
-			sv.chain.degraded = map[string]bool{}
-		}
-		for _, route := range fallback {
-			sv.chain.degraded[route.CorpusID] = true
-		}
+		fc.fallbackRoutes = fallback
 		slices.SortStableFunc(found, func(a, b content.Candidate) int {
 			return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.SegmentID, b.SegmentID))
 		})
@@ -692,7 +964,6 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		routed[r.Generation.ID] = r
 	}
 	// Keep the first object of each segment: the index returns the best first.
-	var unique []content.Candidate
 	seen := map[string]bool{}
 	for _, f := range found {
 		if _, ok := routed[f.GenerationID]; !ok || seen[f.SegmentID] {
@@ -700,65 +971,160 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		}
 		seen[f.SegmentID] = true
 		f.EvaluationPlugin, f.EvaluationSpace = q.EvaluationPlugin, q.Space
-		unique = append(unique, f)
+		fc.unique = append(fc.unique, f)
 	}
-	out := []plugins.Candidate{}
-	outHydrated := []content.Hydrated{}
-	records := map[string]bool{}
-	// Hydrate in index order, a batch at a time, until k candidates are kept.
-	// The first batch is the k best: when hydration keeps them all, as it
-	// usually does, a candidate further down is never read. A further batch
-	// is sized from the share of candidates kept so far, and the last allowed
-	// takes every candidate left, so a page costs at most maxHydrationBatches.
-	for batch, next := 1, 0; next < len(unique) && len(out) < c.K; batch++ {
-		size := c.K - len(out)
-		if next > 0 {
-			if len(out) == 0 || batch == maxHydrationBatches {
-				size = len(unique)
-			} else {
-				size = max(size, (size*next+len(out)-1)/len(out))
+	return fc, nil
+}
+
+// hydrateRound hydrates fetched candidates across all non-profile requests in
+// the round wave-by-wave, coalescing overlapping SegmentIDs into one batch
+// lookup per wave so Postgres and blob reads are never duplicated across legs.
+func (sv *server) hydrateRound(ctx context.Context, q Request, requests []plugins.CandidateRequest, fetched []*fetchedCandidates, served [][]plugins.Candidate) error {
+	type legState struct {
+		next     int
+		out      []plugins.Candidate
+		hydrated []content.Hydrated
+		records  map[string]bool
+	}
+	routed := make(map[string]Route, len(sv.routes))
+	for _, r := range sv.routes {
+		routed[r.Generation.ID] = r
+	}
+	states := make([]*legState, len(requests))
+	active := false
+	for i, fc := range fetched {
+		if fc == nil {
+			continue
+		}
+		states[i] = &legState{out: []plugins.Candidate{}, hydrated: []content.Hydrated{}, records: map[string]bool{}}
+		if len(fc.unique) > 0 && requests[i].K > 0 {
+			active = true
+		}
+	}
+	if !active {
+		for i, st := range states {
+			if st != nil {
+				served[i] = st.out
 			}
 		}
-		wave := unique[next:min(len(unique), next+size)]
-		next += len(wave)
+		return nil
+	}
+
+	type hydrateKey struct {
+		segmentID        string
+		generationID     string
+		evaluationPlugin string
+		evaluationSpace  string
+	}
+	type legWave struct {
+		candidates []content.Candidate
+		indices    []int
+	}
+
+	for batch := 1; ; batch++ {
+		waves := make([]legWave, len(requests))
+		var combined []content.Candidate
+		dedup := map[hydrateKey]int{}
+		for i, st := range states {
+			if st == nil {
+				continue
+			}
+			unique := fetched[i].unique
+			c := requests[i]
+			if st.next >= len(unique) || len(st.out) >= c.K {
+				continue
+			}
+			size := c.K - len(st.out)
+			if st.next > 0 {
+				if len(st.out) == 0 || batch == maxHydrationBatches {
+					size = len(unique)
+				} else {
+					size = max(size, (size*st.next+len(st.out)-1)/len(st.out))
+				}
+			}
+			wave := unique[st.next:min(len(unique), st.next+size)]
+			st.next += len(wave)
+			idxs := make([]int, len(wave))
+			for j, f := range wave {
+				key := hydrateKey{
+					segmentID:        f.SegmentID,
+					generationID:     f.GenerationID,
+					evaluationPlugin: f.EvaluationPlugin,
+					evaluationSpace:  f.EvaluationSpace,
+				}
+				idx, ok := dedup[key]
+				if !ok {
+					idx = len(combined)
+					dedup[key] = idx
+					combined = append(combined, f)
+				}
+				idxs[j] = idx
+			}
+			waves[i] = legWave{candidates: wave, indices: idxs}
+		}
+		if len(combined) == 0 {
+			break
+		}
 		phase := time.Now()
-		hydrated, err := sv.hydrate(ctx, wave)
+		hydrated, err := sv.hydrate(ctx, combined)
 		sv.timing.Hydration += time.Since(phase)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		for i, f := range wave {
-			h, ok := hydrated[i]
-			if !ok {
+		for i, wave := range waves {
+			if len(wave.candidates) == 0 {
 				continue
 			}
-			// A vector hit on the served space counts only with its embedding
-			// coverage, as in a semantic search.
-			if c.Primitive == plugins.PrimitiveNearVector && (routed[f.GenerationID].Generation.Serves(c.Space) || q.EvaluationPlugin != "") && h.EmbeddingID == "" {
-				continue
-			}
-			if c.GroupBy == plugins.GroupByRecord {
-				if records[h.RecordID] {
+			st := states[i]
+			c := requests[i]
+			for j, f := range wave.candidates {
+				h, ok := hydrated[wave.indices[j]]
+				if !ok {
 					continue
 				}
-				records[h.RecordID] = true
-			}
-			out = append(out, sv.candidate(h, f.Score, ""))
-			outHydrated = append(outHydrated, h)
-			if sv.chain.visibleCandidates != nil {
-				sv.chain.visibleCandidates[visibilityCandidate(h, q)] = struct{}{}
-			}
-			if len(out) == c.K {
-				break
+				// A vector hit on the served space counts only with its embedding
+				// coverage, as in a semantic search.
+				if c.Primitive == plugins.PrimitiveNearVector && (routed[f.GenerationID].Generation.Serves(c.Space) || q.EvaluationPlugin != "") && h.EmbeddingID == "" {
+					continue
+				}
+				if c.GroupBy == plugins.GroupByRecord {
+					if st.records[h.RecordID] {
+						continue
+					}
+					st.records[h.RecordID] = true
+				}
+				st.out = append(st.out, sv.candidate(h, f.Score, ""))
+				st.hydrated = append(st.hydrated, h)
+				sv.chain.addVisibleCandidate(visibilityCandidate(h, q))
+				if len(st.out) == c.K {
+					break
+				}
 			}
 		}
 	}
-	if c.IncludeLead && sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
-		if err := sv.attachLeads(ctx, q, out, outHydrated); err != nil {
-			return nil, err
+	if sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		var leadOuts [][]plugins.Candidate
+		var leadHydrated [][]content.Hydrated
+		for i, st := range states {
+			if st != nil && requests[i].IncludeLead && len(st.out) > 0 {
+				leadOuts = append(leadOuts, st.out)
+				leadHydrated = append(leadHydrated, st.hydrated)
+			}
+		}
+		if len(leadOuts) > 0 {
+			leadDur, err := sv.attachLeadsBatch(ctx, q, leadOuts, leadHydrated)
+			sv.timing.Hydration += leadDur
+			if err != nil {
+				return err
+			}
 		}
 	}
-	return out, nil
+	for i, st := range states {
+		if st != nil {
+			served[i] = st.out
+		}
+	}
+	return nil
 }
 
 // fetch is how many projected objects serving k candidates asks the index
@@ -780,6 +1146,7 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 	_, enforced := visibility.Principals(ctx)
 	var batch []content.Candidate
 	var at []int
+	sv.mu.Lock()
 	for i, f := range found {
 		if h, cached := sv.hydrated[f.SegmentID]; cached && !enforced {
 			out[i] = h
@@ -787,6 +1154,7 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 		}
 		batch, at = append(batch, f), append(at, i)
 	}
+	sv.mu.Unlock()
 	if len(batch) == 0 {
 		return out, nil
 	}
@@ -794,45 +1162,51 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 	if err != nil {
 		return nil, ErrUnavailable
 	}
+	sv.mu.Lock()
 	for j, h := range hydrated {
 		out[at[j]] = h
 		sv.hydrated[h.Segment.ID] = h
 	}
+	sv.mu.Unlock()
 	return out, nil
 }
 
 // encode encodes a query with the owner of a space: the engine's E5 encoder
 // for the legacy space that Corpora not yet rebuilt since THE-777 serve, the
 // pinned ingestion plugin for its own.
-func (sv *server) encode(ctx context.Context, space, text string, routes []Route) ([]float32, error) {
-	generations := queryGenerations(routes)
+func (sv *server) encode(ctx context.Context, space, text string) ([]float32, time.Duration, error) {
 	// The serving registration can change between candidate rounds. Let
 	// encodeQuery resolve it before consulting the shared cache.
 	_, pinAware := sv.s.Spaces.(pinnedQueryEncoder)
 	var key string
 	if !pinAware {
-		key = queryVectorKey(space, generations, text)
-		if v, ok := sv.vectors[key]; ok {
-			return v, nil
+		key = queryVectorKey(space, text)
+		sv.mu.Lock()
+		v, ok := sv.vectors[key]
+		sv.mu.Unlock()
+		if ok {
+			return v, 0, nil
 		}
 	}
 	started := time.Now()
-	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
-	vector, err := sv.s.encodeQuery(ctx, sv.scope.Organization, space, generations, text)
+	vector, err := sv.s.encodeQuery(ctx, sv.scope.Organization, space, text)
+	elapsed := time.Since(started)
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) {
-			return nil, ErrModelUnavailable
+			return nil, elapsed, ErrModelUnavailable
 		}
-		return nil, err
+		return nil, elapsed, err
 	}
 	if !pinAware {
+		sv.mu.Lock()
 		sv.vectors[key] = vector
+		sv.mu.Unlock()
 	}
-	return vector, nil
+	return vector, elapsed, nil
 }
 
 func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
-	return s.encodeQuery(ctx, org, space, "", text)
+	return s.encodeQuery(ctx, org, space, text)
 }
 
 // A live encoder must return the actual serving encoder alongside its identity.
@@ -842,14 +1216,14 @@ type pinnedQueryEncoder interface {
 	ResolveQueryEncoder(context.Context, string) (QueryEncoder, string, error)
 }
 
-func (s Service) encodeQuery(ctx context.Context, org, space, generations, text string) ([]float32, error) {
+func (s Service) encodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
 	if ctx.Err() != nil {
 		return nil, ErrUnavailable
 	}
 	switch {
 	case s.Embedder != nil && space == s.Embedder.Space().ID:
 		// The legacy space ID identifies the engine's pinned model and template.
-		return s.QueryVectors.encode(ctx, queryVectorKey("engine", org, space, generations, text), func(ctx context.Context) ([]float32, error) {
+		return s.QueryVectors.encode(ctx, queryVectorKey("engine", org, space, text), func(ctx context.Context) ([]float32, error) {
 			vector, err := s.Embedder.Embed(ctx, "query: "+text)
 			if err != nil {
 				return nil, ErrUnavailable
@@ -865,7 +1239,7 @@ func (s Service) encodeQuery(ctx context.Context, org, space, generations, text 
 				return nil, ErrUnavailable
 			}
 			if encoder != nil {
-				return s.QueryVectors.encode(ctx, queryVectorKey("plugin", org, space, generations, pin, text), func(ctx context.Context) ([]float32, error) {
+				return s.QueryVectors.encode(ctx, queryVectorKey("plugin", org, space, pin, text), func(ctx context.Context) ([]float32, error) {
 					return encodePluginQuery(ctx, encoder, org, space, text)
 				})
 			}
@@ -962,76 +1336,102 @@ func truncateRunes(s string, maxRunes int) string {
 // attachLeads hydrates the opening (ordinal 0) text segment for each served
 // candidate whose passage_ordinal > 0, reusing the search's hydration cache and
 // enforcing every canonical authorization, currentness, and routing fence.
-func (sv *server) attachLeads(ctx context.Context, q Request, out []plugins.Candidate, hydrated []content.Hydrated) error {
+// It returns the hydration time spent rather than mutating sv.timing so callers
+// running in concurrent round goroutines (such as serveProfile) stay race-free.
+func (sv *server) attachLeads(ctx context.Context, q Request, out []plugins.Candidate, hydrated []content.Hydrated) (time.Duration, error) {
 	if len(out) == 0 || len(out) != len(hydrated) {
-		return nil
+		return 0, nil
+	}
+	return sv.attachLeadsBatch(ctx, q, [][]plugins.Candidate{out}, [][]content.Hydrated{hydrated})
+}
+
+func (sv *server) attachLeadsBatch(ctx context.Context, q Request, outs [][]plugins.Candidate, hydrateds [][]content.Hydrated) (time.Duration, error) {
+	if len(outs) == 0 || len(outs) != len(hydrateds) {
+		return 0, nil
 	}
 	var refs []content.LeadSegmentRef
 	seenSeg := map[string]bool{}
-	for _, h := range hydrated {
-		if h.Segment.Derivation.Ordinal <= 0 || h.SegmentationID == "" || h.VersionID == "" || seenSeg[h.SegmentationID] {
+	for leg, hydrated := range hydrateds {
+		if len(outs[leg]) == 0 || len(outs[leg]) != len(hydrated) {
 			continue
 		}
-		seenSeg[h.SegmentationID] = true
-		refs = append(refs, content.LeadSegmentRef{VersionID: h.VersionID, SegmentationID: h.SegmentationID})
+		for _, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 || h.SegmentationID == "" || h.VersionID == "" || seenSeg[h.SegmentationID] {
+				continue
+			}
+			seenSeg[h.SegmentationID] = true
+			refs = append(refs, content.LeadSegmentRef{VersionID: h.VersionID, SegmentationID: h.SegmentationID})
+		}
 	}
 	if len(refs) == 0 {
-		return nil
+		return 0, nil
 	}
+	var elapsed time.Duration
 	phase := time.Now()
 	leadIDs, err := sv.s.Content.LeadSegments(ctx, sv.scope, refs)
-	sv.timing.Hydration += time.Since(phase)
+	elapsed += time.Since(phase)
 	if err != nil {
-		return ErrUnavailable
+		return elapsed, ErrUnavailable
 	}
 	if len(leadIDs) == 0 {
-		return nil
+		return elapsed, nil
 	}
 	var batch []content.Candidate
 	segToLeadIdx := map[string]int{}
-	for _, h := range hydrated {
-		if h.Segment.Derivation.Ordinal <= 0 {
+	for leg, hydrated := range hydrateds {
+		if len(outs[leg]) == 0 || len(outs[leg]) != len(hydrated) {
 			continue
 		}
-		leadID, ok := leadIDs[h.SegmentationID]
-		if !ok || leadID == "" || leadID == h.Segment.ID {
-			continue
+		for _, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 {
+				continue
+			}
+			leadID, ok := leadIDs[h.SegmentationID]
+			if !ok || leadID == "" || leadID == h.Segment.ID {
+				continue
+			}
+			if _, queued := segToLeadIdx[h.SegmentationID]; queued {
+				continue
+			}
+			segToLeadIdx[h.SegmentationID] = len(batch)
+			batch = append(batch, content.Candidate{
+				SegmentID:        leadID,
+				GenerationID:     h.GenerationID,
+				EvaluationPlugin: q.EvaluationPlugin,
+				EvaluationSpace:  q.Space,
+			})
 		}
-		if _, queued := segToLeadIdx[h.SegmentationID]; queued {
-			continue
-		}
-		segToLeadIdx[h.SegmentationID] = len(batch)
-		batch = append(batch, content.Candidate{
-			SegmentID:        leadID,
-			GenerationID:     h.GenerationID,
-			EvaluationPlugin: q.EvaluationPlugin,
-			EvaluationSpace:  q.Space,
-		})
 	}
 	if len(batch) == 0 {
-		return nil
+		return elapsed, nil
 	}
 	phase = time.Now()
 	leadHydrated, err := sv.hydrate(ctx, batch)
-	sv.timing.Hydration += time.Since(phase)
+	elapsed += time.Since(phase)
 	if err != nil {
-		return err
+		return elapsed, err
 	}
-	for i, h := range hydrated {
-		if h.Segment.Derivation.Ordinal <= 0 {
+	for leg, hydrated := range hydrateds {
+		out := outs[leg]
+		if len(out) == 0 || len(out) != len(hydrated) {
 			continue
 		}
-		idx, ok := segToLeadIdx[h.SegmentationID]
-		if !ok {
-			continue
-		}
-		lh, ok := leadHydrated[idx]
-		if !ok || lh.Segment.ID == h.Segment.ID {
-			continue
-		}
-		if text := truncateRunes(lh.Segment.Text, maxCandidateLeadPassageRunes); text != "" {
-			out[i].LeadPassage = text
+		for i, h := range hydrated {
+			if h.Segment.Derivation.Ordinal <= 0 {
+				continue
+			}
+			idx, ok := segToLeadIdx[h.SegmentationID]
+			if !ok {
+				continue
+			}
+			lh, ok := leadHydrated[idx]
+			if !ok || lh.Segment.ID == h.Segment.ID {
+				continue
+			}
+			if text := truncateRunes(lh.Segment.Text, maxCandidateLeadPassageRunes); text != "" {
+				out[i].LeadPassage = text
+			}
 		}
 	}
-	return nil
+	return elapsed, nil
 }

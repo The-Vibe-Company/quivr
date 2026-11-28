@@ -1,0 +1,229 @@
+id: newsroom.retrieve
+version: 0.1.0
+description: High-performance editorial hybrid retrieval with optional HTTP cross-encoder reranking, inverted-pyramid aboutness signals, multi-view query expansion, and calibrated recall-band support.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.21.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Zero-GPU editorial hybrid retrieval with stopword-cleaned BM25, boilerplate-stripped multi-view legs, convex fusion, and inverted-pyramid aboutness signals.
+        max_latency_ms: 500
+        max_cost_cents: 0
+      deep:
+        description: Full-performance open-source cross-encoder reranking over inverted-pyramid surrogates with unsaturated logit Z-score calibration, Recall Band 31-80, sharded requests, and graceful Stage-1 fallback.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      max_rounds: 3
+      max_requests: 8
+      max_candidates: 100
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      dense_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+        description: Candidate count for the ungrouped dense passage leg.
+      lexical_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 60
+        description: Candidate count for the primary BM25 leg.
+      clean_lexical_query:
+        type: boolean
+        default: true
+        description: Strip generic multilingual stopwords and French elisions before querying BM25.
+      fusion:
+        type: string
+        enum: [convex, dbsf, rrf]
+        default: convex
+        description: Stage-1 fusion rule across retrieval legs.
+      rrf_k:
+        type: number
+        minimum: 1
+        maximum: 500
+        default: 60
+        description: Rank constant when fusion is rrf.
+      dense_weight:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 0.65
+        description: Fusion weight for the primary dense leg.
+      lexical_weight:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 0.35
+        description: Fusion weight for the primary BM25 leg.
+      dense_view_mode:
+        type: string
+        enum: [none, question, subject, full_clean]
+        default: question
+        description: Secondary dense query view stripped of interrogative framing. Set to "none" to disable for lower query-encoding cost.
+      dense_view_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.16
+        description: Fusion weight for the secondary dense query view.
+      dense_view_grouped:
+        type: boolean
+        default: true
+        description: Group the secondary dense query view by record to widen unique-record recall.
+      lexical_view_mode:
+        type: string
+        enum: [none, question, subject, full_clean]
+        default: question
+        description: Secondary BM25 query view stripped of interrogative framing. Set to "none" to disable.
+      lexical_view_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.10
+        description: Fusion weight for the secondary BM25 query view.
+      title_lead_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.12
+        description: Weight for pool-IDF query aspect coverage in title and opening lead (set 0 to disable).
+      lead_chars:
+        type: integer
+        minimum: 50
+        maximum: 2000
+        default: 250
+        description: Character length of the inverted-pyramid lead zone at body offset 0.
+      passage_ratio_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.10
+        description: Weight for the FirstP/MaxP lead-vs-body aboutness ratio computed from ungrouped dense passages (set 0 to disable).
+      passage_support_weight:
+        type: number
+        minimum: 0
+        maximum: 5
+        default: 0.12
+        description: Bonus for multi-passage dense corroboration (never penalizes single-passage documents; set 0 to disable).
+      rerank_endpoint:
+        type: string
+        format: uri
+        # Exclude embedded userinfo and fragments; allow optional ports 0-65535 and valid percent escapes.
+        pattern: '^https?://(?:\[[0-9A-Fa-f:.]+(?:%25[-A-Za-z0-9._~]+)?\]|[-A-Za-z0-9._~]+)(?::0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?](?:%[0-9A-Fa-f]{2}|[^%#\s])*)?$'
+        description: Optional HTTP(S) reranker endpoint for the deep profile.
+      rerank_protocol:
+        type: string
+        enum: [tei, cohere]
+        default: tei
+      rerank_model:
+        type: string
+      rerank_instruction:
+        type: string
+        description: Optional rubric/instruction forwarded to instruction-aware TEI rerankers (e.g. Qwen3-Reranker).
+      rerank_top_k:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+        description: Number of top Stage-1 candidates scored with full inverted-pyramid surrogates (lower to 30 for faster latency).
+      rerank_score_space:
+        type: string
+        enum: [logit, prob]
+        default: logit
+        description: Reranker score space. "logit" uses unsaturated raw margins (or log-odds fallback) to avoid probability saturation near 1.0.
+      rerank_ranking:
+        type: string
+        enum: [zscore, linear, rrf, rerank_only]
+        default: zscore
+        description: Fusion rule combining reranker scores with Stage-1 scores.
+      rerank_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.90
+      rerank_max_doc_chars:
+        type: integer
+        minimum: 200
+        maximum: 32000
+        default: 2000
+      rerank_timeout_ms:
+        type: integer
+        minimum: 100
+        maximum: 25000
+        default: 12000
+      rerank_parallel_requests:
+        type: integer
+        minimum: 1
+        maximum: 8
+        default: 2
+        description: Number of concurrent interleaved HTTP requests per rerank batch (set 1 to disable sharding).
+      rerank_band_start:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 30
+        description: Start offset (0-indexed) of the Recall Band region straddling the Recall@50 cut (0 uses rerank_top_k).
+      rerank_band_end:
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 80
+        description: End offset of the Recall Band region scored with compact lead views (set 0 to disable Recall Band).
+      rerank_band_max_chars:
+        type: integer
+        minimum: 200
+        maximum: 4000
+        default: 900
+      rerank_band_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.85
+      fallback_on_error:
+        type: boolean
+        default: true
+        description: Return Stage-1 ranking when the deep reranker fails or times out.
+      adaptive_cascade:
+        type: boolean
+        default: false
+        description: Optional QPP confidence early-exit that skips the deep reranker on high-agreement queries to save GPU cost.
+      cascade_jaccard_threshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.50
+      cascade_margin_threshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.15
+      cascade_dgap_threshold:
+        type: number
+        minimum: 0
+        maximum: 10
+        default: 2.25
+    if:
+      properties:
+        rerank_protocol:
+          const: cohere
+      required: [rerank_protocol]
+    then:
+      required: [rerank_model]
+      properties:
+        rerank_model:
+          minLength: 1
+          pattern: '\S'
+secrets:
+  - name: RERANKER_API_KEY
+    required: false
+    description: Optional Bearer token for an HTTPS rerank endpoint.
+run:
+  command: [go, run, .]

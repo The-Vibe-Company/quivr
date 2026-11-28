@@ -16,6 +16,7 @@ import (
 
 type ingester struct {
 	config    configuration
+	spaceID   string
 	provider  provider
 	queries   *provider
 	documents *documentBatcher
@@ -31,7 +32,7 @@ type cachedVector struct {
 }
 
 func newIngester(c configuration, key string, log *slog.Logger) *ingester {
-	i := &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
+	i := &ingester{config: c, spaceID: c.spaceID(), provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
 	i.tokenizer = byteCounter{}
 	if c.Tokenizer != nil {
 		i.tokenizer = newLocalTokenizer(*c.Tokenizer, c.TokenizerProcesses, log)
@@ -74,7 +75,7 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 	if len(req.Spaces) == 0 {
 		return segments, nil
 	}
-	if len(req.Spaces) != 1 || req.Spaces[0] != c.spaceID() {
+	if len(req.Spaces) != 1 || req.Spaces[0] != i.spaceID {
 		return nil, quivrplugin.TerminalIngestError("unknown_space", "request must name the configured space")
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.CallBudgetMS)*time.Millisecond)
@@ -135,13 +136,13 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 		start = end
 	}
 	for n := range segments {
-		segments[n].Vectors[c.spaceID()] = vectors[n]
+		segments[n].Vectors[i.spaceID] = vectors[n]
 	}
 	return segments, nil
 }
 func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest) ([]float32, error) {
 	c := i.config
-	if req.Space != c.spaceID() {
+	if req.Space != i.spaceID {
 		return nil, quivrplugin.TerminalIngestError("unknown_space", "request must name the configured space")
 	}
 	input := c.queryInput(req.Query.Text)

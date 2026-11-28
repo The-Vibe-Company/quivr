@@ -18,7 +18,7 @@ import (
 )
 
 // The HTTP adapter owns bounded source windows and Unicode offset translation,
-// across both page and Part boundaries. Provider negotiation is tested by hosted.embed.
+// across both page and Part boundaries. Provider negotiation is tested by text.embed.
 func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 	for _, chunkRunes := range []int{64, 4096} {
 		t.Run(fmt.Sprint(chunkRunes), func(t *testing.T) {

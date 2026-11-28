@@ -134,21 +134,46 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	if err != nil {
 		return nil, nil, err
 	}
-	inputForBody := func(body string) string {
+	var titlePart quivrplugin.IngestPart
+	titlePartIdx := -1
+	firstBodyIdx := -1
+	firstBodyText := ""
+	for idx, part := range parts {
+		if part.Role == "title" && strings.TrimSpace(part.Text) != "" && titlePartIdx < 0 {
+			titlePart = part
+			titlePartIdx = idx
+		}
+		if part.Role == "body" && strings.TrimSpace(part.Text) != "" && firstBodyIdx < 0 {
+			firstBodyIdx = idx
+			firstBodyText = part.Text
+		}
+	}
+	leadSentence := ""
+	if c.ContextualAnchor == "title_lead_text" || c.ContextualAnchor == "title_lead_slot" {
+		leadSource := firstBodyText
+		if c.NormalizeWireText {
+			leadSource = normalizeWireText(leadSource)
+		}
+		leadSentence = extractLeadSentence(leadSource)
+	}
+	inputForBody := func(body string, isLeadChunk bool) string {
 		body = modelBody(body)
 		if titleOnlyContext && title != "" {
 			body = title + sourceSeparator + body
 		}
+		if !titleOnly && (c.ContextualAnchor != "" || c.NormalizeWireText) {
+			return c.buildAnchoredInput(title, leadSentence, body, isLeadChunk)
+		}
 		return c.documentInput(title, body)
 	}
 	// Body budget is separate from the model's full templated-input window.
-	fits := func(group []paragraph) (bool, int, error) {
+	fitsBudget := func(group []paragraph, budget int, isLeadChunk bool) (bool, int, error) {
 		text := paragraphText(group)
 		e, err := encodeOne(ctx, t, modelBody(text), false)
 		if err != nil {
 			return false, 0, err
 		}
-		full, err := encodeOne(ctx, t, inputForBody(text), true)
+		full, err := encodeOne(ctx, t, inputForBody(text, isLeadChunk), true)
 		if err != nil {
 			return false, 0, err
 		}
@@ -156,7 +181,10 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		for _, r := range paragraphRanges(group) {
 			bounded = bounded && r.End-r.Start <= 4096
 		}
-		return e.Tokens <= c.BodyTokens && full.Tokens <= c.MaxTokens && bounded, e.Tokens, nil
+		return e.Tokens <= budget && full.Tokens <= c.MaxTokens && bounded, e.Tokens, nil
+	}
+	fits := func(group []paragraph) (bool, int, error) {
+		return fitsBudget(group, c.BodyTokens, false)
 	}
 	units := []paragraph{}
 	run := 0
@@ -218,7 +246,20 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 			raw := paragraph{key: part.Key, start: start, end: end, text: string(runes[start:end]), run: run}
 			for raw.start < raw.end {
-				ok, _, err := fits([]paragraph{raw})
+				isFirstUnit := len(units) == 0 && !titleOnly
+				unitBudget := c.BodyTokens
+				if isFirstUnit && c.LeadMaxTokens > 0 {
+					unitBudget = c.LeadMaxTokens
+				} else if isFirstUnit && c.DualLeadSegment {
+					unitBudget = min(180, c.BodyTokens)
+				}
+				fitsUnit := func(ps []paragraph) (bool, int, error) {
+					if isFirstUnit {
+						return fitsBudget(ps, unitBudget, true)
+					}
+					return fits(ps)
+				}
+				ok, _, err := fitsUnit([]paragraph{raw})
 				if err != nil {
 					return nil, nil, err
 				}
@@ -229,43 +270,75 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				if titleOnly {
 					return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "title-only input exceeds model or excerpt limit")
 				}
-				// Only an oversized paragraph is split. Find the longest safe token
-				// boundary that fits both body and full-model budgets, then prefer an
-				// existing sentence/line break in that window.
+				// Only an oversized paragraph is split. Binary search the longest
+				// safe token boundary that fits both body and full-model budgets,
+				// then prefer an existing sentence/line break in that window.
 				e, err := encodeOne(ctx, t, raw.text, false)
 				if err != nil {
 					return nil, nil, err
 				}
-				limit := min(e.Tokens, c.BodyTokens)
-				cut := 0
-				for k := limit; k > 0; k-- {
+				local := []rune(raw.text)
+				limit := min(e.Tokens, unitBudget)
+				validCuts := make([]int, 0, limit)
+				for k := 1; k <= limit; k++ {
 					candidate := e.Offsets[k-1][1]
 					if k < e.Tokens && candidate > e.Offsets[k][0] {
 						continue
 					}
-					if candidate <= 0 || candidate >= utf8.RuneCountInString(raw.text) {
+					if candidate <= 0 || candidate >= len(local) {
 						continue
 					}
+					if len(validCuts) == 0 || validCuts[len(validCuts)-1] != candidate {
+						validCuts = append(validCuts, candidate)
+					}
+				}
+				cut := 0
+				bestIdx := -1
+				lo, hi := 0, len(validCuts)-1
+				for lo <= hi {
+					mid := lo + (hi-lo)/2
+					cand := validCuts[mid]
 					piece := raw
-					piece.end = raw.start + candidate
-					piece.text = string([]rune(raw.text)[:candidate])
-					if ok, _, err := fits([]paragraph{piece}); err != nil {
+					piece.end = raw.start + cand
+					piece.text = string(local[:cand])
+					ok, _, err := fitsUnit([]paragraph{piece})
+					if err != nil {
 						return nil, nil, err
-					} else if ok {
-						cut = candidate
-						break
+					}
+					if ok {
+						cut = cand
+						bestIdx = mid
+						lo = mid + 1
+					} else {
+						hi = mid - 1
+					}
+				}
+				if c.NormalizeWireText && bestIdx+1 < len(validCuts) {
+					// Wire normalization can shorten a slightly longer prefix (e.g. a stripped URL/markdown span);
+					// scan a small bounded window past the binary-search boundary while keeping probe count O(log N).
+					scanHi := min(len(validCuts)-1, bestIdx+16)
+					for i := scanHi; i > bestIdx; i-- {
+						cand := validCuts[i]
+						piece := raw
+						piece.end = raw.start + cand
+						piece.text = string(local[:cand])
+						if ok, _, err := fitsUnit([]paragraph{piece}); err != nil {
+							return nil, nil, err
+						} else if ok {
+							cut = cand
+							break
+						}
 					}
 				}
 				if cut == 0 {
 					return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "title/template leaves no safe body token boundary")
 				}
-				local := []rune(raw.text)
 				snapped := snap(local, 0, cut)
 				if snapped > 0 {
 					candidate := raw
 					candidate.end = raw.start + snapped
 					candidate.text = string(local[:snapped])
-					if ok, _, err := fits([]paragraph{candidate}); err != nil {
+					if ok, _, err := fitsUnit([]paragraph{candidate}); err != nil {
 						return nil, nil, err
 					} else if ok {
 						cut = snapped
@@ -288,8 +361,13 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	for _, unit := range units {
 		if len(groups) > 0 {
 			last := len(groups) - 1
+			budget := c.BodyTokens
+			isLead := last == 0
+			if isLead && c.LeadMaxTokens > 0 {
+				budget = c.LeadMaxTokens
+			}
 			candidate := append(append([]paragraph(nil), groups[last]...), unit)
-			ok, _, err := fits(candidate)
+			ok, _, err := fitsBudget(candidate, budget, isLead)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -297,10 +375,27 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				groups[last] = candidate
 				continue
 			}
+			// Starting a new group: optionally prepend trailing overlap from the
+			// previous group while keeping canonical source offsets exact.
+			if c.OverlapTokens > 0 && groups[last][len(groups[last])-1].run == unit.run {
+				seed, err := trailingOverlapUnits(ctx, t, groups[last], c.OverlapTokens)
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(seed) > 0 {
+					withSeed := append(seed, unit)
+					if okSeed, _, err := fitsBudget(withSeed, c.BodyTokens, false); err != nil {
+						return nil, nil, err
+					} else if okSeed {
+						groups = append(groups, withSeed)
+						continue
+					}
+				}
+			}
 		}
 		groups = append(groups, []paragraph{unit})
 	}
-	if c.RebalanceTail && len(groups) > 1 {
+	if c.RebalanceTail && c.OverlapTokens == 0 && len(groups) > 1 && (c.LeadMaxTokens == 0 || len(groups) > 2) {
 		last := len(groups) - 1
 		left, right := groups[last-1], groups[last]
 		_, rightTokens, err := fits(right)
@@ -336,18 +431,69 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 			}
 		}
 	}
-	segments := make([]quivrplugin.Segment, len(groups))
-	inputs := make([]string, len(groups))
+	canPrependTitle := c.TitleSource != "none" && !titleOnly && titlePartIdx >= 0 && firstBodyIdx >= 0 && titlePartIdx < firstBodyIdx
+	titleRuneLen := utf8.RuneCountInString(titlePart.Text)
+	sepRuneLen := utf8.RuneCountInString(sourceSeparator)
+	segments := make([]quivrplugin.Segment, 0, len(groups)+1)
+	inputs := make([]string, 0, len(groups)+1)
+	emittedDualLead := false
+
+	if c.DualLeadSegment && canPrependTitle && titleRuneLen <= 4096 && len(groups) >= 2 {
+		leadBudget := c.LeadMaxTokens
+		if leadBudget <= 0 {
+			leadBudget = min(180, c.BodyTokens)
+		}
+		leadGroup := []paragraph{units[0]}
+		for i := 1; i < len(units); i++ {
+			if units[i].run != units[0].run {
+				break
+			}
+			cand := append(append([]paragraph(nil), leadGroup...), units[i])
+			ok, _, err := fitsBudget(cand, leadBudget, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ok {
+				break
+			}
+			leadGroup = cand
+		}
+		leadBody := paragraphText(leadGroup)
+		if titleRuneLen+sepRuneLen+utf8.RuneCountInString(leadBody) <= 16384 {
+			leadRanges := append([]quivrplugin.SourceRange{{PartKey: titlePart.Key, Start: 0, End: titleRuneLen}}, paragraphRanges(leadGroup)...)
+			leadInput := inputForBody(leadBody, true)
+			e, err := encodeOne(ctx, t, leadInput, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			segments = append(segments, quivrplugin.Segment{
+				PartKey:         leadRanges[0].PartKey,
+				Start:           leadRanges[0].Start,
+				End:             leadRanges[0].End,
+				SourceRanges:    leadRanges,
+				SourceSeparator: sourceSeparator,
+				Vectors:         map[string][]float32{},
+				Provenance:      map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "lead_summary"},
+			})
+			inputs = append(inputs, leadInput)
+			emittedDualLead = true
+		}
+	}
+
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
-		input := inputForBody(body)
+		if n == 0 && c.IncludeTitleInLead && !emittedDualLead && canPrependTitle && titleRuneLen <= 4096 &&
+			titleRuneLen+sepRuneLen+utf8.RuneCountInString(body) <= 16384 {
+			ranges = append([]quivrplugin.SourceRange{{PartKey: titlePart.Key, Start: 0, End: titleRuneLen}}, ranges...)
+		}
+		input := inputForBody(body, n == 0)
 		e, err := encodeOne(ctx, t, input, true)
 		if err != nil {
 			return nil, nil, err
 		}
-		segments[n] = quivrplugin.Segment{PartKey: ranges[0].PartKey, Start: ranges[0].Start, End: ranges[0].End, SourceRanges: ranges, SourceSeparator: sourceSeparator, Vectors: map[string][]float32{}, Provenance: map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "paragraphs"}}
-		inputs[n] = input
+		segments = append(segments, quivrplugin.Segment{PartKey: ranges[0].PartKey, Start: ranges[0].Start, End: ranges[0].End, SourceRanges: ranges, SourceSeparator: sourceSeparator, Vectors: map[string][]float32{}, Provenance: map[string]any{"model": c.Model, "input_tokens": e.Tokens, "token_estimate": c.Tokenizer == nil, "packing": "paragraphs"}})
+		inputs = append(inputs, input)
 	}
 	return segments, inputs, nil
 }

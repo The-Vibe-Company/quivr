@@ -8,12 +8,14 @@ import (
 )
 
 // VectorIndexSetting is how the search index stores a space's vectors. An
-// omitted quantization or rescore limit takes the deployment's, except that
-// a space set to "none" has nothing to rescore. A limit of 0 disables RQ-8
-// rescoring and keeps the index's RQ-1 default.
+// omitted quantization, rescore limit or HNSW ef takes the deployment's, except
+// that a space set to "none" has nothing to rescore. A limit of 0 disables RQ-8
+// rescoring and keeps the index's RQ-1 default. EF of 0 leaves the index default
+// and -1 selects dynamic ef.
 type VectorIndexSetting struct {
 	Quantization string `json:"quantization,omitempty"`
 	RescoreLimit *int   `json:"rescore_limit,omitempty"`
+	EF           *int   `json:"ef,omitempty"`
 }
 
 // VectorIndexConfig is the deployment's vector index setting, rq-8 when
@@ -35,6 +37,9 @@ func (c VectorIndexConfig) For(key, id string) content.VectorIndex {
 		}
 		if setting.RescoreLimit != nil {
 			out.RescoreLimit = *setting.RescoreLimit
+		}
+		if setting.EF != nil {
+			out.EF = *setting.EF
 		}
 	}
 	if override.Quantization == content.QuantizationNone && override.RescoreLimit == nil {

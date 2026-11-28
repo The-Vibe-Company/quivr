@@ -668,7 +668,7 @@ def parts():
     steps in order, so a step sees only the state its own part built. CI runs the parts in parallel
     (.github/workflows/verify.yml); `make verify` runs them one after another. To add a step, add one
     line to the part whose state it needs: acceptance('name','^TestPattern') or step('name',fn)."""
-    from hosted_embed_plugin import verify as verify_hosted_embed, verify_redeploy as verify_hosted_redeploy
+    from text_embed_plugin import verify as verify_hosted_embed, verify_redeploy as verify_hosted_redeploy
     from embedding_outage import verify as verify_embedding_outage
     from first_search import verify as verify_first_search
     from tracing import verify as verify_tracing

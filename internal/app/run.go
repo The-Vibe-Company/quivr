@@ -163,6 +163,10 @@ type Config struct {
 // RetrievalConfig names the search profiles selected by this deployment.
 type RetrievalConfig struct {
 	Profiles map[string]string `json:"profiles"`
+	// ProfileFallback controls engine-level fallback to the deployment default
+	// profile when a composing profile fails or runs out of rerank budget
+	// (default true when omitted).
+	ProfileFallback *bool `json:"profile_fallback,omitempty"`
 	// CoverageRefresh paces background snapshots (Go duration, default 10s).
 	CoverageRefresh string `json:"coverage_refresh"`
 	// HydrationBlobCacheBytes bounds the API's in-memory content-addressed text
@@ -605,7 +609,10 @@ func Run(command string, args ...string) error {
 	projection.SetMetrics(dependencyMetrics)
 	projection.Visibility = grants
 	projection.PurgeTimeout = purgeTimeout
-	projection.LegacySpace = tei.Space().ID
+	builtin := BuiltinSpace()
+	projection.LegacySpace = builtin.ID
+	defaultVectorIndex := cfg.VectorIndex.For(builtin.ID, builtin.Name)
+	projection.DefaultIndex = &defaultVectorIndex
 	rebuilds.Projection = projection
 	corpusStore := postgres.Store{Pool: pool, Projection: projection, TenantCollection: weaviate.InitialCollection}
 	if command == "migrate" {
@@ -939,6 +946,9 @@ func Run(command string, args ...string) error {
 	// hydration, and ranks them. The api refuses to start without one.
 	if len(resolved.Retrievals()) > 0 {
 		search.ProfilesRouter = pluginhttp.LiveRetriever{Live: live, Aliases: cfg.Retrieval.Profiles}
+	}
+	if cfg.Retrieval.ProfileFallback != nil && !*cfg.Retrieval.ProfileFallback {
+		search.DisableProfileFallback = true
 	}
 	// The api that served an activation follows it at once; new Corpora
 	// start on the spaces it registered.

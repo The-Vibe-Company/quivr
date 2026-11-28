@@ -74,7 +74,7 @@ def hosted(binary, directory, candidate, gate):
     import ports
     directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o700)
-    owner = 'hosted.embed.c' + hashlib.sha256(candidate['label'].encode()).hexdigest()[:12]
+    owner = 'text.embed.c' + hashlib.sha256(candidate['label'].encode()).hexdigest()[:12]
     config = {'plugin_id': owner, 'format': gate.format, 'base_url': gate.url, 'auth': 'none', 'model': candidate['model'],
               'dimensions': candidate['dimensions'], 'max_tokens_per_segment': candidate['segment_tokens'],
               'max_batch_tokens': 32768, 'batch_size': 16, 'body_tokens': candidate['segment_tokens'],
@@ -92,7 +92,7 @@ def hosted(binary, directory, candidate, gate):
     port = ports.allocate()
     env = {k: v for k, v in plugin_environment.inherited().items() if k not in ('EMBED_API_KEY', 'AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
     env.update(QUIVR_PLUGIN_HOST='127.0.0.1', QUIVR_PLUGIN_PORT=str(port), QUIVR_PLUGIN_MANIFEST=str(manifest))
-    log = directory / 'hosted-embedding.log'
+    log = directory / 'text-embedding.log'
     with log.open('ab') as output:
         process = subprocess.Popen([str(binary)], env=env, stdout=output, stderr=output, start_new_session=True)
     try:
@@ -114,9 +114,9 @@ def hosted(binary, directory, candidate, gate):
 def execute(campaign, options, endpoint, key, budget, out):
     import scoring
     sets = [(name, run.public_sets.prepare(name, options.cache)) for name in campaign['sets']]
-    binary = out / 'hosted-embed'
+    binary = out / 'text-embed'
     subprocess.run([os.environ.get('GO', 'go'), 'build', '-o', str(binary), '.'],
-                   cwd=run.ROOT / 'plugins' / 'hosted-embed', check=True)
+                   cwd=run.ROOT / 'plugins' / 'text-embed', check=True)
     stacks = []
     # All sidecars and evaluation owners share one engine and one Corpus per
     # set. ExitStack keeps them alive until engine teardown has drained work.

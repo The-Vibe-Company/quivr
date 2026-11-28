@@ -252,3 +252,201 @@ func TestBearerRequiresHTTPS(t *testing.T) {
 		t.Fatal("expected a safe error explaining the HTTPS requirement")
 	}
 }
+
+func TestDiagnosticsCountersAndTimeoutPhases(t *testing.T) {
+	t.Setenv("RERANKER_API_KEY", "")
+	r := New().(retriever)
+
+	// 1. Successful rerank counts request, success, and title-anchor formatted candidates.
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = io.Copy(io.Discard, req.Body)
+		_, _ = io.WriteString(w, `[{"index":0,"score":0.9},{"index":1,"score":0.5},{"index":2,"score":0.1}]`)
+	}))
+	defer okServer.Close()
+	if _, err := r.Search(t.Context(), searchRequest(okServer.URL+"/rerank", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Budget timeout increments budget timeout + fallback counters.
+	budgetReq := searchRequest(okServer.URL+"/rerank", "")
+	budgetReq.Budget = &quivrplugin.SearchBudget{RemainingTimeMS: 1}
+	if _, err := r.Search(t.Context(), budgetReq); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. HTTP round-trip timeout increments request timeout + fallback counters.
+	releaseHeader := make(chan struct{})
+	slowHeaderServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		select {
+		case <-req.Context().Done():
+		case <-releaseHeader:
+		}
+	}))
+	defer func() {
+		close(releaseHeader)
+		slowHeaderServer.Close()
+	}()
+	ans, err := r.Search(t.Context(), searchRequest(slowHeaderServer.URL+"/rerank", `,"timeout_ms":100,"fallback_on_error":true`))
+	if err != nil || !strings.Contains(ans.Ranking[0].Explanation, timeoutPhaseHTTPRoundTrip) {
+		t.Fatalf("http roundtrip timeout = %+v, %v; want phase %s", ans, err, timeoutPhaseHTTPRoundTrip)
+	}
+
+	// 4. Response body read timeout increments body read timeout + error counters when fallback is off.
+	releaseBody := make(chan struct{})
+	slowBodyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `[{"index":0`)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		select {
+		case <-req.Context().Done():
+		case <-releaseBody:
+		}
+	}))
+	defer func() {
+		close(releaseBody)
+		slowBodyServer.Close()
+	}()
+	_, err = r.Search(t.Context(), searchRequest(slowBodyServer.URL+"/rerank", `,"timeout_ms":100,"fallback_on_error":false`))
+	if err == nil || !strings.Contains(err.Error(), timeoutPhaseResponseRead) {
+		t.Fatalf("response read timeout err=%v; want phase %s", err, timeoutPhaseResponseRead)
+	}
+
+	got := r.Diagnostics()
+	want := DiagnosticsSnapshot{
+		Requests:              4,
+		Succeeded:             1,
+		TitleAnchorsFormatted: 3, // candidate "a" formatted in calls 1, 3, and 4 (skipped in budget call 2)
+		Fallbacks:             2,
+		Errors:                1,
+		BudgetTimeouts:        1,
+		RequestTimeouts:       1,
+		BodyReadTimeouts:      1,
+	}
+	if got != want {
+		t.Fatalf("diagnostics = %+v, want %+v", got, want)
+	}
+}
+
+func TestTailPreservationWhenCandidateCountBelowLimit(t *testing.T) {
+	baseCandidates := []quivrplugin.Candidate{
+		{SegmentID: "s1", Text: "first", Score: 10},
+		{SegmentID: "s2", Text: "second", Score: 9},
+		{SegmentID: "s3", Text: "third", Score: 8},
+		{SegmentID: "s4", Text: "fourth", Score: 7},
+		{SegmentID: "s5", Text: "fifth", Score: 6},
+	}
+
+	// Round 1 must fetch max(candidate_count, req.Limit) capped at profileLimit.
+	for _, tc := range []struct {
+		name      string
+		candCount int
+		reqLimit  int
+		wantDepth int
+	}{
+		{"candidate_count below limit", 2, 5, 5},
+		{"limit capped at profileLimit", 10, 80, 50},
+	} {
+		t.Run("round1/"+tc.name, func(t *testing.T) {
+			req := searchRequest("https://rerank.example/rerank", fmt.Sprintf(`,"candidate_count":%d`, tc.candCount))
+			req.Round = 1
+			req.Limit = tc.reqLimit
+			answer, err := New().Search(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(answer.Requests) != 1 || answer.Requests[0].Profile == nil || answer.Requests[0].Profile.Limit != tc.wantDepth {
+				t.Fatalf("round 1 profile limit = %+v, want %d", answer.Requests, tc.wantDepth)
+			}
+		})
+	}
+
+	// Round 2 must send only the top candidate_count to the HTTP reranker, stitch
+	// the untouched tail below the reranked head preserving base order, and assign
+	// strictly monotonic descending finite scores across positive, zero, and negative floors.
+	for _, tc := range []struct {
+		name     string
+		options  string
+		response string
+	}{
+		{
+			name:     "positive rerank scores",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":0.2},{"index":1,"score":0.8}]`,
+		},
+		{
+			name:     "negative rerank logits",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":-5.0},{"index":1,"score":-1.5}]`,
+		},
+		{
+			name:     "zero rerank floor",
+			options:  `,"candidate_count":2,"ranking":"rerank_only"`,
+			response: `[{"index":0,"score":0.0},{"index":1,"score":0.5}]`,
+		},
+		{
+			name:     "rrf ranking",
+			options:  `,"candidate_count":2,"ranking":"rrf"`,
+			response: `[{"index":0,"score":0.1},{"index":1,"score":0.9}]`,
+		},
+		{
+			name:     "linear ranking",
+			options:  `,"candidate_count":2,"ranking":"linear","rerank_weight":0.7`,
+			response: `[{"index":0,"score":0.1},{"index":1,"score":0.9}]`,
+		},
+	} {
+		t.Run("round2/"+tc.name, func(t *testing.T) {
+			t.Setenv("RERANKER_API_KEY", "")
+			var sentDocs int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Texts []string `json:"texts"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+					return
+				}
+				sentDocs = len(payload.Texts)
+				io.WriteString(w, tc.response)
+			}))
+			defer server.Close()
+
+			req := searchRequest(server.URL+"/rerank", tc.options)
+			req.Limit = 5
+			req.Served[0].Candidates = baseCandidates
+			answer, err := New().Search(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sentDocs != 2 {
+				t.Fatalf("sent %d docs to reranker, want 2 (candidate_count)", sentDocs)
+			}
+			if len(answer.Ranking) != 5 {
+				t.Fatalf("returned %d hits, want 5 (2 reranked + 3 tail)", len(answer.Ranking))
+			}
+			// Tail must preserve untouched base order [s3, s4, s5].
+			tailIDs := []string{answer.Ranking[2].SegmentID, answer.Ranking[3].SegmentID, answer.Ranking[4].SegmentID}
+			if !reflect.DeepEqual(tailIDs, []string{"s3", "s4", "s5"}) {
+				t.Fatalf("tail order = %v, want [s3 s4 s5]", tailIDs)
+			}
+			// Head must be {s1, s2}, and the full tail must be strictly monotonic descending
+			// below the lowest reranked head hit with finite scores.
+			headIDs := []string{answer.Ranking[0].SegmentID, answer.Ranking[1].SegmentID}
+			if !((headIDs[0] == "s1" && headIDs[1] == "s2") || (headIDs[0] == "s2" && headIDs[1] == "s1")) {
+				t.Fatalf("head IDs = %v, want permutation of [s1 s2]", headIDs)
+			}
+			for i, hit := range answer.Ranking {
+				if math.IsNaN(hit.Score) || math.IsInf(hit.Score, 0) {
+					t.Fatalf("hit %d has non-finite score %v", i, hit.Score)
+				}
+			}
+			for i := 2; i < len(answer.Ranking); i++ {
+				if !(answer.Ranking[i].Score < answer.Ranking[i-1].Score) {
+					t.Fatalf("non-strictly-descending tail at index %d: %g >= %g (ranking=%+v)",
+						i, answer.Ranking[i].Score, answer.Ranking[i-1].Score, answer.Ranking)
+				}
+			}
+		})
+	}
+}

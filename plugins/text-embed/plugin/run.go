@@ -1,4 +1,4 @@
-// hosted-embed is an ingestion plugin built entirely on the public Go kit.
+// text-embed is an ingestion plugin built entirely on the public Go kit.
 package plugin
 
 import (
@@ -18,7 +18,7 @@ func Main() {
 	}
 }
 
-// Run executes hosted-embed with command arguments (excluding argv[0]).
+// Run executes text-embed with command arguments (excluding argv[0]).
 // When runCommand is non-empty, configure writes it as run.command instead of
 // deriving the standalone executable path from os.Executable.
 func Run(args []string, runCommand []string) error {
@@ -48,7 +48,7 @@ func Run(args []string, runCommand []string) error {
 		return err
 	}
 	if len(args) != 0 {
-		return fmt.Errorf("usage: hosted-embed [configure configuration.json]")
+		return fmt.Errorf("usage: text-embed [configure configuration.json]")
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	p, err := quivrplugin.New("", quivrplugin.WithLogger(logger))

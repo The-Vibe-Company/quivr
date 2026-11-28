@@ -23,7 +23,7 @@ func TestDispatchByArgv0SubcommandListAndUnknown(t *testing.T) {
 	}
 	registry := map[string]Entry{
 		"rss":          record("rss"),
-		"hosted-embed": record("hosted-embed"),
+		"text-embed": record("text-embed"),
 	}
 
 	cases := []struct {
@@ -33,8 +33,8 @@ func TestDispatchByArgv0SubcommandListAndUnknown(t *testing.T) {
 		wantArgs []string
 	}{
 		{name: "symlink with quivr prefix", argv: []string{"/usr/local/bin/quivr-rss"}, wantName: "rss"},
-		{name: "symlink with args", argv: []string{"/usr/local/bin/quivr-hosted-embed", "configure", "/tmp/c.json"}, wantName: "hosted-embed", wantArgs: []string{"configure", "/tmp/c.json"}},
-		{name: "explicit subcommand", argv: []string{"/usr/local/bin/quivr-plugins", "hosted-embed", "configure", "/tmp/c.json"}, wantName: "hosted-embed", wantArgs: []string{"configure", "/tmp/c.json"}},
+		{name: "symlink with args", argv: []string{"/usr/local/bin/quivr-text-embed", "configure", "/tmp/c.json"}, wantName: "text-embed", wantArgs: []string{"configure", "/tmp/c.json"}},
+		{name: "explicit subcommand", argv: []string{"/usr/local/bin/quivr-plugins", "text-embed", "configure", "/tmp/c.json"}, wantName: "text-embed", wantArgs: []string{"configure", "/tmp/c.json"}},
 		{name: "explicit subcommand with quivr prefix", argv: []string{"quivr-plugins", "quivr-rss"}, wantName: "rss"},
 	}
 	for _, tc := range cases {
@@ -54,7 +54,7 @@ func TestDispatchByArgv0SubcommandListAndUnknown(t *testing.T) {
 	if code := Execute([]string{"quivr-plugins", "--list"}, registry, &out, &errBuf); code != 0 {
 		t.Fatalf("--list exited %d: %s", code, errBuf.String())
 	}
-	if got := strings.TrimSpace(out.String()); got != "hosted-embed\nrss" {
+	if got := strings.TrimSpace(out.String()); got != "rss\ntext-embed" {
 		t.Fatalf("--list = %q, want sorted plugin names", got)
 	}
 
@@ -63,24 +63,24 @@ func TestDispatchByArgv0SubcommandListAndUnknown(t *testing.T) {
 	if code := Execute([]string{"quivr-plugins", "unknown"}, registry, &out, &errBuf); code != 2 {
 		t.Fatalf("unknown plugin exited %d, want 2", code)
 	}
-	if !strings.Contains(errBuf.String(), "available plugins: hosted-embed, rss") {
+	if !strings.Contains(errBuf.String(), "available plugins: rss, text-embed") {
 		t.Fatalf("stderr = %q, want available plugin list", errBuf.String())
 	}
 }
 
-func TestRoleBinariesListExpectedPluginsAndConfigureHostedEmbed(t *testing.T) {
+func TestRoleBinariesListExpectedPluginsAndConfigureTextEmbed(t *testing.T) {
 	dir := t.TempDir()
 	targets := []struct {
 		pkg  string
 		want []string
 	}{
-		{pkg: "./cmd/quivr-plugins", want: []string{"core-ingest", "core-retrieve", "hosted-embed", "m365-mail", "object-storage-archive", "rss", "x-list"}},
-		{pkg: "./cmd/quivr-plugins-api", want: []string{"core-ingest", "core-retrieve", "hosted-embed", "x-list"}},
-		{pkg: "./cmd/quivr-plugins-worker", want: []string{"core-ingest", "hosted-embed", "m365-mail", "object-storage-archive", "rss", "x-list"}},
+		{pkg: "./cmd/quivr-plugins", want: []string{"core-ingest", "core-retrieve", "m365-mail", "object-storage-archive", "rss", "text-embed", "x-list"}},
+		{pkg: "./cmd/quivr-plugins-api", want: []string{"core-ingest", "core-retrieve", "text-embed", "x-list"}},
+		{pkg: "./cmd/quivr-plugins-worker", want: []string{"core-ingest", "m365-mail", "object-storage-archive", "rss", "text-embed", "x-list"}},
 	}
 
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	example := filepath.Join("..", "..", "plugins", "hosted-embed", "examples", "tei.json")
+	example := filepath.Join("..", "..", "plugins", "text-embed", "examples", "tei.json")
 	for _, target := range targets {
 		name := filepath.Base(target.pkg)
 		bin := filepath.Join(dir, name)
@@ -99,12 +99,12 @@ func TestRoleBinariesListExpectedPluginsAndConfigureHostedEmbed(t *testing.T) {
 			t.Fatalf("%s --list = %v, want %v", name, got, target.want)
 		}
 
-		// Verify hosted-embed configure works through both symlink dispatch and subcommand dispatch.
-		link := filepath.Join(t.TempDir(), "quivr-hosted-embed")
+		// Verify text-embed configure works through both symlink dispatch and subcommand dispatch.
+		link := filepath.Join(t.TempDir(), "quivr-text-embed")
 		if err := os.Symlink(bin, link); err != nil {
 			t.Fatal(err)
 		}
-		for _, cmd := range [][]string{{bin, "hosted-embed", "configure", example}, {link, "configure", example}} {
+		for _, cmd := range [][]string{{bin, "text-embed", "configure", example}, {link, "configure", example}} {
 			raw, err := exec.Command(cmd[0], cmd[1:]...).Output()
 			if err != nil {
 				t.Fatalf("%v failed: %v", cmd, err)
@@ -118,11 +118,11 @@ func TestRoleBinariesListExpectedPluginsAndConfigureHostedEmbed(t *testing.T) {
 			if err := json.Unmarshal(raw, &manifest); err != nil {
 				t.Fatalf("%v produced invalid JSON: %v", cmd, err)
 			}
-			if manifest.ID != "hosted.embed" {
-				t.Fatalf("%v manifest id = %q, want hosted.embed", cmd, manifest.ID)
+			if manifest.ID != "text.embed" {
+				t.Fatalf("%v manifest id = %q, want text.embed", cmd, manifest.ID)
 			}
-			if !reflect.DeepEqual(manifest.Run.Command, []string{bin, "hosted-embed"}) {
-				t.Fatalf("%v run.command = %v, want %v", cmd, manifest.Run.Command, []string{bin, "hosted-embed"})
+			if !reflect.DeepEqual(manifest.Run.Command, []string{bin, "text-embed"}) {
+				t.Fatalf("%v run.command = %v, want %v", cmd, manifest.Run.Command, []string{bin, "text-embed"})
 			}
 		}
 	}

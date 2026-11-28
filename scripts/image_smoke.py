@@ -131,13 +131,13 @@ def check(args):
         print(f'{args.plugin}: read-only signed discovery and health passed ({digest})')
     finally:
         docker('rm', '--force', container)
-    if args.plugin == 'hosted-embed':
+    if args.plugin == 'text-embed':
         profile = json.loads((ROOT / 'plugins/core-ingest/profile.json').read_text())
         model = ROOT / '.scratch/tokenizer/tokenizer.json'
         if not model.is_file() or hashlib.sha256(model.read_bytes()).hexdigest() != profile['tokenizer_sha256']:
             raise RuntimeError('prepare the pinned E5 tokenizer before hosted image smoke: python3 scripts/prepare_tokenizer.py')
         mounts = [(model, '/smoke/tokenizer.json'),
-                  (ROOT / 'plugins/hosted-embed/examples/tei.json', '/smoke/tei.json'),
+                  (ROOT / 'plugins/text-embed/examples/tei.json', '/smoke/tei.json'),
                   (ROOT / 'scripts/hosted_tokenizer_smoke.py', '/smoke/hosted_tokenizer_smoke.py'),
                   (ROOT / 'scripts/image_smoke.py', '/smoke/image_smoke.py')]
         output = docker('run', '--rm', '--network', 'none', '--read-only',

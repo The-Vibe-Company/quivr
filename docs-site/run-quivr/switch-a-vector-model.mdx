@@ -13,7 +13,7 @@ Run a second embedding model (a model that turns text into numeric vectors) besi
 
 ## Prerequisites
 
-- A running Quivr with [an ingestion plugin pinned](/run-quivr/pin). This guide keeps `core.ingest` serving and adds `hosted.embed`, the [hosted text embedding plugin](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/hosted-embed).
+- A running Quivr with [an ingestion plugin pinned](/run-quivr/pin). This guide keeps `core.ingest` serving and adds `text.embed`, the [hosted text embedding plugin](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/text-embed).
 - `curl`, `jq`, Go and the `quivr` CLI (`curl --version`, `jq --version`, `go version`, `command -v quivr`). Run package commands from a Quivr checkout.
 - Your API address in `QUIVR_API_URL` and the id of a collection of documents (Corpus) in `CORPUS_ID`.
 - [API keys](/reference/configuration#api-keys) with the following permissions and grants for the Corpus:
@@ -46,9 +46,9 @@ Keep the former model reachable and filling new documents throughout the trial a
 Build the plugin, then write its configuration. Replace the URL and model placeholders before generating the manifest:
 
 ```bash
-mkdir -p .scratch/hosted-embed/package
-(cd plugins/hosted-embed && go build -o ../../.scratch/hosted-embed/hosted-embed .)
-cat > .scratch/hosted-embed/configuration.json <<'EOF'
+mkdir -p .scratch/text-embed/package
+(cd plugins/text-embed && go build -o ../../.scratch/text-embed/text-embed .)
+cat > .scratch/text-embed/configuration.json <<'EOF'
 {
   "format": "cohere",
   "base_url": "https://<your model endpoint>/providers/cohere/v2",
@@ -69,11 +69,11 @@ generating the manifest:
 ```bash
 python3 scripts/prepare_tokenizer.py --hosted \
   --repository <owner/model> --revision <full-commit-sha> --sha256 <tokenizer-sha256> \
-  > .scratch/hosted-embed/tokenizer-settings.json
-jq --slurpfile tokenizer .scratch/hosted-embed/tokenizer-settings.json \
-  '.tokenizer = $tokenizer[0]' .scratch/hosted-embed/configuration.json \
-  > .scratch/hosted-embed/configuration-with-tokenizer.json
-mv .scratch/hosted-embed/configuration-with-tokenizer.json .scratch/hosted-embed/configuration.json
+  > .scratch/text-embed/tokenizer-settings.json
+jq --slurpfile tokenizer .scratch/text-embed/tokenizer-settings.json \
+  '.tokenizer = $tokenizer[0]' .scratch/text-embed/configuration.json \
+  > .scratch/text-embed/configuration-with-tokenizer.json
+mv .scratch/text-embed/configuration-with-tokenizer.json .scratch/text-embed/configuration.json
 ```
 
 Preparation installs the hash-pinned tokenizers 0.23.2 runtime when absent and
@@ -82,24 +82,24 @@ setup. Startup stays offline. Without a tokenizer, the
 plugin counts UTF-8 bytes conservatively and underfills passages. The published
 hosted image includes tokenizers 0.23.2: mount the model file read-only and use
 `/opt/tokenizer/bin/python` plus its container model path. Follow the
-[tokenizer preparation and image instructions](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#prepare-a-matching-tokenizer)
+[tokenizer preparation and image instructions](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#prepare-a-matching-tokenizer)
 for E5 and Gemma pins, mounts and manifest generation. A tokenizer change creates
 a new recipe and requires a rebuild for existing Corpora.
 
 Generate the manifest after adding the tokenizer and any container path changes:
 
 ```bash
-.scratch/hosted-embed/hosted-embed configure .scratch/hosted-embed/configuration.json \
-  > .scratch/hosted-embed/package/quivr-plugin.yaml
+.scratch/text-embed/text-embed configure .scratch/text-embed/configuration.json \
+  > .scratch/text-embed/package/quivr-plugin.yaml
 ```
 
-For archive imports, `hosted.embed` combines concurrent document inputs from
+For archive imports, `text.embed` combines concurrent document inputs from
 the same Organization within each plugin process. The `batch_wait_ms` window
 (default 25, range 0–100 ms) can extend while awaiting provider admission.
 Batches respect `batch_size`, `max_batch_tokens` and the shared
 `max_concurrent_requests` cap. Set `batch_wait_ms: 0` to disable collection.
 Queries bypass the collection window. See the plugin's
-[limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#limits-and-defaults)
+[limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#limits-and-defaults)
 for cancellation, refusal isolation and batch usage logs.
 
 With a matching local tokenizer configured, document cutting uses a pool of
@@ -112,7 +112,7 @@ smaller pool when memory is limited. Pool tuning and adding its execution-only
 declaration preserve the active ingestion recipe when semantic settings are
 unchanged. Pinned work can use the active equivalent registration after an
 in-place update. Follow the plugin's
-[throughput registration steps](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding)
+[throughput registration steps](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#tune-throughput-without-rebuilding)
 to change it while earlier work drains.
 
 
@@ -121,10 +121,10 @@ The generated manifest binds the model and settings to a distinct vector space, 
 Certify with a fixture carrying the same configuration. Inject `EMBED_API_KEY` into the certification command's environment so its plugin subprocess receives it. This step calls your provider:
 
 ```bash
-jq --slurpfile config .scratch/hosted-embed/configuration.json \
+jq --slurpfile config .scratch/text-embed/configuration.json \
   '.ingestion.configuration = $config[0]' \
-  contracts/plugins/v0/fixtures/ingestion/article.json > .scratch/hosted-embed/fixture.json
-quivr plugin test --fixture .scratch/hosted-embed/fixture.json .scratch/hosted-embed/package
+  contracts/plugins/v0/fixtures/ingestion/article.json > .scratch/text-embed/fixture.json
+quivr plugin test --fixture .scratch/text-embed/fixture.json .scratch/text-embed/package
 ```
 
 Check that the report says `CERTIFIED`. Start the plugin in a separate terminal,
@@ -135,16 +135,16 @@ manager. Its `QUIVR_PLUGIN_SIGNING_KEYS` ring must match the plugin's entry in
 Choose a free port reachable by Quivr's API and workers:
 
 ```bash
-QUIVR_PLUGIN_MANIFEST="$PWD/.scratch/hosted-embed/package/quivr-plugin.yaml" \
+QUIVR_PLUGIN_MANIFEST="$PWD/.scratch/text-embed/package/quivr-plugin.yaml" \
 QUIVR_PLUGIN_HOST=0.0.0.0 QUIVR_PLUGIN_PORT=8087 \
 EMBED_API_KEY="${EMBED_API_KEY:?Set the provider key in this terminal}" \
 QUIVR_PLUGIN_SIGNING_KEYS="${QUIVR_PLUGIN_SIGNING_KEYS:?Set the plugin signing ring in this terminal}" \
-  .scratch/hosted-embed/hosted-embed
+  .scratch/text-embed/text-embed
 ```
 
 Set `document_template` and `query_template` explicitly for models with special prompts;
 the model name never selects a template. EmbeddingGemma 2 has its own
-[example configuration](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/examples/embeddinggemma-2.json).
+[example configuration](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/examples/embeddinggemma-2.json).
 
 Changing the model, dimensions, format, metric, input templates or `model_revision` creates another space. A running deployment needs fresh ingestion or a rebuild
 before it serves that space. Set `model_revision` when the provider changes weights behind a stable model name. A changed package needs a new immutable registration: increment `plugin_version`, regenerate and certify it. To compare several hosted models at once, give each a distinct `plugin_id` before generation.
@@ -152,7 +152,7 @@ before it serves that space. Set `model_revision` when the provider changes weig
 </Step>
 <Step title="Install it for evaluation">
 
-Keep your current [served routing](/reference/configuration#ingestion-routing), and add `hosted.embed` under `ingestion.evaluation` for each source format you want to compare. An ingestion owner is the plugin that produces a document's segments and vectors. Evaluation adds another owner's output without replacing the served owner's output.
+Keep your current [served routing](/reference/configuration#ingestion-routing), and add `text.embed` under `ingestion.evaluation` for each source format you want to compare. An ingestion owner is the plugin that produces a document's segments and vectors. Evaluation adds another owner's output without replacing the served owner's output.
 
 For example, merge these settings into each API, worker and migrate configuration, preserving existing pins and routes:
 
@@ -161,9 +161,9 @@ For example, merge these settings into each API, worker and migrate configuratio
   "ingestion": {
     "default": "core.ingest",
     "evaluation": {
-      "text/plain": ["hosted.embed"],
-      "text/html": ["hosted.embed"],
-      "application/pdf": ["hosted.embed"]
+      "text/plain": ["text.embed"],
+      "text/html": ["text.embed"],
+      "application/pdf": ["text.embed"]
     }
   },
   "plugins": [{
@@ -184,10 +184,10 @@ For example, merge these settings into each API, worker and migrate configuratio
 ```
 
 Replace the pin's entire `configuration` object above with the contents of
-`.scratch/hosted-embed/configuration.json`, including `tokenizer` when prepared.
+`.scratch/text-embed/configuration.json`, including `tokenizer` when prepared.
 The engine pin and the generated manifest must carry the same settings and paths.
 
-Two settings use the same words. The `spaces` pin picks which of this plugin’s spaces it uses: `hosted.embed` has only one, so it is `served`. `ingestion.evaluation` decides whether its output reaches ordinary search: it does not until you activate it in step 5. [Apply the pin](/run-quivr/pin); for a runtime registration, follow [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
+Two settings use the same words. The `spaces` pin picks which of this plugin’s spaces it uses: `text.embed` has only one, so it is `served`. `ingestion.evaluation` decides whether its output reaches ordinary search: it does not until you activate it in step 5. [Apply the pin](/run-quivr/pin); for a runtime registration, follow [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
 Routing uses the original source media type: a PDF normalized to text still follows `application/pdf`. Both owners read the normalized document pieces (canonical Parts), but each keeps its own segment cuts and vectors.
 
@@ -203,12 +203,12 @@ flowchart TD
 
 In words: each model builds its own segments and vectors from the same document. Ordinary search uses the served model; evaluation search names the candidate and its space. An evaluation failure is recorded in document diagnostics and does not change served readiness.
 
-Find the active `hosted.embed` registration and save its `registration_id` as `REGISTRATION_ID`:
+Find the active `text.embed` registration and save its `registration_id` as `REGISTRATION_ID`:
 
 ```bash
 curl -fsS "$QUIVR_API_URL/v0/admin/plugins" \
   -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
-  | jq '[.items[] | select(.plugin_id == "hosted.embed" and .state == "active") |
+  | jq '[.items[] | select(.plugin_id == "text.embed" and .state == "active") |
       {registration_id, state}]'
 ```
 
@@ -216,7 +216,7 @@ Extract `SPACE_ID` from the generated manifest, which is JSON-compatible YAML. S
 
 ```bash
 SPACE_ID=$(jq -r '.contributions.ingestion.spaces | to_entries[0] |
-  "\(.key)@\(.value.version)"' .scratch/hosted-embed/package/quivr-plugin.yaml)
+  "\(.key)@\(.value.version)"' .scratch/text-embed/package/quivr-plugin.yaml)
 ```
 
 ```bash
@@ -298,7 +298,7 @@ curl -fsS -X POST "$QUIVR_API_URL/v0/search" \
   -d @- <<EOF | jq
 {"corpus_ids":["$CORPUS_ID"],"query":"Labour strikes at ports and harbours",
  "mode":"semantic","profile":"default","limit":10,
- "evaluation_plugin":"hosted.embed","evaluation_space":"$SPACE_ID"}
+ "evaluation_plugin":"text.embed","evaluation_space":"$SPACE_ID"}
 EOF
 ```
 </CodeGroup>
@@ -343,7 +343,7 @@ flowchart TD
 
 In words: run both models, fill existing documents, compare, then switch and update alerts. If results worsen, return to the saved plan and update alerts again. Changing spaces within one owner uses space promotion; changing the ingestion owner uses registration activation.
 
-**Different owner, as in this `hosted.embed` example:** activate the already active evaluation registration:
+**Different owner, as in this `text.embed` example:** activate the already active evaluation registration:
 
 ```bash
 curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/$REGISTRATION_ID/activate" \
@@ -395,9 +395,9 @@ curl -fsS "$QUIVR_API_URL/v0/admin/plugins/plan" \
 ```
 
 ```json
-[{"role":"ingestion-route:application/pdf","plugin_id":"hosted.embed"},
- {"role":"ingestion-route:text/html","plugin_id":"hosted.embed"},
- {"role":"ingestion-route:text/plain","plugin_id":"hosted.embed"}]
+[{"role":"ingestion-route:application/pdf","plugin_id":"text.embed"},
+ {"role":"ingestion-route:text/html","plugin_id":"text.embed"},
+ {"role":"ingestion-route:text/plain","plugin_id":"text.embed"}]
 ```
 
 API and worker processes poll for plan changes. If loading a plan fails, they keep the old plan and do not retry that plan id until another plan appears; inspect their logs and fix the reported error before applying another plan change.
@@ -427,7 +427,7 @@ Compatible redeploys preserve activated serving and evaluation routes; see [Rede
 
 ## Encode queries on a local CPU
 
-If you use `hosted.embed` with an OpenAI-compatible model, you can keep documents
+If you use `text.embed` with an OpenAI-compatible model, you can keep documents
 on the remote service and encode search questions beside the API. The optional
 local text encoder must use the same model revision, dimensions and input prefix.
 Changing where that computation runs leaves the vector space unchanged, so this
@@ -450,7 +450,7 @@ list the pinned runtime, thread/startup variables, parity CLI and validation gat
 
 For other deployments, set `QUIVR_HOSTED_QUERY_URL` only in the API's hosted
 plugin process. Use a loopback HTTP `/v1` base, and keep the API and worker plugin
-pins identical. The same [plugin reference](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#optional-local-cpu-queries)
+pins identical. The same [plugin reference](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#optional-local-cpu-queries)
 describes the required readiness metadata and supported format.
 
 ## Clean up
@@ -458,7 +458,7 @@ describes the required readiness metadata and supported format.
 Retaining an evaluation owner is useful for rollback but continues provider calls. Once you no longer need that rollback option:
 
 1. Copy the active plan's default, served routes and evaluation owners into `ingestion.default`, `ingestion.routes` and `ingestion.evaluation` in every process's configuration. [Apply this configuration](/run-quivr/pin) first, so it records the routing you chose by activation or rollback.
-2. Remove the retiring owner from each `ingestion.evaluation` list and apply the configuration again. After rollback in this example, remove `hosted.embed`; if you keep the candidate serving, remove the former owner instead. This stops new evaluation calls for those formats.
+2. Remove the retiring owner from each `ingestion.evaluation` list and apply the configuration again. After rollback in this example, remove `text.embed`; if you keep the candidate serving, remove the former owner instead. This stops new evaluation calls for those formats.
 3. If that plugin no longer serves any format or other plugin role, remove its `plugins` pin too. Keep it reachable until pinned work and Subscriptions release it and its registration becomes `inactive`; see [the plugin lifecycle](/run-quivr/upgrade-a-plugin#plugin-lifecycle). A plugin still serving another format or role must keep running.
 
 Preserve the served routes and remaining owners' pins throughout cleanup. Stored alert Versions and Matches remain readable.

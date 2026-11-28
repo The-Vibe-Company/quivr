@@ -6,7 +6,7 @@ updates:
       - "/contracts/http/v0/checks"
       - "/plugins/core-ingest"
       - "/plugins/core-retrieve"
-      - "/plugins/hosted-embed"
+      - "/plugins/text-embed"
       - "/plugins/m365-mail"
       - "/plugins/rss"
       - "/plugins/x-list"

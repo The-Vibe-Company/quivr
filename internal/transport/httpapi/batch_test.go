@@ -247,7 +247,7 @@ func TestBatchAcceptanceBudgets(t *testing.T) {
 	}{
 		{name: "100 entries exceed the single request budget", count: 100, delay: 60 * time.Millisecond, accepted: 100, elapsed: 6 * time.Second},
 		{name: "an entry timeout leaves its peer a fresh budget", count: 2, delay: 60 * time.Millisecond, slowFirst: true, accepted: 1, elapsed: 5*time.Second + 60*time.Millisecond},
-		{name: "the batch cap leaves unfinished entries retryable", count: 100, delay: 750 * time.Millisecond, invalidLast: true, accepted: 10, elapsed: 8 * time.Second},
+		{name: "the batch cap leaves unfinished entries retryable", count: 100, delay: 750 * time.Millisecond, invalidLast: true, accepted: 33, elapsed: 25 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			port := &acceptancePort{delay: tc.delay}
@@ -326,7 +326,7 @@ func TestBatchDeadlineInterruptsEnvelopeRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		serverConn, clientConn := net.Pipe()
 		defer clientConn.Close()
-		server := &http.Server{Handler: handler, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+		server := &http.Server{Handler: handler, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second}
 		listener := &pipeListener{conn: serverConn, done: make(chan struct{})}
 		defer server.Close()
 		go func() { _ = server.Serve(listener) }()
@@ -348,8 +348,8 @@ func TestBatchDeadlineInterruptsEnvelopeRead(t *testing.T) {
 		if response.StatusCode != 503 || body["code"] != "content_unavailable" || body["retryable"] != true {
 			t.Fatalf("stalled envelope: got %d %v, want retryable content_unavailable", response.StatusCode, body)
 		}
-		if elapsed := time.Since(start); elapsed != 8*time.Second {
-			t.Fatalf("stalled envelope took %s of virtual time, want 8s", elapsed)
+		if elapsed := time.Since(start); elapsed != 25*time.Second {
+			t.Fatalf("stalled envelope took %s of virtual time, want 25s", elapsed)
 		}
 		if len(port.accepted) != 0 {
 			t.Fatalf("incomplete envelope reached acceptance: %v", port.accepted)
@@ -628,4 +628,53 @@ func TestBatchKeepsReceiptsWhenRefusalAuditFails(t *testing.T) {
 		finding.RefusalCode != "not_found" || finding.Error != "[REDACTED]" {
 		t.Fatalf("audit failure warning=%+v, response error=%v", finding, failure)
 	}
+}
+
+func TestBatchExpiredContextDoesNotCascadeAuditFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &auditSink{fail: true}
+		port := &acceptancePort{delay: 150 * time.Millisecond}
+		handler := newAPI(t, port, httpapi.WithAudit(sink))
+
+		allowed0 := inline("ok-0", "ok-0", "Example")
+		allowed0["source"].(map[string]any)["corpus_id"] = "corpus_other"
+		allowed1 := inline("ok-1", "ok-1", "Example")
+		allowed1["source"].(map[string]any)["corpus_id"] = "corpus_other"
+		// Entry 2 would be refused with 404 not_found if attempted, and entry 3 is valid.
+		// Once the batch context expires during entry 1, neither remaining entry should
+		// invoke refusal auditing or be overwritten with storage_unavailable.
+		denied := inline("denied-2", "denied-2", "Example")
+		trailing := inline("ok-3", "ok-3", "Example")
+		trailing["source"].(map[string]any)["corpus_id"] = "corpus_other"
+
+		payload, err := json.Marshal(map[string]any{"items": []any{allowed0, allowed1, denied, trailing}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		req := httptest.NewRequest("POST", "/v0/records/batch", bytes.NewReader(payload)).WithContext(ctx)
+		req.Header.Set("Authorization", "Bearer "+scopedKey)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		conforms(t, "BatchResult", body)
+		items := entries(t, body)
+		if items[0]["receipt"] == nil {
+			t.Fatalf("entry 0 should succeed before deadline: %v", items[0])
+		}
+		for _, idx := range []int{1, 2, 3} {
+			e := entryError(t, items[idx])
+			if e["code"] != "content_unavailable" || e["retryable"] != true {
+				t.Fatalf("entry %d after batch expiry: want retryable content_unavailable, got %v", idx, e)
+			}
+		}
+	})
 }

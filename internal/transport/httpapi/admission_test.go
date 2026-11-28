@@ -383,6 +383,9 @@ func TestDeepDegradationWireContractAndMetrics(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s; want 200 degraded fallback", w.Code, w.Body.String())
 			}
+			if gotDegraded, gotReason := w.Header().Get("X-Quivr-Degraded"), w.Header().Get("X-Quivr-Degraded-Reason"); gotDegraded != "true" || gotReason != wantReason {
+				t.Fatalf("degraded headers = (%q, %q); want (\"true\", %q)", gotDegraded, gotReason, wantReason)
+			}
 			var body struct {
 				RetrievalProfile struct {
 					Name     string `json:"name"`

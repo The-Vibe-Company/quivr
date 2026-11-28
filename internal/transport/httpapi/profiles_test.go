@@ -66,8 +66,11 @@ func TestSearchUsesRoutedProfileDeadline(t *testing.T) {
 			return res, out
 		}
 		res, body := call(`{"query":"library","corpus_ids":["corpus_a"],"profile":"deep"}`)
-		if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining != 9*time.Second {
+		if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining != 25*time.Second {
 			t.Fatalf("profile deadline %s, response %d: %v", routing.remaining, res.StatusCode, body)
+		}
+		if timing := res.Header.Get("Server-Timing"); !strings.Contains(timing, "routing;dur=") {
+			t.Fatalf("503 search response missing Server-Timing header: %q", timing)
 		}
 		res, body = call(`{"query":"library","corpus_ids":["corpus_a"],"profile":"balanced"}`)
 		if res.StatusCode != 422 || body["code"] != "unsupported_profile" {

@@ -89,7 +89,7 @@ class TrustedPromotion(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.repository = pathlib.Path(self.directory.name) / 'repository'
         self.repository.mkdir()
-        for folder in ('scripts/eval', 'plugins/hosted-embed', 'plugins/core-retrieve', 'plugins/core-ingest'):
+        for folder in ('scripts/eval', 'plugins/text-embed', 'plugins/core-retrieve', 'plugins/core-ingest'):
             shutil.copytree(promotion.ROOT / folder, self.repository / folder,
                             ignore=shutil.ignore_patterns('__pycache__', 'results'))
         target = self.repository / promotion.TARGET

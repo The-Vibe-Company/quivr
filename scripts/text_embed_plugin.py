@@ -1,4 +1,4 @@
-"""Fake-only certification and local-stack pin/search of hosted.embed."""
+"""Fake-only certification and local-stack pin/search of text.embed."""
 import plugin_environment
 import argparse
 import base64
@@ -17,7 +17,7 @@ import ingestion_plugin
 import ports
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / 'plugins' / 'hosted-embed'
+PLUGIN = ROOT / 'plugins' / 'text-embed'
 
 
 @contextmanager
@@ -27,7 +27,7 @@ def signing():
     ring = {'active': 'local', 'keys': [{'id': 'local',
             'secret': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')}]}
     keys = json.loads(previous or '{}')
-    keys['hosted.embed'] = ring
+    keys['text.embed'] = ring
     os.environ['QUIVR_ENGINE_PLUGIN_KEYS'] = json.dumps(keys)
     try:
         yield json.dumps(ring)
@@ -39,8 +39,8 @@ def signing():
 
 
 def build(directory):
-    cached = go_bin_cache.ensure('quivr-hosted-embed', PLUGIN, '.', go=os.environ.get('GO', 'go'), env=plugin_environment.inherited())
-    return go_bin_cache.materialize(cached, directory.resolve() / 'hosted-embed')
+    cached = go_bin_cache.ensure('quivr-text-embed', PLUGIN, '.', go=os.environ.get('GO', 'go'), env=plugin_environment.inherited())
+    return go_bin_cache.materialize(cached, directory.resolve() / 'text-embed')
 
 
 def check_committed_manifest(binary):
@@ -52,7 +52,7 @@ def check_committed_manifest(binary):
     generated['run']['command'] = ['go', 'run', '.']
     committed = json.loads((PLUGIN / 'quivr-plugin.yaml').read_text())
     if generated != committed:
-        raise RuntimeError('plugins/hosted-embed/quivr-plugin.yaml is stale; regenerate '
+        raise RuntimeError('plugins/text-embed/quivr-plugin.yaml is stale; regenerate '
                            'with configure examples/tei.json and set run.command to ["go", "run", "."]')
 
 
@@ -82,22 +82,22 @@ def certify(quivr, directory):
             article['ingestion']['configuration'] = config
             fixture = manifest.parent / 'fixture.json'
             fixture.write_text(json.dumps(article))
-            report = directory / f'hosted-embed-{format}-contract-report.json'
-            log = directory / f'hosted-embed-{format}-contract.log'
+            report = directory / f'text-embed-{format}-contract-report.json'
+            log = directory / f'text-embed-{format}-contract.log'
             with log.open('w') as output:
                 result = subprocess.run([str(quivr), 'plugin', 'test', '--startup-timeout', '120s', '--report', str(report),
                                          '--fixture', str(fixture), str(manifest.parent)],
                                         env={**os.environ, 'EMBED_API_KEY': 'fake-key'}, stdout=output, stderr=subprocess.STDOUT)
             if result.returncode or '\nCERTIFIED' not in '\n' + log.read_text():
                 raise RuntimeError(f'{format} did not certify: {log.read_text()}')
-            print(f'Certified hosted.embed {format}: {report}', flush=True)
+            print(f'Certified text.embed {format}: {report}', flush=True)
     print(f'Hosted embedding certification: {time.monotonic() - started:.1f}s', flush=True)
 
 
 def verify(stack):
     """Use both provider formats as actual pins, restoring the stack afterwards."""
     started = time.monotonic()
-    directory = stack.directory / 'hosted-embed'
+    directory = stack.directory / 'text-embed'
     binary = build(directory)
     configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
     plugin = None
@@ -122,7 +122,7 @@ def verify(stack):
                 ingestion_plugin.await_healthy(plugin, port, log)
                 for name, original in configs.items():
                     cfg = json.loads(original)
-                    cfg['ingestion'] = {'default': 'hosted.embed'}
+                    cfg['ingestion'] = {'default': 'text.embed'}
                     cfg['plugins'].append({'manifest': str(manifest), 'endpoint': f'http://127.0.0.1:{port}',
                                            'configuration': config, 'spaces': {space: 'served'}})
                     path = stack.directory / name
@@ -130,7 +130,7 @@ def verify(stack):
                     path.chmod(0o600)
                 stack.stop_processes()
                 stack.start_processes()
-                stack.tests('^TestHostedEmbeddingPinFindsText$', {'QUIVR_TEST_HOSTED_SPACE': space})
+                stack.tests('^TestTextEmbeddingPinFindsText$', {'QUIVR_TEST_HOSTED_SPACE': space})
                 stack.stop_processes()
                 ingestion_plugin.stop_plugin(plugin)
                 plugin = None
@@ -141,7 +141,7 @@ def verify(stack):
             (stack.directory / name).write_text(original)
         stack.stop_processes()
         stack.start_processes()
-    (stack.directory / 'hosted-embed.json').write_text(json.dumps({'formats': ['openai', 'cohere'], 'seconds': round(time.monotonic() - started, 1)}))
+    (stack.directory / 'text-embed.json').write_text(json.dumps({'formats': ['openai', 'cohere'], 'seconds': round(time.monotonic() - started, 1)}))
 
 
 def verify_redeploy(stack):
@@ -183,7 +183,7 @@ def verify_redeploy(stack):
             def configure(declaration):
                 for name, original in configs.items():
                     cfg = json.loads(original)
-                    cfg['ingestion'] = {'default': 'core.ingest', 'evaluation': {'text/plain': ['hosted.embed']}}
+                    cfg['ingestion'] = {'default': 'core.ingest', 'evaluation': {'text/plain': ['text.embed']}}
                     cfg['plugins'].append({'manifest': str(declaration), 'endpoint': f'http://127.0.0.1:{port}',
                                            'configuration': config, 'spaces': {space: 'served'}})
                     path = stack.directory / name
@@ -196,7 +196,7 @@ def verify_redeploy(stack):
             stack.start_processes()
             run = {'QUIVR_TEST_HOSTED_REDEPLOY_SPACE': space,
                    'QUIVR_TEST_HOSTED_REDEPLOY_ORIGINAL_PLAN': original_plan}
-            stack.tests('^TestHostedEmbeddingRedeployBefore$', run)
+            stack.tests('^TestTextEmbeddingRedeployBefore$', run)
             stack.stop_processes()
             ingestion_plugin.stop_plugin(plugin)
             plugin = None
@@ -208,7 +208,7 @@ def verify_redeploy(stack):
             plugin = start(next_binary, next_manifest, 'new')
             configure(next_manifest)
             stack.start_processes()
-            stack.tests('^TestHostedEmbeddingRedeployAfter$', run)
+            stack.tests('^TestTextEmbeddingRedeployAfter$', run)
             # An endpoint move is incompatible with automatic build following.
             # Keep the prior endpoint reachable for the exact saved rollback.
             stack.stop_processes()
@@ -217,7 +217,7 @@ def verify_redeploy(stack):
             plugin = start(next_binary, next_manifest, 'moved')
             configure(next_manifest)
             stack.start_processes()
-            stack.tests('^TestHostedEmbeddingRollbackCoverage$', run)
+            stack.tests('^TestTextEmbeddingRollbackCoverage$', run)
     finally:
         if plugin is not None:
             ingestion_plugin.stop_plugin(plugin)

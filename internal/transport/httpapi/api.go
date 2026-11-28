@@ -162,8 +162,8 @@ const (
 	maxBatchBytes   = 10 << 20
 	maxBatchEntries = 100
 	requestTimeout  = 5 * time.Second
-	// Leave response headroom within the server write timeout.
-	batchTimeout = 8 * time.Second
+	// Leave response headroom within the server's 30 s write timeout.
+	batchTimeout = 25 * time.Second
 )
 
 func send(w http.ResponseWriter, status int, v any) {
@@ -393,13 +393,12 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Sc
 	return raw, true
 }
 
-// readJSON reads one bounded UTF-8 JSON document without interpreting its
-// shape, returning it decoded and as the raw payload.
-func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte, bool) {
+// readPayload reads one bounded UTF-8 JSON request body without decoding it.
+func readPayload(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		writeError(w, publicerr.UnsupportedMediaType, nil)
-		return nil, nil, false
+		return nil, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	payload, err := io.ReadAll(r.Body)
@@ -415,10 +414,20 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 		} else {
 			writeDecodeError(w, r, publicerr.MalformedJson)
 		}
-		return nil, nil, false
+		return nil, false
 	}
 	if !utf8.Valid(payload) {
 		writeDecodeError(w, r, publicerr.MalformedJson)
+		return nil, false
+	}
+	return payload, true
+}
+
+// readJSON reads one bounded UTF-8 JSON document without interpreting its
+// shape, returning it decoded and as the raw payload.
+func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte, bool) {
+	payload, ok := readPayload(w, r, limit)
+	if !ok {
 		return nil, nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))

@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -58,6 +59,12 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	return result0, err
 }
 
+func rollbackTx(ctx context.Context, tx pgx.Tx) {
+	rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_ = tx.Rollback(rbCtx)
+}
+
 func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
 	canonical, err := json.Marshal(c)
 	if err != nil {
@@ -75,7 +82,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackTx(ctx, tx)
 	if db != s.Pool {
 		if err = lockProjectionRouting(ctx, tx); err != nil {
 			return content.Receipt{}, err
@@ -226,7 +233,7 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackTx(ctx, tx)
 	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return content.Receipt{}, err
 	}

@@ -1,4 +1,4 @@
-module github.com/The-Vibe-Company/quivr/plugins/hosted-embed
+module github.com/The-Vibe-Company/quivr/plugins/text-embed
 
 go 1.26.0
 

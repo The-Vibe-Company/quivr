@@ -544,3 +544,155 @@ func (j *pacedJournal) ReadChanges(ctx context.Context, _, corpusID string, afte
 	}
 	return w, nil
 }
+
+type batchVisibilityJournal struct {
+	memoryJournal
+	visMu        sync.Mutex
+	rev          int64
+	denied       map[int64]bool
+	batchCalls   int
+	singleCalls  int
+	revCalls     int
+	batchSizes   []int
+}
+
+func (j *batchVisibilityJournal) VisibleChange(_ context.Context, _, _ string, position int64) (bool, error) {
+	j.visMu.Lock()
+	defer j.visMu.Unlock()
+	j.singleCalls++
+	return !j.denied[position], nil
+}
+
+func (j *batchVisibilityJournal) VisibleChanges(_ context.Context, _, _ string, positions []int64) (map[int64]bool, int64, error) {
+	j.visMu.Lock()
+	defer j.visMu.Unlock()
+	j.batchCalls++
+	j.batchSizes = append(j.batchSizes, len(positions))
+	out := make(map[int64]bool, len(positions))
+	for _, pos := range positions {
+		if !j.denied[pos] {
+			out[pos] = true
+		}
+	}
+	return out, j.rev, nil
+}
+
+func (j *batchVisibilityJournal) VisibilityRevision(_ context.Context, _, _ string) (int64, error) {
+	j.visMu.Lock()
+	defer j.visMu.Unlock()
+	j.revCalls++
+	return j.rev, nil
+}
+
+type revokeOnFirstSSE struct {
+	http.ResponseWriter
+	onFirst func()
+}
+
+func (w *revokeOnFirstSSE) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *revokeOnFirstSSE) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if w.onFirst != nil && strings.Contains(string(p), "event: change\n") {
+		w.onFirst()
+		w.onFirst = nil
+	}
+	return n, err
+}
+
+// SSE visibility recheck batches all events on a page into one query when policy
+// stays unchanged, and re-batches only the remaining slice when policy changes mid-page.
+func TestStreamBatchesVisibilityRecheckAndCatchesMidPageRevocation(t *testing.T) {
+	for _, revokeMidPage := range []bool{false, true} {
+		name := "stable policy batches entire page"
+		if revokeMidPage {
+			name = "mid-page revocation re-batches remaining events"
+		}
+		t.Run(name, func(t *testing.T) {
+			journal := &batchVisibilityJournal{denied: map[int64]bool{}}
+			key := []byte("cursor-key-0123456789abcdef0123456789")
+			const enforcedToken = "enforced-reader-0123456789abcdef01234567"
+			keys := map[string]corpus.Scope{
+				enforcedToken: {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}, VisibilityMode: "enforce"},
+			}
+			feed := changes.Service{Journal: journal, Key: key, Retention: time.Minute}
+			handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 5*time.Millisecond))
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !revokeMidPage {
+					handler.ServeHTTP(w, r)
+					return
+				}
+				handler.ServeHTTP(&revokeOnFirstSSE{ResponseWriter: w, onFirst: func() {
+					journal.visMu.Lock()
+					journal.rev++
+					journal.denied[2] = true
+					journal.denied[3] = true
+					journal.visMu.Unlock()
+				}}, r)
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, "GET", server.URL+"/v0/changes/stream?corpus_id=corpus_a", nil)
+			req.Header.Set("Authorization", "Bearer "+enforcedToken)
+			req.Header.Set("X-Quivr-Actor", "38e61a6d8a6f4849aca7b0f7dd7880d6")
+			req.Header.Set("X-Quivr-Principals", "group:readers")
+			res, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			if res.StatusCode != 200 {
+				t.Fatalf("status=%d", res.StatusCode)
+			}
+			stream := &sse{res: res, scanner: bufio.NewScanner(res.Body)}
+			if cp, ok := stream.next(t); !ok || cp.event != "checkpoint" {
+				t.Fatalf("want initial checkpoint, got %+v", cp)
+			}
+			for _, id := range []string{"r1", "r2", "r3", "r4", "r5"} {
+				journal.append("corpus_a", "record.accepted", id)
+			}
+			wantCount := 5
+			if revokeMidPage {
+				wantCount = 3 // r1, r4, r5 (r2 and r3 revoked mid-page)
+			}
+			var emitted []string
+			for len(emitted) < wantCount {
+				f, ok := stream.next(t)
+				if !ok {
+					t.Fatalf("stream closed early after %v", emitted)
+				}
+				if f.event != "change" {
+					continue
+				}
+				var ev struct{ Resource struct{ ID string } }
+				if err := json.Unmarshal([]byte(f.data), &ev); err != nil {
+					t.Fatal(err)
+				}
+				emitted = append(emitted, ev.Resource.ID)
+			}
+			cancel()
+
+			journal.visMu.Lock()
+			defer journal.visMu.Unlock()
+			if journal.singleCalls != 0 {
+				t.Fatalf("expected 0 per-event VisibleChange calls, got %d", journal.singleCalls)
+			}
+			if !revokeMidPage {
+				if journal.batchCalls != 1 || len(journal.batchSizes) != 1 || journal.batchSizes[0] != 5 {
+					t.Fatalf("stable policy batchCalls=%d sizes=%v; want 1 call of 5", journal.batchCalls, journal.batchSizes)
+				}
+			} else {
+				if strings.Join(emitted, ",") != "r1,r4,r5" {
+					t.Fatalf("revoked events leaked: emitted=%v; want [r1 r4 r5]", emitted)
+				}
+				if journal.batchCalls != 2 || len(journal.batchSizes) != 2 || journal.batchSizes[0] != 5 || journal.batchSizes[1] != 4 {
+					t.Fatalf("mid-page revocation batchCalls=%d sizes=%v; want [5 4]", journal.batchCalls, journal.batchSizes)
+				}
+			}
+		})
+	}
+}

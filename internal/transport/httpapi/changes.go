@@ -163,20 +163,65 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			write("event: stream_error\ndata: %s\n\n", b)
 			return
 		}
-		for _, c := range page.Items {
+		var batchVisible map[int64]bool
+		var visibilityRev int64
+		useBatchVisibility := enforced && len(page.Items) > 0 && a.Changes.SupportsBatchVisibility()
+		if useBatchVisibility {
+			check, cancel := context.WithTimeout(r.Context(), requestTimeout)
+			batchVisible, visibilityRev, err = a.Changes.VisibleChanges(check, scope, corpusID, page.Items)
+			cancel()
+			if err != nil {
+				_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+				correlateError(r.Context(), &body)
+				b, _ := json.Marshal(body)
+				write("event: stream_error\ndata: %s\n\n", b)
+				return
+			}
+		}
+		for i, c := range page.Items {
 			if enforced {
-				check, cancel := context.WithTimeout(r.Context(), requestTimeout)
-				allowed, err := a.Changes.VisibleChange(check, scope, c.Event)
-				cancel()
-				if err != nil {
-					_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
-					correlateError(r.Context(), &body)
-					b, _ := json.Marshal(body)
-					write("event: stream_error\ndata: %s\n\n", b)
-					return
-				}
-				if !allowed {
-					continue
+				if useBatchVisibility {
+					if i > 0 {
+						check, cancel := context.WithTimeout(r.Context(), requestTimeout)
+						currentRev, revErr := a.Changes.VisibilityRevision(check, scope, corpusID)
+						cancel()
+						if revErr != nil {
+							_, body := errorResponse(revErr, publicerr.ChangesUnavailable, corpusID)
+							correlateError(r.Context(), &body)
+							b, _ := json.Marshal(body)
+							write("event: stream_error\ndata: %s\n\n", b)
+							return
+						}
+						if currentRev != visibilityRev {
+							check, cancel := context.WithTimeout(r.Context(), requestTimeout)
+							batchVisible, visibilityRev, err = a.Changes.VisibleChanges(check, scope, corpusID, page.Items[i:])
+							cancel()
+							if err != nil {
+								_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+								correlateError(r.Context(), &body)
+								b, _ := json.Marshal(body)
+								write("event: stream_error\ndata: %s\n\n", b)
+								return
+							}
+						}
+					}
+					if !batchVisible[c.Position] {
+						continue
+					}
+				} else {
+					check, cancel := context.WithTimeout(r.Context(), requestTimeout)
+					allowed, err := a.Changes.VisibleChange(check, scope, c.Event)
+					cancel()
+					if err != nil {
+						_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+						correlateError(r.Context(), &body)
+						b, _ := json.Marshal(body)
+						write("event: stream_error\ndata: %s\n\n", b)
+						return
+					}
+					if !allowed {
+						continue
+					}
 				}
 			}
 			b, _ := json.Marshal(changeToTransport(c))

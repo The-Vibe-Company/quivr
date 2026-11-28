@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -18,16 +21,12 @@ import (
 // ingestCommand validates one raw IngestCommand and runs the acceptance path
 // shared by single submission and every batch entry, so a key replays the same
 // Receipt through either endpoint. A non-nil error reports the rejection.
-func (a *API) ingestCommand(ctx context.Context, submit content.Submitter, raw any) (content.Receipt, error) {
+func (a *API) ingestCommand(ctx context.Context, submit content.Submitter, raw any, rawBytes []byte) (content.Receipt, error) {
 	if a.schemas["IngestCommand"].Validate(raw) != nil {
 		return content.Receipt{}, publicerr.InvalidSchema
 	}
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return content.Receipt{}, publicerr.InvalidSchema
-	}
 	var wire transport.IngestCommand
-	if err = json.Unmarshal(b, &wire); err != nil {
+	if err := json.Unmarshal(rawBytes, &wire); err != nil {
 		return content.Receipt{}, publicerr.InvalidSchema
 	}
 	c, err := commandFromTransport(wire)
@@ -44,22 +43,108 @@ func (a *API) ingestCommand(ctx context.Context, submit content.Submitter, raw a
 	return receipt, nil
 }
 
+// decodeJSONNumber decodes a single JSON value preserving numeric fidelity for
+// JSON Schema validation.
+func decodeJSONNumber(rawBytes []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(rawBytes))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// parseBatchEnvelope validates the top-level BatchRequest envelope in a single
+// pass without allocating decoded maps for every entry upfront.
+func parseBatchEnvelope(payload []byte) ([]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, publicerr.MalformedJson
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		// Valid non-object JSON (e.g. a bare array) violates BatchRequest's
+		// object schema; malformed syntax remains malformed_json.
+		var check any
+		if json.Unmarshal(payload, &check) != nil {
+			return nil, publicerr.MalformedJson
+		}
+		return nil, publicerr.InvalidSchema
+	}
+	seen := map[string]bool{}
+	var itemsRaw json.RawMessage
+	var extraKey bool
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, publicerr.MalformedJson
+		}
+		key, ok := keyTok.(string)
+		if !ok || seen[key] {
+			return nil, publicerr.MalformedJson
+		}
+		seen[key] = true
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return nil, publicerr.MalformedJson
+		}
+		if key == "items" {
+			itemsRaw = val
+		} else {
+			extraKey = true
+		}
+	}
+	endTok, err := dec.Token()
+	if err != nil || endTok != json.Delim('}') {
+		return nil, publicerr.MalformedJson
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, publicerr.MalformedJson
+	}
+	if len(itemsRaw) == 0 {
+		return nil, publicerr.InvalidSchema
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(itemsRaw, &items); err != nil {
+		return nil, publicerr.InvalidSchema
+	}
+	if len(items) > maxBatchEntries {
+		return nil, publicerr.BatchTooLarge
+	}
+	if extraKey || len(items) == 0 {
+		return nil, publicerr.InvalidSchema
+	}
+	return items, nil
+}
+
 // batchEntry resolves one batch entry independently of its peers. Its index
 // only correlates the outcome; the entry's own key carries its identity. An
 // entry is held to the single-request bound on its raw bytes, so the same entry
 // submitted alone is never refused for size.
-func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index int, entry any, size int) (transport.BatchItem, int) {
+func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index int, rawBytes []byte) (transport.BatchItem, int) {
+	item := transport.BatchItem{Index: index}
+	if err := ctx.Err(); err != nil {
+		status, e := errorResponse(err, publicerr.ContentUnavailable)
+		correlateError(ctx, &e)
+		item.Error = &e
+		return item, status
+	}
 	// Each entry gets a fresh budget, bounded by the batch and caller deadlines.
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	item := transport.BatchItem{Index: index}
 	var receipt content.Receipt
-	err := ctx.Err()
-	if err == nil {
-		if size > maxRequestBytes {
-			err = publicerr.EntryTooLarge
+	var err error
+	if len(rawBytes) > maxRequestBytes {
+		err = publicerr.EntryTooLarge
+	} else {
+		var raw any
+		raw, err = decodeJSONNumber(rawBytes)
+		if err != nil {
+			err = publicerr.InvalidSchema
 		} else {
-			receipt, err = a.ingestCommand(ctx, submit, entry)
+			receipt, err = a.ingestCommand(ctx, submit, raw, rawBytes)
 		}
 	}
 	if err != nil {
@@ -77,11 +162,11 @@ func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index in
 // has matched POST /v0/records.
 func (a *API) handleIngestRecord(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	err := a.Content.Submit(scope, func(submit content.Submitter) error {
-		raw, _, ok := readJSON(w, r, maxRequestBytes)
+		raw, payload, ok := readJSON(w, r, maxRequestBytes)
 		if !ok {
 			return nil
 		}
-		receipt, err := a.ingestCommand(r.Context(), submit, raw)
+		receipt, err := a.ingestCommand(r.Context(), submit, raw, payload)
 		if err != nil {
 			writeError(w, err, publicerr.ContentUnavailable)
 		} else {
@@ -100,42 +185,51 @@ func (a *API) handleIngestRecord(w http.ResponseWriter, r *http.Request, scope c
 // handleIngestBatch accepts POST /v0/records/batch.
 func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	err := a.Content.Batch(scope, func(submit content.Submitter) error {
-		raw, payload, ok := readJSON(w, r, maxBatchBytes)
+		payload, ok := readPayload(w, r, maxBatchBytes)
 		if !ok {
 			return nil
 		}
 		// The envelope is bounded and rejected whole before any entry is attempted.
-		envelope, _ := raw.(map[string]any)
-		entries, _ := envelope["items"].([]any)
-		if len(entries) > maxBatchEntries {
-			writeError(w, publicerr.BatchTooLarge, nil)
+		rawItems, err := parseBatchEnvelope(payload)
+		if err != nil {
+			writeError(w, err, nil)
 			return nil
 		}
-		if a.schemas["BatchRequest"].Validate(raw) != nil {
-			writeError(w, publicerr.InvalidSchema, nil)
-			return nil
-		}
-		var sized struct {
-			Items []json.RawMessage `json:"items"`
-		}
-		if json.Unmarshal(payload, &sized) != nil {
-			writeError(w, publicerr.MalformedJson, nil)
-			return nil
-		}
-		result := transport.BatchResult{Items: make([]transport.BatchItem, 0, len(entries))}
+		result := transport.BatchResult{Items: make([]transport.BatchItem, 0, len(rawItems))}
 		receipts, retryable := 0, 0
-		for i, entry := range entries {
-			item, status := a.batchEntry(r.Context(), submit, i, entry, len(sized.Items[i]))
+		batchCtx := r.Context()
+		var auditDeadline time.Time
+		for i, rawItem := range rawItems {
+			if err := batchCtx.Err(); err != nil {
+				_, e := errorResponse(err, publicerr.ContentUnavailable)
+				correlateError(batchCtx, &e)
+				result.Items = append(result.Items, transport.BatchItem{Index: i, Error: &e})
+				retryable++
+				continue
+			}
+			item, status := a.batchEntry(batchCtx, submit, i, rawItem)
 			if item.Receipt != nil {
 				receipts++
 			} else {
-				if err := a.auditEmbeddedRefusal(r.Context(), status, item.Error.Code); err != nil {
-					slog.WarnContext(r.Context(), "batch refusal audit write failed",
-						"request_id", w.Header().Get("X-Request-ID"), "entry_index", i,
-						"refusal_code", item.Error.Code, "error", err)
-					_, failure := errorResponse(publicerr.StorageUnavailable, nil)
-					correlateError(r.Context(), &failure)
-					item.Error = &failure
+				// Avoid passing an already-expired batch context into refusal auditing;
+				// skip auditing for retryable deadline/availability failures and bound
+				// all refusal audits across the batch to one shared 2-second budget.
+				if !(status >= http.StatusInternalServerError && item.Error.Retryable) &&
+					refusalAuditAction(status, item.Error.Code, true) != "" {
+					if auditDeadline.IsZero() {
+						auditDeadline = time.Now().Add(2 * time.Second)
+					}
+					auditCtx, cancelAudit := context.WithDeadline(context.WithoutCancel(batchCtx), auditDeadline)
+					auditErr := a.auditEmbeddedRefusal(auditCtx, status, item.Error.Code)
+					cancelAudit()
+					if auditErr != nil {
+						slog.WarnContext(batchCtx, "batch refusal audit write failed",
+							"request_id", w.Header().Get("X-Request-ID"), "entry_index", i,
+							"refusal_code", item.Error.Code, "error", auditErr)
+						_, failure := errorResponse(publicerr.StorageUnavailable, nil)
+						correlateError(batchCtx, &failure)
+						item.Error = &failure
+					}
 				}
 				if item.Error.Retryable {
 					retryable++
@@ -144,7 +238,7 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 			result.Items = append(result.Items, item)
 		}
 		a.Commands.Accepted(telemetry.CommandBatchEntry, receipts)
-		slog.InfoContext(r.Context(), "ingestion batch", "request_id", w.Header().Get("X-Request-ID"), "entries", len(entries), "receipts", receipts, "rejected", len(entries)-receipts, "retryable", retryable)
+		slog.InfoContext(batchCtx, "ingestion batch", "request_id", w.Header().Get("X-Request-ID"), "entries", len(rawItems), "receipts", receipts, "rejected", len(rawItems)-receipts, "retryable", retryable)
 		send(w, 200, result)
 		return nil
 	})

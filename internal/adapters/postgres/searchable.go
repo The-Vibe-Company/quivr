@@ -655,6 +655,15 @@ func hydrateShards(candidates int, maxConns int32) int {
 	return max(1, min(byPool, bySize))
 }
 
+// HydrateIsAtomic reports whether Hydrate for candidates executes under a
+// single snapshot/connection rather than fanning out across independent shards.
+func (s ProjectionStore) HydrateIsAtomic(ctx context.Context, candidates int) bool {
+	if s.Pool == nil || database(ctx, s.Pool) != s.Pool {
+		return true
+	}
+	return hydrateShards(candidates, s.Pool.Config().MaxConns) == 1
+}
+
 // Hydrate looks a batch of candidates up with response and packed-source fields.
 // Large non-transactional batches fan out across a bounded slice of pool
 // connections so cold random seeks execute concurrently. A candidate outside
