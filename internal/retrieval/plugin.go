@@ -1333,8 +1333,15 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, ti
 	return vector, elapsed, nil
 }
 
-func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
-	return s.encodeQuery(ctx, org, space, text)
+// EncodeQuery encodes a query outside a search. An encoder that panics on the
+// caller's goroutine is ErrUnavailable; the shared query-vector cache recovers
+// a panic on its own flight goroutine.
+func (s Service) EncodeQuery(ctx context.Context, org, space, text string) (vector []float32, err error) {
+	err = guard(ctx, "query.encode", func() (err error) {
+		vector, err = s.encodeQuery(ctx, org, space, text)
+		return err
+	})
+	return vector, err
 }
 
 // A live encoder must return the actual serving encoder alongside its identity.

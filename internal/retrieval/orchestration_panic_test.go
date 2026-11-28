@@ -94,6 +94,18 @@ func bubbleGoroutines(t *testing.T) int {
 	return count
 }
 
+// Outside a search, as for a subscription's meaning query, an encoder that
+// panics on the caller's goroutine is unavailable, not the caller's panic.
+func TestEncodeQueryPanicIsUnavailable(t *testing.T) {
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&syncBuffer{}, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	s := retrieval.Service{Embedder: panickingEmbedder{}}
+	if _, err := s.EncodeQuery(t.Context(), panicOrg, "space", panicQuery); !errors.Is(err, retrieval.ErrUnavailable) {
+		t.Fatalf("EncodeQuery with a panicking encoder = %v, want ErrUnavailable", err)
+	}
+}
+
 // syncBuffer is a log sink the search's goroutines may write concurrently.
 type syncBuffer struct {
 	mu sync.Mutex
