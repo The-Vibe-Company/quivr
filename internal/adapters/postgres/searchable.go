@@ -1,9 +1,11 @@
 package postgres
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -180,6 +182,79 @@ func insertSegmentation(ctx context.Context, tx pgx.Tx, org string, result conte
 	return finish()
 }
 
+// saveSegmentationSQL inserts the segmentation header and all of its segments
+// in a single sorted unnest statement. Ordering by segment ID keeps primary-key
+// lock acquisition deterministic across concurrent writers, while ON CONFLICT
+// DO NOTHING preserves idempotent replay.
+const saveSegmentationSQL = `WITH seg AS (
+ INSERT INTO segmentations(organization,id,version_id,recipe,digest,provenance,segment_count)
+ VALUES($1,$2,$3,$4,$5,$6,$7)
+ ON CONFLICT(organization,id) DO NOTHING
+ RETURNING id
+), rows AS (
+ INSERT INTO segments(organization,id,segmentation_id,version_id,part_key,start_offset,end_offset,text_sha256,derivation)
+ SELECT $1,x.id,seg.id,$3,x.part_key,x.start_offset,x.end_offset,x.text_sha256,x.derivation
+ FROM seg
+ CROSS JOIN unnest($8::text[],$9::text[],$10::integer[],$11::integer[],$12::text[],$13::jsonb[])
+  AS x(id,part_key,start_offset,end_offset,text_sha256,derivation)
+ ORDER BY x.id
+ ON CONFLICT(organization,id) DO NOTHING
+)
+SELECT EXISTS(SELECT 1 FROM seg),
+ (SELECT digest FROM segmentations WHERE organization=$1 AND id=$2)`
+
+type segmentInsertBatch struct {
+	IDs         []string
+	PartKeys    []string
+	Starts      []int
+	Ends        []int
+	TextSHA256s []string
+	Derivations []string
+}
+
+func prepareSegmentInsertBatch(segments []content.Segment) (segmentInsertBatch, error) {
+	n := len(segments)
+	if n == 0 {
+		return segmentInsertBatch{
+			IDs:         []string{},
+			PartKeys:    []string{},
+			Starts:      []int{},
+			Ends:        []int{},
+			TextSHA256s: []string{},
+			Derivations: []string{},
+		}, nil
+	}
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(segments[a].ID, segments[b].ID)
+	})
+	batch := segmentInsertBatch{
+		IDs:         make([]string, n),
+		PartKeys:    make([]string, n),
+		Starts:      make([]int, n),
+		Ends:        make([]int, n),
+		TextSHA256s: make([]string, n),
+		Derivations: make([]string, n),
+	}
+	for dst, src := range order {
+		p := segments[src]
+		metadata, err := compactSegmentDerivation(p.Derivation)
+		if err != nil {
+			return segmentInsertBatch{}, err
+		}
+		batch.IDs[dst] = p.ID
+		batch.PartKeys[dst] = p.PartKey
+		batch.Starts[dst] = p.Start
+		batch.Ends[dst] = p.End
+		batch.TextSHA256s[dst] = content.Hash([]byte(p.Text))
+		batch.Derivations[dst] = string(metadata)
+	}
+	return batch, nil
+}
+
 func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result content.Segmentation) (journalFinish, error) {
 	if journalGroupOf(ctx) == nil {
 		if err := lockProjectionRouting(ctx, tx); err != nil {
@@ -189,29 +264,32 @@ func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result cont
 			return nil, err
 		}
 	}
+	batch, err := prepareSegmentInsertBatch(result.Segments)
+	if err != nil {
+		return nil, err
+	}
+	provenance := result.Provenance
+	if len(provenance) == 0 {
+		provenance = json.RawMessage("{}")
+	}
 	digest := content.SegmentationDigest(result)
-	var existing string
-	err := tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&existing)
-	if err == nil {
-		if existing != digest {
+	var inserted bool
+	var existing *string
+	if err = tx.QueryRow(ctx, saveSegmentationSQL, org, result.ID, result.VersionID, result.Recipe, digest, provenance, len(result.Segments),
+		batch.IDs, batch.PartKeys, batch.Starts, batch.Ends, batch.TextSHA256s, batch.Derivations).Scan(&inserted, &existing); err != nil {
+		return nil, err
+	}
+	if !inserted {
+		var storedDigest string
+		if existing != nil {
+			storedDigest = *existing
+		} else if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&storedDigest); err != nil {
+			return nil, err
+		}
+		if storedDigest != digest {
 			return nil, content.ErrConflict
 		}
 		return nil, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO segmentations(organization,id,version_id,recipe,digest,provenance,segment_count) VALUES($1,$2,$3,$4,$5,$6,$7)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance, len(result.Segments)); err != nil {
-		return nil, err
-	}
-	for _, p := range result.Segments {
-		metadata, err := compactSegmentDerivation(p.Derivation)
-		if err != nil {
-			return nil, err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO segments VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, org, p.ID, result.ID, result.VersionID, p.PartKey, p.Start, p.End, content.Hash([]byte(p.Text)), metadata); err != nil {
-			return nil, err
-		}
 	}
 	if group := journalGroupOf(ctx); group != nil {
 		group.segmented[result.VersionID] = true
