@@ -145,8 +145,8 @@ func TestOrchestrationPanic(t *testing.T) {
 		name  string
 		mode  string
 		setup func(*retrieval.Service)
-		// want is ErrUnavailable unless set: a panicking query encoder did not
-		// answer, as when it fails.
+		// want is ErrPanicked, which is ErrUnavailable, unless set: a panicking
+		// query encoder did not answer, as when it fails.
 		want error
 	}{
 		{name: "projection search", mode: "lexical", setup: func(s *retrieval.Service) { s.Projection = &panickingProjection{} }},
@@ -188,7 +188,7 @@ func TestOrchestrationPanic(t *testing.T) {
 				scope := searchScope
 				scope.Organization = panicOrg
 				_, err := s.Search(ctx, scope, retrieval.Request{Query: panicQuery, Mode: tc.mode, CorpusIDs: []string{"corpus"}})
-				want := cmp.Or[error](tc.want, retrieval.ErrUnavailable)
+				want := cmp.Or[error](tc.want, retrieval.ErrPanicked)
 				if !errors.Is(err, want) {
 					t.Fatalf("search with a panicking dependency = %v, want %v", err, want)
 				}

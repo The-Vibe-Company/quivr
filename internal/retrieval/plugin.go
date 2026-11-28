@@ -146,27 +146,37 @@ func invocationID() string {
 	return "search-" + hex.EncodeToString(b[:])
 }
 
-// errPanicked is a dependency call that panicked. It is ErrUnavailable.
-var errPanicked = fmt.Errorf("%w: dependency panicked", ErrUnavailable)
+// ErrPanicked reports a search dependency that panicked and was recovered.
+// It is ErrUnavailable; transports answer it as their own panic guard does.
+var ErrPanicked = fmt.Errorf("%w: dependency panicked", ErrUnavailable)
 
-// recovered turns a panic of the call it is deferred in into errPanicked. The
+// unavailable is ErrUnavailable for a failed dependency call, keeping
+// ErrPanicked so a transport can tell a recovered panic from an outage.
+func unavailable(err error) error {
+	if errors.Is(err, ErrPanicked) {
+		return err
+	}
+	return ErrUnavailable
+}
+
+// recovered turns a panic of the call it is deferred in into ErrPanicked. The
 // log names the call site and the panic's type only: a panic value may quote
 // the query, the Organization or the caller's principals.
 func recovered(ctx context.Context, site string, err *error) {
 	if r := recover(); r != nil {
 		slog.ErrorContext(ctx, "search dependency panicked", "component", "search", "site", site, "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
-		*err = errPanicked
+		*err = ErrPanicked
 	}
 }
 
-// guard calls fn on this goroutine, a panic being errPanicked.
+// guard calls fn on this goroutine, a panic being ErrPanicked.
 func guard(ctx context.Context, site string, fn func() error) (err error) {
 	defer recovered(ctx, site, &err)
 	return fn()
 }
 
 // recoverGo runs fn on a new goroutine of wg. Every search fan-out starts its
-// goroutines here: a panic is errPanicked instead of the end of the process,
+// goroutines here: a panic is ErrPanicked instead of the end of the process,
 // and reaches failed, when set, like any error fn returns, so the caller fails
 // the request and cancels its siblings.
 func recoverGo(ctx context.Context, wg *sync.WaitGroup, site string, fn func() error, failed func(error)) {
@@ -359,7 +369,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 	timing.Coverage += time.Since(phase)
 	if err != nil {
 		out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, 0)
-		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
+		return out, s.unserved(ctx, m.ID, unavailable(err), timing)
 	}
 	spaces := plan.spaces
 	if plan.empty && q.EvaluationPlugin == "" {
@@ -474,7 +484,7 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 				}
 			}
 			out.Usage = s.buildUsage(m, q.Profile, started, timing, chain, profile, session.Round())
-			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
+			return out, s.deadline(ctx, m.ID, unavailable(err), timing)
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
@@ -780,7 +790,7 @@ func (sv *server) sharedKeywords(ctx context.Context, key string, search func() 
 			if flight.abandoned && ctx.Err() == nil {
 				continue
 			}
-			return nil, ErrUnavailable
+			return nil, unavailable(flight.err)
 		}
 		flight := &keywordCall{done: make(chan struct{})}
 		if sv.keywordFlights == nil {
@@ -802,7 +812,7 @@ func (sv *server) sharedKeywords(ctx context.Context, key string, search func() 
 		sv.mu.Unlock()
 		close(flight.done)
 		if err != nil {
-			return nil, ErrUnavailable
+			return nil, unavailable(err)
 		}
 		return res, nil
 	}
@@ -1035,7 +1045,7 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 		var err error
 		found, err = search(routes, pq)
 		if err != nil {
-			return fc, ErrUnavailable
+			return fc, unavailable(err)
 		}
 		if q.EvaluationPlugin == "" && pq.Mode != "lexical" {
 			fc.vectorRoutes = routes
@@ -1281,7 +1291,7 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 		return err
 	})
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, unavailable(err)
 	}
 	sv.mu.Lock()
 	for j, h := range hydrated {
@@ -1510,7 +1520,7 @@ func (sv *server) attachLeadsBatch(ctx context.Context, q Request, outs [][]plug
 	})
 	elapsed += time.Since(phase)
 	if err != nil {
-		return elapsed, ErrUnavailable
+		return elapsed, unavailable(err)
 	}
 	if len(leadIDs) == 0 {
 		return elapsed, nil

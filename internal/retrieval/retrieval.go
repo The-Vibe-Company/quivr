@@ -360,7 +360,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		if err != nil {
 			elapsed := time.Since(started)
 			out.Usage = &Usage{Elapsed: elapsed, Phases: Phases{Routing: elapsed}}
-			return out, ErrUnavailable
+			return out, unavailable(err)
 		}
 		if g.ProfileVersion != ProfileVersion {
 			return out, ErrUnsupported
