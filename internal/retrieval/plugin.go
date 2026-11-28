@@ -853,29 +853,22 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 			}
 		} else {
 			k := string(key)
-			for {
-				sv.mu.Lock()
-				if cached, ok := sv.keywordCandidates[k]; ok {
-					more = cached
-					sv.mu.Unlock()
-					break
-				}
-				if flight, ok := sv.keywordFlights[k]; ok {
-					sv.mu.Unlock()
-					select {
-					case <-flight.done:
-						if flight.err == nil {
-							more = flight.res
-							goto haveKeywords
-						}
-						if ctx.Err() != nil {
-							return fc, ErrUnavailable
-						}
-						continue
-					case <-ctx.Done():
+			sv.mu.Lock()
+			if cached, ok := sv.keywordCandidates[k]; ok {
+				more = cached
+				sv.mu.Unlock()
+			} else if flight, ok := sv.keywordFlights[k]; ok {
+				sv.mu.Unlock()
+				select {
+				case <-flight.done:
+					if flight.err != nil {
 						return fc, ErrUnavailable
 					}
+					more = flight.res
+				case <-ctx.Done():
+					return fc, ErrUnavailable
 				}
+			} else {
 				flight := &keywordCall{done: make(chan struct{})}
 				if sv.keywordFlights == nil {
 					sv.keywordFlights = map[string]*keywordCall{}
@@ -899,10 +892,8 @@ func (sv *server) fetchCandidates(ctx context.Context, q Request, c plugins.Cand
 					return fc, ErrUnavailable
 				}
 				more = res
-				break
 			}
 		}
-	haveKeywords:
 		if !pq.RankAcrossRoutes {
 			found, more = NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)
 		}
