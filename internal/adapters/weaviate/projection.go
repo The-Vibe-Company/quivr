@@ -928,11 +928,7 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	// The source filter is part of the candidate query, so ranking and the
 	// candidate limit apply within it in every mode.
 	if len(q.SourceNamespaces) > 0 {
-		sources := make([]filter, 0, len(q.SourceNamespaces))
-		for _, ns := range q.SourceNamespaces {
-			sources = append(sources, equal(sourceNamespaceProperty, ns))
-		}
-		operands = append(operands, or(sources...))
+		operands = append(operands, containsAny(sourceNamespaceProperty, q.SourceNamespaces))
 	}
 	operands = append(operands, identityConditions(q)...)
 	where := and(operands...)

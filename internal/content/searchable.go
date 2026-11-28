@@ -712,9 +712,22 @@ func (b blobSlicer) slice(start, end int) (string, bool) {
 // while letting a 50-hit page complete in a single round-trip wave.
 const blobReadParallelism = 64
 
+// HydrationAtomicityChecker reports whether Baseline.Hydrate executes under a
+// single consistent visibility fence for a batch of n candidates. Backends that
+// shard large batches across independent connections return false so Service.Hydrate
+// preserves the post-lookup RecheckHydration fence even when BlobCache serves
+// every excerpt locally.
+type HydrationAtomicityChecker interface {
+	HydrateIsAtomic(ctx context.Context, candidates int) bool
+}
+
 // Hydrate rechecks candidates and reads their excerpts from canonical storage
-// as one batch: one lookup, one read per distinct uncached blob, then one recheck,
-// since access and currentness may change while the immutable bytes are read.
+// as one batch: one lookup, one read per distinct uncached blob, then one recheck
+// when any uncached blob was read from canonical storage or the initial lookup
+// spanned multiple independent shards, since access and currentness may change
+// while bytes are fetched or between shards. When every blob is served
+// synchronously from BlobCache under a single atomic lookup, the initial
+// Baseline.Hydrate already enforces every visibility and currentness fence.
 // The result holds, at each candidate's index, its hydration, or nothing when
 // the caller may not read it or it is no longer current.
 func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate) (map[int]Hydrated, error) {
@@ -729,7 +742,7 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 	if err != nil {
 		return nil, err
 	}
-	excerpts, err := s.excerpts(ctx, scope.Organization, located)
+	excerpts, readBlobs, err := s.excerpts(ctx, scope.Organization, located)
 	if err != nil {
 		return nil, err
 	}
@@ -743,7 +756,11 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 		out[i] = l.Hydrated
 		found = append(found, i)
 	}
-	if len(found) == 0 {
+	atomicLookup := true
+	if checker, ok := s.Baseline.(HydrationAtomicityChecker); ok {
+		atomicLookup = checker.HydrateIsAtomic(ctx, len(cs))
+	}
+	if len(found) == 0 || (!readBlobs && atomicLookup) {
 		return out, nil
 	}
 	recheck := make([]Candidate, len(found))
@@ -787,7 +804,8 @@ func (s Service) RecheckHydration(ctx context.Context, scope corpus.Scope, candi
 // excerpts reads each distinct blob of a batch once, serving verified immutable
 // blobs from BlobCache when present and reading only misses concurrently from
 // canonical storage, then cuts and checksum-verifies each candidate's excerpt.
-func (s Service) excerpts(ctx context.Context, org string, located map[int]Located) (map[int]string, error) {
+// It also reports whether any uncached blob had to be read from canonical storage.
+func (s Service) excerpts(ctx context.Context, org string, located map[int]Located) (map[int]string, bool, error) {
 	type request struct {
 		candidate, index int
 		source           LocatedSource
@@ -803,7 +821,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		if len(l.Sources) == 0 && l.ManifestBlob.Key != "" && len(l.Segment.Derivation.SourceRanges) > 0 {
 			if prev, ok := seenBlob[l.ManifestBlob.Key]; ok && prev != l.ManifestBlob {
-				return nil, ErrArtifactCorrupt
+				return nil, false, ErrArtifactCorrupt
 			}
 			seenBlob[l.ManifestBlob.Key] = l.ManifestBlob
 			key := blobCacheKey{organization: org, key: l.ManifestBlob.Key, sha256: l.ManifestBlob.SHA256, size: l.ManifestBlob.Size}
@@ -820,7 +838,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		for k, source := range sources {
 			if prev, ok := seenBlob[source.Blob.Key]; ok && prev != source.Blob {
-				return nil, ErrArtifactCorrupt
+				return nil, false, ErrArtifactCorrupt
 			}
 			seenBlob[source.Blob.Key] = source.Blob
 			key := blobCacheKey{organization: org, key: source.Blob.Key, sha256: source.Blob.SHA256, size: source.Blob.Size}
@@ -931,14 +949,15 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		if text, ok := cached[key]; ok {
 			cuts, err := sliceBlob(text, requests)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			applyCuts(requests, cuts)
 			continue
 		}
 		misses = append(misses, miss{key: key, requests: requests})
 	}
-	if len(misses) > 0 {
+	readBlobs := len(misses) > 0
+	if readBlobs {
 		var mu sync.Mutex
 		var failure error
 		var wg sync.WaitGroup
@@ -997,13 +1016,13 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		wg.Wait()
 		if failure != nil {
-			return nil, failure
+			return nil, readBlobs, failure
 		}
 	}
 	out := map[int]string{}
 	for i := range regionOnly {
 		if Hash(nil) != located[i].TextSHA256 {
-			return nil, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
+			return nil, readBlobs, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = ""
 	}
@@ -1014,7 +1033,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 		}
 		text := strings.Join(texts, located[i].Segment.Derivation.SourceSeparator)
 		if Hash([]byte(text)) != located[i].TextSHA256 {
-			return nil, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
+			return nil, readBlobs, fmt.Errorf("canonical excerpt mismatch: %w", ErrArtifactCorrupt)
 		}
 		out[i] = text
 		l := located[i]
@@ -1023,7 +1042,7 @@ func (s Service) excerpts(ctx context.Context, org string, located map[int]Locat
 			located[i] = l
 		}
 	}
-	return out, nil
+	return out, readBlobs, nil
 }
 
 // bounds returns a half-open byte interval. Check the length with subtraction

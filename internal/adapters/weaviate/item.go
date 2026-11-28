@@ -178,7 +178,7 @@ func (s *Store) searchRows(ctx context.Context, collection string, branch search
 		responseLimit = 16 << 20
 	}
 	if s.grpc != nil {
-		return s.grpcSearchRows(ctx, collection, branch, where, order, limit, fields, responseLimit, item)
+		return s.grpcSearchRows(ctx, collection, branch, where, order, limit, fields, responseLimit, true)
 	}
 	query := fmt.Sprintf("{Get{%s(%s%s%s%slimit:%d){%s _additional{score distance}}}}",
 		collection, tenantArgument(ctx), branch.graphql(), order.graphql(), where.graphql(), limit, strings.Join(fields, " "))
@@ -189,8 +189,8 @@ func (s *Store) searchRows(ctx context.Context, collection string, branch search
 		Errors []any `json:"errors"`
 	}
 	reader := s
-	if _, bounded := ctx.Deadline(); item && bounded && s.Client.Timeout != 0 {
-		// Item search is already bounded by its caller. Keep the shared
+	if _, bounded := ctx.Deadline(); bounded && s.Client.Timeout != 0 {
+		// Search queries are already bounded by their caller. Keep the shared
 		// transport and leave the client used for projection writes alone.
 		client := *s.Client
 		client.Timeout = 0
@@ -216,11 +216,7 @@ func identityConditions(q retrieval.Request) []filter {
 		values []string
 	}{{"recordId", q.RecordIDs}, {"versionId", q.VersionIDs}} {
 		if len(field.values) > 0 {
-			var choices []filter
-			for _, v := range field.values {
-				choices = append(choices, equal(field.name, v))
-			}
-			out = append(out, or(choices...))
+			out = append(out, containsAny(field.name, field.values))
 		}
 	}
 	return out
@@ -273,11 +269,7 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		all = append([]filter{equal("organization", scope.Organization)}, all...)
 	}
 	if len(q.SourceNamespaces) > 0 {
-		var namespaces []filter
-		for _, v := range q.SourceNamespaces {
-			namespaces = append(namespaces, equal(sourceNamespaceProperty, v))
-		}
-		all = append(all, or(namespaces...))
+		all = append(all, containsAny(sourceNamespaceProperty, q.SourceNamespaces))
 	}
 	all = append(all, identityConditions(q)...)
 	return and(all...), nil
@@ -509,15 +501,18 @@ func tailPassageScanLimit(itemCount int) int {
 
 func versionFilter(items []content.Candidate) filter {
 	seen := make(map[string]bool, len(items))
-	ids := make([]filter, 0, len(items))
+	ids := make([]string, 0, len(items))
 	for _, c := range items {
 		if seen[c.VersionID] {
 			continue
 		}
 		seen[c.VersionID] = true
-		ids = append(ids, equal("versionId", c.VersionID))
+		ids = append(ids, c.VersionID)
 	}
-	return or(ids...)
+	if len(ids) == 0 {
+		return filter{}
+	}
+	return containsAny("versionId", ids)
 }
 
 func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow) {
@@ -620,16 +615,38 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 		}
 		return rows[i].GenerationID < rows[j].GenerationID
 	})
-	ids := make([]filter, 0, len(rows))
-	for _, row := range rows {
-		id := equal("segmentId", row.SegmentID)
-		if tenantFrom(ctx) == "" {
-			id = and(equal("generationId", row.GenerationID), id)
+	var idFilter filter
+	if tenantFrom(ctx) != "" {
+		segIDs := make([]string, 0, len(rows))
+		seen := make(map[string]struct{}, len(rows))
+		for _, row := range rows {
+			if _, ok := seen[row.SegmentID]; !ok {
+				seen[row.SegmentID] = struct{}{}
+				segIDs = append(segIDs, row.SegmentID)
+			}
 		}
-		ids = append(ids, id)
+		idFilter = containsAny("segmentId", segIDs)
+	} else {
+		var clauses []filter
+		for i := 0; i < len(rows); {
+			genID := rows[i].GenerationID
+			var segIDs []string
+			for i < len(rows) && rows[i].GenerationID == genID {
+				if len(segIDs) == 0 || segIDs[len(segIDs)-1] != rows[i].SegmentID {
+					segIDs = append(segIDs, rows[i].SegmentID)
+				}
+				i++
+			}
+			clauses = append(clauses, and(equal("generationId", genID), containsAny("segmentId", segIDs)))
+		}
+		if len(clauses) == 1 {
+			idFilter = clauses[0]
+		} else {
+			idFilter = or(clauses...)
+		}
 	}
 	// Reserve room for the seed and replacement of a segment during a swap.
-	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, or(ids...)), passageOrder, 2*len(ids), true, true)
+	textRows, err := s.searchRows(ctx, collection, searchBranch{}, and(where, idFilter), passageOrder, 2*len(rows), true, true)
 	if errors.Is(err, errResponseLimit) {
 		// Retain the canonical first passage already captured per item in the
 		// metadata window for byte-limit recovery.
@@ -984,27 +1001,44 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 }
 
 func itemBM25(p *itemPartition, query string) []searchBranch {
-	var branches []searchBranch
-	for _, a := range append([]keywords.Analyzer{{}}, p.analyzers...) {
-		text := query
-		if a.Name != "" {
-			text = a.Analyze(query)
+	if strings.TrimSpace(query) == "" {
+		return nil
+	}
+	analyzedQuery := make(map[string]string, len(p.analyzers))
+	for _, a := range p.analyzers {
+		if text := a.Analyze(query); strings.TrimSpace(text) != "" {
+			analyzedQuery[a.Name] = text
 		}
-		if strings.TrimSpace(text) == "" {
+	}
+	// Only include fields on the raw branch when they have no registered
+	// analyzer or their analyzer dropped every query token (for example, an
+	// all-stopword query), matching itemPassageTerms and preventing raw
+	// stopword matches from masking analyzed stemming.
+	var rawProps []string
+	for _, f := range p.fields {
+		if _, ok := keywords.Lookup(f.Analyzer); !ok || analyzedQuery[f.Analyzer] == "" {
+			rawProps = append(rawProps, itemProperty(f)+"^"+strconv.Itoa(f.EffectiveBoost()))
+		}
+	}
+	var branches []searchBranch
+	if len(rawProps) > 0 {
+		branches = append(branches, searchBranch{mode: "lexical", query: query, properties: rawProps})
+	}
+	for _, a := range p.analyzers {
+		text := analyzedQuery[a.Name]
+		if text == "" {
 			continue
 		}
 		var props []string
 		for _, f := range p.fields {
-			property := itemProperty(f)
-			if a.Name != "" {
-				if f.Analyzer != a.Name {
-					continue
-				}
-				property = analyzedProperty(f, a)
+			if f.Analyzer != a.Name {
+				continue
 			}
-			props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
+			props = append(props, analyzedProperty(f, a)+"^"+strconv.Itoa(f.EffectiveBoost()))
 		}
-		branches = append(branches, searchBranch{mode: "lexical", query: text, properties: props})
+		if len(props) > 0 {
+			branches = append(branches, searchBranch{mode: "lexical", query: text, properties: props})
+		}
 	}
 	return branches
 }
