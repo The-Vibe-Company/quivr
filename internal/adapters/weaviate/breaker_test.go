@@ -151,16 +151,29 @@ func TestGRPCBreaker(t *testing.T) {
 	srv1 := grpc.NewServer()
 	pb.RegisterWeaviateServer(srv1, &controllableGRPCServer{})
 	go func() { _ = srv1.Serve(lis) }()
+	t.Cleanup(srv1.Stop)
 
 	store, closeStore, err := NewWithTransport("http://weaviate.test", addr, outbound.TLS{})
 	if err != nil {
-		srv1.Stop()
 		t.Fatal(err)
 	}
 	t.Cleanup(closeStore)
 
-	const cooldown = 60 * time.Millisecond
-	breaker := newCircuitBreaker(5, cooldown, nil)
+	now := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	var clockMu sync.Mutex
+	clock := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		now = now.Add(d)
+		clockMu.Unlock()
+	}
+
+	const cooldown = 5 * time.Second
+	breaker := newCircuitBreaker(5, cooldown, clock)
 	store.grpcPooled().breaker = breaker
 
 	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "gen-1", Collection: "Example"}}}
@@ -184,7 +197,21 @@ func TestGRPCBreaker(t *testing.T) {
 		t.Fatalf("breaker state = %v, want open", breaker.State())
 	}
 
+	// Already-canceled and expired callers keep context error identity even when
+	// the circuit is open.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := store.Search(canceledCtx, routes, scope, req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("open breaker with canceled ctx err = %v, want context.Canceled", err)
+	}
+	expiredCtx, expire := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer expire()
+	if _, err := store.Search(expiredCtx, routes, scope, req); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("open breaker with expired ctx err = %v, want context.DeadlineExceeded", err)
+	}
+
 	// 200 searches after breaker opens must fast-fail with p99 <= 20 ms.
+	// With the injected clock held constant, cooldown cannot expire mid-sample.
 	const fastFailCount = 200
 	latencies := make([]time.Duration, fastFailCount)
 	for i := range fastFailCount {
@@ -217,7 +244,8 @@ func TestGRPCBreaker(t *testing.T) {
 	go func() { _ = srv2.Serve(lis2) }()
 	t.Cleanup(srv2.Stop)
 
-	time.Sleep(cooldown + 20*time.Millisecond)
+	// Advance fake clock past cooldown without sleeping.
+	advance(cooldown + time.Millisecond)
 
 	// Launch the single half-open probe and wait until it reaches the server.
 	probeDone := make(chan error, 1)
@@ -317,5 +345,39 @@ func TestGRPCDecodePanicRecoveredToErrUnavailable(t *testing.T) {
 	_, err = store.Search(context.Background(), routes, scope, req)
 	if !errors.Is(err, retrieval.ErrUnavailable) {
 		t.Fatalf("client panic err = %v, want retrieval.ErrUnavailable", err)
+	}
+}
+
+func TestGRPCPoolSkipsUnavailableConnections(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, &controllableGRPCServer{})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	store, closeStore, err := NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+
+	pool := store.grpcPooled().pool
+	// Close connections 0, 1, and 2 (Shutdown state), leaving only conn 3 usable.
+	for i := range 3 {
+		_ = pool.conns[i].Close()
+	}
+	pool.inFlight.Store(10)
+	for i := range 12 {
+		if got := pool.pick(); got != pool.conns[3] {
+			t.Fatalf("pick %d returned unavailable conn %p, want healthy conn %p", i, got, pool.conns[3])
+		}
+	}
+	// When no connection is usable, pick falls back to round-robin without panicking.
+	_ = pool.conns[3].Close()
+	if got := pool.pick(); got == nil {
+		t.Fatal("fallback pick returned nil")
 	}
 }

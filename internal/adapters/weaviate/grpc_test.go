@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
@@ -309,6 +310,28 @@ func TestGRPCContextCancelAndDeadlinePreserved(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("server DeadlineExceeded err = %v, want errors.Is(context.DeadlineExceeded)", err)
 	}
+
+	// 4. Server-returned codes.Canceled without caller cancellation must not be
+	// misclassified as context.Canceled.
+	lis3, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv3 := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv3, &blockingSearchFixture{returnCode: codes.Canceled})
+	go func() { _ = srv3.Serve(lis3) }()
+	t.Cleanup(srv3.Stop)
+
+	store3, closeStore3, err := weaviate.NewWithTransport("http://weaviate.test", lis3.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore3)
+
+	_, err = store3.Search(context.Background(), routes, scope, req)
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("server Canceled without caller cancel err = %v, want non-nil error not matching context.Canceled", err)
+	}
 }
 
 func TestGRPCServerKilledMidStreamReturnsUnavailable(t *testing.T) {
@@ -360,30 +383,44 @@ func TestGRPCServerKilledMidStreamReturnsUnavailable(t *testing.T) {
 	}
 }
 
-type connCountingStatsHandler struct {
-	mu    sync.Mutex
-	conns map[string]struct{}
+type peerRecordingSearchFixture struct {
+	pb.UnimplementedWeaviateServer
+	reply       *pb.SearchReply
+	barrierSize int32
+	arrived     atomic.Int32
+	release     chan struct{}
+	releaseOnce sync.Once
+
+	mu       sync.Mutex
+	rpcPeers map[string]int
 }
 
-func (h *connCountingStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
-	return ctx
-}
-func (h *connCountingStatsHandler) HandleRPC(context.Context, stats.RPCStats) {}
-func (h *connCountingStatsHandler) TagConn(ctx context.Context, info *stats.ConnTagInfo) context.Context {
-	h.mu.Lock()
-	if h.conns == nil {
-		h.conns = make(map[string]struct{})
+func (f *peerRecordingSearchFixture) Search(ctx context.Context, _ *pb.SearchRequest) (*pb.SearchReply, error) {
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		f.mu.Lock()
+		if f.rpcPeers == nil {
+			f.rpcPeers = make(map[string]int)
+		}
+		f.rpcPeers[p.Addr.String()]++
+		f.mu.Unlock()
 	}
-	h.conns[info.RemoteAddr.String()] = struct{}{}
-	h.mu.Unlock()
-	return ctx
+	if f.barrierSize > 0 {
+		if f.arrived.Add(1) >= f.barrierSize {
+			f.releaseOnce.Do(func() { close(f.release) })
+		}
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return f.reply, nil
 }
-func (h *connCountingStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
 
-func (h *connCountingStatsHandler) count() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.conns)
+func (f *peerRecordingSearchFixture) distinctRPCPeers() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.rpcPeers)
 }
 
 func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
@@ -391,9 +428,17 @@ func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracker := &connCountingStatsHandler{}
-	srv := grpc.NewServer(grpc.StatsHandler(tracker))
-	pb.RegisterWeaviateServer(srv, &blockingSearchFixture{reply: searchFixtureReply()})
+	// Hold the first wave of 16 concurrent RPCs behind a barrier so inFlight > 4
+	// is guaranteed and round-robin must dispatch actual RPCs across all 4 pooled
+	// TCP connections (not merely eager dials).
+	const workers = 16
+	fixture := &peerRecordingSearchFixture{
+		reply:       searchFixtureReply(),
+		barrierSize: workers,
+		release:     make(chan struct{}),
+	}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, fixture)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 
@@ -407,25 +452,30 @@ func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
 	scope := corpus.Scope{Organization: "organization"}
 	req := retrieval.Request{Mode: "lexical", Query: "example"}
 
-	// Concurrent searches exceed single-connection affinity and fan out across
-	// all pooled connections via round-robin.
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
 	var firstErr error
-	wg.Add(16)
-	for range 16 {
+	recordErr := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+	}
+	wg.Add(workers)
+	for range workers {
 		go func() {
 			defer wg.Done()
-			for range 20 {
-				hits, searchErr := store.Search(context.Background(), routes, scope, req)
-				if searchErr != nil || len(hits) != 1 {
-					errMu.Lock()
-					if firstErr == nil {
-						firstErr = searchErr
-					}
-					errMu.Unlock()
-					return
-				}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hits, searchErr := store.Search(ctx, routes, scope, req)
+			if searchErr != nil {
+				recordErr(searchErr)
+				return
+			}
+			if len(hits) != 1 {
+				recordErr(fmt.Errorf("search returned %d hits, want 1", len(hits)))
+				return
 			}
 		}()
 	}
@@ -433,8 +483,8 @@ func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
 	if firstErr != nil {
 		t.Fatalf("concurrent search failed: %v", firstErr)
 	}
-	if got := tracker.count(); got < 4 {
-		t.Fatalf("server observed %d distinct TCP connections, want >= 4 from pool fan-out", got)
+	if got := fixture.distinctRPCPeers(); got < 4 {
+		t.Fatalf("server handled RPCs on %d distinct client peers, want >= 4 from pool fan-out", got)
 	}
 }
 

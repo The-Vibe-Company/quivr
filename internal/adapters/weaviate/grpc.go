@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -164,6 +166,15 @@ func searchRequest(collection string, branch searchBranch, where filter, order s
 	return request, nil
 }
 
+func logRecoveredGRPCPanic(ctx context.Context, path string, recovered any) {
+	slog.ErrorContext(ctx, "recovered weaviate gRPC panic",
+		"component", "weaviate.grpc",
+		"path", path,
+		"panic_type", fmt.Sprintf("%T", recovered),
+		"stack", string(debug.Stack()),
+	)
+}
+
 func classifyGRPCError(ctx, rpcCtx context.Context, err error) (classified error, tripBreaker bool) {
 	code := status.Code(err)
 	if code == codes.ResourceExhausted && strings.Contains(status.Convert(err).Message(), "received message larger than max") {
@@ -178,7 +189,7 @@ func classifyGRPCError(ctx, rpcCtx context.Context, err error) (classified error
 	if errors.Is(rpcCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || code == codes.DeadlineExceeded {
 		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.DeadlineExceeded), true
 	}
-	if errors.Is(err, context.Canceled) || code == codes.Canceled {
+	if errors.Is(rpcCtx.Err(), context.Canceled) {
 		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.Canceled), false
 	}
 	switch code {
@@ -190,6 +201,9 @@ func classifyGRPCError(ctx, rpcCtx context.Context, err error) (classified error
 }
 
 func (s *Store) grpcSearch(ctx context.Context, request *pb.SearchRequest, operation string, responseLimit int, callerDeadline bool) (results []*pb.SearchResult, err error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("projection query aborted: %w", ctxErr)
+	}
 	breaker := s.grpcBreaker()
 	var isProbe bool
 	if breaker != nil {
@@ -202,6 +216,7 @@ func (s *Store) grpcSearch(ctx context.Context, request *pb.SearchRequest, opera
 	recorded := false
 	defer func() {
 		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "search", r)
 			if breaker != nil && !recorded {
 				breaker.RecordFailure(isProbe)
 				recorded = true
@@ -259,6 +274,7 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "search_rows", r)
 			rows = nil
 			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
 		}
@@ -312,6 +328,7 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "projection_rows", r)
 			rows = nil
 			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
 		}
@@ -354,6 +371,7 @@ func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "anchor_properties", r)
 			out = nil
 			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
 		}

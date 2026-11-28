@@ -25,7 +25,8 @@ const (
 	breakerHalfOpen
 )
 
-// circuitBreaker is a generic, process-level consecutive-failure circuit breaker.
+// circuitBreaker is a generic consecutive-failure circuit breaker owned per
+// pooled gRPC client (one instance per Store created by NewWithTransport).
 // In the healthy closed state, Allow and RecordSuccess use a lock-free atomic
 // fast path. Once open, requests fast-fail with ErrCircuitOpen until cooldown
 // elapses, at which point half-open admits exactly one probe.

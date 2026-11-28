@@ -39,12 +39,31 @@ type grpcConnPool struct {
 	inFlight atomic.Int32
 }
 
+func isUsableConn(conn *grpc.ClientConn) bool {
+	state := conn.GetState()
+	return state != connectivity.TransientFailure && state != connectivity.Shutdown
+}
+
+func (p *grpcConnPool) pickRoundRobin() *grpc.ClientConn {
+	n := len(p.conns)
+	start := p.next.Add(1) - 1
+	for offset := range uint64(n) {
+		conn := p.conns[(start+offset)%uint64(n)]
+		if isUsableConn(conn) {
+			return conn
+		}
+	}
+	return p.conns[start%uint64(n)]
+}
+
 func (p *grpcConnPool) pick() *grpc.ClientConn {
-	if len(p.conns) == 1 || (p.inFlight.Load() <= 4 && p.conns[0].GetState() != connectivity.TransientFailure) {
+	if len(p.conns) == 1 {
 		return p.conns[0]
 	}
-	idx := p.next.Add(1) - 1
-	return p.conns[idx%uint64(len(p.conns))]
+	if p.inFlight.Load() <= 4 && isUsableConn(p.conns[0]) {
+		return p.conns[0]
+	}
+	return p.pickRoundRobin()
 }
 
 // prepareProbe resets reconnect backoff across pooled connections so a
@@ -71,8 +90,7 @@ func (p *grpcConnPool) Invoke(ctx context.Context, method string, args, reply an
 }
 
 func (p *grpcConnPool) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	idx := p.next.Add(1) - 1
-	return p.conns[idx%uint64(len(p.conns))].NewStream(ctx, desc, method, opts...)
+	return p.pickRoundRobin().NewStream(ctx, desc, method, opts...)
 }
 
 type grpcPooledClient struct {
