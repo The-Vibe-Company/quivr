@@ -1,5 +1,5 @@
 {
-  "description": "Hybrid mode fuses near_vector and bm25 legs via DBSF.",
+  "description": "Hybrid mode fuses near_vector and bm25 legs via calibrated convex fusion.",
   "retrieval": {
     "query": "harbour strike",
     "mode": "hybrid",
@@ -35,7 +35,9 @@
     },
     "expect": {
       "top": [
-        "seg_harbour"
+        "seg_harbour",
+        "seg_rail",
+        "seg_ferry"
       ]
     }
   }

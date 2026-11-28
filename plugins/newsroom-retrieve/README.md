@@ -5,7 +5,7 @@
 ## Profiles
 
 - **`newsroom.retrieve/default`** (`max_latency_ms: 500`, `max_cost_cents: 0`):
-  1. **Streamlined 2-Leg Hybrid Retrieval (`O(1)` at corpus scale):** Issues a single ungrouped `near_vector` leg (`dense_k: 100`) and a stopword/elision-cleaned `bm25` leg (`lexical_k: 60`, `clean_lexical_query: true`) in Round 1. Cleaning generic multilingual stopwords and French elision prefixes inside the plugin prevents raw BM25 branches from masking analyzed stems on unmodified Quivr `main`.
+  1. **Streamlined 2-Leg Hybrid Retrieval (bounded candidate-pool cost):** Issues a single ungrouped `near_vector` leg (`dense_k: 100`) and a stopword/elision-cleaned `bm25` leg (`lexical_k: 60`, `clean_lexical_query: true`) in Round 1. Cleaning generic multilingual stopwords and French elision prefixes inside the plugin prevents raw BM25 branches from masking analyzed stems on unmodified Quivr `main`.
   2. **Bruch Min-Max Convex Fusion (`0.65` dense / `0.35` lexical):** Score-calibrated convex combination over the top-K candidate pools (also supports `dbsf`, `rrf`, optional 3rd focused entity `bm25` leg, and optional grouped dense leg).
   3. **Three Orthogonal O(1) Editorial Aboutness Signals:**
      - **Title + Lead Pool-IDF Coverage (`title_lead_weight: 0.12`, `lead_chars: 250`):** Rewards dispatches whose headline and opening lead cover query facets weighted by in-pool IDF.

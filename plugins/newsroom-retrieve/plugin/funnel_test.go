@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -226,7 +227,9 @@ func TestDeepZScoreLogitMultiPassageEndToEnd(t *testing.T) {
 func ttime() time.Time { return time.Now() }
 
 func TestShardedRerankMergesInDocumentOrder(t *testing.T) {
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		var body struct {
 			Texts []string `json:"texts"`
 		}
@@ -249,6 +252,9 @@ func TestShardedRerankMergesInDocumentOrder(t *testing.T) {
 	s, err := ret.callRerankerSharded(context.Background(), cfg, "q", docs, 3)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 sharded reranker HTTP calls, got %d", got)
 	}
 	for i := range docs {
 		if s.Raw[i] != float64(i) {

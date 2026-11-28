@@ -126,7 +126,7 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 		DenseWeight:             0.65,
 		LexicalWeight:           0.35,
 		EntityLeg:               false,
-		EntityWeight:            0.10,
+		EntityWeight:            0.25,
 		EntityMaxTerms:          6,
 		CombMNZBonus:            0,
 		TitleLeadWeight:         0.12,
@@ -298,9 +298,9 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		for _, s := range req.Served {
 			if len(s.Candidates) > 0 {
 				c := s.Candidates[0]
-				fmt.Fprintf(os.Stderr, "[newsroom-shape] prim=%s group=%s part=%q start=%d end=%d ranges=%+v sep=%q text=%d passage=%d head=%q\n",
-					s.Request.Primitive, s.Request.GroupBy, c.PartKey, c.Start, c.End, c.SourceRanges, c.SourceSeparator,
-					len(c.Text), len(c.PassageText), truncateRunes(candidateBodyText(c), 160))
+				fmt.Fprintf(os.Stderr, "[newsroom-shape] prim=%s group=%s part=%q start=%d end=%d ranges=%d sep_len=%d text=%d passage=%d\n",
+					s.Request.Primitive, s.Request.GroupBy, c.PartKey, c.Start, c.End, len(c.SourceRanges), len(c.SourceSeparator),
+					len(c.Text), len(c.PassageText))
 			}
 		}
 	}

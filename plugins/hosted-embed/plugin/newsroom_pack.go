@@ -70,10 +70,14 @@ func extractLeadSentence(body string) string {
 	if len(runes) <= maxRunes {
 		return s
 	}
-	// Snap back to last whitespace before maxRunes.
+	// Snap back to last whitespace before maxRunes; fall back to maxRunes if
+	// no whitespace appears in the tail window.
 	cut := maxRunes
 	for cut > 120 && !unicode.IsSpace(runes[cut-1]) {
 		cut--
+	}
+	if cut <= 120 {
+		cut = maxRunes
 	}
 	return strings.TrimSpace(string(runes[:cut]))
 }
@@ -95,15 +99,20 @@ func (c configuration) buildAnchoredInput(title, leadSentence, body string, isLe
 			lead = normalizeWireText(lead)
 		}
 	}
+	inlineTitle := c.TitleSource == "inline"
 	switch c.ContextualAnchor {
 	case "title_in_text":
-		if t != "" && b != "" {
+		if !inlineTitle && t != "" && b != "" {
 			b = t + sourceSeparator + b
 		}
 	case "title_lead_text":
-		if !isLeadChunk && t != "" && lead != "" && b != "" {
-			b = t + " — " + lead + sourceSeparator + b
-		} else if t != "" && b != "" {
+		if !isLeadChunk && lead != "" && b != "" {
+			if !inlineTitle && t != "" {
+				b = t + " — " + lead + sourceSeparator + b
+			} else {
+				b = lead + sourceSeparator + b
+			}
+		} else if !inlineTitle && t != "" && b != "" {
 			b = t + sourceSeparator + b
 		}
 	case "title_lead_slot":

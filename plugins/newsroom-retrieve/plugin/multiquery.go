@@ -373,7 +373,7 @@ func buildRound2ConsensusQuery(
 	byStem := map[string]*expTerm{}
 
 	for _, sd := range seeds {
-		txt := truncateRunes(strings.TrimSpace(candidateBodyText(sd.cand)), 800)
+		txt := truncateRunes(strings.TrimSpace(candidateBodyText(sd.cand)), 700)
 		if txt == "" {
 			continue
 		}
