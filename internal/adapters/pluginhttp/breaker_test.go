@@ -90,21 +90,35 @@ func TestBreakerStateMachine(t *testing.T) {
 	// Failures below threshold followed by a success reset the failure streak.
 	for range 2 {
 		ok, probe := b.Allow()
-		if !ok || probe {
-			t.Fatalf("closed Allow = (%v, %v), want (true, false)", ok, probe)
+		if !ok || probe != 0 {
+			t.Fatalf("closed Allow = (%v, %v), want (true, 0)", ok, probe)
 		}
 		b.RecordFailure(probe)
 	}
-	b.RecordSuccess(false)
+	b.RecordSuccess(0)
 	if b.State() != breakerClosed || !b.fastClosed.Load() {
 		t.Fatalf("state after reset = %v (fastClosed=%v), want closed+fastClosed", b.State(), b.fastClosed.Load())
+	}
+
+	// Non-failure peer response (e.g. valid 503 envelope or oversized 200) resets
+	// the closed consecutive-failure streak so intermittent failures do not accumulate.
+	for range 2 {
+		ok, probe := b.Allow()
+		if !ok || probe != 0 {
+			t.Fatalf("closed Allow = (%v, %v), want (true, 0)", ok, probe)
+		}
+		b.RecordFailure(probe)
+	}
+	b.RecordPeerResponded(0)
+	if b.State() != breakerClosed || !b.fastClosed.Load() {
+		t.Fatalf("state after peer response reset = %v (fastClosed=%v), want closed+fastClosed", b.State(), b.fastClosed.Load())
 	}
 
 	// Reaching consecutive failure threshold opens the breaker.
 	for range 3 {
 		ok, probe := b.Allow()
-		if !ok || probe {
-			t.Fatalf("closed Allow = (%v, %v), want (true, false)", ok, probe)
+		if !ok || probe != 0 {
+			t.Fatalf("closed Allow = (%v, %v), want (true, 0)", ok, probe)
 		}
 		b.RecordFailure(probe)
 	}
@@ -116,7 +130,7 @@ func TestBreakerStateMachine(t *testing.T) {
 	if ok, _ := b.Allow(); ok {
 		t.Fatal("Allow succeeded while open before cooldown")
 	}
-	b.RecordSuccess(false)
+	b.RecordSuccess(0)
 	if b.State() != breakerOpen {
 		t.Fatalf("stale non-probe success changed open state to %v", b.State())
 	}
@@ -124,21 +138,35 @@ func TestBreakerStateMachine(t *testing.T) {
 	// Advance past cooldown -> half-open admits exactly one probe.
 	advance(5 * time.Second)
 	ok, probe := b.Allow()
-	if !ok || !probe {
-		t.Fatalf("first half-open Allow = (%v, %v), want (true, true)", ok, probe)
+	if !ok || probe == 0 {
+		t.Fatalf("first half-open Allow = (%v, %v), want (true, >0)", ok, probe)
 	}
 	if b.State() != breakerHalfOpen {
 		t.Fatalf("state = %v, want half-open", b.State())
 	}
-	if ok2, probe2 := b.Allow(); ok2 || probe2 {
-		t.Fatalf("concurrent half-open Allow = (%v, %v), want (false, false)", ok2, probe2)
+	if ok2, probe2 := b.Allow(); ok2 || probe2 != 0 {
+		t.Fatalf("concurrent half-open Allow = (%v, %v), want (false, 0)", ok2, probe2)
+	}
+
+	// If a probe stalls/panics past cooldown, a new probe is admitted and the
+	// expired probe token can no longer mutate breaker state.
+	staleProbe := probe
+	advance(5 * time.Second)
+	ok, probe = b.Allow()
+	if !ok || probe == 0 || probe == staleProbe {
+		t.Fatalf("re-admitted half-open Allow = (%v, %v), want fresh probe token", ok, probe)
+	}
+	b.RecordFailure(staleProbe)
+	b.RecordSuccess(staleProbe)
+	if b.State() != breakerHalfOpen {
+		t.Fatalf("stale probe mutated state to %v, want half-open", b.State())
 	}
 
 	// Neutral release frees the probe slot without closing or re-opening cooldown.
 	b.ReleaseProbe(probe)
 	ok, probe = b.Allow()
-	if !ok || !probe {
-		t.Fatalf("re-acquired half-open Allow = (%v, %v), want (true, true)", ok, probe)
+	if !ok || probe == 0 {
+		t.Fatalf("re-acquired half-open Allow = (%v, %v), want (true, >0)", ok, probe)
 	}
 
 	// Failed probe re-opens and restarts cooldown.
@@ -154,12 +182,22 @@ func TestBreakerStateMachine(t *testing.T) {
 	// After second cooldown, one healthy probe closes the breaker.
 	advance(3 * time.Second)
 	ok, probe = b.Allow()
-	if !ok || !probe {
-		t.Fatalf("probe after second cooldown = (%v, %v), want (true, true)", ok, probe)
+	if !ok || probe == 0 {
+		t.Fatalf("probe after second cooldown = (%v, %v), want (true, >0)", ok, probe)
 	}
 	b.RecordSuccess(probe)
 	if b.State() != breakerClosed || !b.fastClosed.Load() {
 		t.Fatalf("state=%v fastClosed=%v, want closed+fastClosed", b.State(), b.fastClosed.Load())
+	}
+
+	// Registry evicts retired idle closed endpoints when capacity is reached.
+	reg := newBreakerRegistry(3, 5*time.Second, clock)
+	reg.maxEntries = 4
+	for i := range 6 {
+		_ = reg.forEndpoint("http://plugin-" + string(rune('a'+i)) + ".test")
+	}
+	if got := reg.count.Load(); got > int64(reg.maxEntries) {
+		t.Fatalf("registry count = %d, want <= %d after idle eviction", got, reg.maxEntries)
 	}
 }
 
@@ -231,10 +269,11 @@ func TestBreakerFastFailAndHalfOpenRecovery(t *testing.T) {
 		}
 	}
 	slices.Sort(latencies)
+	p50 := latencies[len(latencies)/2]
 	p99 := latencies[int(float64(len(latencies)-1)*0.99)]
-	t.Logf("breaker open fast-fail (n=%d): p50=%s p99=%s max=%s", fastFailCount, latencies[len(latencies)/2], p99, latencies[len(latencies)-1])
-	if p99 > 5*time.Millisecond {
-		t.Fatalf("breaker fast-fail p99 = %s, want <= 5ms", p99)
+	t.Logf("breaker open fast-fail (n=%d): p50=%s p99=%s max=%s", fastFailCount, p50, p99, latencies[len(latencies)-1])
+	if p50 > 5*time.Millisecond {
+		t.Fatalf("breaker fast-fail p50 = %s, want <= 5ms", p50)
 	}
 
 	// Restart a healthy server on the same address with a probe gate to prove

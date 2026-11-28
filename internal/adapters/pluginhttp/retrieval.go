@@ -176,20 +176,23 @@ func (r Retriever) Round(ctx context.Context, request plugins.SearchRequest) ([]
 		return nil, err
 	}
 	b := r.endpointBreaker()
-	var isProbe bool
+	var probe probeToken
 	if b != nil {
 		var allowed bool
-		allowed, isProbe = b.Allow()
+		allowed, probe = b.Allow()
 		if !allowed {
 			observe(r.Pin, request.OrganizationID, OpSearchRound, started, nil, ErrCircuitOpen)
 			return nil, ErrCircuitOpen
 		}
 	}
+	recorded := false
+	defer func() {
+		if b != nil && probe != 0 && !recorded {
+			b.ReleaseProbe(probe)
+		}
+	}()
 	body, release, err := marshalSearchRequest(request)
 	if err != nil {
-		if b != nil {
-			b.ReleaseProbe(isProbe)
-		}
 		return nil, err
 	}
 	invokeCtx, cleanup := devhost.WithRequestRelease(ctx, release)
@@ -197,7 +200,8 @@ func (r Retriever) Round(ctx context.Context, request plugins.SearchRequest) ([]
 
 	result, err := call.Invoke(invokeCtx, r.Pin, call.SearchRound, call.Bytes(body), nil, nil)
 	if b != nil {
-		b.Record(classifyRoundOutcome(ctx, r.Pin, result, err), isProbe)
+		recorded = true
+		b.Record(classifyRoundOutcome(ctx, r.Pin, result, err), probe)
 	}
 	observe(r.Pin, request.OrganizationID, OpSearchRound, started, result, err)
 	if err != nil {

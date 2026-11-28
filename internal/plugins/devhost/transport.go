@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -85,14 +86,26 @@ func (t *trackedBytesBody) dec() {
 
 type trackedBytesReader struct {
 	tracker *trackedBytesBody
+	mu      sync.Mutex
 	r       *bytes.Reader
-	closed  atomic.Bool
+	closed  bool
 }
 
-func (r *trackedBytesReader) Read(p []byte) (int, error) { return r.r.Read(p) }
+func (r *trackedBytesReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return 0, io.ErrClosedPipe
+	}
+	return r.r.Read(p)
+}
 
 func (r *trackedBytesReader) Close() error {
-	if !r.closed.Swap(true) {
+	r.mu.Lock()
+	already := r.closed
+	r.closed = true
+	r.mu.Unlock()
+	if !already {
 		r.tracker.dec()
 	}
 	return nil

@@ -87,6 +87,18 @@ func TestReadBoundedBodyContentLengthAndCaps(t *testing.T) {
 		}
 	})
 
+	t.Run("boundary overflow probe preserves non-EOF read errors", func(t *testing.T) {
+		const maxBytes = 64
+		r := io.MultiReader(
+			bytes.NewReader(bytes.Repeat([]byte("a"), maxBytes)),
+			oneByteThenErrReader{b: 'x', err: io.ErrUnexpectedEOF},
+		)
+		got, err := readBoundedBody(r, -1, maxBytes)
+		if !errors.Is(err, io.ErrUnexpectedEOF) || got != nil {
+			t.Fatalf("boundary probe with error = (%d bytes, %v), want ErrUnexpectedEOF", len(got), err)
+		}
+	})
+
 	t.Run("InvokeSearch enforces CodeResponseTooLarge with Content-Length and chunked", func(t *testing.T) {
 		const maxBytes = 256
 		for _, chunked := range []bool{false, true} {
@@ -151,8 +163,49 @@ func TestWithRequestReleaseLifecycle(t *testing.T) {
 	if got := unclaimed.Load(); got != 1 {
 		t.Fatalf("unclaimed releases = %d, want 1", got)
 	}
+
+	// Concurrent Read and Close must synchronize before releasing the buffer.
+	data := bytes.Repeat([]byte("a"), 4096)
+	var released atomic.Bool
+	tracker := newTrackedBytesBody(data, func() {
+		released.Store(true)
+		// Mutate buffer on release to catch any race under -race.
+		for i := range data {
+			data[i] = 'b'
+		}
+	})
+	reader := tracker.newReader()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 128)
+		for {
+			if _, err := reader.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	_ = reader.Close()
+	tracker.dec()
+	<-done
+	if !released.Load() {
+		t.Fatal("buffer was not released after Close and owner dec")
+	}
 }
 
 type errReader struct{ err error }
 
 func (e errReader) Read([]byte) (int, error) { return 0, e.err }
+
+type oneByteThenErrReader struct {
+	b   byte
+	err error
+}
+
+func (r oneByteThenErrReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	p[0] = r.b
+	return 1, r.err
+}

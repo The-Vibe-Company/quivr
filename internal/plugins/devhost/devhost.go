@@ -590,6 +590,9 @@ func readBoundedBody(r io.Reader, contentLength int64, maxResponseBytes int) ([]
 			n, err := limited.Read(probe[:])
 			if n > 0 {
 				buf = append(buf, probe[0])
+				if err != nil && err != io.EOF {
+					return nil, err
+				}
 				return buf, nil
 			}
 			if err == io.EOF {
