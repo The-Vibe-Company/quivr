@@ -25,6 +25,8 @@ type fakeS3 struct {
 	mu       sync.Mutex
 	objects  map[string][]byte
 	requests atomic.Int64
+	puts     atomic.Int64
+	gets     atomic.Int64
 	// onPut runs after the body is read and validated, before the fake replies.
 	// It returns true when it wrote (or deliberately dropped) the response.
 	onPut func(w http.ResponseWriter, key string, body []byte, f *fakeS3) bool
@@ -69,6 +71,7 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/"+fakeBucket+"/")
 	switch r.Method {
 	case http.MethodPut:
+		f.puts.Add(1)
 		body := make([]byte, max(r.ContentLength, 0))
 		if _, err := io.ReadFull(r.Body, body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -101,6 +104,7 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
+		f.gets.Add(1)
 		stored, ok := f.lookup(key)
 		if f.onGet != nil && f.onGet(w, key, stored, ok) {
 			return
