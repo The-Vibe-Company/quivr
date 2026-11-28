@@ -523,6 +523,102 @@ func TestBreakerErrorClassificationAndEndpointIsolation(t *testing.T) {
 		}
 	})
 
+	t.Run("parent context deadline expiry is neutral while downstream timeout trips breaker", func(t *testing.T) {
+		pin := testRetrieverPin("http://parent-deadline-breaker.test")
+		clock, _ := newFakeClock(time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC))
+		breaker := newCircuitBreaker(3, 5*time.Second, clock)
+
+		// Parent context expires with DeadlineExceeded -> neutral (matches invocationFailure).
+		expiredParent, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		for range 5 {
+			ok, probe := breaker.Allow()
+			if !ok || probe != 0 {
+				t.Fatalf("Allow = (%v, %v), want (true, 0)", ok, probe)
+			}
+			breaker.Record(classifyRoundOutcome(expiredParent, pin, nil, context.DeadlineExceeded), probe)
+		}
+		if breaker.State() != breakerClosed {
+			t.Fatalf("breaker state after parent DeadlineExceeded = %v, want closed", breaker.State())
+		}
+
+		// Live parent context with downstream/inner ErrCallDeadline timeout -> trips breaker.
+		for range 3 {
+			ok, probe := breaker.Allow()
+			if !ok || probe != 0 {
+				t.Fatalf("Allow = (%v, %v), want (true, 0)", ok, probe)
+			}
+			breaker.Record(classifyRoundOutcome(context.Background(), pin, nil, plugins.ErrCallDeadline), probe)
+		}
+		if breaker.State() != breakerOpen {
+			t.Fatalf("breaker state after downstream ErrCallDeadline = %v, want open", breaker.State())
+		}
+	})
+
+	t.Run("panicked half-open probe releases slot via defer", func(t *testing.T) {
+		pin := testRetrieverPin("http://panic-probe-breaker.test")
+		discoveryBody, err := json.Marshal(map[string]any{
+			"plugin_api":      pin.PluginAPI(),
+			"plugin":          map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version},
+			"manifest_digest": pin.ManifestDigest,
+			"contributions":   pin.Manifest.Contributions.Names(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var shouldPanic atomic.Bool
+		devhost.SetTransport(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/v0/discovery" {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(bytes.NewReader(discoveryBody)),
+				}, nil
+			}
+			if shouldPanic.Load() {
+				panic("simulated transport panic")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ranking":{"hits":[]}}`)),
+			}, nil
+		}))
+		t.Cleanup(func() { devhost.SetTransport(nil) })
+
+		clock, advance := newFakeClock(time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC))
+		breaker := newCircuitBreaker(1, 5*time.Second, clock)
+		retriever := Retriever{Pin: pin, breaker: breaker}
+		req := plugins.NewRetrievalSession(&pin.Manifest, benchFirstRequest()).Request()
+
+		// Open the breaker and advance past cooldown to enter half-open.
+		breaker.RecordFailure(0)
+		advance(5 * time.Second)
+		shouldPanic.Store(true)
+
+		var panicked bool
+		func() {
+			defer func() {
+				if recover() != nil {
+					panicked = true
+				}
+			}()
+			_, _ = retriever.Round(context.Background(), req)
+		}()
+		if !panicked {
+			t.Fatal("expected transport panic during half-open probe")
+		}
+
+		// Recovered panic must have released the half-open slot immediately.
+		shouldPanic.Store(false)
+		if body, err := retriever.Round(context.Background(), req); err != nil || len(body) == 0 {
+			t.Fatalf("next half-open probe after recovered panic failed: (%q, %v)", body, err)
+		}
+		if breaker.State() != breakerClosed {
+			t.Fatalf("breaker state after recovery probe = %v, want closed", breaker.State())
+		}
+	})
+
 	t.Run("per-endpoint registry isolates endpoints", func(t *testing.T) {
 		var pinB *plugins.Pin
 		srvB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -668,6 +764,18 @@ func TestMarshalSearchRequestByteIdenticalAndHMAC(t *testing.T) {
 	wireR3 := assertIdentical(t, "round3-cached-plus-new", r3)
 	// Second marshal of round 3 hits cache for every entry.
 	assertIdentical(t, "round3-all-cached", r3)
+
+	// Verify Go 1.27 encoding/json parity on invalid UTF-8 bytes (\xff -> raw UTF-8 U+FFFD).
+	t.Run("invalid UTF-8 matches Go 1.27 json.Marshal byte-for-byte", func(t *testing.T) {
+		s := plugins.NewRetrievalSession(m, benchFirstRequest())
+		s.Serve("inv-utf8", []plugins.CandidateRequest{{Primitive: plugins.PrimitiveBM25, QueryText: "q", K: 1}}, [][]plugins.Candidate{{
+			{SegmentID: "s1", RecordID: "r1", VersionID: "v1", PartKey: "body", Text: "bad\xffutf8\xfeend", Score: 1.0},
+		}})
+		wire := assertIdentical(t, "invalid-utf8", s.Request())
+		if !bytes.Contains(wire, []byte("bad\xef\xbf\xbdutf8\xef\xbf\xbdend")) {
+			t.Fatalf("expected raw UTF-8 U+FFFD matching Go 1.27 json.Marshal, got %q", wire)
+		}
+	})
 
 	// Deterministic randomized fuzz check over 50 multi-round shapes.
 	rng := rand.New(rand.NewPCG(2585, 42))

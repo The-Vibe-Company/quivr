@@ -315,18 +315,17 @@ func (r *breakerRegistry) delete(endpoint string) {
 var defaultBreakers = newBreakerRegistry(defaultBreakerThreshold, defaultBreakerCooldown, nil)
 
 // classifyRoundOutcome maps a search round result to a breaker outcome.
-// Only transport errors, timeouts (including profile-deadline expiry after the
-// round started, because call.Timeout uses the max across all declared
-// profiles while Retriever.Round rejects already-expired contexts on entry),
-// and HTTP 5xx responses without a valid plugin error envelope count as
-// failures. Plugin-declared error envelopes (4xx terminal or 5xx retryable),
-// caller cancellation, stopped work, and response-size violations never trip
-// the breaker.
+// Only transport errors, downstream/per-attempt timeouts (when the caller's
+// parent ctx has not expired), and HTTP 5xx responses without a valid plugin
+// error envelope count as failures. Caller cancellation, parent-context
+// deadline expiry (matching call.invocationFailure), stopped work,
+// plugin-declared error envelopes (4xx terminal or 5xx retryable), and
+// response-size violations never trip the breaker.
 func classifyRoundOutcome(ctx context.Context, pin *plugins.Pin, result *devhost.Result, err error) breakerOutcome {
 	if err == nil {
 		return outcomeSuccess
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
+	if ctx.Err() != nil {
 		return outcomeNeutral
 	}
 	if pin != nil && plugins.Stopped(ctx, pin) {
