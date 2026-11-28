@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -160,7 +162,7 @@ func (r *fixtureHydrationRepo) Hydrate(_ context.Context, scope corpus.Scope, cs
 	r.lookups.Add(1)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := map[int]content.Located{}
+	out := make(map[int]content.Located, len(cs))
 	if r.deniedOrg[scope.Organization] {
 		return out, nil
 	}
@@ -653,8 +655,8 @@ func TestHydrateCoalescesLegacyMultiPartManifestAndCancelsOnContext(t *testing.T
 	}
 
 	for _, tc := range []struct {
-		name  string
-		raw   []byte
+		name   string
+		raw    []byte
 		range_ []content.SourceRange
 	}{
 		{name: "invalid json", raw: []byte("{not-json"), range_: ranges},
@@ -734,4 +736,57 @@ type blockingBlobReader struct {
 
 func (b blockingBlobReader) Read(ctx context.Context, blob content.Blob) ([]byte, error) {
 	return b.read(ctx, blob)
+}
+
+// One failing blob read fails its batch at once: the batch's other reads are
+// cancelled instead of awaited, and none is left running after Hydrate
+// returns, with or without a blob cache.
+func TestHydrateFailFast(t *testing.T) {
+	const blobCount, slow = 20, 300 * time.Millisecond
+	errStore := errors.New("blob store unavailable")
+	scope := corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
+	repo := &fixtureHydrationRepo{located: map[string]content.Located{}, withdrawn: map[string]bool{}, deniedOrg: map[string]bool{}}
+	candidates := make([]content.Candidate, blobCount)
+	for i := range blobCount {
+		id := fmt.Sprintf("seg-%d", i)
+		candidates[i] = content.Candidate{SegmentID: id, GenerationID: "g1"}
+		repo.located[id] = content.Located{
+			Hydrated: content.Hydrated{RecordID: "r", VersionID: "v", TextSHA256: content.Hash([]byte("text")), Segment: content.Segment{ID: id, PartKey: "body", End: 4}},
+			Blob:     content.Blob{Key: fmt.Sprintf("org/sha256/%d", i), SHA256: content.Hash([]byte("text")), Size: 4},
+		}
+	}
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var running atomic.Int64
+				reader := blockingBlobReader{read: func(ctx context.Context, b content.Blob) ([]byte, error) {
+					if b.Key == "org/sha256/0" {
+						return nil, errStore
+					}
+					running.Add(1)
+					defer running.Add(-1)
+					select {
+					case <-time.After(slow):
+						return []byte("text"), nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}}
+				svc := content.Service{Baseline: repo, Blobs: reader}
+				if cached {
+					svc.BlobCache = content.NewHydrationBlobCache(1 << 20)
+				}
+				start := time.Now()
+				_, err := svc.Hydrate(context.Background(), scope, candidates)
+				elapsed := time.Since(start)
+				synctest.Wait()
+				if !errors.Is(err, errStore) || elapsed > 30*time.Millisecond {
+					t.Fatalf("1 failing of %d blobs: err %v after %v; want %v within 30ms", blobCount, err, elapsed, errStore)
+				}
+				if n := running.Load(); n != 0 {
+					t.Fatalf("%d blob reads still running after Hydrate returned", n)
+				}
+			})
+		})
+	}
 }
