@@ -641,10 +641,11 @@ func embeddingRevisionProperty() map[string]any {
 }
 
 type projectionRow struct {
-	SegmentID  string `json:"segmentId"`
-	Kind       string `json:"itemKind"`
-	Revision   int64  `json:"embeddingRevision"`
-	Additional struct {
+	SegmentID   string `json:"segmentId"`
+	Kind        string `json:"itemKind"`
+	Revision    int64  `json:"embeddingRevision"`
+	LexicalText string `json:"lexicalText"`
+	Additional  struct {
 		ID      string `json:"id"`
 		Created int64  `json:"creationTimeUnix,string"`
 	} `json:"_additional"`

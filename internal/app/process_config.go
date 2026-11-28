@@ -104,11 +104,15 @@ func (cfg Config) logSecrets() []string {
 			secrets = append(secrets, secretForRedaction(destination.SecretEnv))
 		}
 	}
-	for _, raw := range []string{cfg.DatabaseURL, cfg.TEIURL, cfg.WeaviateURL, cfg.S3.Endpoint, cfg.PublicURL} {
+	for _, raw := range []string{cfg.DatabaseURL, cfg.TEIURL, cfg.WeaviateURL, cfg.S3.Endpoint, cfg.PublicURL, cfg.LexicalEnrichment.Endpoint} {
 		if u, err := url.Parse(raw); err == nil && u.User != nil {
 			password, _ := u.User.Password()
 			secrets = append(secrets, password, u.User.Username())
 		}
+	}
+	secrets = append(secrets, cfg.LexicalEnrichment.APIKey)
+	if cfg.LexicalEnrichment.APIKeyEnv != "" {
+		secrets = append(secrets, secretForRedaction(cfg.LexicalEnrichment.APIKeyEnv))
 	}
 	// Plugin settings are opaque and may carry arbitrary credentials. Treat all
 	// strings as confidential without needing to understand a plugin's schema.
@@ -185,5 +189,6 @@ func (cfg Config) processSummary(grace time.Duration) slog.Attr {
 		slog.Bool("credential_deposits", cfg.CredentialKey != ""), slog.Int("destinations", len(cfg.Destinations)),
 		slog.Int("ingestion_evaluation_concurrency", concurrency),
 		slog.Bool("record_query_text", cfg.Observability.RecordQueryText),
+		slog.Bool("lexical_enrichment", cfg.LexicalEnrichment.Enabled),
 		slog.Bool("allow_private_destinations", cfg.Delivery.AllowPrivateDestinations))
 }

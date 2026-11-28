@@ -2,6 +2,8 @@ package retrieval
 
 import (
 	"context"
+	"errors"
+
 	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
@@ -20,6 +22,14 @@ func (p MetadataProjection) Publish(ctx context.Context, g content.Generation, o
 		return nil
 	}
 	return p.Metadata.SaveProjectionMetadata(ctx, org, v.ID, g.ID, content.ProjectionMetadata(v, g.Fields))
+}
+
+func (p MetadataProjection) UpdateLexicalText(ctx context.Context, g content.Generation, org, corpusID string, updates []content.SegmentLexicalUpdate) error {
+	updater, ok := p.Projection.(LexicalProjection)
+	if !ok {
+		return errors.New("projection does not support lexical text updates")
+	}
+	return updater.UpdateLexicalText(ctx, g, org, corpusID, updates)
 }
 
 func (p MetadataProjection) UsesRouteRankFusion(routes []Route) bool {
