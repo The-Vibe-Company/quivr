@@ -58,6 +58,7 @@ type Store struct {
 	vectorSchema       *semaphore.Weighted
 	metadataMu         sync.Mutex
 	metadataProperties map[string]bool
+	schemaSync         map[string]*semaphore.Weighted
 	metrics            atomic.Pointer[telemetry.DependencyMetrics]
 }
 
@@ -322,6 +323,14 @@ func (s *Store) call(ctx context.Context, method, path string, in, out any) (int
 
 var errResponseLimit = errors.New("projection response exceeds byte limit")
 
+const maxPooledResponseBuf = 512 << 10
+
+var responseBufPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 4<<10))
+	},
+}
+
 func (s *Store) callLimit(ctx context.Context, method, path string, in, out any, responseLimit int64) (int, error) {
 	var body []byte
 	var err error
@@ -345,10 +354,21 @@ func (s *Store) callLimit(ctx context.Context, method, path string, in, out any,
 		return res.StatusCode, errors.New("projection request failed")
 	}
 	if out != nil {
+		buf := responseBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
 		limited := &io.LimitedReader{R: res.Body, N: responseLimit}
-		err = json.NewDecoder(limited).Decode(out)
+		_, readErr := buf.ReadFrom(limited)
+		if readErr != nil {
+			err = readErr
+		} else {
+			err = json.Unmarshal(buf.Bytes(), out)
+		}
 		if err != nil && limited.N == 0 {
 			err = errResponseLimit
+		}
+		if buf.Cap() <= maxPooledResponseBuf {
+			buf.Reset()
+			responseBufPool.Put(buf)
 		}
 	}
 	return res.StatusCode, s.safeError(err)
@@ -583,7 +603,7 @@ func (s *Store) fetchAnchors(ctx context.Context, collection string, ids []strin
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(anchorFetchConcurrency)
 	for _, id := range missing {
-		g.Go(func() error {
+		goRecover(g, func() error {
 			anchor, projected, err := s.anchorProperties(gctx, collection, id)
 			if err != nil {
 				return err
@@ -661,17 +681,45 @@ func (s *Store) projectionRowsLimit(ctx context.Context, collection string, wher
 	if s.grpc != nil {
 		return s.grpcProjectionRows(ctx, collection, where, limit, order, properties, created, responseLimit)
 	}
-	sortClause := strings.TrimSuffix(order.graphql(), ",")
-	if sortClause != "" {
-		sortClause = "," + sortClause
+	var qb strings.Builder
+	qb.Grow(len("{Get{(") + len(collection) + where.encodedLen() + order.encodedLen() + len(properties)*16 + 96)
+	qb.WriteString("{Get{")
+	qb.WriteString(collection)
+	qb.WriteByte('(')
+	if tenant := tenantFrom(ctx); tenant != "" {
+		qb.WriteString("tenant:")
+		writeJSONString(&qb, tenant)
+		qb.WriteByte(',')
 	}
-	fields := append([]string{}, properties...)
-	additional := "_additional{id}"
+	if where.operator != 0 {
+		qb.WriteString("where:")
+		where.writeGraphQL(&qb)
+		qb.WriteByte(',')
+	}
+	qb.WriteString(" limit:")
+	var num [24]byte
+	qb.Write(strconv.AppendInt(num[:0], int64(limit), 10))
+	if order.field != "" {
+		qb.WriteString(",sort:[{path:[")
+		writeJSONString(&qb, order.field)
+		if order.desc {
+			qb.WriteString("],order:desc}]")
+		} else {
+			qb.WriteString("],order:asc}]")
+		}
+	}
+	qb.WriteString("){")
+	for _, prop := range properties {
+		qb.WriteString(prop)
+		qb.WriteByte(' ')
+	}
 	if created {
-		additional = "_additional{id creationTimeUnix}"
+		qb.WriteString("_additional{id creationTimeUnix}")
+	} else {
+		qb.WriteString("_additional{id}")
 	}
-	fields = append(fields, additional)
-	query := fmt.Sprintf("{Get{%s(%s%s limit:%d%s){%s}}}", collection, tenantArgument(ctx), where.graphql(), limit, sortClause, strings.Join(fields, " "))
+	qb.WriteString("}}}")
+	query := qb.String()
 	var response struct {
 		Data struct {
 			Get map[string][]projectionRow `json:"Get"`
@@ -884,7 +932,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		return errors.New("invalid projection route")
 	}
 	if len(v.RecordACL) > 0 {
-		if err := s.ensureProperties(ctx, g.Collection, visibilityProperties()); err != nil {
+		if err := s.ensurePropertiesLazy(ctx, g.Collection, visibilityPropertyNames, visibilityProperties); err != nil {
 			return err
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/visibility"
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -15,7 +16,11 @@ const (
 	recordACLRestrictedProperty = "recordAclRestricted"
 	// Keep the rare Version-ID fallback within a bounded index request.
 	maxVisibilityVersionIDs = 10000
+	// Bound concurrent per-route visibility resolver lookups.
+	maxVisibilityConcurrency = 4
 )
+
+var visibilityPropertyNames = []string{recordACLProperty, recordACLRestrictedProperty}
 
 func visibilityProperties() []map[string]any {
 	acl := filterable(recordACLProperty)
@@ -78,30 +83,91 @@ func compileRecordVisibility(source filter, sourceAllowed, recordOverride bool, 
 	return or(visibleSource, override), true
 }
 
+type resolvedRouteVisibility struct {
+	revision  int64
+	predicate filter
+	possible  bool
+}
+
+func (s *Store) resolveRouteVisibility(ctx context.Context, route retrieval.Route, org string, principals []string) (resolvedRouteVisibility, error) {
+	sources, err := s.Visibility.Sources(ctx, org, route.CorpusID, principals)
+	if err != nil {
+		return resolvedRouteVisibility{}, err
+	}
+	predicate, possible, err := s.routeVisibilityFilter(ctx, org, route, sources, principals)
+	if err != nil {
+		return resolvedRouteVisibility{}, err
+	}
+	return resolvedRouteVisibility{
+		revision:  sources.Revision,
+		predicate: predicate,
+		possible:  possible,
+	}, nil
+}
+
 func (s *Store) resolveVisibility(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, principals []string) ([]retrieval.Route, map[string]filter, map[string]int64, error) {
-	allowed := make([]retrieval.Route, 0, len(routes))
-	filters := make(map[string]filter, len(routes))
-	revisions := make(map[string]int64, len(routes))
 	for _, route := range routes {
 		if !className.MatchString(route.Generation.Collection) || !scope.Contains(route.CorpusID) {
 			return nil, nil, nil, retrieval.ErrUnavailable
 		}
-		sources, err := s.Visibility.Sources(ctx, scope.Organization, route.CorpusID, principals)
+	}
+	resolved := make([]resolvedRouteVisibility, len(routes))
+	if len(routes) == 1 {
+		res, err := s.resolveRouteVisibility(ctx, routes[0], scope.Organization, principals)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		revisions[route.CorpusID] = sources.Revision
-		predicate, possible, err := s.routeVisibilityFilter(ctx, scope.Organization, route, sources, principals)
-		if err != nil {
+		resolved[0] = res
+	} else {
+		group, gctx := errgroup.WithContext(ctx)
+		group.SetLimit(maxVisibilityConcurrency)
+		for i, route := range routes {
+			if gctx.Err() != nil {
+				break
+			}
+			goRecover(group, func() error {
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				res, err := s.resolveRouteVisibility(gctx, route, scope.Organization, principals)
+				if err != nil {
+					return err
+				}
+				resolved[i] = res
+				return nil
+			})
+		}
+		if err := group.Wait(); err != nil {
 			return nil, nil, nil, err
 		}
-		if !possible {
+	}
+	allowed := make([]retrieval.Route, 0, len(routes))
+	filters := make(map[string]filter, len(routes))
+	revisions := make(map[string]int64, len(routes))
+	var ensuredCollections map[string]struct{}
+	for i, route := range routes {
+		res := resolved[i]
+		revisions[route.CorpusID] = res.revision
+		if !res.possible {
 			continue
 		}
-		if err := s.ensureProperties(ctx, route.Generation.Collection, visibilityProperties()); err != nil {
-			return nil, nil, nil, err
+		collection := route.Generation.Collection
+		alreadyEnsured := false
+		if ensuredCollections != nil {
+			_, alreadyEnsured = ensuredCollections[collection]
 		}
-		filters[route.CorpusID] = predicate
+		if !alreadyEnsured {
+			if err := s.ensurePropertiesLazy(ctx, collection, visibilityPropertyNames, visibilityProperties); err != nil {
+				return nil, nil, nil, err
+			}
+			if len(routes) > 1 {
+				if ensuredCollections == nil {
+					ensuredCollections = make(map[string]struct{}, 2)
+				}
+				ensuredCollections[collection] = struct{}{}
+			}
+		}
+		filters[route.CorpusID] = res.predicate
 		allowed = append(allowed, route)
 	}
 	return allowed, filters, revisions, nil

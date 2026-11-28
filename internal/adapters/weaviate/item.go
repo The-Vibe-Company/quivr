@@ -1,17 +1,23 @@
 package weaviate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -76,36 +82,113 @@ func fieldAnalyzers(fields []corpus.Field) []keywords.Analyzer {
 	return out
 }
 
+func (s *Store) hasProperties(collection string, names []string) bool {
+	s.metadataMu.Lock()
+	defer s.metadataMu.Unlock()
+	if s.metadataProperties == nil {
+		return false
+	}
+	prefix := collection + "/"
+	for _, name := range names {
+		if !s.metadataProperties[prefix+name] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) ensurePropertiesLazy(ctx context.Context, collection string, names []string, build func() []map[string]any) error {
+	if s.hasProperties(collection, names) {
+		return nil
+	}
+	return s.ensureProperties(ctx, collection, build())
+}
+
 func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) error {
 	if !g.ItemKeywordsProjected {
 		return nil
 	}
-	props := []map[string]any{filterable(itemKind), filterable("recordId"), embeddingRevisionProperty(), {"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false}}
-	for _, f := range content.ItemFields(g.Fields) {
-		props = append(props, searchable(itemProperty(f)))
+	itemFields := content.ItemFields(g.Fields)
+	names := make([]string, 0, 4+len(itemFields)*2)
+	names = append(names, itemKind, "recordId", embeddingRevision, passageText)
+	fieldProps := make([]string, len(itemFields))
+	for i, f := range itemFields {
+		prop := itemProperty(f)
+		fieldProps[i] = prop
+		names = append(names, prop)
 		if a, ok := keywords.Lookup(f.Analyzer); ok {
-			props = append(props, searchable(analyzedProperty(f, a)))
+			names = append(names, prop+"_"+a.Property)
+		}
+	}
+	if s.hasProperties(g.Collection, names) {
+		return nil
+	}
+	props := make([]map[string]any, 0, len(names))
+	props = append(props,
+		filterable(itemKind),
+		filterable("recordId"),
+		embeddingRevisionProperty(),
+		map[string]any{"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false},
+	)
+	for i, f := range itemFields {
+		prop := fieldProps[i]
+		props = append(props, searchable(prop))
+		if a, ok := keywords.Lookup(f.Analyzer); ok {
+			props = append(props, searchable(prop+"_"+a.Property))
 		}
 	}
 	return s.ensureProperties(ctx, g.Collection, props)
 }
 
-// Reconcile additive schemas once per process, including concurrent creation.
-func (s *Store) ensureProperties(ctx context.Context, collection string, props []map[string]any) error {
-	s.metadataMu.Lock()
+func (s *Store) missingProperties(collection string, props []map[string]any) []map[string]any {
 	if s.metadataProperties == nil {
 		s.metadataProperties = map[string]bool{}
 	}
+	prefix := collection + "/"
 	var missing []map[string]any
 	for _, p := range props {
-		if !s.metadataProperties[collection+"/"+p["name"].(string)] {
+		if !s.metadataProperties[prefix+p["name"].(string)] {
 			missing = append(missing, p)
 		}
 	}
+	return missing
+}
+
+func (s *Store) collectionSchemaLock(collection string) *semaphore.Weighted {
+	if s.schemaSync == nil {
+		s.schemaSync = map[string]*semaphore.Weighted{}
+	}
+	sem := s.schemaSync[collection]
+	if sem == nil {
+		sem = semaphore.NewWeighted(1)
+		s.schemaSync[collection] = sem
+	}
+	return sem
+}
+
+// Reconcile additive schemas once per process, including concurrent creation.
+func (s *Store) ensureProperties(ctx context.Context, collection string, props []map[string]any) error {
+	s.metadataMu.Lock()
+	missing := s.missingProperties(collection, props)
+	if len(missing) == 0 {
+		s.metadataMu.Unlock()
+		return nil
+	}
+	sem := s.collectionSchemaLock(collection)
+	s.metadataMu.Unlock()
+
+	if err := sem.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer sem.Release(1)
+
+	s.metadataMu.Lock()
+	missing = s.missingProperties(collection, props)
 	s.metadataMu.Unlock()
 	if len(missing) == 0 {
 		return nil
 	}
+
 	var schema struct {
 		Properties []struct {
 			Name string `json:"name"`
@@ -114,10 +197,11 @@ func (s *Store) ensureProperties(ctx context.Context, collection string, props [
 	if _, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &schema); err != nil {
 		return err
 	}
-	present := map[string]bool{}
+	present := make(map[string]bool, len(schema.Properties))
 	for _, p := range schema.Properties {
 		present[p.Name] = true
 	}
+	prefix := collection + "/"
 	for _, p := range missing {
 		name := p["name"].(string)
 		if !present[name] {
@@ -138,7 +222,7 @@ func (s *Store) ensureProperties(ctx context.Context, collection string, props [
 			}
 		}
 		s.metadataMu.Lock()
-		s.metadataProperties[collection+"/"+name] = true
+		s.metadataProperties[prefix+name] = true
 		s.metadataMu.Unlock()
 	}
 	return nil
@@ -153,57 +237,1068 @@ type itemRow struct {
 		Score    *string  `json:"score"`
 		Distance *float64 `json:"distance"`
 	} `json:"_additional"`
+	scoreVal    float64
+	distanceVal float64
+	hasScore    bool
+	hasDistance bool
 }
 
 func (r itemRow) candidate(dense bool) content.Candidate {
 	score := 0.0
-	if dense && r.Additional.Distance != nil {
-		score = 1 - *r.Additional.Distance
-	} else if r.Additional.Score != nil {
-		score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+	if dense {
+		if r.hasDistance {
+			score = 1 - r.distanceVal
+		} else if r.Additional.Distance != nil {
+			score = 1 - *r.Additional.Distance
+		} else if r.hasScore {
+			score = r.scoreVal
+		} else if r.Additional.Score != nil {
+			score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+		}
+	} else {
+		if r.hasScore {
+			score = r.scoreVal
+		} else if r.Additional.Score != nil {
+			score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+		}
 	}
 	return content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, VersionID: r.VersionID, Score: score}
 }
-func (s *Store) searchRows(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, item, text bool) ([]itemRow, error) {
-	fields := []string{"segmentId", "generationId"}
+
+var queryBuilderPool = sync.Pool{
+	New: func() any {
+		return &strings.Builder{}
+	},
+}
+
+const maxPooledQueryCap = 64 << 10
+
+func buildSearchRowsRequestBody(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, item, text bool) []byte {
+	qb := queryBuilderPool.Get().(*strings.Builder)
+	qb.Reset()
+	est := len("{Get{(") + len(collection) + branch.encodedLen() + order.encodedLen() + where.encodedLen() + 128
+	qb.Grow(est)
+	qb.WriteString("{Get{")
+	qb.WriteString(collection)
+	qb.WriteByte('(')
+	if tenant := tenantFrom(ctx); tenant != "" {
+		qb.WriteString("tenant:")
+		writeJSONString(qb, tenant)
+		qb.WriteByte(',')
+	}
+	branch.writeGraphQL(qb)
+	order.writeGraphQL(qb)
+	if where.operator != 0 {
+		qb.WriteString("where:")
+		where.writeGraphQL(qb)
+		qb.WriteByte(',')
+	}
+	qb.WriteString("limit:")
+	var num [24]byte
+	qb.Write(strconv.AppendInt(num[:0], int64(limit), 10))
+	qb.WriteString("){segmentId generationId")
 	if item {
-		fields = append(fields, "versionId")
+		qb.WriteString(" versionId")
 	}
 	if text {
-		fields = append(fields, passageText)
+		qb.WriteByte(' ')
+		qb.WriteString(passageText)
 	}
+	qb.WriteString(" _additional{score distance}}}}")
+
+	query := qb.String()
+	body := make([]byte, 0, len(query)+len(`{"query":""}`)+32)
+	body = append(body, `{"query":`...)
+	body = appendJSONString(body, query)
+	body = append(body, '}')
+
+	if qb.Cap() <= maxPooledQueryCap {
+		qb.Reset()
+		queryBuilderPool.Put(qb)
+	}
+	return body
+}
+
+func (s *Store) searchRows(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, item, text bool) ([]itemRow, error) {
 	responseLimit := 2 << 20
 	if text {
 		// The bounded window can carry more text than a 128-row page.
 		responseLimit = 16 << 20
 	}
 	if s.grpc != nil {
+		fields := make([]string, 0, 4)
+		fields = append(fields, "segmentId", "generationId")
+		if item {
+			fields = append(fields, "versionId")
+		}
+		if text {
+			fields = append(fields, passageText)
+		}
 		return s.grpcSearchRows(ctx, collection, branch, where, order, limit, fields, responseLimit, true)
 	}
-	query := fmt.Sprintf("{Get{%s(%s%s%s%slimit:%d){%s _additional{score distance}}}}",
-		collection, tenantArgument(ctx), branch.graphql(), order.graphql(), where.graphql(), limit, strings.Join(fields, " "))
-	var out struct {
-		Data struct {
-			Get map[string][]itemRow `json:"Get"`
-		} `json:"data"`
-		Errors []any `json:"errors"`
-	}
-	reader := s
-	if _, bounded := ctx.Deadline(); bounded && s.Client.Timeout != 0 {
+	body := buildSearchRowsRequestBody(ctx, collection, branch, where, order, limit, item, text)
+	client := s.Client
+	if _, bounded := ctx.Deadline(); bounded && client.Timeout != 0 {
 		// Search queries are already bounded by their caller. Keep the shared
 		// transport and leave the client used for projection writes alone.
-		client := *s.Client
-		client.Timeout = 0
-		reader = &Store{Endpoint: s.Endpoint, Client: &client, apiKey: s.apiKey}
+		c := *client
+		c.Timeout = 0
+		client = &c
 	}
-	if _, err := reader.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, int64(responseLimit)); err != nil {
+	req, err := http.NewRequestWithContext(ctx, "POST", s.Endpoint+"/v1/graphql", bytes.NewReader(body))
+	if err != nil {
+		return nil, s.safeError(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, errors.New("projection connection unavailable")
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, errors.New("projection request failed")
+	}
+	limited := &io.LimitedReader{R: res.Body, N: int64(responseLimit)}
+	rows, err := decodeItemRows(limited, collection, item, text, limit)
+	if err != nil && limited.N == 0 {
+		return nil, errResponseLimit
+	}
+	if err != nil {
+		return nil, s.safeError(err)
+	}
+	return rows, nil
+}
+
+// Streaming typed GraphQL response decoder backed by pooled read buffers.
+
+const (
+	itemStreamBufSize    = 32 << 10
+	maxStreamScratchCap  = 64 << 10
+	maxStreamNesting     = 1024
+	errInvalidJSONSyntax = "invalid projection JSON response"
+)
+
+type jsonStream struct {
+	r       io.Reader
+	buf     []byte
+	pos     int
+	end     int
+	eof     bool
+	err     error
+	scratch []byte
+}
+
+var itemStreamPool = sync.Pool{
+	New: func() any {
+		return &jsonStream{
+			buf:     make([]byte, itemStreamBufSize),
+			scratch: make([]byte, 0, 256),
+		}
+	},
+}
+
+func acquireJSONStream(r io.Reader) *jsonStream {
+	s := itemStreamPool.Get().(*jsonStream)
+	s.r = r
+	s.pos = 0
+	s.end = 0
+	s.eof = false
+	s.err = nil
+	s.scratch = s.scratch[:0]
+	return s
+}
+
+func releaseJSONStream(s *jsonStream) {
+	s.r = nil
+	s.err = nil
+	s.pos = 0
+	s.end = 0
+	s.eof = false
+	if cap(s.scratch) > maxStreamScratchCap {
+		s.scratch = make([]byte, 0, 256)
+	} else {
+		s.scratch = s.scratch[:0]
+	}
+	itemStreamPool.Put(s)
+}
+
+func (s *jsonStream) fill() bool {
+	if s.eof || s.err != nil {
+		return false
+	}
+	s.pos = 0
+	s.end = 0
+	for {
+		n, err := s.r.Read(s.buf)
+		if n > 0 {
+			s.end = n
+			if err == io.EOF {
+				s.eof = true
+			} else if err != nil {
+				s.err = err
+			}
+			return true
+		}
+		if err == io.EOF {
+			s.eof = true
+			return false
+		}
+		if err != nil {
+			s.err = err
+			return false
+		}
+	}
+}
+
+func (s *jsonStream) eofErr() error {
+	if s.err != nil {
+		return s.err
+	}
+	return io.ErrUnexpectedEOF
+}
+
+func (s *jsonStream) peek() (byte, error) {
+	for {
+		for s.pos < s.end {
+			c := s.buf[s.pos]
+			if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+				return c, nil
+			}
+			s.pos++
+		}
+		if !s.fill() {
+			return 0, s.eofErr()
+		}
+	}
+}
+
+func (s *jsonStream) nextByte() (byte, error) {
+	if s.pos >= s.end {
+		if !s.fill() {
+			return 0, s.eofErr()
+		}
+	}
+	b := s.buf[s.pos]
+	s.pos++
+	return b, nil
+}
+
+func (s *jsonStream) expectByte(want byte) error {
+	c, err := s.peek()
+	if err != nil {
+		return err
+	}
+	if c != want {
+		return errors.New(errInvalidJSONSyntax)
+	}
+	s.pos++
+	return nil
+}
+
+func (s *jsonStream) expectLiteral(lit string) error {
+	for i := 0; i < len(lit); i++ {
+		b, err := s.nextByte()
+		if err != nil {
+			return err
+		}
+		if b != lit[i] {
+			return errors.New(errInvalidJSONSyntax)
+		}
+	}
+	return nil
+}
+
+func parseHex4(s *jsonStream) (rune, error) {
+	var r rune
+	for range 4 {
+		b, err := s.nextByte()
+		if err != nil {
+			return 0, err
+		}
+		var d rune
+		switch {
+		case b >= '0' && b <= '9':
+			d = rune(b - '0')
+		case b >= 'a' && b <= 'f':
+			d = rune(b-'a') + 10
+		case b >= 'A' && b <= 'F':
+			d = rune(b-'A') + 10
+		default:
+			return 0, errors.New(errInvalidJSONSyntax)
+		}
+		r = (r << 4) | d
+	}
+	return r, nil
+}
+
+func (s *jsonStream) readStringBytes() ([]byte, error) {
+	if err := s.expectByte('"'); err != nil {
 		return nil, err
 	}
-	if len(out.Errors) > 0 {
+	// Fast path: unescaped string contained completely inside the current buffer.
+	start := s.pos
+	buf := s.buf[:s.end]
+	for i := start; i < len(buf); i++ {
+		c := buf[i]
+		if c == '"' {
+			s.pos = i + 1
+			return buf[start:i], nil
+		}
+		if c == '\\' || c < 0x20 {
+			s.scratch = append(s.scratch[:0], buf[start:i]...)
+			s.pos = i
+			return s.readStringSlow()
+		}
+	}
+	s.scratch = append(s.scratch[:0], buf[start:]...)
+	s.pos = s.end
+	return s.readStringSlow()
+}
+
+func (s *jsonStream) readStringSlow() ([]byte, error) {
+	for {
+		for s.pos < s.end {
+			start := s.pos
+			buf := s.buf[:s.end]
+			i := start
+			for i < len(buf) {
+				c := buf[i]
+				if c == '"' || c == '\\' || c < 0x20 {
+					break
+				}
+				i++
+			}
+			if i > start {
+				s.scratch = append(s.scratch, buf[start:i]...)
+			}
+			s.pos = i
+			if i >= len(buf) {
+				break
+			}
+			c := buf[i]
+			if c == '"' {
+				s.pos = i + 1
+				return s.scratch, nil
+			}
+			if c < 0x20 {
+				return nil, errors.New(errInvalidJSONSyntax)
+			}
+			// Handle escape sequence.
+			s.pos = i + 1
+			esc, err := s.nextByte()
+			if err != nil {
+				return nil, err
+			}
+			switch esc {
+			case '"', '\\', '/':
+				s.scratch = append(s.scratch, esc)
+			case 'b':
+				s.scratch = append(s.scratch, '\b')
+			case 'f':
+				s.scratch = append(s.scratch, '\f')
+			case 'n':
+				s.scratch = append(s.scratch, '\n')
+			case 'r':
+				s.scratch = append(s.scratch, '\r')
+			case 't':
+				s.scratch = append(s.scratch, '\t')
+			case 'u':
+				r1, err := parseHex4(s)
+				if err != nil {
+					return nil, err
+				}
+				if utf16.IsSurrogate(r1) {
+					if r1 >= 0xD800 && r1 <= 0xDBFF {
+						if b1, err := s.nextByte(); err == nil {
+							if b1 == '\\' {
+								b2, err := s.nextByte()
+								if err != nil {
+									return nil, err
+								}
+								if b2 == 'u' {
+									r2, err := parseHex4(s)
+									if err != nil {
+										return nil, err
+									}
+									if r2 >= 0xDC00 && r2 <= 0xDFFF {
+										s.scratch = utf8.AppendRune(s.scratch, utf16.DecodeRune(r1, r2))
+										continue
+									}
+									s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+									s.scratch = utf8.AppendRune(s.scratch, r2)
+									continue
+								}
+								// Not \u: emit replacement for r1, then handle \b2.
+								s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+								if err := s.appendSimpleEscape(b2); err != nil {
+									return nil, err
+								}
+								continue
+							}
+							// Put back non-backslash byte by handling it directly.
+							s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+							if b1 == '"' {
+								return s.scratch, nil
+							}
+							if b1 < 0x20 {
+								return nil, errors.New(errInvalidJSONSyntax)
+							}
+							s.scratch = append(s.scratch, b1)
+							continue
+						} else {
+							return nil, err
+						}
+					}
+					s.scratch = utf8.AppendRune(s.scratch, utf8.RuneError)
+				} else {
+					s.scratch = utf8.AppendRune(s.scratch, r1)
+				}
+			default:
+				return nil, errors.New(errInvalidJSONSyntax)
+			}
+		}
+		if !s.fill() {
+			return nil, s.eofErr()
+		}
+	}
+}
+
+func (s *jsonStream) appendSimpleEscape(esc byte) error {
+	switch esc {
+	case '"', '\\', '/':
+		s.scratch = append(s.scratch, esc)
+	case 'b':
+		s.scratch = append(s.scratch, '\b')
+	case 'f':
+		s.scratch = append(s.scratch, '\f')
+	case 'n':
+		s.scratch = append(s.scratch, '\n')
+	case 'r':
+		s.scratch = append(s.scratch, '\r')
+	case 't':
+		s.scratch = append(s.scratch, '\t')
+	default:
+		return errors.New(errInvalidJSONSyntax)
+	}
+	return nil
+}
+
+func (s *jsonStream) skipString() error {
+	if err := s.expectByte('"'); err != nil {
+		return err
+	}
+	for {
+		buf := s.buf[:s.end]
+		for i := s.pos; i < len(buf); i++ {
+			c := buf[i]
+			if c == '"' {
+				s.pos = i + 1
+				return nil
+			}
+			if c < 0x20 {
+				return errors.New(errInvalidJSONSyntax)
+			}
+			if c == '\\' {
+				s.pos = i + 1
+				esc, err := s.nextByte()
+				if err != nil {
+					return err
+				}
+				switch esc {
+				case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+				case 'u':
+					if _, err := parseHex4(s); err != nil {
+						return err
+					}
+				default:
+					return errors.New(errInvalidJSONSyntax)
+				}
+				buf = s.buf[:s.end]
+				i = s.pos - 1
+			}
+		}
+		if !s.fill() {
+			return s.eofErr()
+		}
+	}
+}
+
+func isNumberChar(c byte) bool {
+	return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
+}
+
+func (s *jsonStream) readNumberBytes() ([]byte, error) {
+	c, err := s.peek()
+	if err != nil {
+		return nil, err
+	}
+	if (c < '0' || c > '9') && c != '-' {
+		return nil, errors.New(errInvalidJSONSyntax)
+	}
+	start := s.pos
+	buf := s.buf[:s.end]
+	i := start
+	for i < len(buf) && isNumberChar(buf[i]) {
+		i++
+	}
+	if i < len(buf) {
+		s.pos = i
+		return buf[start:i], nil
+	}
+	s.scratch = append(s.scratch[:0], buf[start:]...)
+	s.pos = s.end
+	for {
+		if !s.fill() {
+			if s.err != nil {
+				return nil, s.err
+			}
+			return s.scratch, nil
+		}
+		buf = s.buf[:s.end]
+		i = 0
+		for i < len(buf) && isNumberChar(buf[i]) {
+			i++
+		}
+		s.scratch = append(s.scratch, buf[:i]...)
+		s.pos = i
+		if i < len(buf) {
+			return s.scratch, nil
+		}
+	}
+}
+
+func (s *jsonStream) skipValue(depth int) error {
+	if depth > maxStreamNesting {
+		return errors.New(errInvalidJSONSyntax)
+	}
+	c, err := s.peek()
+	if err != nil {
+		return err
+	}
+	switch c {
+	case '"':
+		return s.skipString()
+	case '{':
+		s.pos++
+		next, err := s.peek()
+		if err != nil {
+			return err
+		}
+		if next == '}' {
+			s.pos++
+			return nil
+		}
+		for {
+			if err := s.skipString(); err != nil {
+				return err
+			}
+			if err := s.expectByte(':'); err != nil {
+				return err
+			}
+			if err := s.skipValue(depth + 1); err != nil {
+				return err
+			}
+			sep, err := s.peek()
+			if err != nil {
+				return err
+			}
+			s.pos++
+			if sep == '}' {
+				return nil
+			}
+			if sep != ',' {
+				return errors.New(errInvalidJSONSyntax)
+			}
+		}
+	case '[':
+		s.pos++
+		next, err := s.peek()
+		if err != nil {
+			return err
+		}
+		if next == ']' {
+			s.pos++
+			return nil
+		}
+		for {
+			if err := s.skipValue(depth + 1); err != nil {
+				return err
+			}
+			sep, err := s.peek()
+			if err != nil {
+				return err
+			}
+			s.pos++
+			if sep == ']' {
+				return nil
+			}
+			if sep != ',' {
+				return errors.New(errInvalidJSONSyntax)
+			}
+		}
+	case 't':
+		return s.expectLiteral("true")
+	case 'f':
+		return s.expectLiteral("false")
+	case 'n':
+		return s.expectLiteral("null")
+	default:
+		if c == '-' || (c >= '0' && c <= '9') {
+			raw, err := s.readNumberBytes()
+			if err != nil {
+				return err
+			}
+			if _, err := strconv.ParseFloat(bytesAsString(raw), 64); err != nil {
+				return errors.New(errInvalidJSONSyntax)
+			}
+			return nil
+		}
+		return errors.New(errInvalidJSONSyntax)
+	}
+}
+
+// bytesAsString creates a non-escaping string view for immediate read-only use
+// (such as strconv.ParseFloat). Callers must never retain the returned string.
+func bytesAsString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
+}
+
+func (s *jsonStream) readOptionalString() (string, bool, error) {
+	c, err := s.peek()
+	if err != nil {
+		return "", false, err
+	}
+	if c == 'n' {
+		return "", false, s.expectLiteral("null")
+	}
+	b, err := s.readStringBytes()
+	if err != nil {
+		return "", false, err
+	}
+	return string(b), true, nil
+}
+
+func (s *jsonStream) decodeAdditional(row *itemRow) error {
+	c, err := s.peek()
+	if err != nil {
+		return err
+	}
+	if c == 'n' {
+		return s.expectLiteral("null")
+	}
+	if err := s.expectByte('{'); err != nil {
+		return err
+	}
+	next, err := s.peek()
+	if err != nil {
+		return err
+	}
+	if next == '}' {
+		s.pos++
+		return nil
+	}
+	for {
+		key, err := s.readStringBytes()
+		if err != nil {
+			return err
+		}
+		if err := s.expectByte(':'); err != nil {
+			return err
+		}
+		switch string(key) {
+		case "score":
+			vc, err := s.peek()
+			if err != nil {
+				return err
+			}
+			if vc == 'n' {
+				if err := s.expectLiteral("null"); err != nil {
+					return err
+				}
+			} else {
+				raw, err := s.readStringBytes()
+				if err != nil {
+					return err
+				}
+				row.scoreVal, _ = strconv.ParseFloat(bytesAsString(raw), 64)
+				row.hasScore = true
+			}
+		case "distance":
+			vc, err := s.peek()
+			if err != nil {
+				return err
+			}
+			if vc == 'n' {
+				if err := s.expectLiteral("null"); err != nil {
+					return err
+				}
+			} else {
+				raw, err := s.readNumberBytes()
+				if err != nil {
+					return err
+				}
+				val, err := strconv.ParseFloat(bytesAsString(raw), 64)
+				if err != nil {
+					return errors.New(errInvalidJSONSyntax)
+				}
+				row.distanceVal = val
+				row.hasDistance = true
+			}
+		default:
+			if err := s.skipValue(0); err != nil {
+				return err
+			}
+		}
+		sep, err := s.peek()
+		if err != nil {
+			return err
+		}
+		s.pos++
+		if sep == '}' {
+			return nil
+		}
+		if sep != ',' {
+			return errors.New(errInvalidJSONSyntax)
+		}
+	}
+}
+
+func (s *jsonStream) decodeItemRow(wantItem, wantText bool, lastGenID *string) (itemRow, error) {
+	var row itemRow
+	c, err := s.peek()
+	if err != nil {
+		return row, err
+	}
+	if c == 'n' {
+		return row, s.expectLiteral("null")
+	}
+	if err := s.expectByte('{'); err != nil {
+		return row, err
+	}
+	next, err := s.peek()
+	if err != nil {
+		return row, err
+	}
+	if next == '}' {
+		s.pos++
+		return row, nil
+	}
+	for {
+		key, err := s.readStringBytes()
+		if err != nil {
+			return row, err
+		}
+		if err := s.expectByte(':'); err != nil {
+			return row, err
+		}
+		switch string(key) {
+		case "segmentId":
+			val, _, err := s.readOptionalString()
+			if err != nil {
+				return row, err
+			}
+			row.SegmentID = val
+		case "generationId":
+			vc, err := s.peek()
+			if err != nil {
+				return row, err
+			}
+			if vc == 'n' {
+				if err := s.expectLiteral("null"); err != nil {
+					return row, err
+				}
+			} else {
+				raw, err := s.readStringBytes()
+				if err != nil {
+					return row, err
+				}
+				if *lastGenID != "" && string(raw) == *lastGenID {
+					row.GenerationID = *lastGenID
+				} else {
+					val := string(raw)
+					*lastGenID = val
+					row.GenerationID = val
+				}
+			}
+		case "versionId":
+			if wantItem {
+				val, _, err := s.readOptionalString()
+				if err != nil {
+					return row, err
+				}
+				row.VersionID = val
+			} else {
+				if err := s.skipValue(0); err != nil {
+					return row, err
+				}
+			}
+		case passageText:
+			if wantText {
+				val, _, err := s.readOptionalString()
+				if err != nil {
+					return row, err
+				}
+				row.Text = val
+			} else {
+				if err := s.skipValue(0); err != nil {
+					return row, err
+				}
+			}
+		case "_additional":
+			if err := s.decodeAdditional(&row); err != nil {
+				return row, err
+			}
+		default:
+			if err := s.skipValue(0); err != nil {
+				return row, err
+			}
+		}
+		sep, err := s.peek()
+		if err != nil {
+			return row, err
+		}
+		s.pos++
+		if sep == '}' {
+			return row, nil
+		}
+		if sep != ',' {
+			return row, errors.New(errInvalidJSONSyntax)
+		}
+	}
+}
+
+func (s *jsonStream) decodeItemRowSlice(wantItem, wantText bool, limit int) ([]itemRow, error) {
+	c, err := s.peek()
+	if err != nil {
+		return nil, err
+	}
+	if c == 'n' {
+		return nil, s.expectLiteral("null")
+	}
+	if err := s.expectByte('['); err != nil {
+		return nil, err
+	}
+	next, err := s.peek()
+	if err != nil {
+		return nil, err
+	}
+	if next == ']' {
+		s.pos++
+		return []itemRow{}, nil
+	}
+	initCap := min(max(limit, 8), 256)
+	rows := make([]itemRow, 0, initCap)
+	var lastGenID string
+	for {
+		row, err := s.decodeItemRow(wantItem, wantText, &lastGenID)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+		sep, err := s.peek()
+		if err != nil {
+			return nil, err
+		}
+		s.pos++
+		if sep == ']' {
+			return rows, nil
+		}
+		if sep != ',' {
+			return nil, errors.New(errInvalidJSONSyntax)
+		}
+	}
+}
+
+func decodeItemRows(r io.Reader, collection string, wantItem, wantText bool, limit int) ([]itemRow, error) {
+	s := acquireJSONStream(r)
+	defer releaseJSONStream(s)
+
+	if err := s.expectByte('{'); err != nil {
+		return nil, err
+	}
+	next, err := s.peek()
+	if err != nil {
+		return nil, err
+	}
+	var rows []itemRow
+	var foundCollection bool
+	var hasErrors bool
+	if next == '}' {
+		s.pos++
+	} else {
+		for {
+			key, err := s.readStringBytes()
+			if err != nil {
+				return nil, err
+			}
+			if err := s.expectByte(':'); err != nil {
+				return nil, err
+			}
+			switch string(key) {
+			case "errors":
+				vc, err := s.peek()
+				if err != nil {
+					return nil, err
+				}
+				if vc == 'n' {
+					if err := s.expectLiteral("null"); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := s.expectByte('['); err != nil {
+						return nil, err
+					}
+					enext, err := s.peek()
+					if err != nil {
+						return nil, err
+					}
+					if enext == ']' {
+						s.pos++
+					} else {
+						hasErrors = true
+						for {
+							if err := s.skipValue(0); err != nil {
+								return nil, err
+							}
+							sep, err := s.peek()
+							if err != nil {
+								return nil, err
+							}
+							s.pos++
+							if sep == ']' {
+								break
+							}
+							if sep != ',' {
+								return nil, errors.New(errInvalidJSONSyntax)
+							}
+						}
+					}
+				}
+			case "data":
+				vc, err := s.peek()
+				if err != nil {
+					return nil, err
+				}
+				if vc == 'n' {
+					if err := s.expectLiteral("null"); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := s.expectByte('{'); err != nil {
+						return nil, err
+					}
+					dnext, err := s.peek()
+					if err != nil {
+						return nil, err
+					}
+					if dnext == '}' {
+						s.pos++
+					} else {
+						for {
+							dkey, err := s.readStringBytes()
+							if err != nil {
+								return nil, err
+							}
+							if err := s.expectByte(':'); err != nil {
+								return nil, err
+							}
+							if string(dkey) == "Get" {
+								gc, err := s.peek()
+								if err != nil {
+									return nil, err
+								}
+								if gc == 'n' {
+									if err := s.expectLiteral("null"); err != nil {
+										return nil, err
+									}
+								} else {
+									if err := s.expectByte('{'); err != nil {
+										return nil, err
+									}
+									gnext, err := s.peek()
+									if err != nil {
+										return nil, err
+									}
+									if gnext == '}' {
+										s.pos++
+									} else {
+										for {
+											gkey, err := s.readStringBytes()
+											if err != nil {
+												return nil, err
+											}
+											if err := s.expectByte(':'); err != nil {
+												return nil, err
+											}
+											if string(gkey) == collection {
+												foundCollection = true
+												rows, err = s.decodeItemRowSlice(wantItem, wantText, limit)
+												if err != nil {
+													return nil, err
+												}
+											} else {
+												if err := s.skipValue(0); err != nil {
+													return nil, err
+												}
+											}
+											gsep, err := s.peek()
+											if err != nil {
+												return nil, err
+											}
+											s.pos++
+											if gsep == '}' {
+												break
+											}
+											if gsep != ',' {
+												return nil, errors.New(errInvalidJSONSyntax)
+											}
+										}
+									}
+								}
+							} else {
+								if err := s.skipValue(0); err != nil {
+									return nil, err
+								}
+							}
+							dsep, err := s.peek()
+							if err != nil {
+								return nil, err
+							}
+							s.pos++
+							if dsep == '}' {
+								break
+							}
+							if dsep != ',' {
+								return nil, errors.New(errInvalidJSONSyntax)
+							}
+						}
+					}
+				}
+			default:
+				if err := s.skipValue(0); err != nil {
+					return nil, err
+				}
+			}
+			sep, err := s.peek()
+			if err != nil {
+				return nil, err
+			}
+			s.pos++
+			if sep == '}' {
+				break
+			}
+			if sep != ',' {
+				return nil, errors.New(errInvalidJSONSyntax)
+			}
+		}
+	}
+	if hasErrors {
 		return nil, errors.New("item projection query failed")
 	}
-	rows, ok := out.Data.Get[collection]
-	if !ok {
+	if !foundCollection {
 		return nil, errors.New("item projection response missing")
 	}
 	return rows, nil
@@ -223,7 +1318,7 @@ func identityConditions(q retrieval.Request) []filter {
 }
 
 func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, kind string) (filter, error) {
-	var clauses []filter
+	clauses := make([]filter, 0, len(routes))
 	for _, r := range routes {
 		if !className.MatchString(r.Generation.Collection) || r.Generation.ID == "" {
 			return filter{}, errors.New("invalid projection route")
@@ -241,7 +1336,8 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 		if err = s.ensureMetadata(ctx, r.Generation); err != nil {
 			return filter{}, err
 		}
-		values := []filter{routeVisibility(ctx, r.CorpusID)}
+		values := make([]filter, 0, 4+len(typed))
+		values = append(values, routeVisibility(ctx, r.CorpusID))
 		if tenantFrom(ctx) == "" {
 			values = append(values, equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID))
 		}
@@ -264,10 +1360,11 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 	} else if kind == "passage" {
 		kinds = or(kinds, equal(itemKind, segmentKind))
 	}
-	all := []filter{kinds, or(clauses...)}
+	all := make([]filter, 0, 5)
 	if tenantFrom(ctx) == "" {
-		all = append([]filter{equal("organization", scope.Organization)}, all...)
+		all = append(all, equal("organization", scope.Organization))
 	}
+	all = append(all, kinds, or(clauses...))
 	if len(q.SourceNamespaces) > 0 {
 		all = append(all, containsAny(sourceNamespaceProperty, q.SourceNamespaces))
 	}
@@ -275,20 +1372,34 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 	return and(all...), nil
 }
 
-func candidateKey(c content.Candidate, grouped bool) string {
-	if grouped {
-		return c.GenerationID + "/" + c.VersionID
-	}
-	return c.GenerationID + "/" + c.SegmentID
+type candidateID struct {
+	generationID string
+	id           string
 }
-func keepBest(pool map[string]content.Candidate, c content.Candidate, grouped bool) {
+
+func candidateKey(c content.Candidate, grouped bool) candidateID {
+	if grouped {
+		return candidateID{generationID: c.GenerationID, id: c.VersionID}
+	}
+	return candidateID{generationID: c.GenerationID, id: c.SegmentID}
+}
+
+func rowCandidateKey(r itemRow, grouped bool) candidateID {
+	if grouped {
+		return candidateID{generationID: r.GenerationID, id: r.VersionID}
+	}
+	return candidateID{generationID: r.GenerationID, id: r.SegmentID}
+}
+
+func keepBest(pool map[candidateID]content.Candidate, c content.Candidate, grouped bool) {
 	key := candidateKey(c, grouped)
 	prev, ok := pool[key]
 	if !ok || c.Score > prev.Score || (c.Score == prev.Score && c.SegmentID < prev.SegmentID) {
 		pool[key] = c
 	}
 }
-func ordered(pool map[string]content.Candidate) []content.Candidate {
+
+func ordered(pool map[candidateID]content.Candidate) []content.Candidate {
 	out := make([]content.Candidate, 0, len(pool))
 	for _, c := range pool {
 		out = append(out, c)
@@ -300,7 +1411,10 @@ func ordered(pool map[string]content.Candidate) []content.Candidate {
 		if out[i].SegmentID != out[j].SegmentID {
 			return out[i].SegmentID < out[j].SegmentID
 		}
-		return candidateKey(out[i], true) < candidateKey(out[j], true)
+		if out[i].GenerationID != out[j].GenerationID {
+			return out[i].GenerationID < out[j].GenerationID
+		}
+		return out[i].VersionID < out[j].VersionID
 	})
 	return out
 }
@@ -502,13 +1616,13 @@ func tailPassageScanLimit(itemCount int) int {
 }
 
 func versionFilter(items []content.Candidate) filter {
-	seen := make(map[string]bool, len(items))
+	seen := make(map[string]struct{}, len(items))
 	ids := make([]string, 0, len(items))
 	for _, c := range items {
-		if seen[c.VersionID] {
+		if _, ok := seen[c.VersionID]; ok {
 			continue
 		}
-		seen[c.VersionID] = true
+		seen[c.VersionID] = struct{}{}
 		ids = append(ids, c.VersionID)
 	}
 	if len(ids) == 0 {
@@ -517,30 +1631,33 @@ func versionFilter(items []content.Candidate) filter {
 	return containsAny("versionId", ids)
 }
 
-func groupPassageRows(rows []itemRow) (map[string]itemRow, map[string][]itemRow) {
-	best := map[string]itemRow{}
-	ambiguous := map[string][]itemRow{}
+func groupPassageRows(rows []itemRow) (map[candidateID]itemRow, map[candidateID][]itemRow) {
+	best := make(map[candidateID]itemRow, len(rows))
+	ambiguous := map[candidateID][]itemRow{}
 	addPassageRows(best, ambiguous, rows)
 	return best, ambiguous
 }
 
-func addPassageRows(best map[string]itemRow, ambiguous map[string][]itemRow, rows []itemRow) {
-	seenSegments := make(map[string]bool, len(rows))
+func addPassageRows(best map[candidateID]itemRow, ambiguous map[candidateID][]itemRow, rows []itemRow) {
+	seenSegments := make(map[candidateID]struct{}, len(rows)+len(best))
 	for _, row := range best {
-		seenSegments[candidateKey(row.candidate(false), false)] = true
+		seenSegments[rowCandidateKey(row, false)] = struct{}{}
 	}
 	for _, group := range ambiguous {
 		for _, row := range group {
-			seenSegments[candidateKey(row.candidate(false), false)] = true
+			seenSegments[rowCandidateKey(row, false)] = struct{}{}
 		}
 	}
 	for _, row := range rows {
-		segment := candidateKey(row.candidate(false), false)
-		if row.SegmentID == "" || seenSegments[segment] {
+		if row.SegmentID == "" {
 			continue
 		}
-		seenSegments[segment] = true
-		key := candidateKey(row.candidate(false), true)
+		segment := rowCandidateKey(row, false)
+		if _, dup := seenSegments[segment]; dup {
+			continue
+		}
+		seenSegments[segment] = struct{}{}
+		key := rowCandidateKey(row, true)
 		first, seen := best[key]
 		if !seen {
 			best[key] = row
@@ -553,7 +1670,7 @@ func addPassageRows(best map[string]itemRow, ambiguous map[string][]itemRow, row
 	}
 }
 
-func missingCandidates(items []content.Candidate, present map[string]itemRow) []content.Candidate {
+func missingCandidates(items []content.Candidate, present map[candidateID]itemRow) []content.Candidate {
 	var missing []content.Candidate
 	for _, c := range items {
 		if _, ok := present[candidateKey(c, true)]; !ok {
@@ -566,13 +1683,16 @@ func missingCandidates(items []content.Candidate, present map[string]itemRow) []
 // recoverMissingPassages guarantees that a high-passage item filling a shared
 // segmentId-ordered scan window cannot starve other ranked versions.
 func (s *Store) recoverMissingPassages(ctx context.Context, collection string, passageWhere filter, missing []content.Candidate, perVersionLimit int) ([]itemRow, error) {
-	seen := make(map[string]bool, len(missing))
+	seen := make(map[string]struct{}, len(missing))
 	versions := make([]string, 0, len(missing))
 	for _, c := range missing {
-		if c.VersionID == "" || seen[c.VersionID] {
+		if c.VersionID == "" {
 			continue
 		}
-		seen[c.VersionID] = true
+		if _, ok := seen[c.VersionID]; ok {
+			continue
+		}
+		seen[c.VersionID] = struct{}{}
 		versions = append(versions, c.VersionID)
 	}
 	if len(versions) == 0 {
@@ -582,7 +1702,7 @@ func (s *Store) recoverMissingPassages(ctx context.Context, collection string, p
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(missingPassageConcurrency)
 	for i, ver := range versions {
-		group.Go(func() error {
+		goRecover(group, func() error {
 			rows, err := s.searchRows(gctx, collection, searchBranch{}, and(passageWhere, equal("versionId", ver)), passageOrder, perVersionLimit, true, false)
 			results[i] = rows
 			return err
@@ -601,7 +1721,7 @@ func (s *Store) recoverMissingPassages(ctx context.Context, collection string, p
 // Choose a representative only where text affects the answer. Ungrouped
 // candidates all keep their segment IDs. With relative-score fusion a dense
 // match supplies the representative and the sparse score is independent of it.
-func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string, where filter, best map[string]itemRow, ambiguous map[string][]itemRow, query []passageTerms) (bool, error) {
+func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string, where filter, best map[candidateID]itemRow, ambiguous map[candidateID][]itemRow, query []passageTerms) (bool, error) {
 	if len(ambiguous) == 0 {
 		return false, nil
 	}
@@ -657,15 +1777,18 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 	if err != nil {
 		return false, err
 	}
-	byItem := map[string][]itemRow{}
-	seenSegments := make(map[string]bool, len(textRows))
+	byItem := make(map[candidateID][]itemRow, len(ambiguous))
+	seenSegments := make(map[candidateID]struct{}, len(textRows))
 	for _, row := range textRows {
-		segment := candidateKey(row.candidate(false), false)
-		if row.SegmentID == "" || seenSegments[segment] {
+		if row.SegmentID == "" {
 			continue
 		}
-		seenSegments[segment] = true
-		key := candidateKey(row.candidate(false), true)
+		segment := rowCandidateKey(row, false)
+		if _, dup := seenSegments[segment]; dup {
+			continue
+		}
+		seenSegments[segment] = struct{}{}
+		key := rowCandidateKey(row, true)
 		if len(ambiguous[key]) == 0 {
 			continue
 		}
@@ -693,56 +1816,74 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	if limit == 0 {
 		limit = retrieval.CandidateLimit
 	}
-	partitions := map[string]*itemPartition{}
-	var partitionKeys []string
-	for _, r := range routes {
-		if r.Generation.Collection != collection {
-			return nil, errors.New("invalid projection route")
-		}
+	var orderedPartitions []*itemPartition
+	if len(routes) == 1 {
+		r := routes[0]
 		if err := s.ensureItemSchema(ctx, r.Generation); err != nil {
 			return nil, err
 		}
 		fields := content.ItemFields(r.Generation.Fields)
-		b, _ := json.Marshal(fields)
-		key := string(b)
-		if partitions[key] == nil {
-			partitions[key] = &itemPartition{fields: fields, analyzers: fieldAnalyzers(fields)}
-			partitionKeys = append(partitionKeys, key)
+		orderedPartitions = []*itemPartition{{
+			routes:    routes,
+			fields:    fields,
+			analyzers: fieldAnalyzers(fields),
+		}}
+	} else {
+		partitions := map[string]*itemPartition{}
+		var partitionKeys []string
+		for _, r := range routes {
+			if r.Generation.Collection != collection {
+				return nil, errors.New("invalid projection route")
+			}
+			if err := s.ensureItemSchema(ctx, r.Generation); err != nil {
+				return nil, err
+			}
+			fields := content.ItemFields(r.Generation.Fields)
+			b, _ := json.Marshal(fields)
+			key := string(b)
+			if partitions[key] == nil {
+				partitions[key] = &itemPartition{fields: fields, analyzers: fieldAnalyzers(fields)}
+				partitionKeys = append(partitionKeys, key)
+			}
+			partitions[key].routes = append(partitions[key].routes, r)
 		}
-		partitions[key].routes = append(partitions[key].routes, r)
+		sort.Strings(partitionKeys)
+		orderedPartitions = make([]*itemPartition, len(partitionKeys))
+		for i, key := range partitionKeys {
+			orderedPartitions[i] = partitions[key]
+		}
 	}
-	sort.Strings(partitionKeys)
 	alpha, fusion := 0.5, retrieval.FusionRelativeScore
 	if q.Hybrid != nil {
 		alpha, fusion = q.Hybrid.Alpha, q.Hybrid.Fusion
 	}
-	var sparse, dense map[string]content.Candidate
-	legs, ctx := errgroup.WithContext(ctx)
+	var sparse, dense map[candidateID]content.Candidate
+	legs, legCtx := errgroup.WithContext(ctx)
 	denseDone := make(chan struct{})
 	if q.Mode != "lexical" {
-		legs.Go(func() error {
+		goRecover(legs, func() error {
+			defer close(denseDone)
 			var err error
-			dense, err = s.itemDense(ctx, collection, routes, scope, q, limit, grouped)
-			close(denseDone)
+			dense, err = s.itemDense(legCtx, collection, routes, scope, q, limit, grouped)
 			return err
 		})
 	}
 	if q.Mode != "semantic" {
-		legs.Go(func() error {
-			sparse = map[string]content.Candidate{}
-			var densePassages func() map[string]content.Candidate
+		goRecover(legs, func() error {
+			sparse = make(map[candidateID]content.Candidate, limit)
+			var densePassages func() map[candidateID]content.Candidate
 			if q.Mode != "lexical" && alpha > 0 && fusion != retrieval.FusionRanked {
-				densePassages = func() map[string]content.Candidate {
+				densePassages = func() map[candidateID]content.Candidate {
 					select {
 					case <-denseDone:
 						return dense
-					case <-ctx.Done():
+					case <-legCtx.Done():
 						return nil
 					}
 				}
 			}
-			for _, key := range partitionKeys {
-				if err := s.itemSparse(ctx, collection, partitions[key], scope, q, limit, grouped, sparse, densePassages); err != nil {
+			for _, part := range orderedPartitions {
+				if err := s.itemSparse(legCtx, collection, part, scope, q, limit, grouped, sparse, densePassages); err != nil {
 					return err
 				}
 			}
@@ -761,21 +1902,21 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	return fuseItems(sparse, dense, alpha, fusion, grouped), nil
 }
 
-func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartition, scope corpus.Scope, q retrieval.Request, limit int, grouped bool, sparse map[string]content.Candidate, densePassages func() map[string]content.Candidate) error {
+func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartition, scope corpus.Scope, q retrieval.Request, limit int, grouped bool, sparse map[candidateID]content.Candidate, densePassages func() map[candidateID]content.Candidate) error {
 	where, err := s.itemWhere(ctx, p.routes, scope, q, "item")
 	if err != nil || where.operator == 0 {
 		return err
 	}
 	requests := itemBM25(p, q.Query)
 	query := itemPassageTerms(q.Query, p.analyzers)
-	items := map[string]content.Candidate{}
+	items := make(map[candidateID]content.Candidate, limit)
 	// An ownerless item may not yet have passages from the selected
 	// ingestion owner. Allow one refill at twice the candidate depth.
 	for round, depth := 0, limit; round < 2; round, depth = round+1, min(maxItemPassages, depth*2) {
 		results := make([][]itemRow, len(requests))
 		copies, copyCtx := errgroup.WithContext(ctx)
 		for i, branch := range requests {
-			copies.Go(func() error {
+			goRecover(copies, func() error {
 				rows, err := s.searchRows(copyCtx, collection, branch, where, searchOrder{}, depth, true, false)
 				results[i] = rows
 				return err
@@ -828,16 +1969,19 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 				return err
 			}
 		}
-		chosen := map[string]bool{}
+		chosen := make(map[candidateID]struct{}, len(rows))
 		for _, row := range rows {
-			item, ok := items[candidateKey(row.candidate(false), true)]
-			if !ok || row.SegmentID == "" {
+			if row.SegmentID == "" {
+				continue
+			}
+			item, ok := items[rowCandidateKey(row, true)]
+			if !ok {
 				continue
 			}
 			c := row.candidate(false)
 			c.Score = item.Score
 			id := candidateKey(c, grouped)
-			chosen[id] = true
+			chosen[id] = struct{}{}
 			// On equal scores keep the passage chosen before the refill.
 			if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
 				sparse[id] = c
@@ -850,7 +1994,7 @@ func (s *Store) itemSparse(ctx context.Context, collection string, p *itemPartit
 	return nil
 }
 
-func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection string, passageWhere filter, ranked []content.Candidate, query []passageTerms, selectK int, densePassages func() map[string]content.Candidate) ([]itemRow, bool, error) {
+func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection string, passageWhere filter, ranked []content.Candidate, query []passageTerms, selectK int, densePassages func() map[candidateID]content.Candidate) ([]itemRow, bool, error) {
 	topCount := min(len(ranked), selectK)
 	top := ranked[:topCount]
 	tail := ranked[topCount:]
@@ -862,7 +2006,7 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 	}
 	best, ambiguous := groupPassageRows(topRows)
 
-	var denseMap map[string]content.Candidate
+	var denseMap map[candidateID]content.Candidate
 	if densePassages != nil && (len(ambiguous) > 0 || len(tail) > 0 || len(best) < len(top)) {
 		denseMap = densePassages()
 		for key := range denseMap {
@@ -916,7 +2060,7 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 	if len(tailNeed) > 0 {
 		tailLimit := tailPassageScanLimit(len(tailNeed))
 		tailWhere := and(passageWhere, versionFilter(tailNeed))
-		fetchTail := func(tailCtx context.Context, perMissing int) (map[string]itemRow, map[string][]itemRow, error) {
+		fetchTail := func(tailCtx context.Context, perMissing int) (map[candidateID]itemRow, map[candidateID][]itemRow, error) {
 			tailRows, err := s.searchRows(tailCtx, collection, searchBranch{}, tailWhere, passageOrder, tailLimit, true, false)
 			if err != nil {
 				return nil, nil, err
@@ -934,15 +2078,15 @@ func (s *Store) selectSparseGroupedPassages(ctx context.Context, collection stri
 			return tailBest, tailAmbiguous, nil
 		}
 		if topCovered >= selectK {
-			var tailBest map[string]itemRow
+			var tailBest map[candidateID]itemRow
 			var textExhausted bool
 			group, gctx := errgroup.WithContext(ctx)
-			group.Go(func() error {
+			goRecover(group, func() error {
 				var err error
 				textExhausted, err = s.resolveAmbiguousPassages(gctx, collection, passageWhere, best, ambiguous, query)
 				return err
 			})
-			group.Go(func() error {
+			goRecover(group, func() error {
 				var err error
 				tailBest, _, err = fetchTail(gctx, 1)
 				return err
@@ -1045,7 +2189,7 @@ func itemBM25(p *itemPartition, query string) []searchBranch {
 	return branches
 }
 
-func (s *Store) itemDense(ctx context.Context, collection string, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, limit int, grouped bool) (map[string]content.Candidate, error) {
+func (s *Store) itemDense(ctx context.Context, collection string, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request, limit int, grouped bool) (map[candidateID]content.Candidate, error) {
 	where, err := s.itemWhere(ctx, routes, scope, q, "vector")
 	if err != nil || where.operator == 0 {
 		return nil, err
@@ -1066,7 +2210,7 @@ func (s *Store) itemDense(ctx context.Context, collection string, routes []retri
 		}
 	}
 	branch := searchBranch{mode: "semantic", vector: q.Vector, target: target}
-	dense := map[string]content.Candidate{}
+	dense := make(map[candidateID]content.Candidate, limit)
 	maxDepth := limit
 	if grouped {
 		maxDepth = min(maxItemPassages, max(limit, min(maxDensePassageScan, max(minDensePassageScan, limit*4))))
@@ -1087,10 +2231,10 @@ func (s *Store) itemDense(ctx context.Context, collection string, routes []retri
 	}
 }
 
-func fuseItems(sparse, dense map[string]content.Candidate, alpha float64, fusion string, grouped bool) []content.Candidate {
-	out := map[string]content.Candidate{}
+func fuseItems(sparse, dense map[candidateID]content.Candidate, alpha float64, fusion string, grouped bool) []content.Candidate {
+	out := make(map[candidateID]content.Candidate, max(len(sparse), len(dense)))
 	for _, leg := range []struct {
-		pool   map[string]content.Candidate
+		pool   map[candidateID]content.Candidate
 		weight float64
 		dense  bool
 	}{{sparse, 1 - alpha, false}, {dense, alpha, true}} {
