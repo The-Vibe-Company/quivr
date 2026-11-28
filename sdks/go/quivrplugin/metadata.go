@@ -15,15 +15,15 @@ const CommonMetadataVersion = "1"
 // CommonMetadata contains source metadata that the engine can expose through
 // the same contract for every first-party plugin. Empty values are omitted.
 type CommonMetadata struct {
-	Language    string
-	PublishedAt string
-	SourceType  string
-	Source      string
-	Author      []string
-	Subjects    []string
-	Tags        []string
-	Country     []string
-	Place       []string
+	Language    string   `json:"language,omitempty"`
+	PublishedAt string   `json:"published_at,omitempty"`
+	SourceType  string   `json:"source_type,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Author      []string `json:"author,omitempty"`
+	Subjects    []string `json:"subjects,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Country     []string `json:"country,omitempty"`
+	Place       []string `json:"place,omitempty"`
 }
 
 // CommonMetadataExtension builds the reserved extension using only the

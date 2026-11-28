@@ -47,64 +47,59 @@ func (m *Manifest) SupportsSearchBudget() bool {
 	return true
 }
 
-// SupportsCoverageSnapshots requires the declared range to exclude older
-// implementations whose request schemas reject snapshot metadata.
-func (m *Manifest) SupportsCoverageSnapshots() bool {
+// strictlySpeaks reports whether every supported Plugin API version admitted by
+// the manifest's declared range speaks feature. This protects older plugins
+// whose strict request schemas reject fields added in newer Plugin API versions.
+func (m *Manifest) strictlySpeaks(feature Feature) bool {
+	if m == nil {
+		return false
+	}
 	r, err := ParseRange(m.Compatibility.PluginAPI)
 	if err != nil {
 		return false
 	}
 	version, ok := NegotiatePluginAPI(r)
-	if !ok || !ResolveAPI(version).Speaks(FeatureCoverageSnapshots) {
+	if !ok || !ResolveAPI(version).Speaks(feature) {
 		return false
 	}
 	for _, version := range SupportedPluginAPIVersions {
 		v, _ := ParseVersion(version)
-		if r.Contains(v) && !ResolveAPI(version).Speaks(FeatureCoverageSnapshots) {
+		if r.Contains(v) && !ResolveAPI(version).Speaks(feature) {
 			return false
 		}
 	}
 	return true
+}
+
+// SupportsCoverageSnapshots requires the declared range to exclude older
+// implementations whose request schemas reject snapshot metadata.
+func (m *Manifest) SupportsCoverageSnapshots() bool {
+	return m.strictlySpeaks(FeatureCoverageSnapshots)
 }
 
 // SupportsMultiPartSegments requires the declared range to exclude older
 // retrieval candidate schemas that reject source ranges.
 func (m *Manifest) SupportsMultiPartSegments() bool {
-	r, err := ParseRange(m.Compatibility.PluginAPI)
-	if err != nil {
-		return false
-	}
-	version, ok := NegotiatePluginAPI(r)
-	if !ok || !ResolveAPI(version).Speaks(FeatureMultiPartSegments) {
-		return false
-	}
-	for _, version := range SupportedPluginAPIVersions {
-		v, _ := ParseVersion(version)
-		if r.Contains(v) && !ResolveAPI(version).Speaks(FeatureMultiPartSegments) {
-			return false
-		}
-	}
-	return true
+	return m.strictlySpeaks(FeatureMultiPartSegments)
 }
 
 // SupportsMultimodalIngestion requires the declared range to exclude older
 // retrieval candidate schemas that reject segment region metadata.
 func (m *Manifest) SupportsMultimodalIngestion() bool {
-	r, err := ParseRange(m.Compatibility.PluginAPI)
-	if err != nil {
-		return false
-	}
-	version, ok := NegotiatePluginAPI(r)
-	if !ok || !ResolveAPI(version).Speaks(FeatureMultimodalIngestion) {
-		return false
-	}
-	for _, version := range SupportedPluginAPIVersions {
-		v, _ := ParseVersion(version)
-		if r.Contains(v) && !ResolveAPI(version).Speaks(FeatureMultimodalIngestion) {
-			return false
-		}
-	}
-	return true
+	return m.strictlySpeaks(FeatureMultimodalIngestion)
+}
+
+// SupportsDeepCandidatePools requires the declared range to exclude older
+// retrieval request schemas whose candidate arrays cap at 100 items.
+func (m *Manifest) SupportsDeepCandidatePools() bool {
+	return m.strictlySpeaks(FeatureDeepCandidatePools)
+}
+
+// SupportsRichRetrievalCandidates requires the declared range to exclude older
+// retrieval request schemas that reject candidate title, common_metadata,
+// passage_ordinal, total_passages, or lead_passage fields.
+func (m *Manifest) SupportsRichRetrievalCandidates() bool {
+	return m.strictlySpeaks(FeatureRichRetrievalCandidates)
 }
 
 func dependencyIssues(pins []*Pin) []Issue {

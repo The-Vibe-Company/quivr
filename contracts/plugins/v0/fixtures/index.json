@@ -2813,6 +2813,32 @@
       "manifest": "manifests/valid/ingestion-multimodal.yaml",
       "request": "requests/ingestion/segment-and-embed-blob.json",
       "description": "Image region extending past x + width = 1 is rejected semantically."
+    },
+    {
+      "file": "manifests/valid/retrieval-deep-pool.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.21 retrieval manifest declaring max_candidates above 100 (up to 400)."
+    },
+    {
+      "file": "manifests/invalid/retrieval-deep-pool-plugin-api-0.20.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "max_candidates above 100 requires a plugin_api range admitting Plugin API 0.21."
+    },
+    {
+      "file": "requests/retrieval/search-round-2-rich-candidates.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.21 round 2 request carrying k > 100, include_lead, title, common_metadata, passage_ordinal, total_passages, and lead_passage."
     }
   ]
 }

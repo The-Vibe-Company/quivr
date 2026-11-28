@@ -169,9 +169,16 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 		sv.timing.Hydration += u.Phases.Hydration
 	}
 	out := make([]plugins.Candidate, 0, len(result.Hits))
+	outHydrated := make([]content.Hydrated, 0, len(result.Hits))
 	for _, h := range result.Hits {
 		sv.hydrated[h.Segment.ID] = h.Hydrated
 		out = append(out, sv.candidate(h.Hydrated, h.Score, h.Explanation))
+		outHydrated = append(outHydrated, h.Hydrated)
+	}
+	if c.IncludeLead && sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		if err := sv.attachLeads(ctx, q, out, outHydrated); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

@@ -62,7 +62,7 @@
         "candidates": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 200,
+          "maxItems": 400,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -100,6 +100,32 @@
                 "minLength": 1,
                 "maxLength": 1024,
                 "description": "Optional explanation for profile candidates."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Optional Record title for Plugin API 0.21+ candidates."
+              },
+              "common_metadata": {
+                "$ref": "../../shared/v0/common-metadata.schema.json",
+                "description": "Optional common source metadata for Plugin API 0.21+ candidates."
+              },
+              "passage_ordinal": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Optional zero-based passage ordinal for Plugin API 0.21+ candidates."
+              },
+              "total_passages": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional total segment count for Plugin API 0.21+ candidates."
+              },
+              "lead_passage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384,
+                "description": "Optional explicit lead passage text served when include_lead is true."
               }
             }
           },

@@ -17,7 +17,7 @@ contracts = plugins.parents[1]
 base = "https://quivr.invalid/contracts/"
 
 resources = []
-for path in [contracts / "shared/v0/manifest.schema.json", *sorted(plugins.glob("*.schema.json"))]:
+for path in [contracts / "shared/v0/manifest.schema.json", contracts / "shared/v0/common-metadata.schema.json", *sorted(plugins.glob("*.schema.json"))]:
     doc = json.loads(path.read_text())
     Draft202012Validator.check_schema(doc)
     uri = base + path.relative_to(contracts).as_posix()

@@ -703,6 +703,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		unique = append(unique, f)
 	}
 	out := []plugins.Candidate{}
+	outHydrated := []content.Hydrated{}
 	records := map[string]bool{}
 	// Hydrate in index order, a batch at a time, until k candidates are kept.
 	// The first batch is the k best: when hydration keeps them all, as it
@@ -743,12 +744,18 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 				records[h.RecordID] = true
 			}
 			out = append(out, sv.candidate(h, f.Score, ""))
+			outHydrated = append(outHydrated, h)
 			if sv.chain.visibleCandidates != nil {
 				sv.chain.visibleCandidates[visibilityCandidate(h, q)] = struct{}{}
 			}
 			if len(out) == c.K {
 				break
 			}
+		}
+	}
+	if c.IncludeLead && sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		if err := sv.attachLeads(ctx, q, out, outHydrated); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
@@ -917,5 +924,114 @@ func (sv *server) candidate(h content.Hydrated, score float64, explanation strin
 			Label:            r.Label,
 		}
 	}
+	if sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
+		if title := truncateRunes(h.Title, maxCandidateTitleRunes); title != "" {
+			c.Title = title
+		}
+		if len(h.CommonMetadata) > 0 && h.CommonMetadata[0] == '{' && string(h.CommonMetadata) != "{}" {
+			c.CommonMetadata = h.CommonMetadata
+		}
+		ord := max(0, h.Segment.Derivation.Ordinal)
+		c.PassageOrdinal = &ord
+		if h.TotalPassages > 0 {
+			c.TotalPassages = h.TotalPassages
+		}
+	}
 	return c
+}
+
+const (
+	maxCandidateTitleRunes       = 1024
+	maxCandidateLeadPassageRunes = 16384
+)
+
+func truncateRunes(s string, maxRunes int) string {
+	if s == "" || maxRunes <= 0 {
+		return ""
+	}
+	if len(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes])
+}
+
+// attachLeads hydrates the opening (ordinal 0) text segment for each served
+// candidate whose passage_ordinal > 0, reusing the search's hydration cache and
+// enforcing every canonical authorization, currentness, and routing fence.
+func (sv *server) attachLeads(ctx context.Context, q Request, out []plugins.Candidate, hydrated []content.Hydrated) error {
+	if len(out) == 0 || len(out) != len(hydrated) {
+		return nil
+	}
+	var refs []content.LeadSegmentRef
+	seenSeg := map[string]bool{}
+	for _, h := range hydrated {
+		if h.Segment.Derivation.Ordinal <= 0 || h.SegmentationID == "" || h.VersionID == "" || seenSeg[h.SegmentationID] {
+			continue
+		}
+		seenSeg[h.SegmentationID] = true
+		refs = append(refs, content.LeadSegmentRef{VersionID: h.VersionID, SegmentationID: h.SegmentationID})
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	phase := time.Now()
+	leadIDs, err := sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+	sv.timing.Hydration += time.Since(phase)
+	if err != nil {
+		return ErrUnavailable
+	}
+	if len(leadIDs) == 0 {
+		return nil
+	}
+	var batch []content.Candidate
+	segToLeadIdx := map[string]int{}
+	for _, h := range hydrated {
+		if h.Segment.Derivation.Ordinal <= 0 {
+			continue
+		}
+		leadID, ok := leadIDs[h.SegmentationID]
+		if !ok || leadID == "" || leadID == h.Segment.ID {
+			continue
+		}
+		if _, queued := segToLeadIdx[h.SegmentationID]; queued {
+			continue
+		}
+		segToLeadIdx[h.SegmentationID] = len(batch)
+		batch = append(batch, content.Candidate{
+			SegmentID:        leadID,
+			GenerationID:     h.GenerationID,
+			EvaluationPlugin: q.EvaluationPlugin,
+			EvaluationSpace:  q.Space,
+		})
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	phase = time.Now()
+	leadHydrated, err := sv.hydrate(ctx, batch)
+	sv.timing.Hydration += time.Since(phase)
+	if err != nil {
+		return err
+	}
+	for i, h := range hydrated {
+		if h.Segment.Derivation.Ordinal <= 0 {
+			continue
+		}
+		idx, ok := segToLeadIdx[h.SegmentationID]
+		if !ok {
+			continue
+		}
+		lh, ok := leadHydrated[idx]
+		if !ok || lh.Segment.ID == h.Segment.ID {
+			continue
+		}
+		if text := truncateRunes(lh.Segment.Text, maxCandidateLeadPassageRunes); text != "" {
+			out[i].LeadPassage = text
+		}
+	}
+	return nil
 }

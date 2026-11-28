@@ -30,17 +30,18 @@ const (
 
 // CandidateRequest asks the core for candidates.
 type CandidateRequest struct {
-	Primitive string             `json:"primitive"`
-	QueryText string             `json:"query_text,omitempty"`
-	Vector    []float32          `json:"vector,omitempty"`
-	Space     string             `json:"space,omitempty"`
-	Field     string             `json:"field,omitempty"`
-	Alpha     *float64           `json:"alpha,omitempty"`
-	Fusion    string             `json:"fusion,omitempty"`
-	K         int                `json:"k,omitempty"`
-	Profile   *ProfileCandidates `json:"profile,omitempty"`
-	Filter    *CandidateFilter   `json:"filter,omitempty"`
-	GroupBy   string             `json:"group_by,omitempty"`
+	Primitive   string             `json:"primitive"`
+	QueryText   string             `json:"query_text,omitempty"`
+	Vector      []float32          `json:"vector,omitempty"`
+	Space       string             `json:"space,omitempty"`
+	Field       string             `json:"field,omitempty"`
+	Alpha       *float64           `json:"alpha,omitempty"`
+	Fusion      string             `json:"fusion,omitempty"`
+	K           int                `json:"k,omitempty"`
+	Profile     *ProfileCandidates `json:"profile,omitempty"`
+	Filter      *CandidateFilter   `json:"filter,omitempty"`
+	GroupBy     string             `json:"group_by,omitempty"`
+	IncludeLead bool               `json:"include_lead,omitempty"`
 }
 
 // ProfileCandidates asks for a full profile declared in the manifest's requires.
@@ -64,19 +65,24 @@ type CandidateFilter struct {
 
 // Candidate is a segment the core served: authorized, current, hydrated.
 type Candidate struct {
-	SegmentID       string        `json:"segment_id"`
-	RecordID        string        `json:"record_id"`
-	VersionID       string        `json:"version_id"`
-	PartKey         string        `json:"part_key"`
-	Text            string        `json:"text"`
-	Start           int           `json:"start"`
-	End             int           `json:"end"`
-	PassageText     string        `json:"passage_text,omitempty"`
-	SourceRanges    []SourceRange `json:"source_ranges,omitempty"`
-	SourceSeparator string        `json:"source_separator,omitempty"`
-	Region          *ImageRegion  `json:"region,omitempty"`
-	Score           float64       `json:"score"`
-	Explanation     string        `json:"explanation,omitempty"`
+	SegmentID       string          `json:"segment_id"`
+	RecordID        string          `json:"record_id"`
+	VersionID       string          `json:"version_id"`
+	PartKey         string          `json:"part_key"`
+	Text            string          `json:"text"`
+	Start           int             `json:"start"`
+	End             int             `json:"end"`
+	PassageText     string          `json:"passage_text,omitempty"`
+	SourceRanges    []SourceRange   `json:"source_ranges,omitempty"`
+	SourceSeparator string          `json:"source_separator,omitempty"`
+	Region          *ImageRegion    `json:"region,omitempty"`
+	Score           float64         `json:"score"`
+	Explanation     string          `json:"explanation,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	CommonMetadata  *CommonMetadata `json:"common_metadata,omitempty"`
+	PassageOrdinal  *int            `json:"passage_ordinal,omitempty"`
+	TotalPassages   int             `json:"total_passages,omitempty"`
+	LeadPassage     string          `json:"lead_passage,omitempty"`
 }
 
 // ServedRequest is a request of an earlier round and what the core served.
@@ -282,6 +288,12 @@ func (p *Plugin) encodeSearch(req *SearchRequest, a *SearchAnswer) ([]byte, stri
 			}
 			if limit < 1 || limit > rc.Limits.MaxCandidates {
 				return nil, fmt.Sprintf("request %d: k %d is outside 1..max_candidates %d", i, c.K, rc.Limits.MaxCandidates)
+			}
+			if c.K > 100 && !resolveAPIFeatures(p.m.pluginAPI).speaks("deep_candidate_pools") {
+				return nil, fmt.Sprintf("request %d: k above 100 requires Plugin API %s", i, FeatureSince["deep_candidate_pools"])
+			}
+			if c.IncludeLead && !resolveAPIFeatures(p.m.pluginAPI).speaks("rich_retrieval_candidates") {
+				return nil, fmt.Sprintf("request %d: include_lead requires Plugin API %s", i, FeatureSince["rich_retrieval_candidates"])
 			}
 		}
 		doc["requests"] = a.Requests

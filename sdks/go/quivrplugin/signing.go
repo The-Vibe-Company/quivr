@@ -171,7 +171,7 @@ func (p *Plugin) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, requestLimit(r.URL.Path)))
 		if err != nil {
 			writeJSON(w, 413, envelope{Code: "request_too_large", Message: "request body exceeds the SDK limit"})
 			return
@@ -196,5 +196,5 @@ func requestBody(r *http.Request) ([]byte, error) {
 	if body, ok := r.Body.(*authenticatedBody); ok {
 		return body.data, nil
 	}
-	return io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	return io.ReadAll(io.LimitReader(r.Body, requestLimit(r.URL.Path)+1))
 }

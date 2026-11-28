@@ -19,7 +19,10 @@ TARGET = SDK / "quivrplugin" / "schemas"
 
 
 def sources() -> dict[str, bytes]:
-    files = {"shared/v0/manifest.schema.json": (CONTRACTS / "shared/v0/manifest.schema.json").read_bytes()}
+    files = {
+        "shared/v0/manifest.schema.json": (CONTRACTS / "shared/v0/manifest.schema.json").read_bytes(),
+        "shared/v0/common-metadata.schema.json": (CONTRACTS / "shared/v0/common-metadata.schema.json").read_bytes(),
+    }
     for path in sorted((CONTRACTS / "plugins/v0").glob("*.schema.json")):
         files[f"plugins/v0/{path.name}"] = path.read_bytes()
     return files

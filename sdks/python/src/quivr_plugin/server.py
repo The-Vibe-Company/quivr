@@ -66,7 +66,7 @@ DEFAULT_SHUTDOWN_TIMEOUT = 30.0
 MAX_REQUEST_BYTES = 1 << 20
 # A subscription request carries the text of a Record Version; the core keeps it within 16 MiB.
 MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
-MAX_RETRIEVAL_REQUEST_BYTES = 16 << 20
+MAX_RETRIEVAL_REQUEST_BYTES = 64 << 20
 
 
 def max_request_bytes(path: str) -> int:

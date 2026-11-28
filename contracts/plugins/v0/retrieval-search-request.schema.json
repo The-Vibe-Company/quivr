@@ -245,7 +245,7 @@
           },
           "candidates": {
             "type": "array",
-            "maxItems": 100,
+            "maxItems": 400,
             "items": {
               "$ref": "#/$defs/Candidate"
             }
@@ -338,8 +338,8 @@
         "k": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 100,
-          "description": "Most candidates to serve; at most limits.max_candidates."
+          "maximum": 400,
+          "description": "Most candidates to serve; at most limits.max_candidates. Values above 100 require Plugin API 0.21."
         },
         "filter": {
           "type": "object",
@@ -366,6 +366,11 @@
             "record"
           ],
           "description": "record keeps the best candidate of each Record."
+        },
+        "include_lead": {
+          "type": "boolean",
+          "default": false,
+          "description": "Since Plugin API 0.21. When true, attach the record's opening lead passage (ordinal 0) to served candidates whose passage_ordinal is greater than 0."
         },
         "profile": {
           "type": "object",
@@ -670,6 +675,32 @@
           "minLength": 1,
           "maxLength": 1024,
           "description": "The inner profile explanation, when profile candidates supply one."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Since Plugin API 0.21. Optional Record title when available."
+        },
+        "common_metadata": {
+          "$ref": "../../shared/v0/common-metadata.schema.json",
+          "description": "Since Plugin API 0.21. Optional common source metadata (quivr.metadata) for this Record Version."
+        },
+        "passage_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Since Plugin API 0.21. Zero-based ordinal of this segment within its Record Version's segmentation."
+        },
+        "total_passages": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Since Plugin API 0.21. Total number of segments in this Record Version's segmentation, when known."
+        },
+        "lead_passage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "description": "Since Plugin API 0.21. Optional opening lead passage text (ordinal 0) of the same segmentation, populated only when include_lead is true and passage_ordinal is greater than 0."
         }
       }
     },

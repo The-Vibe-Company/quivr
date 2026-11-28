@@ -30,6 +30,8 @@ const (
 	FeatureIngestionPages                 Feature = "ingestion_pages"
 	FeatureConnectorOrderedRecords        Feature = "connector_ordered_records"
 	FeatureMultimodalIngestion            Feature = "multimodal_ingestion"
+	FeatureDeepCandidatePools             Feature = "deep_candidate_pools"
+	FeatureRichRetrievalCandidates        Feature = "rich_retrieval_candidates"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -66,6 +68,8 @@ var featureTable = []FeatureDefinition{
 	{FeatureIngestionPages, "0.18.0", "Bounded ingestion pages with complete source coverage and durable negotiated cuts", "", "/contributions/ingestion/paging"},
 	{FeatureConnectorOrderedRecords, "0.19.0", "Optional connector pages with ordered revisions of each record", "", ""},
 	{FeatureMultimodalIngestion, "0.20.0", "Multimodal image ingestion with Blob Part references and segment region provenance", "", ""},
+	{FeatureDeepCandidatePools, "0.21.0", "Retrieval candidate pools above 100 (up to 400)", "", ""},
+	{FeatureRichRetrievalCandidates, "0.21.0", "Retrieval candidate title, common metadata, passage ordinals and opt-in lead passages", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

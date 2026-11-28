@@ -23,6 +23,7 @@ REPO = SDK.parents[1]
 CONTRACTS = REPO / "contracts"
 PACKAGE = SDK / "src" / "quivr_plugin"
 SHARED = "shared/v0/manifest.schema.json"
+COMMON_METADATA = "shared/v0/common-metadata.schema.json"
 
 # Top-level class name of each Plugin Protocol schema file, in output order.
 FILES = {
@@ -62,6 +63,7 @@ FILES = {
 # Unlisted inline objects are named <Parent><Property>.
 NAMES = {
     SHARED + "#/$defs/Extensions/additionalProperties": "ExtensionEntry",
+    COMMON_METADATA + "#": "CommonMetadata",
     "plugins/v0/normalizer-request.schema.json#/properties/input": "InputBlob",
     "plugins/v0/normalizer-request.schema.json#/properties/input/properties/reference/oneOf/0": "SignedUrlReference",
     "plugins/v0/normalizer-request.schema.json#/properties/input/properties/reference/oneOf/1": "FileReference",
@@ -257,7 +259,7 @@ class Generator:
 
 def outputs() -> dict[Path, bytes]:
     files = {PACKAGE / "models.py": Generator().run().encode()}
-    for rel in [SHARED, *sorted(f"plugins/v0/{p.name}" for p in (CONTRACTS / "plugins/v0").glob("*.schema.json"))]:
+    for rel in [SHARED, COMMON_METADATA, *sorted(f"plugins/v0/{p.name}" for p in (CONTRACTS / "plugins/v0").glob("*.schema.json"))]:
         files[PACKAGE / "schemas" / rel] = (CONTRACTS / rel).read_bytes()
     return files
 

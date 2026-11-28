@@ -284,8 +284,24 @@ type Hydrated struct {
 	GenerationID                        string
 	TextSHA256                          string
 	EmbeddingID, SpaceID                string
+	Title                               string
+	CommonMetadata                      json.RawMessage
+	TotalPassages                       int
 	Segment                             Segment
 	Availability                        Availability
+}
+
+// LeadSegmentRef identifies a Version's segmentation whose opening text
+// segment should be located when a retrieval plugin opts in to lead passages.
+type LeadSegmentRef struct {
+	VersionID      string
+	SegmentationID string
+}
+
+// LeadSegmentLocator resolves the opening (lowest-ordinal) text segment ID for
+// each requested segmentation.
+type LeadSegmentLocator interface {
+	LeadSegments(ctx context.Context, org string, refs []LeadSegmentRef) (map[string]string, error)
 }
 
 // Quarantine stages: the step a quarantined Version failed at, which a
@@ -782,6 +798,22 @@ func (s Service) RecheckHydration(ctx context.Context, scope corpus.Scope, candi
 		still[i] = true
 	}
 	return still, nil
+}
+
+// LeadSegments resolves the opening (lowest-ordinal) text segment ID per
+// segmentation when the underlying BaselineRepository supports it.
+func (s Service) LeadSegments(ctx context.Context, scope corpus.Scope, refs []LeadSegmentRef) (map[string]string, error) {
+	if err := scope.Require(corpus.ActionContentHydrate); err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return map[string]string{}, nil
+	}
+	locator, ok := s.Baseline.(LeadSegmentLocator)
+	if !ok {
+		return map[string]string{}, nil
+	}
+	return locator.LeadSegments(ctx, scope.Organization, refs)
 }
 
 // excerpts reads each distinct blob of a batch once, serving verified immutable

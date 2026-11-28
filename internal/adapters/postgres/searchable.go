@@ -201,7 +201,7 @@ func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result cont
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO segmentations VALUES($1,$2,$3,$4,$5,$6)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO segmentations(organization,id,version_id,recipe,digest,provenance,segment_count) VALUES($1,$2,$3,$4,$5,$6,$7)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance, len(result.Segments)); err != nil {
 		return nil, err
 	}
 	for _, p := range result.Segments {
@@ -451,10 +451,11 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 // Resolve routing overlays once per distinct requested generation, rather than
 // repeating their control-table probes for every hit and embedding lookup.
 func hydrationLookupsSQL(response bool) string {
-	segmentFields, versionFields, generationFields := "", "", ""
+	segmentFields, outerVersionFields, innerVersionFields, generationFields := "", "", "", ""
 	if response {
 		segmentFields = ",sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,sg.derivation"
-		versionFields = ",v.manifest_blob_id"
+		outerVersionFields = ",v.manifest_blob_id,v.common_metadata"
+		innerVersionFields = ",v.manifest_blob_id,v.extensions->'quivr.metadata'->'data' AS common_metadata"
 		generationFields = ",g.spaces,g.space_id"
 	}
 	return `WITH candidates AS MATERIALIZED (
@@ -465,12 +466,12 @@ func hydrationLookupsSQL(response bool) string {
  JOIN ` + effectiveGenerationsSQL + ` g ON g.id=requested.generation_id
 ), located AS MATERIALIZED (
  SELECT c.*,sg.version_id,sg.segmentation_id` + segmentFields + `,
- v.record_id,v.slot,v.baseline_ready,v.quarantined` + versionFields + `,r.corpus_id,r.current_version_id,r.withdrawn
+ v.record_id,v.slot,v.baseline_ready,v.quarantined` + outerVersionFields + `,r.corpus_id,r.current_version_id,r.withdrawn
 FROM candidates c JOIN generations g ON g.id=c.generation_id
 JOIN LATERAL (SELECT sg.organization,sg.id,sg.version_id,sg.segmentation_id` + segmentFields + `
  FROM segments sg WHERE (sg.organization,sg.id)>=(c.organization,c.segment_id)
  ORDER BY sg.organization,sg.id LIMIT 1) sg ON (sg.organization,sg.id)=(c.organization,c.segment_id)
-JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.slot,v.baseline_ready,v.quarantined` + versionFields + ` FROM record_versions v
+JOIN LATERAL (SELECT v.organization,v.id,v.record_id,v.slot,v.baseline_ready,v.quarantined` + innerVersionFields + ` FROM record_versions v
  WHERE (v.organization,v.id)>=(c.organization,sg.version_id)
  ORDER BY v.organization,v.id LIMIT 1) v ON (v.organization,v.id)=(c.organization,sg.version_id)
 JOIN LATERAL (SELECT r.organization,r.id,r.corpus_id,r.current_version_id,r.withdrawn FROM records r
@@ -537,9 +538,16 @@ var hydrateSourcesSQL = `CASE WHEN jsonb_typeof(c.derivation->'source_ranges')='
 ) END`
 
 var hydrateSQL = hydrationLookupsSQL(true) + `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,c.part_key,c.start_offset,c.end_offset,c.text_sha256,coalesce(b.object_key,''),coalesce(b.sha256,''),coalesce(b.byte_length,0),p.pack_offset,p.pack_length,coalesce(mb.object_key,''),coalesce(mb.sha256,''),coalesce(mb.byte_length,0),coalesce(e.id,''),coalesce(e.space_id,''),
- jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator','region',c.derivation->'region'),
- ` + hydrateSourcesSQL + `
+ jsonb_build_object('source_ranges',c.derivation->'source_ranges','source_separator',c.derivation->'source_separator','region',c.derivation->'region','ordinal',coalesce((c.derivation->>'ordinal')::integer,0)),
+ ` + hydrateSourcesSQL + `,
+ coalesce(ar.title,''),c.common_metadata,coalesce(s.segment_count,0)
 ` + hydrationCandidatesSQL + `
+LEFT JOIN LATERAL (SELECT ar.organization,ar.record_id,ar.slot,ar.title FROM accepted_revisions ar
+ WHERE (ar.organization,ar.record_id,ar.slot)>=(c.organization,v.record_id,v.slot)
+ ORDER BY ar.organization,ar.record_id,ar.slot LIMIT 1) ar ON (ar.organization,ar.record_id,ar.slot)=(c.organization,v.record_id,v.slot)
+LEFT JOIN LATERAL (SELECT s.organization,s.id,s.segment_count FROM segmentations s
+ WHERE (s.organization,s.id)>=(c.organization,sg.segmentation_id)
+ ORDER BY s.organization,s.id LIMIT 1) s ON (s.organization,s.id)=(c.organization,sg.segmentation_id)
 LEFT JOIN LATERAL (SELECT p.organization,p.version_id,p.part_key,p.blob_id,p.pack_offset,p.pack_length FROM version_parts p
  WHERE c.derivation->'region' IS NULL AND (p.organization,p.version_id,p.part_key)>=(c.organization,sg.version_id,c.part_key)
  ORDER BY p.organization,p.version_id,p.part_key LIMIT 1) p ON (p.organization,p.version_id,p.part_key)=(c.organization,sg.version_id,c.part_key)
@@ -728,14 +736,17 @@ func (s ProjectionStore) hydrateBatch(ctx context.Context, scope corpus.Scope, c
 		var n int
 		var l content.Located
 		var corpusID string
-		var derivation, sourcesRaw []byte
+		var derivation, sourcesRaw, commonMetadata []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &l.ManifestBlob.Key, &l.ManifestBlob.SHA256, &l.ManifestBlob.Size, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &l.Pack.Offset, &l.Pack.Length, &l.ManifestBlob.Key, &l.ManifestBlob.SHA256, &l.ManifestBlob.Size, &h.EmbeddingID, &h.SpaceID, &derivation, &sourcesRaw, &h.Title, &commonMetadata, &h.TotalPassages); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {
 			return nil, err
+		}
+		if len(commonMetadata) > 0 && commonMetadata[0] == '{' && string(commonMetadata) != "{}" {
+			h.CommonMetadata = commonMetadata
 		}
 		if !scope.Contains(corpusID) {
 			continue
@@ -757,6 +768,44 @@ func (s ProjectionStore) hydrateBatch(ctx context.Context, scope corpus.Scope, c
 
 // ProjectionStore persists baseline projection artifacts and Corpus routing.
 type ProjectionStore struct{ Pool *pgxpool.Pool }
+
+// LeadSegments resolves the opening (lowest-ordinal) text segment ID for each
+// requested segmentation using the segments_by_version composite index.
+func (s ProjectionStore) LeadSegments(ctx context.Context, org string, refs []content.LeadSegmentRef) (map[string]string, error) {
+	out := map[string]string{}
+	if len(refs) == 0 {
+		return out, nil
+	}
+	orgs := make([]string, len(refs))
+	versions := make([]string, len(refs))
+	segmentations := make([]string, len(refs))
+	for i, ref := range refs {
+		orgs[i], versions[i], segmentations[i] = org, ref.VersionID, ref.SegmentationID
+	}
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT req.segmentation_id, s.id
+FROM unnest($1::text[],$2::text[],$3::text[]) AS req(organization,version_id,segmentation_id)
+JOIN LATERAL (
+ SELECT sg.id FROM segments sg
+ WHERE sg.organization=req.organization AND sg.version_id=req.version_id AND sg.segmentation_id=req.segmentation_id
+   AND sg.derivation->'region' IS NULL
+ ORDER BY coalesce((sg.derivation->>'ordinal')::integer,0), sg.id
+ LIMIT 1
+) s ON true`, orgs, versions, segmentations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var segID, leadID string
+		if err = rows.Scan(&segID, &leadID); err != nil {
+			return nil, err
+		}
+		out[segID] = leadID
+	}
+	return out, rows.Err()
+}
+
+var _ content.LeadSegmentLocator = ProjectionStore{}
 
 // Storage omits empty derivation values without changing the domain encoding
 // used by segment/segmentation identity or the packed source-range contract.

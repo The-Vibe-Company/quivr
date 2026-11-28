@@ -333,6 +333,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 		if rc.Limits.MaxCandidates == 0 {
 			rc.Limits.MaxCandidates = 50
 		}
+		if rc.Limits.MaxCandidates > 100 && !features.speaks("deep_candidate_pools") {
+			return nil, fmt.Errorf("%s: contributions.retrieval.limits.max_candidates above 100 requires Plugin API %s", path, FeatureSince["deep_candidate_pools"])
+		}
 		if rc.Limits.MaxResponseBytes == 0 {
 			rc.Limits.MaxResponseBytes = 1 << 20
 		}

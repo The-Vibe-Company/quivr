@@ -38,12 +38,17 @@ func IsRetrievalFixture(raw []byte) bool {
 
 // FixtureCandidate is one segment of a retrieval fixture's catalogue.
 type FixtureCandidate struct {
-	SegmentID       string   `json:"segment_id"`
-	RecordID        string   `json:"record_id"`
-	SourceNamespace string   `json:"source_namespace,omitempty"`
-	Text            string   `json:"text"`
-	Score           *float64 `json:"score,omitempty"`
-	Explanation     string   `json:"explanation,omitempty"`
+	SegmentID       string          `json:"segment_id"`
+	RecordID        string          `json:"record_id"`
+	SourceNamespace string          `json:"source_namespace,omitempty"`
+	Text            string          `json:"text"`
+	Score           *float64        `json:"score,omitempty"`
+	Explanation     string          `json:"explanation,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	CommonMetadata  json.RawMessage `json:"common_metadata,omitempty"`
+	PassageOrdinal  *int            `json:"passage_ordinal,omitempty"`
+	TotalPassages   int             `json:"total_passages,omitempty"`
+	LeadPassage     string          `json:"lead_passage,omitempty"`
 }
 
 type retrievalFixture struct {
@@ -225,8 +230,33 @@ func (r *RetrievalRun) Serve(c plugins.CandidateRequest) []plugins.Candidate {
 			}
 			explanation = f.Explanation
 		}
-		out = append(out, plugins.Candidate{SegmentID: f.SegmentID, RecordID: f.RecordID, VersionID: "dev-version-" + f.RecordID, PartKey: "body",
-			Text: f.Text, End: utf8.RuneCountInString(f.Text), Score: score, Explanation: explanation})
+		cand := plugins.Candidate{
+			SegmentID:      f.SegmentID,
+			RecordID:       f.RecordID,
+			VersionID:      "dev-version-" + f.RecordID,
+			PartKey:        "body",
+			Text:           f.Text,
+			End:            utf8.RuneCountInString(f.Text),
+			Score:          score,
+			Explanation:    explanation,
+			Title:          f.Title,
+			CommonMetadata: f.CommonMetadata,
+			PassageOrdinal: f.PassageOrdinal,
+			TotalPassages:  f.TotalPassages,
+		}
+		if c.IncludeLead {
+			if f.LeadPassage != "" {
+				cand.LeadPassage = f.LeadPassage
+			} else if f.PassageOrdinal != nil && *f.PassageOrdinal > 0 {
+				for _, other := range r.candidates {
+					if other.RecordID == f.RecordID && other.SegmentID != f.SegmentID && (other.PassageOrdinal == nil || *other.PassageOrdinal == 0) {
+						cand.LeadPassage = other.Text
+						break
+					}
+				}
+			}
+		}
+		out = append(out, cand)
 		if len(out) == c.Limit() {
 			break
 		}

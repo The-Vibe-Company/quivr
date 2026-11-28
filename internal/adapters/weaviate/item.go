@@ -37,7 +37,7 @@ const (
 	passagesPerTailItem         = 4
 	missingPassageConcurrency   = 8
 	minDensePassageScan         = 64
-	maxDensePassageScan         = 600
+	maxDensePassageScan         = maxItemPassages
 
 	// Minimum lexical information density for a substantive passage. Shorter
 	// boilerplate fragments (headers, footers, page markers) rank below
@@ -497,14 +497,16 @@ func topPassageScanLimit(itemCount int) int {
 	if itemCount <= 0 {
 		return 0
 	}
-	return min(maxTopKPassageScan, max(minTopKPassageScan, itemCount*passagesPerTopItem))
+	ceiling := max(maxTopKPassageScan, min(maxItemPassages, itemCount*passagesPerTailItem))
+	return min(ceiling, max(minTopKPassageScan, itemCount*passagesPerTopItem))
 }
 
 func tailPassageScanLimit(itemCount int) int {
 	if itemCount <= 0 {
 		return 0
 	}
-	return min(maxTailPassageScan, max(itemCount, itemCount*passagesPerTailItem))
+	ceiling := max(maxTailPassageScan, min(maxItemPassages, itemCount*2))
+	return min(ceiling, max(itemCount, itemCount*passagesPerTailItem))
 }
 
 func versionFilter(items []content.Candidate) filter {

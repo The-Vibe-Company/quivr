@@ -360,6 +360,9 @@ func Discover(ctx context.Context, baseURL string, report plugins.Report) (strin
 			if len(m.Requires) > 0 && !plugins.ResolveAPI(doc.PluginAPI).Speaks(plugins.FeatureProfileCandidates) {
 				mismatch("/plugin_api", "discovery implements Plugin API %s, but declared profile dependencies need %s or later", doc.PluginAPI, plugins.FeatureSince(plugins.FeatureProfileCandidates))
 			}
+			if rc := m.Contributions.Retrieval; rc != nil && rc.Limits.MaxCandidates > plugins.LegacyMaxRetrievalCandidates && !plugins.ResolveAPI(doc.PluginAPI).Speaks(plugins.FeatureDeepCandidatePools) {
+				mismatch("/plugin_api", "discovery implements Plugin API %s, but max_candidates above %d needs %s or later", doc.PluginAPI, plugins.LegacyMaxRetrievalCandidates, plugins.FeatureSince(plugins.FeatureDeepCandidatePools))
+			}
 			if connector := m.Contributions.Connector; connector != nil {
 				api := plugins.ResolveAPI(doc.PluginAPI)
 				for _, kind := range connector.Kinds {
