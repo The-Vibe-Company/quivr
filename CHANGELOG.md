@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.0](https://github.com/The-Vibe-Company/quivr/compare/v2.2.0...v2.3.0) (2026-11-28)
+
+
+### Features
+
+* **core:** harden search reliability, observability, and bulk ingestion ([#4046](https://github.com/The-Vibe-Company/quivr/issues/4046)) ([545ecca](https://github.com/The-Vibe-Company/quivr/commit/545ecca34a5ce30cb4d1a18a95f10da60412c6d7))
+* **deploy:** bundle newsroom-retrieve and add generic Modal reranker app ([#4051](https://github.com/The-Vibe-Company/quivr/issues/4051)) ([9ff47d0](https://github.com/The-Vibe-Company/quivr/commit/9ff47d04fc64238efee74d1210fa69070df08601))
+* **enrichment:** add opt-in async Phase-2 lexical enrichment ([#4052](https://github.com/The-Vibe-Company/quivr/issues/4052)) ([9ddc9e9](https://github.com/The-Vibe-Company/quivr/commit/9ddc9e9408e582acf171cfb328c9a6ac076b243d))
+* **plugins:** add newsroom-retrieve, rename hosted-embed to text-embed with newsroom packing, and add guide ([#4043](https://github.com/The-Vibe-Company/quivr/issues/4043)) ([774957d](https://github.com/The-Vibe-Company/quivr/commit/774957d7cfb97282d21b2ff9778c02bb1582ee65))
+* **plugins:** add Plugin API 0.21.0 rich retrieval contract and deep candidate pools ([#4045](https://github.com/The-Vibe-Company/quivr/issues/4045)) ([70d201b](https://github.com/The-Vibe-Company/quivr/commit/70d201b55169d2e774210f519b7b6377d64c37b7))
+* **plugins:** upgrade newsroom.retrieve to Plugin API 0.21.0 ([#4053](https://github.com/The-Vibe-Company/quivr/issues/4053)) ([1a53be8](https://github.com/The-Vibe-Company/quivr/commit/1a53be84c34fe530c1715f6097b3fc3dfcb1e237))
+
+
+### Performance Improvements
+
+* **search:** parallelize multi-request rounds, coalesce hydration, and fix BM25F/rerank quick wins ([#4044](https://github.com/The-Vibe-Company/quivr/issues/4044)) ([217af70](https://github.com/The-Vibe-Company/quivr/commit/217af706f8bd2469b1d172392e691de8b655a32e))
+
 ## [2.2.0](https://github.com/The-Vibe-Company/quivr/compare/v2.1.1...v2.2.0) (2026-11-27)
 
 
