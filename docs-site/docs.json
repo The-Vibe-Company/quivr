@@ -153,6 +153,7 @@
                   "plugins/push-source",
                   "plugins/write-an-ingestion-plugin",
                   "plugins/write-a-retrieval-plugin",
+                  "plugins/optimize-newsroom-search",
                   "plugins/write-an-alert-rule"
                 ]
               }

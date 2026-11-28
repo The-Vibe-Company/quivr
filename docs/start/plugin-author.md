@@ -14,6 +14,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 - [hosted.embed](../../plugins/hosted-embed/README.md): configure hosted text embeddings in OpenAI and Cohere formats
 - [HTTP cross-encoder reranking](../../plugins/http-rerank/README.md): HTTP cross-encoder reranking with configurable protocols, fusion and fallback
 - [Jev reranking](../../plugins/jev-rerank/README.md): optional Jev reranking, bounded pair caching and hybrid fallback
+- [`newsroom.retrieve` — Unified Editorial Retrieval Plugin](../../plugins/newsroom-retrieve/README.md): editorial hybrid retrieval and open-source cross-encoder reranking plugin
 - [Object-storage archive connector](../../plugins/object-storage-archive/README.md): stream immutable object-storage archives through upload grants
 - [Object Storage Prefix Connector](../../plugins/object-storage-prefix/README.md): stream individual objects under an S3-compatible prefix with resumable checkpoints
 - [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests

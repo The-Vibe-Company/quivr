@@ -29,6 +29,12 @@ type configuration struct {
 	DocumentPrefix     string                  `json:"document_prefix"`
 	MaxTokens          int                     `json:"max_tokens_per_segment"`
 	BodyTokens         int                     `json:"body_tokens"`
+	OverlapTokens      int                     `json:"overlap_tokens,omitempty"`
+	LeadMaxTokens      int                     `json:"lead_max_tokens,omitempty"`
+	IncludeTitleInLead bool                    `json:"include_title_in_lead,omitempty"`
+	ContextualAnchor   string                  `json:"contextual_anchor,omitempty"`
+	NormalizeWireText  bool                    `json:"normalize_wire_text,omitempty"`
+	DualLeadSegment    bool                    `json:"dual_lead_segment,omitempty"`
 	MaxChunks          int                     `json:"max_chunks"`
 	RebalanceTail      bool                    `json:"rebalance_tail"`
 	TailMinFraction    float64                 `json:"tail_min_fraction"`
@@ -64,6 +70,17 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	}
 	if c.BodyTokens < 8 || c.BodyTokens > 32768 || c.MaxChunks < 1 || c.MaxChunks > 256 || c.TailMinFraction < 0 || c.TailMinFraction > 0.5 {
 		return c, fmt.Errorf("invalid packing budget, cap or tail settings")
+	}
+	if c.OverlapTokens < 0 || c.OverlapTokens > c.BodyTokens/2 {
+		return c, fmt.Errorf("overlap_tokens must be between 0 and body_tokens/2")
+	}
+	if c.LeadMaxTokens < 0 || (c.LeadMaxTokens > 0 && (c.LeadMaxTokens < 32 || c.LeadMaxTokens > c.BodyTokens)) {
+		return c, fmt.Errorf("lead_max_tokens must be 0 or between 32 and body_tokens")
+	}
+	switch c.ContextualAnchor {
+	case "", "title_in_text", "title_lead_text", "title_lead_slot":
+	default:
+		return c, fmt.Errorf("invalid contextual_anchor")
 	}
 	if c.TitleSource != "title" && c.TitleSource != "none" && c.TitleSource != "inline" {
 		return c, fmt.Errorf("invalid title_source")
@@ -148,6 +165,16 @@ func (c configuration) spaceID() string {
 		contextParts = nil
 	}
 	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.DocumentTemplate, c.QueryTemplate, c.TitleSource, contextParts, "separate_passages:v1"}
+	if c.OverlapTokens > 0 || c.LeadMaxTokens > 0 || c.IncludeTitleInLead || c.ContextualAnchor != "" || c.NormalizeWireText || c.DualLeadSegment {
+		semantics = append(semantics, map[string]any{
+			"overlap_tokens":        c.OverlapTokens,
+			"lead_max_tokens":       c.LeadMaxTokens,
+			"include_title_in_lead": c.IncludeTitleInLead,
+			"contextual_anchor":     c.ContextualAnchor,
+			"normalize_wire_text":   c.NormalizeWireText,
+			"dual_lead_segment":     c.DualLeadSegment,
+		})
+	}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
 	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
