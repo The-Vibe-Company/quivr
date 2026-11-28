@@ -12,7 +12,15 @@ import (
 	"strings"
 )
 
-const pluginID = "hosted.embed"
+const pluginID = "text.embed"
+
+var (
+	rePluginID     = regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`)
+	reSHA256       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	reRevision     = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`)
+	reSemver       = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	reSlugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+)
 
 type configuration struct {
 	PluginID           string                  `json:"plugin_id"`
@@ -29,6 +37,12 @@ type configuration struct {
 	DocumentPrefix     string                  `json:"document_prefix"`
 	MaxTokens          int                     `json:"max_tokens_per_segment"`
 	BodyTokens         int                     `json:"body_tokens"`
+	OverlapTokens      int                     `json:"overlap_tokens,omitempty"`
+	LeadMaxTokens      int                     `json:"lead_max_tokens,omitempty"`
+	IncludeTitleInLead bool                    `json:"include_title_in_lead,omitempty"`
+	ContextualAnchor   string                  `json:"contextual_anchor,omitempty"`
+	NormalizeWireText  bool                    `json:"normalize_wire_text,omitempty"`
+	DualLeadSegment    bool                    `json:"dual_lead_segment,omitempty"`
 	MaxChunks          int                     `json:"max_chunks"`
 	RebalanceTail      bool                    `json:"rebalance_tail"`
 	TailMinFraction    float64                 `json:"tail_min_fraction"`
@@ -59,14 +73,28 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if dec.Decode(new(any)) != io.EOF {
 		return c, fmt.Errorf("configuration must be one JSON object")
 	}
-	if len(c.PluginID) > 40 || !regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`).MatchString(c.PluginID) {
+	if len(c.PluginID) > 40 || !rePluginID.MatchString(c.PluginID) {
 		return c, fmt.Errorf("plugin_id must be a plugin identifier of at most 40 characters")
 	}
 	if c.BodyTokens < 8 || c.BodyTokens > 32768 || c.MaxChunks < 1 || c.MaxChunks > 256 || c.TailMinFraction < 0 || c.TailMinFraction > 0.5 {
 		return c, fmt.Errorf("invalid packing budget, cap or tail settings")
 	}
+	if c.OverlapTokens < 0 || c.OverlapTokens > c.BodyTokens/2 {
+		return c, fmt.Errorf("overlap_tokens must be between 0 and body_tokens/2")
+	}
+	if c.LeadMaxTokens < 0 || (c.LeadMaxTokens > 0 && (c.LeadMaxTokens < 32 || c.LeadMaxTokens > c.BodyTokens)) {
+		return c, fmt.Errorf("lead_max_tokens must be 0 or between 32 and body_tokens")
+	}
+	switch c.ContextualAnchor {
+	case "", "title_in_text", "title_lead_text", "title_lead_slot":
+	default:
+		return c, fmt.Errorf("invalid contextual_anchor")
+	}
 	if c.TitleSource != "title" && c.TitleSource != "none" && c.TitleSource != "inline" {
 		return c, fmt.Errorf("invalid title_source")
+	}
+	if c.ContextualAnchor == "title_lead_slot" && !strings.Contains(c.DocumentTemplate, "{title}") && c.TitleSource != "inline" {
+		return c, fmt.Errorf("contextual_anchor title_lead_slot requires {title} in document_template or title_source inline")
 	}
 	if err := validateTemplate(c.DocumentTemplate, "text", c.DocumentPrefix, "title"); err != nil {
 		return c, fmt.Errorf("document_template: %w", err)
@@ -85,7 +113,7 @@ func parseConfiguration(raw []byte) (configuration, error) {
 			return c, fmt.Errorf("invalid title context key")
 		}
 	}
-	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
+	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !reSHA256.MatchString(c.Tokenizer.SHA256)) {
 		return c, fmt.Errorf("tokenizer requires python, model and sha256")
 	}
 	if c.TokenizerProcesses < 0 || c.TokenizerProcesses > 32 {
@@ -101,10 +129,10 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if c.Auth != "bearer" && c.Auth != "api-key" && c.Auth != "none" {
 		return c, fmt.Errorf("auth must be bearer, api-key or none")
 	}
-	if c.Model == "" || len(c.Model) > 256 || c.Revision == "" || !regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$`).MatchString(c.Revision) {
+	if c.Model == "" || len(c.Model) > 256 || c.Revision == "" || !reRevision.MatchString(c.Revision) {
 		return c, fmt.Errorf("model and model_revision must be nonempty and bounded")
 	}
-	if !regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(c.PluginVersion) {
+	if !reSemver.MatchString(c.PluginVersion) {
 		return c, fmt.Errorf("plugin_version must be MAJOR.MINOR.PATCH")
 	}
 	if c.Dimensions < 1 || c.Dimensions > 4096 || (c.Metric != "cosine" && c.Metric != "dot" && c.Metric != "l2") {
@@ -148,9 +176,19 @@ func (c configuration) spaceID() string {
 		contextParts = nil
 	}
 	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.DocumentTemplate, c.QueryTemplate, c.TitleSource, contextParts, "separate_passages:v1"}
+	if c.OverlapTokens > 0 || c.LeadMaxTokens > 0 || c.IncludeTitleInLead || c.ContextualAnchor != "" || c.NormalizeWireText || c.DualLeadSegment {
+		semantics = append(semantics, map[string]any{
+			"overlap_tokens":        c.OverlapTokens,
+			"lead_max_tokens":       c.LeadMaxTokens,
+			"include_title_in_lead": c.IncludeTitleInLead,
+			"contextual_anchor":     c.ContextualAnchor,
+			"normalize_wire_text":   c.NormalizeWireText,
+			"dual_lead_segment":     c.DualLeadSegment,
+		})
+	}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
-	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
+	slug := strings.Trim(reSlugNonAlnum.ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
 	if slug == "" {
 		slug = "model"
 	}
@@ -187,6 +225,20 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	}
 	if c.InputPrice == nil {
 		props["usd_per_million_tokens"] = map[string]any{"const": nil}
+	}
+	// Keep optional packing fields valid in schema even when serialized with
+	// omitempty zero values so explicit default keys pass additionalProperties: false.
+	for k, def := range map[string]any{
+		"overlap_tokens":        0,
+		"lead_max_tokens":       0,
+		"include_title_in_lead": false,
+		"contextual_anchor":     "",
+		"normalize_wire_text":   false,
+		"dual_lead_segment":     false,
+	} {
+		if _, ok := props[k]; !ok {
+			props[k] = map[string]any{"const": def}
+		}
 	}
 	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"format", "base_url", "auth", "model", "dimensions"}, "properties": props}
 	space := map[string]any{"version": c.Revision, "model": c.Model, "dimensions": c.Dimensions, "metric": c.Metric, "indexes": []string{"text"}, "query_modalities": []string{"text"}}

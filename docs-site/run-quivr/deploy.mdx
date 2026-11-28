@@ -219,7 +219,7 @@ For example, not run; this is one entry in the file's `plugins` list, alongside 
 }
 ```
 
-The `hosted.embed` image requires a manifest generated for your model configuration. Run its `configure` command with the configuration mounted read-only and save its stdout as `quivr-plugin.yaml`. Mount that file at `/app/quivr-plugin.yaml` in the serving container and pin those same bytes in the engine; see [Hosted embeddings](/run-quivr/catalog#hosted-embed). Provider keys go in the plugin's environment, as its manifest declares. Stop and remove plugin containers when you remove the deployment.
+The `text.embed` image requires a manifest generated for your model configuration. Run its `configure` command with the configuration mounted read-only and save its stdout as `quivr-plugin.yaml`. Mount that file at `/app/quivr-plugin.yaml` in the serving container and pin those same bytes in the engine; see [Hosted embeddings](/run-quivr/catalog#text-embed). Provider keys go in the plugin's environment, as its manifest declares. Stop and remove plugin containers when you remove the deployment.
 
 ## Start order
 

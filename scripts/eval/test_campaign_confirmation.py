@@ -40,8 +40,8 @@ class NativeCampaign(unittest.TestCase):
         cls.repository = pathlib.Path(directory.name) / 'repository'
         subprocess.run(['git', 'clone', '--quiet', '--local', str(search_campaign.ROOT), str(cls.repository)], check=True)
         cls.sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cls.repository, text=True).strip()
-        cls.binary = pathlib.Path(directory.name) / 'hosted-embed'
-        subprocess.run(['go', 'build', '-o', str(cls.binary), '.'], cwd=cls.repository / 'plugins/hosted-embed', check=True)
+        cls.binary = pathlib.Path(directory.name) / 'text-embed'
+        subprocess.run(['go', 'build', '-o', str(cls.binary), '.'], cwd=cls.repository / 'plugins/text-embed', check=True)
 
     def setUp(self):
         import psycopg

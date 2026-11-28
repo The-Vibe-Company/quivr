@@ -185,10 +185,12 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 }
 
 // A shared vector still goes through search authorization and projection, and
-// equivalent query text only shares it within its organization, space and generation.
+// equivalent query text shares it across generations and corpus subsets within
+// the same organization, space and serving pin.
 func TestServingReusesQueryVectorsWithinAuthorizedRoutes(t *testing.T) {
 	routing := spaceRouting{
 		"plugin": pluginGeneration("gen-first", true, "example.small@1", "example.large@1"),
+		"other":  pluginGeneration("gen-other", true, "example.small@1", "example.large@1"),
 	}
 	projection := &fakeProjection{}
 	encoder := &cacheablePluginEncoder{pin: "first"}
@@ -212,17 +214,29 @@ func TestServingReusesQueryVectorsWithinAuthorizedRoutes(t *testing.T) {
 	request.Query = "alpha\nbeta"
 	search(1, 2)
 
+	// Different corpus subset and generation with the same space must reuse the cached vector.
+	request.CorpusIDs = []string{"other"}
+	search(1, 3)
+	request.CorpusIDs = []string{"plugin", "other"}
+	search(1, 4)
+	routing["plugin"] = pluginGeneration("gen-second", true, "example.small@1", "example.large@1")
+	request.CorpusIDs = []string{"plugin"}
+	search(1, 5)
+
 	scope.Corpora = []string{"another-corpus"}
 	if _, err := s.Search(t.Context(), scope, request); !errors.Is(err, corpus.ErrForbidden) {
 		t.Fatalf("unauthorized hot search error = %v, want %v", err, corpus.ErrForbidden)
 	}
+	// Different organization must not share the cache entry.
 	scope = searchScope
 	scope.Organization = "another-org"
-	search(2, 3)
-	routing["plugin"] = pluginGeneration("gen-second", true, "example.small@1", "example.large@1")
-	search(3, 4)
+	search(2, 6)
+	// Different space must not share the cache entry.
 	routing["plugin"] = pluginGeneration("gen-second", true, "example.large@1", "example.small@1")
-	search(4, 5)
+	search(3, 7)
+	// Different encoder pin must not share the cache entry.
+	encoder.pin = "second"
+	search(4, 8)
 }
 
 type cacheablePluginEncoder struct {

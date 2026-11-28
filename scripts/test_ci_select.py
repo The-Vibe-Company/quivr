@@ -44,7 +44,7 @@ class Selection(unittest.TestCase):
 
     def test_evaluation_dependencies_and_engine_manifest_inputs_are_selected(self):
         for path in ['plugins/jev-rerank/cache.py', 'plugins/core-retrieve/main.go',
-                     'plugins/core-ingest/main.go', 'plugins/hosted-embed/main.go',
+                     'plugins/core-ingest/main.go', 'plugins/text-embed/main.go',
                      'migrations/expansion.sql', 'internal/retrieval/retrieval.go']:
             with self.subTest(path=path):
                 self.assertTrue({'eval-1', 'eval-2', 'eval-3'} <= set(ci_select.select([path])['groups']))
@@ -81,8 +81,8 @@ class Selection(unittest.TestCase):
 
     def test_sdk_sources_select_images_using_that_language(self):
         for path, group, included, excluded in [
-            ('sdks/go/go.sum', 'sdk-go', {'rss', 'core-ingest', 'hosted-embed'}, {'pdf-text', 'jev-rerank'}),
-            ('sdks/python/README.md', 'sdk-python', {'pdf-text', 'jev-rerank'}, {'rss', 'core-ingest', 'hosted-embed'}),
+            ('sdks/go/go.sum', 'sdk-go', {'rss', 'core-ingest', 'text-embed'}, {'pdf-text', 'jev-rerank'}),
+            ('sdks/python/README.md', 'sdk-python', {'pdf-text', 'jev-rerank'}, {'rss', 'core-ingest', 'text-embed'}),
         ]:
             with self.subTest(path=path):
                 selected = ci_select.select([path])

@@ -111,15 +111,16 @@ excluded = [
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
 "plugins/crossmodal-image/README.md" = { audience = "plugin-author", kind = "concept", summary = "normalize image Blobs and embed image regions into a Cross-modal Vector Space" }
-"plugins/hosted-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
 "plugins/http-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "HTTP cross-encoder reranking with configurable protocols, fusion and fallback" }
 "plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
 "plugins/newsml-g2/README.md" = { audience = "plugin-author", kind = "guide", summary = "normalize NewsML-G2 text items and preserve their source metadata" }
+"plugins/newsroom-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "editorial hybrid retrieval and open-source cross-encoder reranking plugin" }
 "plugins/object-storage-archive/README.md" = { audience = "plugin-author", kind = "concept", summary = "stream immutable object-storage archives through upload grants" }
 "plugins/object-storage-prefix/README.md" = { audience = "plugin-author", kind = "concept", summary = "stream individual objects under an S3-compatible prefix with resumable checkpoints" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
+"plugins/text-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "internal/adapters/postgres/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep PostgreSQL test contracts at their durable owners" }
 "quivr-search/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep demo test contracts at their observable owners" }

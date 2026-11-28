@@ -159,8 +159,8 @@ class HostedManifestBuilder:
             directory = pathlib.Path(directory)
             binary = self.binary
             if binary is None:
-                binary = directory / 'hosted-embed'
-                _run(['go', 'build', '-o', str(binary), '.'], pathlib.Path(checkout) / 'plugins/hosted-embed')
+                binary = directory / 'text-embed'
+                _run(['go', 'build', '-o', str(binary), '.'], pathlib.Path(checkout) / 'plugins/text-embed')
             path = directory / 'configuration.json'
             path.write_text(json.dumps(configuration, allow_nan=False))
             return json.loads(_run([str(binary), 'configure', str(path)], checkout))

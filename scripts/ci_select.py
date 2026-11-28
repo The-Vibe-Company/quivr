@@ -87,7 +87,7 @@ def select(paths, full=False):
             images.add(plugin)
             if path.endswith('/quivr-plugin.yaml'):
                 images.add('')
-            if plugin in {'jev-rerank', 'core-ingest', 'core-retrieve', 'hosted-embed'}:
+            if plugin in {'jev-rerank', 'core-ingest', 'core-retrieve', 'text-embed'}:
                 groups.update(eval_groups)
             is_go_plugin = (ROOT / 'plugins' / plugin / 'go.mod').exists()
             groups.add('sdk-go' if is_go_plugin else 'sdk-python')
@@ -98,7 +98,7 @@ def select(paths, full=False):
             else:
                 parts.add('connectors' if plugin in connector_plugins else 'plugins')
             # These plugins are also pinned by the default stack and its core proofs.
-            if plugin in {'core-ingest', 'core-retrieve', 'hosted-embed', 'pdf-text', 'newsml-g2'}:
+            if plugin in {'core-ingest', 'core-retrieve', 'text-embed', 'pdf-text', 'newsml-g2'}:
                 parts.update(all_parts)
         elif path.startswith('internal/monitoring/'):
             groups.update(eval_groups)

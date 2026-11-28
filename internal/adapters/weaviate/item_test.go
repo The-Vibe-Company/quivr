@@ -449,11 +449,43 @@ func TestItemSearchOverlapsQueriesWithinRequestDeadline(t *testing.T) {
 			}
 			return itemSearchResponse(nil), nil
 		})
-		hits, err := runItemSearch(ctx, transport, retrieval.Request{Query: "harbour", Mode: "hybrid", Vector: []float32{1}, GroupBy: "record", K: 3})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		g := content.Generation{
+			ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+			Fields: []corpus.Field{
+				{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}},
+				{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"},
+			},
+		}
+		hits, err := store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{Query: "harbour", Mode: "hybrid", Vector: []float32{1}, GroupBy: "record", K: 3})
 		if err != nil || len(hits) != 1 || hits[0].SegmentID != "best" {
 			t.Fatalf("hybrid search with a slow index: %+v, %v (started %v)", hits, err, started)
 		}
 	})
+}
+
+func matchesFieldFilter(query, field, value string) bool {
+	quoted := strconv.Quote(value)
+	if strings.Contains(query, `{path:[`+strconv.Quote(field)+`],operator:Equal,valueText:`+quoted) {
+		return true
+	}
+	prefix := `{path:[` + strconv.Quote(field) + `],operator:ContainsAny,valueText:[`
+	for rest := query; ; {
+		idx := strings.Index(rest, prefix)
+		if idx < 0 {
+			return false
+		}
+		rest = rest[idx+len(prefix):]
+		end := strings.IndexByte(rest, ']')
+		if end < 0 {
+			return false
+		}
+		if strings.Contains(rest[:end], quoted) {
+			return true
+		}
+		rest = rest[end+1:]
+	}
 }
 
 func TestItemSearchFetchesTextOnlyForPassageSelection(t *testing.T) {
@@ -486,7 +518,7 @@ func TestItemSearchFetchesTextOnlyForPassageSelection(t *testing.T) {
 					textReads++
 					var rows []itemSearchRow
 					for _, row := range passages {
-						if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+						if matchesFieldFilter(query, "segmentId", row.Segment) {
 							rows = append(rows, row)
 						}
 					}
@@ -494,7 +526,7 @@ func TestItemSearchFetchesTextOnlyForPassageSelection(t *testing.T) {
 						return nil, fmt.Errorf("projected text for %v, want %v", rows, mode.wantText)
 					}
 					for _, id := range mode.wantText {
-						if !strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(id)) {
+						if !matchesFieldFilter(query, "segmentId", id) {
 							return nil, fmt.Errorf("missing text for %s", id)
 						}
 					}
@@ -681,8 +713,8 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 		for i := 0; i < totalItems; i++ {
 			ver := fmt.Sprintf("v-%03d", i)
 			for _, row := range byVersion[ver] {
-				if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) ||
-					strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(ver)) {
+				if matchesFieldFilter(query, "segmentId", row.Segment) ||
+					matchesFieldFilter(query, "versionId", ver) {
 					if !withText {
 						row.Text = ""
 					}
@@ -848,7 +880,7 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 				for i := 0; i < maxLimitItems; i++ {
 					ver := fmt.Sprintf("m-%03d", i)
 					for _, row := range passages[ver] {
-						if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+						if matchesFieldFilter(query, "segmentId", row.Segment) {
 							out = append(out, row)
 							mu.Lock()
 							textVers[ver] = true
@@ -861,7 +893,7 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 				var out []itemSearchRow
 				for i := 0; i < maxLimitItems; i++ {
 					ver := fmt.Sprintf("m-%03d", i)
-					if !strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(ver)) {
+					if !matchesFieldFilter(query, "versionId", ver) {
 						continue
 					}
 					for _, row := range passages[ver] {
@@ -939,7 +971,7 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 			case strings.Contains(query, "passageText"):
 				var out []itemSearchRow
 				for _, row := range allPassages {
-					if strings.Contains(query, `{path:["segmentId"],operator:Equal,valueText:`+strconv.Quote(row.Segment)) {
+					if matchesFieldFilter(query, "segmentId", row.Segment) {
 						out = append(out, row)
 						mu.Lock()
 						textVers[row.Version] = true
@@ -950,7 +982,7 @@ func TestItemSearchBoundsPassageScansToTopK(t *testing.T) {
 			default:
 				var out []itemSearchRow
 				for _, row := range allPassages {
-					if strings.Contains(query, `{path:["versionId"],operator:Equal,valueText:`+strconv.Quote(row.Version)) {
+					if matchesFieldFilter(query, "versionId", row.Version) {
 						row.Text = ""
 						out = append(out, row)
 					}
@@ -1171,4 +1203,215 @@ func TestItemSearchAndReplayWithLegacyAndUnifiedSegments(t *testing.T) {
 			t.Fatalf("mixed %s search: %+v, %v", mode, hits, err)
 		}
 	}
+}
+
+// Regression test for BM25F stopword masking: analyzed fields (e.g. french_light)
+// must not also run on the unfiltered raw branch where stopwords inflate raw BM25
+// and mask stemmed matches; an all-stopword query falls back to raw fields.
+func TestItemBM25AnalyzedFieldsSkipRawStopwordMasking(t *testing.T) {
+	t.Run("french_light fields query only analyzed stems and never raw stopwords", func(t *testing.T) {
+		var mu sync.Mutex
+		var bm25Queries []string
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			if strings.Contains(query, "bm25:") {
+				mu.Lock()
+				bm25Queries = append(bm25Queries, query)
+				mu.Unlock()
+				if strings.Contains(query, "_fr^") {
+					return itemSearchResponse([]itemSearchRow{
+						{Version: "stemmed-match", Score: "3.0"},
+						{Version: "stopword-heavy", Score: "1.0"},
+					}), nil
+				}
+				// Simulate raw stopword masking: if a raw branch were issued,
+				// stopword-heavy would outscore the stemmed match.
+				return itemSearchResponse([]itemSearchRow{
+					{Version: "stopword-heavy", Score: "9.5"},
+				}), nil
+			}
+			return itemSearchResponse([]itemSearchRow{
+				{Segment: "seg-stemmed", Version: "stemmed-match"},
+				{Segment: "seg-stopword", Version: "stopword-heavy"},
+			}), nil
+		})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		six, two := 6, 2
+		g := content.Generation{
+			ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+			Fields: []corpus.Field{
+				{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Boost: &six, Analyzer: "french_light"},
+				{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Boost: &two, Analyzer: "french_light"},
+				{Name: "caption", PartRole: "caption", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+				{Name: "transcript", PartRole: "transcript", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"},
+			},
+		}
+		hits, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+			Query: "les élections de la ville", Mode: "lexical", GroupBy: "record", K: 10,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(bm25Queries) != 1 {
+			t.Fatalf("issued %d BM25 branches (%v), want exactly 1 analyzed french_light branch", len(bm25Queries), bm25Queries)
+		}
+		if !strings.Contains(bm25Queries[0], `_fr^6`) || !strings.Contains(bm25Queries[0], `_fr^2`) || strings.Contains(bm25Queries[0], `"les `) {
+			t.Fatalf("unexpected BM25 query: %s", bm25Queries[0])
+		}
+		if len(hits) != 2 || hits[0].SegmentID != "seg-stemmed" {
+			t.Fatalf("hits = %+v, want stemmed-match ranked first without raw stopword masking", hits)
+		}
+
+		// All-stopword query falls back to raw fields so BM25 still answers.
+		bm25Queries = nil
+		_, err = store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+			Query: "le de la", Mode: "lexical", GroupBy: "record", K: 10,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(bm25Queries) != 1 || strings.Contains(bm25Queries[0], "_fr^") || !strings.Contains(bm25Queries[0], `query:"le de la"`) || !strings.Contains(bm25Queries[0], "^6") {
+			t.Fatalf("all-stopword fallback BM25 queries = %v, want 1 raw fallback branch including analyzed fields", bm25Queries)
+		}
+	})
+
+	t.Run("mixed schema keeps raw branch restricted to non-analyzed fields", func(t *testing.T) {
+		var mu sync.Mutex
+		var bm25Queries []string
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			if strings.Contains(query, "bm25:") {
+				mu.Lock()
+				bm25Queries = append(bm25Queries, query)
+				mu.Unlock()
+			}
+			return itemSearchResponse(nil), nil
+		})
+		store := weaviate.New("http://index.invalid")
+		store.Client.Transport = transport
+		six, two := 6, 2
+		g := content.Generation{
+			ID: "generation", Collection: "ItemSearch", ItemKeywordsProjected: true,
+			Fields: []corpus.Field{
+				{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Boost: &six},
+				{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Boost: &two, Analyzer: "french_light"},
+			},
+		}
+		if _, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+			Query: "les élections de la ville", Mode: "lexical", GroupBy: "record", K: 10,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(bm25Queries) != 2 {
+			t.Fatalf("issued %d BM25 branches, want 2 (1 raw for unanalyzed fields, 1 french_light for body)", len(bm25Queries))
+		}
+		var sawRawWithoutBody, sawAnalyzedBodyOnly bool
+		for _, q := range bm25Queries {
+			if strings.Contains(q, "_fr^2") && !strings.Contains(q, "^6") {
+				sawAnalyzedBodyOnly = true
+			}
+			if strings.Contains(q, "^6") && !strings.Contains(q, "^2") {
+				sawRawWithoutBody = true
+			}
+		}
+		if !sawRawWithoutBody || !sawAnalyzedBodyOnly {
+			t.Fatalf("mixed schema BM25 branches = %v, want raw without body (^6, no ^2) and analyzed body-only (_fr^2)", bm25Queries)
+		}
+
+		// All-stopword query also falls back the analyzed body field onto the raw branch.
+		bm25Queries = nil
+		if _, err := store.Search(t.Context(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+			Query: "le de la", Mode: "lexical", GroupBy: "record", K: 10,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(bm25Queries) != 1 || !strings.Contains(bm25Queries[0], "^6") || !strings.Contains(bm25Queries[0], "^2") {
+			t.Fatalf("mixed schema all-stopword BM25 branches = %v, want 1 raw branch including both title (^6) and body (^2)", bm25Queries)
+		}
+	})
+}
+
+func TestContainsAnyFiltersAndLegacyCallerDeadline(t *testing.T) {
+	t.Run("version, passage, and source namespace filters use ContainsAny", func(t *testing.T) {
+		var mu sync.Mutex
+		var queries []string
+		transport := itemSearchTransport(func(_ context.Context, query string) ([]byte, error) {
+			mu.Lock()
+			queries = append(queries, query)
+			mu.Unlock()
+			switch {
+			case strings.Contains(query, "bm25:"):
+				return itemSearchResponse([]itemSearchRow{
+					{Version: "v1", Score: "2"},
+					{Version: "v2", Score: "1"},
+				}), nil
+			case strings.Contains(query, "passageText"):
+				return itemSearchResponse([]itemSearchRow{
+					{Segment: "s1", Version: "v1", Text: "harbour ferries"},
+					{Segment: "s2", Version: "v1", Text: "harbour"},
+				}), nil
+			default:
+				return itemSearchResponse([]itemSearchRow{
+					{Segment: "s1", Version: "v1"},
+					{Segment: "s2", Version: "v1"},
+					{Segment: "s3", Version: "v2"},
+				}), nil
+			}
+		})
+		hits, err := runItemSearch(t.Context(), transport, retrieval.Request{
+			Query:            "harbour",
+			Mode:             "lexical",
+			GroupBy:          "record",
+			K:                10,
+			SourceNamespaces: []string{"ns-a", "ns-b"},
+		})
+		if err != nil || len(hits) != 2 {
+			t.Fatalf("item search = %+v, %v", hits, err)
+		}
+		var sawSourceContainsAny, sawVersionContainsAny, sawSegmentContainsAny bool
+		for _, q := range queries {
+			if strings.Contains(q, `{path:["sourceNamespace"],operator:ContainsAny,valueText:["ns-a","ns-b"]}`) {
+				sawSourceContainsAny = true
+			}
+			if strings.Contains(q, `{path:["versionId"],operator:ContainsAny,valueText:[`) {
+				sawVersionContainsAny = true
+			}
+			if strings.Contains(q, `{path:["segmentId"],operator:ContainsAny,valueText:["s1","s2"]}`) {
+				sawSegmentContainsAny = true
+			}
+		}
+		if !sawSourceContainsAny || !sawVersionContainsAny || !sawSegmentContainsAny {
+			t.Fatalf("expected ContainsAny for sourceNamespace=%t versionId=%t segmentId=%t; queries=%v",
+				sawSourceContainsAny, sawVersionContainsAny, sawSegmentContainsAny, queries)
+		}
+	})
+
+	t.Run("legacy search propagates caller deadline past default client timeout", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			defer cancel()
+			var seenQuery string
+			transport := itemSearchTransport(func(ctx context.Context, query string) ([]byte, error) {
+				seenQuery = query
+				// Advance the virtual clock past the shared client's 4 s timeout.
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+				return itemSearchResponse([]itemSearchRow{{Segment: "legacy-seg", Score: "1.5"}}), nil
+			})
+			store := weaviate.New("http://index.invalid")
+			store.Client.Transport = transport
+			g := content.Generation{ID: "generation", Collection: "ItemSearch"}
+			hits, err := store.Search(ctx, []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{
+				Query: "harbour", Mode: "lexical", K: 5, SourceNamespaces: []string{"ns-a", "ns-b"},
+			})
+			if err != nil || len(hits) != 1 || hits[0].SegmentID != "legacy-seg" {
+				t.Fatalf("legacy search with caller deadline: %+v, %v", hits, err)
+			}
+			if !strings.Contains(seenQuery, `{path:["sourceNamespace"],operator:ContainsAny,valueText:["ns-a","ns-b"]}`) {
+				t.Fatalf("legacy search did not use ContainsAny for sourceNamespace: %s", seenQuery)
+			}
+		})
+	})
 }

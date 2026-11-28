@@ -43,7 +43,7 @@ class ReleaseImagesTests(unittest.TestCase):
             (plugin / 'go.mod').unlink()
             (plugin / 'pyproject.toml').write_text('[project]\nname="feed"\n')
             self.assertEqual(release_images.inventory(root, 'example/quivr')['include'][1]['target'], 'python-plugin')
-            for folder, target in [('core-ingest', 'core-ingest'), ('hosted-embed', 'hosted-embed')]:
+            for folder, target in [('core-ingest', 'core-ingest'), ('text-embed', 'text-embed')]:
                 with self.subTest(folder=folder):
                     runtime = root / 'plugins' / folder
                     runtime.mkdir()

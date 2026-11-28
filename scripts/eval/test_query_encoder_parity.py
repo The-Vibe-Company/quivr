@@ -25,7 +25,7 @@ class QueryEncoderParityTest(unittest.TestCase):
             opener.return_value.open.side_effect = [io.BytesIO(json.dumps({'vector': vector}).encode()) for _ in range(3)]
             for _ in range(2):
                 parity.encode('http://127.0.0.1', 'A library opens.',
-                              plugin={'configuration': {'plugin_id': 'hosted.embed.evaluation'}, 'space': 'evaluation'})
+                              plugin={'configuration': {'plugin_id': 'text.embed.evaluation'}, 'space': 'evaluation'})
             with self.assertRaises(ValueError):
                 parity.encode('http://192.0.2.1', 'A library opens.',
                               plugin={'configuration': {}, 'space': 'evaluation'})
@@ -38,7 +38,7 @@ class QueryEncoderParityTest(unittest.TestCase):
                 return base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
             self.assertEqual(hmac.digest(secret, (header64 + '.' + claims64).encode(), 'sha256'), decode(signature64))
             claims = json.loads(decode(claims64))
-            self.assertEqual(claims['aud'], 'hosted.embed.evaluation')
+            self.assertEqual(claims['aud'], 'text.embed.evaluation')
             self.assertEqual(claims['plugin_id'], claims['aud'])
             self.assertEqual(claims['body_sha256'], hashlib.sha256(request.data).hexdigest())
             self.assertEqual(claims['target'], '/v0/contributions/ingestion/embed_query')

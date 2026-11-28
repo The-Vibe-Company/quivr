@@ -85,18 +85,6 @@ func queryVectorKey(parts ...string) string {
 	return key.String()
 }
 
-func queryGenerations(routes []Route) string {
-	if len(routes) == 1 {
-		return queryVectorKey(routes[0].Generation.ID)
-	}
-	ids := make([]string, 0, len(routes))
-	for _, r := range routes {
-		ids = append(ids, r.Generation.ID)
-	}
-	slices.Sort(ids)
-	return queryVectorKey(slices.Compact(ids)...)
-}
-
 func (c *QueryVectorCache) lookup(key string) ([]float32, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

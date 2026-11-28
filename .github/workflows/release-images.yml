@@ -90,7 +90,7 @@ jobs:
       with:
         python-version: 3.12.16
     - name: Prepare the pinned E5 tokenizer fixture
-      if: matrix.plugin == 'hosted-embed'
+      if: matrix.plugin == 'text-embed'
       run: python3 scripts/prepare_tokenizer.py
     - name: Check the published runtime before signing
       env:

@@ -51,10 +51,10 @@ func hostedRedeploySearch(t *testing.T, admin string, s hostedRedeployState, spa
 	}
 }
 
-func TestHostedEmbeddingRedeployBefore(t *testing.T) {
+func TestTextEmbeddingRedeployBefore(t *testing.T) {
 	admin, operator, space, statePath := hostedRedeploySetup(t)
 	run := monitoringRun()
-	s := hostedRedeployState{OldRegistration: hostedRegistration(t, operator, "hosted.embed"), CoreRegistration: hostedRegistration(t, operator, "core.ingest")}
+	s := hostedRedeployState{OldRegistration: hostedRegistration(t, operator, "text.embed"), CoreRegistration: hostedRegistration(t, operator, "core.ingest")}
 	s.Corpus = request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Build redeploy", "idempotency_key": "redeploy-" + run}, 201)["corpus_id"].(string)
 	cursor := request(t, "GET", changesPath(s.Corpus, "", 0), admin, nil, 200)["next_cursor"].(string)
 	accepted := request(t, "POST", "/v0/records", admin, inlineCommand(s.Corpus, "redeploy-"+run, "Library", "The library opens downtown on Wednesday."), 202)
@@ -90,7 +90,7 @@ func TestHostedEmbeddingRedeployBefore(t *testing.T) {
 	}
 }
 
-func TestHostedEmbeddingRedeployAfter(t *testing.T) {
+func TestTextEmbeddingRedeployAfter(t *testing.T) {
 	admin, operator, space, statePath := hostedRedeploySetup(t)
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
@@ -100,12 +100,12 @@ func TestHostedEmbeddingRedeployAfter(t *testing.T) {
 	if err = json.Unmarshal(raw, &s); err != nil {
 		t.Fatal(err)
 	}
-	next := hostedRegistration(t, operator, "hosted.embed")
+	next := hostedRegistration(t, operator, "text.embed")
 	if next == s.OldRegistration {
 		t.Fatal("redeploy did not replace the exact build registration")
 	}
 	plan := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
-	if plan["plan_id"] == s.PromotedPlan || planRoles(plan)["ingestion-route:text/plain"] != "hosted.embed@1.2.0" || planRoles(plan)["ingestion-evaluation:text/plain:core.ingest"] == "" {
+	if plan["plan_id"] == s.PromotedPlan || planRoles(plan)["ingestion-route:text/plain"] != "text.embed@1.2.0" || planRoles(plan)["ingestion-evaluation:text/plain:core.ingest"] == "" {
 		t.Fatalf("redeploy lost promoted routing: %v", plan)
 	}
 	hostedRedeploySearch(t, admin, s, space)
@@ -138,7 +138,7 @@ func TestHostedEmbeddingRedeployAfter(t *testing.T) {
 // The harness now changes the endpoint, an incompatible startup replacement.
 // Existing Corpora keep their serving routes; the plan's default owner must
 // also fill new documents so returning to that owner needs no backfill.
-func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
+func TestTextEmbeddingRollbackCoverage(t *testing.T) {
 	admin, operator, space, statePath := hostedRedeploySetup(t)
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
-	if planRoles(plan)["ingestion-default"] != "core.ingest@1.0.0" || planRoles(plan)["ingestion-route:text/plain"] != "" || planRoles(plan)["ingestion-evaluation:text/plain:hosted.embed"] == "" {
+	if planRoles(plan)["ingestion-default"] != "core.ingest@1.0.0" || planRoles(plan)["ingestion-route:text/plain"] != "" || planRoles(plan)["ingestion-evaluation:text/plain:text.embed"] == "" {
 		t.Fatalf("expected default/evaluation plan after endpoint replacement: %v", plan)
 	}
 	cursor := request(t, "GET", changesPath(s.Corpus, "", 0), admin, nil, 200)["next_cursor"].(string)
@@ -174,7 +174,7 @@ func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	current := hostedRegistration(t, operator, "hosted.embed")
+	current := hostedRegistration(t, operator, "text.embed")
 	routingRequest(t, "POST", "/v0/admin/plugins/"+current+"/activate", operator, map[string]any{}, 200)
 	routingRequest(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "coverage-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "drain"}, 200)
 	result := request(t, "POST", "/v0/search", admin, map[string]any{"query": "The mountain tram arrives every Friday.", "corpus_ids": []string{s.Corpus}, "mode": "semantic", "limit": 10}, 200)

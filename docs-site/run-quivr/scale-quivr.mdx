@@ -72,9 +72,9 @@ Budget provider admission for `bulk plugin processes × max_concurrent_requests`
 
 **Example incident:** eight bulk replicas at 16 requests per process offered about 128 requests to a two-GPU service. Provider `503`s became `embedding_incomplete`; documents retried for roughly 11 seconds per attempt and rebuild progress stopped. Increasing that service's GPU cap to four restored successful responses and about 16–21 Versions/s. This describes that service, not a four-GPU sizing rule.
 
-Batch across documents. **Example measurements:** tiny calls of roughly 80 tokens, one document per call and four calls in flight limited an archive to 3–4 documents/s. In a separate synthetic measurement, batches averaging about 11 documents raised searchable throughput from 8 to 55.5 documents/s. `hosted.embed` collects document inputs within each Organization and plugin process. Queries bypass the collection window but share remote admission; cooldown after `429` or `503` is process-local, with no fleet-wide coordination.
+Batch across documents. **Example measurements:** tiny calls of roughly 80 tokens, one document per call and four calls in flight limited an archive to 3–4 documents/s. In a separate synthetic measurement, batches averaging about 11 documents raised searchable throughput from 8 to 55.5 documents/s. `text.embed` collects document inputs within each Organization and plugin process. Queries bypass the collection window but share remote admission; cooldown after `429` or `503` is process-local, with no fleet-wide coordination.
 
-[Tune execution](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model) and the [hosted embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#configuration) own the settings. Check endpoint request-size limits as well as token limits: a byte limit once rejected every input over 2 KB. Oversized text needs more passages, rather than truncation.
+[Tune execution](../run-quivr/choose-an-embedding-model.mdx#tune-execution-without-changing-the-model) and the [text embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#configuration-examples) own the settings. Check endpoint request-size limits as well as token limits: a byte limit once rejected every input over 2 KB. Oversized text needs more passages, rather than truncation.
 
 ### PostgreSQL
 
@@ -144,7 +144,7 @@ Check actual engine searches with expected results in lexical, semantic and hybr
 
 A tokenizer counts and cuts model inputs. A configured local tokenizer uses persistent helper processes; concurrent requests can queue behind too few helpers. **Example observations:** a serialized helper left short documents waiting 1.5–55 seconds; a pool cut a 16-request microbenchmark from 378 to 133 ms.
 
-Tune `tokenizer_processes` when cutting queues and CPU/memory have room. Auto uses `min(GOMAXPROCS, 4)`; each plugin process owns its pool. **Example memory measurement:** Python 3.12 and tokenizers 0.23.2 with a 768-dimensional model's vocabulary used roughly 440 MiB per loaded helper. Vocabulary and runtime, rather than vector dimensions alone, determine memory. Leave startup headroom and measure your tokenizer; the byte-count fallback starts no helpers. The [hosted embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#configuration) owns pool bounds and deadlines.
+Tune `tokenizer_processes` when cutting queues and CPU/memory have room. Auto uses `min(GOMAXPROCS, 4)`; each plugin process owns its pool. **Example memory measurement:** Python 3.12 and tokenizers 0.23.2 with a 768-dimensional model's vocabulary used roughly 440 MiB per loaded helper. Vocabulary and runtime, rather than vector dimensions alone, determine memory. Leave startup headroom and measure your tokenizer; the byte-count fallback starts no helpers. The [text embedding README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#configuration-examples) owns pool bounds and deadlines.
 
 ### Object storage and disk guards
 

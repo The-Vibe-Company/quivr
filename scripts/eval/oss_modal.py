@@ -50,7 +50,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
                             ignore=['test_*.py', '__pycache__'])
-             .add_local_dir(root / 'plugins/hosted-embed/examples', '/workspace/plugins/hosted-embed/examples', copy=True)
+             .add_local_dir(root / 'plugins/text-embed/examples', '/workspace/plugins/text-embed/examples', copy=True)
              .add_local_file(root / 'plugins/core-ingest/profile.json', '/workspace/plugins/core-ingest/profile.json', copy=True)
              # Modal's requirements helper copies only the top-level file;
              # install here so relative -r requirements.txt resolves correctly.

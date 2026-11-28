@@ -99,20 +99,20 @@ def lineage():
          'modal_engine.py', 'control_store.py', 'results.py', 'run.py', 'scoring.py', 'gates.py', 'embeddings.py', 'trec.py',
          'search_trial.py', 'direct_bakeoff.py', 'protected_inputs.py', 'ci_guard.py')]
     sources += ['scripts/' + name for name in
-                ('local.py', 'go_bin_cache.py', 'hosted_embed_plugin.py', 'ingestion_plugin.py', 'connector_plugin.py',
+                ('local.py', 'go_bin_cache.py', 'text_embed_plugin.py', 'ingestion_plugin.py', 'connector_plugin.py',
                  'core_ingest_plugin.py', 'retrieval_plugin.py', 'ports.py', 'push_plugin.py', 'fixture_plugin.py',
                  'normalizer_plugin.py', 'subscription_plugin.py', 'prepare_tokenizer.py', 'prepare_embeddings.py')]
     sources += ['deploy/mlflow/eval-control.sql']
     sources += ['plugins/core-ingest/profile.json', 'plugins/core-retrieve/quivr-plugin.yaml',
-                'plugins/hosted-embed/plugin/configuration.go', 'deploy/compose/compose.yaml',
+                'plugins/text-embed/plugin/configuration.go', 'deploy/compose/compose.yaml',
                 'third_party/e5/model-lock.json', 'third_party/tokenizer/requirements-linux-x86_64.txt',
                 'third_party/tokenizer/requirements-macos-arm64.txt', 'go.mod', 'go.sum']
     # Bind the complete actual engine/SDK/plugin source, not just a manifest.
     for directory in ('client', 'contracts', 'migrations', 'internal', 'cmd', 'sdks/go', 'plugins/core-ingest',
-                      'plugins/core-retrieve', 'plugins/hosted-embed'):
+                      'plugins/core-retrieve', 'plugins/text-embed'):
         sources += [str(p.relative_to(ROOT)) for p in (ROOT / directory).rglob('*.go')
                     if not p.name.endswith('_test.go')]
-    for directory in ('sdks/go', 'plugins/core-ingest', 'plugins/core-retrieve', 'plugins/hosted-embed'):
+    for directory in ('sdks/go', 'plugins/core-ingest', 'plugins/core-retrieve', 'plugins/text-embed'):
         sources += [str(p.relative_to(ROOT)) for p in (ROOT / directory).rglob('*')
                     if p.is_file() and 'testdata' not in p.parts and 'fixtures' not in p.parts
                     and (p.suffix in ('.json', '.yaml', '.py') or p.name in ('go.mod', 'go.sum'))]

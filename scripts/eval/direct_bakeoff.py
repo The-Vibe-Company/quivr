@@ -51,7 +51,7 @@ def reference_identity():
 
 
 class OpenAI:
-    """Self-hosted endpoint using the hosted.embed plugin's configuration."""
+    """Self-hosted endpoint using the text.embed plugin's configuration."""
     def __init__(self, config, budget, set_name, label):
         fields = {'plugin_id', 'format', 'base_url', 'auth', 'model', 'dimensions', 'send_dimensions',
                   'metric', 'model_revision', 'plugin_version', 'query_prefix', 'document_prefix',
@@ -59,7 +59,7 @@ class OpenAI:
                   'batch_size', 'max_batch_tokens', 'request_timeout_ms', 'call_budget_ms',
                   'max_concurrent_requests', 'max_retries', 'usd_per_million_tokens'}
         if not isinstance(config, dict) or set(config) - fields:
-            raise ValueError('configuration must use declared hosted.embed fields only')
+            raise ValueError('configuration must use declared text.embed fields only')
         operational = {'request_timeout_ms', 'call_budget_ms', 'max_concurrent_requests', 'max_retries', 'max_batch_tokens'}
         if config.get('metric', 'cosine') != 'cosine' or set(config) & operational:
             raise ValueError('direct benchmark requires cosine and omits plugin operational controls')
@@ -359,7 +359,7 @@ def main(argv=None):
     parser.add_argument('--models', nargs='+', default=None,
                         help='e5 baseline always runs first; include Cohere-Embed-V5-Pro-1024 for reduced dimensions')
     parser.add_argument('--openai-config', action='append', default=[], metavar='LABEL=FILE',
-                        help='self-hosted candidate with the same JSON configuration as hosted.embed (auth none)')
+                        help='self-hosted candidate with the same JSON configuration as text.embed (auth none)')
     parser.add_argument('--e5-reference', type=pathlib.Path, help='reuse a completed e5 report with matching sample and code')
     parser.add_argument('--query-latency', action='store_true',
                         help='encode queries individually to measure warm query p50/p95, instead of batch throughput')

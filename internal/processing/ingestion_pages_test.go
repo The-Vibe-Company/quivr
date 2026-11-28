@@ -14,7 +14,7 @@ import (
 )
 
 // The external owner supplies known four-passage output. This test owns the
-// engine's selection and persistence; hosted.embed owns actual paragraph packing.
+// engine's selection and persistence; text.embed owns actual paragraph packing.
 type boundedItemOwner struct {
 	wholeError            error
 	failPage              bool

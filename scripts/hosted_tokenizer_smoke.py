@@ -83,7 +83,7 @@ def check(model, checksum):
                                    'version': {'corpus_id': 'example', 'record_id': 'example', 'record_version_id': '1'},
                                    'parts': [{'key': 'body', 'role': 'body', 'text': source}], 'spaces': [space]}
                         count = len(calls)
-                        wire = signed_request('127.0.0.1:8080', 'hosted.embed', secret,
+                        wire = signed_request('127.0.0.1:8080', 'text.embed', secret,
                                               '/v0/contributions/ingestion/segment_and_embed', request)
                         try:
                             with urllib.request.urlopen(wire, timeout=10) as response:
@@ -120,7 +120,7 @@ def check(model, checksum):
         provider.shutdown()
         provider.server_close()
         thread.join(timeout=5)
-    print('hosted-embed: offline E5 packing (90 body bytes, 30 prompt tokens) and corrupt-pin refusal passed')
+    print('text-embed: offline E5 packing (90 body bytes, 30 prompt tokens) and corrupt-pin refusal passed')
 
 
 if __name__ == '__main__':
