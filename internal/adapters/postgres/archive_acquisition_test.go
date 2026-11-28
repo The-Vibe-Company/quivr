@@ -150,10 +150,12 @@ func TestArchiveAcquisitionWorkBudget(t *testing.T) {
 		name, position string
 		accept         acquisitionWork
 	}{
-		// Request and Record claims add two statements within the existing acceptance exchange.
-		{"new-records", "12", acquisitionWork{29, 5, 1, 1, 0}},
-		{"corrections", "13", acquisitionWork{36, 7, 1, 1, 0}},
-		{"older-position", "3", acquisitionWork{35, 7, 1, 1, 0}},
+		// Non-rewriting claim locks (DO NOTHING + SELECT FOR UPDATE) and single-batch
+		// first revision keep new-records at 5 exchanges; corrections skip the
+		// speculative first-revision batch and drop from 7 to 6 exchanges.
+		{"new-records", "12", acquisitionWork{30, 5, 1, 1, 0}},
+		{"corrections", "13", acquisitionWork{36, 6, 1, 1, 0}},
+		{"older-position", "3", acquisitionWork{35, 6, 1, 1, 0}},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			totals := map[string]acquisitionWork{}

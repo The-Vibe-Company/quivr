@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
 	"google.golang.org/grpc"
@@ -16,8 +19,27 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
+
+// grpcDecodeRowHook is nil in production; white-box tests may install a hook
+// to inject a decode-path panic and verify recovery to retrieval.ErrUnavailable.
+var grpcDecodeRowHook atomic.Pointer[func(*pb.SearchResult)]
+
+func (s *Store) grpcPooled() *grpcPooledClient {
+	if pooled, ok := s.grpc.(*grpcPooledClient); ok {
+		return pooled
+	}
+	return nil
+}
+
+func (s *Store) grpcBreaker() *circuitBreaker {
+	if pooled := s.grpcPooled(); pooled != nil {
+		return pooled.breaker
+	}
+	return nil
+}
 
 func (s *Store) rpcContext(ctx context.Context, operation string, callerDeadline bool) (context.Context, context.CancelFunc) {
 	if metrics := s.metrics.Load(); metrics != nil {
@@ -26,10 +48,16 @@ func (s *Store) rpcContext(ctx context.Context, operation string, callerDeadline
 	if s.apiKey != "" {
 		md, ok := metadata.FromOutgoingContext(ctx)
 		if !ok {
-			md = metadata.MD{}
+			if pooled := s.grpcPooled(); pooled != nil && pooled.authMD != nil {
+				ctx = metadata.NewOutgoingContext(ctx, pooled.authMD)
+			} else {
+				ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+s.apiKey))
+			}
+		} else {
+			md = md.Copy()
+			md.Set("authorization", "Bearer "+s.apiKey)
+			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
-		md.Set("authorization", "Bearer "+s.apiKey)
-		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 	if _, bounded := ctx.Deadline(); callerDeadline && bounded || s.Client.Timeout == 0 {
 		return ctx, func() {}
@@ -138,21 +166,100 @@ func searchRequest(collection string, branch searchBranch, where filter, order s
 	return request, nil
 }
 
-func (s *Store) grpcSearch(ctx context.Context, request *pb.SearchRequest, operation string, responseLimit int, callerDeadline bool) ([]*pb.SearchResult, error) {
+func logRecoveredGRPCPanic(ctx context.Context, path string, recovered any) {
+	slog.ErrorContext(ctx, "recovered weaviate gRPC panic",
+		"component", "weaviate.grpc",
+		"path", path,
+		"panic_type", fmt.Sprintf("%T", recovered),
+		"stack", string(debug.Stack()),
+	)
+}
+
+func classifyGRPCError(ctx, rpcCtx context.Context, err error) (classified error, tripBreaker bool) {
+	code := status.Code(err)
+	if code == codes.ResourceExhausted && strings.Contains(status.Convert(err).Message(), "received message larger than max") {
+		return errResponseLimit, false
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.Canceled), false
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.DeadlineExceeded), false
+	}
+	if errors.Is(rpcCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || code == codes.DeadlineExceeded {
+		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.DeadlineExceeded), true
+	}
+	if errors.Is(rpcCtx.Err(), context.Canceled) {
+		return fmt.Errorf("projection query failed (gRPC %s): %w", code, context.Canceled), false
+	}
+	switch code {
+	case codes.Unavailable, codes.Internal, codes.Unknown, codes.DataLoss, codes.ResourceExhausted:
+		return fmt.Errorf("projection query failed (gRPC %s): %w", code, retrieval.ErrUnavailable), true
+	default:
+		return fmt.Errorf("projection query failed (gRPC %s)", code), false
+	}
+}
+
+func (s *Store) grpcSearch(ctx context.Context, request *pb.SearchRequest, operation string, responseLimit int, callerDeadline bool) (results []*pb.SearchResult, err error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("projection query aborted: %w", ctxErr)
+	}
+	breaker := s.grpcBreaker()
+	var isProbe bool
+	if breaker != nil {
+		var allowed bool
+		allowed, isProbe = breaker.Allow()
+		if !allowed {
+			return nil, ErrCircuitOpen
+		}
+	}
+	recorded := false
+	defer func() {
+		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "search", r)
+			if breaker != nil && !recorded {
+				breaker.RecordFailure(isProbe)
+				recorded = true
+			}
+			results = nil
+			err = fmt.Errorf("projection query panic: %w", retrieval.ErrUnavailable)
+			return
+		}
+		if breaker != nil && isProbe && !recorded {
+			breaker.ReleaseProbe(true)
+		}
+	}()
+
 	request.Tenant = tenantFrom(ctx)
 	rpcCtx, cancel := s.rpcContext(ctx, operation, callerDeadline)
 	defer cancel()
-	reply, err := s.grpc.Search(rpcCtx, request, grpc.MaxCallRecvMsgSize(responseLimit))
-	if err != nil {
-		if status.Code(err) == codes.ResourceExhausted && strings.Contains(status.Convert(err).Message(), "received message larger than max") {
-			return nil, errResponseLimit
+	if isProbe {
+		if pooled := s.grpcPooled(); pooled != nil {
+			pooled.pool.prepareProbe(rpcCtx)
 		}
-		return nil, fmt.Errorf("projection query failed (gRPC %s)", status.Code(err))
+	}
+	reply, callErr := s.grpc.Search(rpcCtx, request, grpc.MaxCallRecvMsgSize(responseLimit))
+	if callErr != nil {
+		classified, tripBreaker := classifyGRPCError(ctx, rpcCtx, callErr)
+		if breaker != nil {
+			if tripBreaker {
+				breaker.RecordFailure(isProbe)
+				recorded = true
+			} else if isProbe {
+				breaker.ReleaseProbe(true)
+				recorded = true
+			}
+		}
+		return nil, classified
+	}
+	if breaker != nil {
+		breaker.RecordSuccess(isProbe)
+		recorded = true
 	}
 	return reply.GetResults(), nil
 }
 
-func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, fields []string, responseLimit int, callerDeadline bool) ([]itemRow, error) {
+func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch searchBranch, where filter, order searchOrder, limit int, fields []string, responseLimit int, callerDeadline bool) (rows []itemRow, err error) {
 	request, err := searchRequest(collection, branch, where, order, limit, fields)
 	if err != nil {
 		return nil, err
@@ -165,29 +272,50 @@ func (s *Store) grpcSearchRows(ctx context.Context, collection string, branch se
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]itemRow, 0, len(results))
-	for _, result := range results {
-		fields := result.GetProperties().GetNonRefProps().GetFields()
-		row := itemRow{
-			SegmentID: fields["segmentId"].GetTextValue(), GenerationID: fields["generationId"].GetTextValue(),
-			VersionID: fields["versionId"].GetTextValue(), Text: fields[passageText].GetTextValue(),
+	defer func() {
+		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "search_rows", r)
+			rows = nil
+			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
 		}
+	}()
+	if hook := grpcDecodeRowHook.Load(); hook != nil {
+		fn := *hook
+		for _, result := range results {
+			fn(result)
+		}
+	}
+	rows = make([]itemRow, len(results))
+	var scores []string
+	var distances []float64
+	for i, result := range results {
+		fields := result.GetProperties().GetNonRefProps().GetFields()
+		row := &rows[i]
+		row.SegmentID = fields["segmentId"].GetTextValue()
+		row.GenerationID = fields["generationId"].GetTextValue()
+		row.VersionID = fields["versionId"].GetTextValue()
+		row.Text = fields[passageText].GetTextValue()
 		if m := result.GetMetadata(); m != nil {
 			if m.ScorePresent {
-				score := strconv.FormatFloat(float64(m.Score), 'g', -1, 32)
-				row.Additional.Score = &score
+				if scores == nil {
+					scores = make([]string, len(results))
+				}
+				scores[i] = strconv.FormatFloat(float64(m.Score), 'g', -1, 32)
+				row.Additional.Score = &scores[i]
 			}
 			if m.DistancePresent {
-				distance := float64(m.Distance)
-				row.Additional.Distance = &distance
+				if distances == nil {
+					distances = make([]float64, len(results))
+				}
+				distances[i] = float64(m.Distance)
+				row.Additional.Distance = &distances[i]
 			}
 		}
-		rows = append(rows, row)
 	}
 	return rows, nil
 }
 
-func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool, responseLimit int) ([]projectionRow, error) {
+func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where filter, limit int, order searchOrder, properties []string, created bool, responseLimit int) (rows []projectionRow, err error) {
 	request, err := searchRequest(collection, searchBranch{}, where, order, limit, properties)
 	if err != nil {
 		return nil, err
@@ -198,7 +326,14 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]projectionRow, 0, len(results))
+	defer func() {
+		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "projection_rows", r)
+			rows = nil
+			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
+		}
+	}()
+	rows = make([]projectionRow, 0, len(results))
 	for _, result := range results {
 		fields := result.GetProperties().GetNonRefProps().GetFields()
 		row := projectionRow{
@@ -221,7 +356,7 @@ func (s *Store) grpcProjectionRows(ctx context.Context, collection string, where
 
 const grpcAnchorBatchLimit = 16 << 20
 
-func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids []string) (map[string]map[string]any, error) {
+func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids []string) (out map[string]map[string]any, err error) {
 	request := &pb.SearchRequest{
 		Collection:  collection,
 		Limit:       uint32(len(ids)),
@@ -234,7 +369,14 @@ func (s *Store) grpcAnchorProperties(ctx context.Context, collection string, ids
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]map[string]any, len(results))
+	defer func() {
+		if r := recover(); r != nil {
+			logRecoveredGRPCPanic(ctx, "anchor_properties", r)
+			out = nil
+			err = fmt.Errorf("projection decode panic: %w", retrieval.ErrUnavailable)
+		}
+	}()
+	out = make(map[string]map[string]any, len(results))
 	for _, result := range results {
 		m := result.GetMetadata()
 		id := m.GetId()

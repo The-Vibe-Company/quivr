@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
@@ -220,4 +224,338 @@ func TestPublishEmbeddingsUsesSingleGRPCBatchForAnchors(t *testing.T) {
 func weaviateAnchorIDForTest(org, gen, seg string) string {
 	h := content.Hash([]byte(content.StableID("projection", org, gen, seg)))
 	return h[:8] + "-" + h[8:12] + "-5" + h[13:16] + "-a" + h[17:20] + "-" + h[20:32]
+}
+
+type blockingSearchFixture struct {
+	pb.UnimplementedWeaviateServer
+	entered    chan struct{}
+	returnCode codes.Code
+	reply      *pb.SearchReply
+}
+
+func (f *blockingSearchFixture) Search(ctx context.Context, _ *pb.SearchRequest) (*pb.SearchReply, error) {
+	if f.entered != nil {
+		select {
+		case f.entered <- struct{}{}:
+		default:
+		}
+	}
+	if f.returnCode != codes.OK {
+		return nil, status.Error(f.returnCode, "injected status error")
+	}
+	if f.reply != nil {
+		return f.reply, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestGRPCContextCancelAndDeadlinePreserved(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &blockingSearchFixture{entered: make(chan struct{}, 1)}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, fixture)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+
+	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "generation", Collection: "Example"}}}
+	scope := corpus.Scope{Organization: "organization"}
+	req := retrieval.Request{Mode: "lexical", Query: "example"}
+
+	// 1. Caller cancellation preserves context.Canceled.
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-fixture.entered
+		cancel()
+	}()
+	_, err = store.Search(cancelCtx, routes, scope, req)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled search err = %v, want errors.Is(context.Canceled)", err)
+	}
+
+	// 2. Caller deadline preserves context.DeadlineExceeded.
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer deadlineCancel()
+	_, err = store.Search(deadlineCtx, routes, scope, req)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline search err = %v, want errors.Is(context.DeadlineExceeded)", err)
+	}
+
+	// 3. Server-returned codes.DeadlineExceeded preserves context.DeadlineExceeded.
+	lis2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv2 := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv2, &blockingSearchFixture{returnCode: codes.DeadlineExceeded})
+	go func() { _ = srv2.Serve(lis2) }()
+	t.Cleanup(srv2.Stop)
+
+	store2, closeStore2, err := weaviate.NewWithTransport("http://weaviate.test", lis2.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore2)
+
+	_, err = store2.Search(context.Background(), routes, scope, req)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("server DeadlineExceeded err = %v, want errors.Is(context.DeadlineExceeded)", err)
+	}
+
+	// 4. Server-returned codes.Canceled without caller cancellation must not be
+	// misclassified as context.Canceled.
+	lis3, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv3 := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv3, &blockingSearchFixture{returnCode: codes.Canceled})
+	go func() { _ = srv3.Serve(lis3) }()
+	t.Cleanup(srv3.Stop)
+
+	store3, closeStore3, err := weaviate.NewWithTransport("http://weaviate.test", lis3.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore3)
+
+	_, err = store3.Search(context.Background(), routes, scope, req)
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("server Canceled without caller cancel err = %v, want non-nil error not matching context.Canceled", err)
+	}
+}
+
+func TestGRPCServerKilledMidStreamReturnsUnavailable(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &blockingSearchFixture{entered: make(chan struct{}, 1)}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, fixture)
+	go func() { _ = srv.Serve(lis) }()
+
+	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
+	if err != nil {
+		srv.Stop()
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+
+	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "generation", Collection: "Example"}}}
+	scope := corpus.Scope{Organization: "organization"}
+	req := retrieval.Request{Mode: "lexical", Query: "example"}
+
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, searchErr := store.Search(ctx, routes, scope, req)
+		errCh <- searchErr
+	}()
+
+	select {
+	case <-fixture.entered:
+	case <-time.After(2 * time.Second):
+		srv.Stop()
+		t.Fatal("request did not reach server")
+	}
+
+	// Hard-kill server mid-RPC.
+	srv.Stop()
+
+	select {
+	case err = <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("search hung after server was killed mid-stream")
+	}
+	if !errors.Is(err, retrieval.ErrUnavailable) {
+		t.Fatalf("mid-stream kill err = %v, want errors.Is(retrieval.ErrUnavailable)", err)
+	}
+}
+
+type peerRecordingSearchFixture struct {
+	pb.UnimplementedWeaviateServer
+	reply       *pb.SearchReply
+	barrierSize int32
+	arrived     atomic.Int32
+	release     chan struct{}
+	releaseOnce sync.Once
+
+	mu       sync.Mutex
+	rpcPeers map[string]int
+}
+
+func (f *peerRecordingSearchFixture) Search(ctx context.Context, _ *pb.SearchRequest) (*pb.SearchReply, error) {
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		f.mu.Lock()
+		if f.rpcPeers == nil {
+			f.rpcPeers = make(map[string]int)
+		}
+		f.rpcPeers[p.Addr.String()]++
+		f.mu.Unlock()
+	}
+	if f.barrierSize > 0 {
+		if f.arrived.Add(1) >= f.barrierSize {
+			f.releaseOnce.Do(func() { close(f.release) })
+		}
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return f.reply, nil
+}
+
+func (f *peerRecordingSearchFixture) distinctRPCPeers() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.rpcPeers)
+}
+
+func TestGRPCPoolRoundRobinDistributesAcrossConnections(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hold the first wave of 16 concurrent RPCs behind a barrier so inFlight > 4
+	// is guaranteed and round-robin must dispatch actual RPCs across all 4 pooled
+	// TCP connections (not merely eager dials).
+	const workers = 16
+	fixture := &peerRecordingSearchFixture{
+		reply:       searchFixtureReply(),
+		barrierSize: workers,
+		release:     make(chan struct{}),
+	}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, fixture)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeStore)
+
+	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "generation", Collection: "Example"}}}
+	scope := corpus.Scope{Organization: "organization"}
+	req := retrieval.Request{Mode: "lexical", Query: "example"}
+
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var firstErr error
+	recordErr := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+	}
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hits, searchErr := store.Search(ctx, routes, scope, req)
+			if searchErr != nil {
+				recordErr(searchErr)
+				return
+			}
+			if len(hits) != 1 {
+				recordErr(fmt.Errorf("search returned %d hits, want 1", len(hits)))
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		t.Fatalf("concurrent search failed: %v", firstErr)
+	}
+	if got := fixture.distinctRPCPeers(); got < 4 {
+		t.Fatalf("server handled RPCs on %d distinct client peers, want >= 4 from pool fan-out", got)
+	}
+}
+
+func TestGRPCPoolCloseReleasesGoroutines(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	pb.RegisterWeaviateServer(srv, &blockingSearchFixture{reply: searchFixtureReply()})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	runtime.GC()
+	time.Sleep(20 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	store, closeStore, err := weaviate.NewWithTransport("http://weaviate.test", lis.Addr().String(), outbound.TLS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routes := []retrieval.Route{{CorpusID: "corpus", Generation: content.Generation{ID: "generation", Collection: "Example"}}}
+	scope := corpus.Scope{Organization: "organization"}
+	req := retrieval.Request{Mode: "lexical", Query: "example"}
+
+	const totalSearches = 1000
+	const workers = 16
+	var next atomic.Int64
+	var errMu sync.Mutex
+	var firstErr error
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for {
+				if next.Add(1) > totalSearches {
+					return
+				}
+				if _, err := store.Search(context.Background(), routes, scope, req); err != nil {
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					errMu.Unlock()
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		closeStore()
+		t.Fatalf("concurrent search failed: %v", firstErr)
+	}
+
+	// Closing twice must be idempotent and release every pooled connection's goroutines.
+	closeStore()
+	closeStore()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		runtime.GC()
+		if cur := runtime.NumGoroutine(); cur <= baseline+2 {
+			t.Logf("goroutines: baseline=%d after_close=%d", baseline, cur)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutine leak after closeFn: baseline=%d current=%d (want <= %d)", baseline, runtime.NumGoroutine(), baseline+2)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
