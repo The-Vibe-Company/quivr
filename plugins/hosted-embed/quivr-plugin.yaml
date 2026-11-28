@@ -35,6 +35,9 @@
         "call_budget_ms": {
           "const": 30000
         },
+        "contextual_anchor": {
+          "const": ""
+        },
         "dimensions": {
           "const": 384
         },
@@ -44,8 +47,17 @@
         "document_template": {
           "const": "{prefix}{text}"
         },
+        "dual_lead_segment": {
+          "const": false
+        },
         "format": {
           "const": "openai"
+        },
+        "include_title_in_lead": {
+          "const": false
+        },
+        "lead_max_tokens": {
+          "const": 0
         },
         "max_batch_tokens": {
           "const": 8192
@@ -70,6 +82,12 @@
         },
         "model_revision": {
           "const": "1"
+        },
+        "normalize_wire_text": {
+          "const": false
+        },
+        "overlap_tokens": {
+          "const": 0
         },
         "plugin_id": {
           "const": "hosted.embed"

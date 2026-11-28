@@ -44,7 +44,7 @@ Storage choices compound with retrieval. For inverted-pyramid articles embedded 
 }
 ```
 
-Attach the model's `tokenizer` configuration (generated with `plugins/hosted-embed/scripts/prepare_tokenizer.py`) before running in production so `body_tokens: 768` counts exact model tokens rather than conservative UTF-8 byte estimates.
+Attach the model's `tokenizer` configuration (generated from the repository root with `scripts/prepare_tokenizer.py --hosted`; setup installs the pinned tokenizer runtime and downloads the tokenizer, while plugin startup remains offline) before running in production so `body_tokens: 768` counts exact model tokens rather than conservative UTF-8 byte estimates.
 
 Three design principles come out of controlled chunking and storage ablations:
 
