@@ -127,7 +127,7 @@ def encode(url, text, *, token='', timeout=10, plugin=None):
                 'space': plugin['space'], 'query': {'modality': 'text', 'text': text}}
         path = '/v0/contributions/ingestion/embed_query'
     started = time.monotonic()
-    audience = plugin['configuration'].get('plugin_id', 'hosted.embed') if plugin else ''
+    audience = plugin['configuration'].get('plugin_id', 'text.embed') if plugin else ''
     result = request_json(url.rstrip('/') + path, body, token, timeout, signing_audience=audience)
     elapsed = (time.monotonic() - started) * 1000
     if plugin is not None:
@@ -219,7 +219,7 @@ def arguments(argv):
     parser.add_argument('--output', type=pathlib.Path, required=True)
     parser.add_argument('--local-url', required=True, help='loopback encoder base ending /v1')
     parser.add_argument('--remote-url', required=True, help='remote OpenAI base ending /v1')
-    parser.add_argument('--plugin-url', help='optional hosted.embed origin: loopback HTTP or HTTPS; input includes plugin.configuration and plugin.space')
+    parser.add_argument('--plugin-url', help='optional text.embed origin: loopback HTTP or HTTPS; input includes plugin.configuration and plugin.space')
     parser.add_argument('--cpu-cores', type=int, required=True, help='allocated service CPU cores, not machine count')
     parser.add_argument('--threads', type=int, required=True)
     parser.add_argument('--concurrency', type=int, default=4)

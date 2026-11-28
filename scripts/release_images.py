@@ -35,7 +35,7 @@ def inventory(root, repository):
             raise ValueError(f'invalid or duplicate image id: {plugin_id}')
         seen.add(plugin_id)
         if (folder / 'go.mod').exists():
-            target = folder.name if folder.name in {'core-ingest', 'hosted-embed'} else 'go-plugin'
+            target = folder.name if folder.name in {'core-ingest', 'text-embed'} else 'go-plugin'
         elif (folder / 'pyproject.toml').exists():
             target = 'python-plugin'
         else:

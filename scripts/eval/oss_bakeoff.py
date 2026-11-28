@@ -72,7 +72,7 @@ def configuration(label):
                 'query_prefix': 'task: search result | query: ', 'document_prefix': 'title: none | text: ',
                 'max_tokens_per_segment': 8192, 'overlap': 200, 'batch_size': 16}
     filename, revision = CANDIDATES[label]
-    config = json.loads((ROOT / 'plugins/hosted-embed/examples' / (filename + '.json')).read_text())
+    config = json.loads((ROOT / 'plugins/text-embed/examples' / (filename + '.json')).read_text())
     # The plugin uses a bounded logical version; TEI uses the full HF commit.
     config['model_revision'] = revision[:16]
     return config

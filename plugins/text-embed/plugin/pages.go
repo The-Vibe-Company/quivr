@@ -21,9 +21,16 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 	}
 	c := i.config
 	// Every text Part, including title/context text, receives its own passages.
-	// Repeating a large title in every model input would recreate a size refusal.
+	// Repeating a large title in every model input would recreate a size refusal,
+	// and paged ingestion requires every code point in the window to be covered
+	// exactly once without per-page lead/overlap distortions.
 	c.TitleSource = "none"
 	c.TitleContextParts = nil
+	c.OverlapTokens = 0
+	c.LeadMaxTokens = 0
+	c.ContextualAnchor = ""
+	c.IncludeTitleInLead = false
+	c.DualLeadSegment = false
 	window := part
 	window.Role = "body"
 	window.Text = string(runes[req.Page.Start:])
@@ -38,7 +45,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 		segments = []quivrplugin.Segment{{PartKey: part.Key, Start: 0, End: len(runes) - req.Page.Start, Vectors: map[string][]float32{}, Provenance: map[string]any{"budget_negotiated": true}}}
 		inputs = []string{c.documentInput("", window.Text)}
 	}
-	if len(req.Spaces) > 0 && (len(req.Spaces) != 1 || req.Spaces[0] != i.config.spaceID()) {
+	if len(req.Spaces) > 0 && (len(req.Spaces) != 1 || req.Spaces[0] != i.spaceID) {
 		return quivrplugin.IngestPage{}, quivrplugin.TerminalIngestError("unknown_space", "request must name the configured space")
 	}
 	type passage struct {
@@ -114,7 +121,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 				vector = vectors[0]
 				i.put(key, vector)
 			}
-			p.segment.Vectors[i.config.spaceID()] = vector
+			p.segment.Vectors[i.spaceID] = vector
 		}
 		page.Segments = append(page.Segments, p.segment)
 		pending = pending[1:]

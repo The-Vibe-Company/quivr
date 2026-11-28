@@ -1,0 +1,100 @@
+---
+title: "Optimize domain search with plugins"
+description: "Pair newsroom.retrieve and tuned text.embed packing with a disciplined, anti-overfit evaluation loop to optimize retrieval and storage without modifying Quivr's core engine."
+keywords: ["newsroom", "retrieval", "rerank", "chunking", "autoresearch", "weaviate", "evaluation"]
+---
+
+Quivr ships a general-purpose retrieval plugin (`core.retrieve`) and a configurable hosted embedding plugin (`text.embed`). When a corpus has strong domain structure—such as inverted-pyramid news dispatches, press releases, or editorial archives—you can push precision, recall, and storage efficiency much further using dedicated plugins without touching the core engine.
+
+This guide explains how to deploy **`newsroom.retrieve`** alongside tuned **`text.embed`** packing, and outlines the disciplined evaluation loop used to build and validate domain search plugins.
+
+## Architecture: two tiers on one index
+
+Both retrieval tiers share a single Weaviate vector and lexical index backed by one embedding space (for example `google/embeddinggemma-2`, 768d):
+
+| Tier | Profile | Query-time GPU | Target latency | What it runs |
+| --- | --- | --- | --- | --- |
+| **Fast ($0)** | `newsroom.retrieve/default` | None | `< 150 ms` | Ungrouped `near_vector` + stopword/elision-cleaned `bm25`, boilerplate-stripped multi-view legs (`question` view on by default), min-max convex fusion (`0.65 / 0.35`), and three editorial aboutness signals (title+lead IDF coverage, multi-passage corroboration, `FirstP/MaxP` lead ratio). |
+| **Deep (Open-Source)** | `newsroom.retrieve/deep` | Open-source cross-encoder (e.g. `Qwen3-Reranker-4B`, Apache-2.0) | `2–6 s` | Builds inverted-pyramid multi-passage surrogates (`[TITLE] + [LEAD] + [MATCHED DEEP PASSAGE]`, `rerank_top_k: 50`), scores in unsaturated logit margin space (`raw_score`) with per-query Z-score fusion, runs Recall Band `31–80` with `2` concurrent shards, stitches the tail to preserve `Recall@50`, and falls back gracefully to Stage 1 on error. |
+
+### High-performance defaults (opt-out to lighten)
+
+`newsroom.retrieve` ships with the highest-performing settings enabled out of the box so operators do not need to tune dozens of parameters. To trade recall for lower latency or GPU cost, opt out selectively:
+
+- **Disable secondary query views** (`dense_view_mode: "none"`, `lexical_view_mode: "none"`): reduces Round 1 to 2 legs (one dense, one BM25) when remote query-encoding latency dominates.
+- **Disable Recall Band or shrink `rerank_top_k`** (`rerank_band_end: 0`, `rerank_top_k: 30`): lowers cross-encoder GPU tokens per query while keeping top-30 logit/Z-score reranking and tail stitching.
+- **Single-container rerankers** (`rerank_parallel_requests: 1`): disables 2-way interleaved HTTP sharding when serving on a single GPU replica.
+- **Adaptive QPP cascade** (`adaptive_cascade: true`): early-exits high-confidence queries at Stage 1 (`$0` rerank cost) when dense/lexical agreement and score margin exceed configured thresholds.
+
+## Storage representation: tuned `text.embed` packing
+
+Storage choices compound with retrieval. For inverted-pyramid articles embedded with long-context models such as `google/embeddinggemma-2`, use the reference configuration in `plugins/text-embed/examples/newsroom-embeddinggemma-2.json`:
+
+```json
+{
+  "model": "google/embeddinggemma-2",
+  "dimensions": 768,
+  "document_template": "title: {title} | text: {text}",
+  "title_source": "title",
+  "body_tokens": 768,
+  "normalize_wire_text": true,
+  "include_title_in_lead": true,
+  "rebalance_tail": true
+}
+```
+
+Attach the model's `tokenizer` configuration (generated from the repository root with `scripts/prepare_tokenizer.py --hosted`; setup installs the pinned tokenizer runtime and downloads the tokenizer, while plugin startup remains offline) before running in production so `body_tokens: 768` counts exact model tokens rather than conservative UTF-8 byte estimates.
+
+Three design principles come out of controlled chunking and storage ablations:
+
+1. **Match `body_tokens` to the median document length (`768` for wire dispatches).** Smaller unanchored windows (`192–384` tokens) tear passing mentions out of context into standalone high-cosine vectors, inflating vector RAM by `1.3×–2.4×` while hurting precision. A `768`-token window keeps median dispatches holistic while preserving multi-passage contrast on long features—cutting HNSW vector storage by roughly **31%** while improving both fast and deep ranking.
+2. **Keep dense embeddings pure; route lexical enrichment to `Segment.LexicalText`.** Models that already condition on `title: {title} | text: {text}` lose `FirstP/MaxP` contrast when raw leads or synthetic queries are stuffed into dense passage text. If you add write-time LLM enrichment (such as salience-gated `Doc2Query--` queries or domain synonyms), write it only to pre-normalized `Segment.LexicalText` (`0` extra HNSW vectors) rather than appending it to dense `Segment.Text`.
+3. **Include the headline in Segment 0 (`include_title_in_lead: true`) and clean wire boilerplate (`normalize_wire_text: true`).** Ensuring Segment 0 carries the headline lets downstream retrieval and reranking plugins read the title directly from matched passages without duplicating it across deep chunks.
+
+## Pinning `newsroom.retrieve` alongside `core.retrieve`
+
+Keep `core.retrieve` intact for general corpora and pin `newsroom.retrieve` as an additional retrieval plugin in your Quivr configuration:
+
+```json
+{
+  "retrieval": {
+    "profiles": {
+      "default": "newsroom.retrieve/default",
+      "deep": "newsroom.retrieve/deep"
+    }
+  },
+  "plugins": [
+    {
+      "manifest": "./plugins/newsroom-retrieve/quivr-plugin.yaml",
+      "endpoint": "http://127.0.0.1:9102",
+      "configuration": {
+        "clean_lexical_query": true,
+        "dense_weight": 0.65,
+        "lexical_weight": 0.35,
+        "title_lead_weight": 0.12,
+        "passage_ratio_weight": 0.10,
+        "passage_support_weight": 0.12,
+        "rerank_endpoint": "https://reranker.example.org/rerank",
+        "rerank_protocol": "tei",
+        "rerank_top_k": 50,
+        "rerank_score_space": "logit",
+        "rerank_ranking": "zscore",
+        "rerank_parallel_requests": 2,
+        "fallback_on_error": true
+      }
+    }
+  ]
+}
+```
+
+Set `RERANKER_API_KEY` in the plugin process environment when authenticating against an HTTPS reranker endpoint (never put credentials in configuration files).
+
+## Repeatable optimization methodology
+
+When adapting a plugin to a new domain, follow a strict anti-overfit loop:
+
+1. **Split your evaluation set before tuning.** Separate a `working` split for iterative exploration from a locked `heldout` confirmation split that is never inspected during development.
+2. **Track a full Pareto tuple, not a single metric.** Record `nDCG@10`, human-graded `Gold nDCG@10`, `Recall@50`, `MRR@10`, false-positive taxonomy counts (such as passing mentions vs missing required elements), warm `p95` latency, segment multiplier (`M_seg`), and estimated `10M`-document RAM and inference cost.
+3. **Test one hypothesis per run against a keep/discard gate.** Keep a change only if it beats the current champion by a meaningful margin without regressing human gold grades or blowing the latency or storage budget.
+4. **Run public generalization guardrails before shipping.** Evaluate finalists on public datasets such as `miracl-fr` and `xpqa-fr` via `scripts/eval/run.py` to confirm zero regression outside your target domain.
+5. **Confirm once on locked `heldout` and certify the plugin contract.** Run `go test -race ./...`, `quivr plugin inspect .`, and `quivr plugin test .` before opening a pull request.

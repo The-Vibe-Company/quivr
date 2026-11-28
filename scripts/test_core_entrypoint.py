@@ -44,7 +44,7 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(pins[0]['configuration']['base_url'], 'http://embeddings:8080/v1')
         self.assertEqual(pins[0]['configuration']['batch_size'], 1)
         self.assertEqual(pins[0]['configuration']['max_concurrent_requests'], 1)
-        self.assertEqual(config['ingestion']['default'], 'hosted.embed')
+        self.assertEqual(config['ingestion']['default'], 'text.embed')
         for endpoint in ('http://example.org:8080', 'http://embeddings:8080/path', 'http://user@embeddings:8080'):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 core_entrypoint.build_config({**env, 'EMBED_URL': endpoint})
@@ -85,7 +85,7 @@ class CoreEntrypointTest(unittest.TestCase):
                 cpu = [item for item in commands if item[0] == 'text-encoder']
                 expected = flag == '1' and role == 'api'
                 self.assertEqual(bool(cpu), expected)
-                hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
+                hosted = [child for name, _, _, child in commands if name == 'text-embed']
                 if hosted:
                     self.assertEqual(hosted[0].get('QUIVR_HOSTED_QUERY_URL'),
                                      'http://127.0.0.1:9995/v1' if expected else None)
@@ -182,7 +182,7 @@ class CoreEntrypointTest(unittest.TestCase):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / 'runtime.json'
-            manifest = pathlib.Path(tmp) / 'hosted-embed' / 'quivr-plugin.yaml'
+            manifest = pathlib.Path(tmp) / 'text-embed' / 'quivr-plugin.yaml'
             real_path = type(runtime)
             fixture_secrets = {name: ENV[name] for name in
                                ('DATABASE_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'QUIVR_CURSOR_KEY', 'QUIVR_API_KEY')}
@@ -217,7 +217,7 @@ class CoreEntrypointTest(unittest.TestCase):
                         core_entrypoint.main()
                     self.assertEqual(stopped.exception.code, 0)
                     configure = migrate.call_args_list[0]
-                    self.assertEqual(configure.args[0], ['/usr/local/bin/quivr-hosted-embed', 'configure',
+                    self.assertEqual(configure.args[0], ['/usr/local/bin/quivr-text-embed', 'configure',
                                      str(manifest.parent / 'configuration.json')])
                     self.assertNotIn('AZURE_FOUNDRY_KEY', configure.kwargs['env'])
                     self.assertNotIn('EMBED_API_KEY', configure.kwargs['env'])
@@ -230,7 +230,7 @@ class CoreEntrypointTest(unittest.TestCase):
                         core_env = next(child for name, _, _, child in commands if name == 'quivr ' + role)
                         effective = core_env if core_env is not None else dict(os.environ)
                         jev = [child for name, _, _, child in commands if name == 'jev-rerank']
-                        hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
+                        hosted = [child for name, _, _, child in commands if name == 'text-embed']
                         self.assertEqual(hosted[0]['EMBED_API_KEY'],
                                          'fixture-foundry-key' if provider == 'cohere' else 'fixture-modal-token')
                         self.assertEqual(len(jev), 1 if role == 'api' else 0)
@@ -352,15 +352,15 @@ class CoreEntrypointTest(unittest.TestCase):
                 config = core_entrypoint.build_config(env)
                 pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
                 enabled = switch == '1' or selection == 'cohere'
-                self.assertEqual('hosted-embed' in pins, enabled)
+                self.assertEqual('text-embed' in pins, enabled)
                 self.assertEqual(pins['core-ingest'], next(p for p in core_entrypoint.build_config(ENV)['plugins']
                                  if p['manifest'] == pins['core-ingest']['manifest']))
                 self.assertNotIn('fixture-foundry-key', json.dumps(config))
                 if enabled:
                     # A default without routes covers every normalized source,
                     # including XML and future media types; no E5 evaluation.
-                    self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
-                    hosted = pins['hosted-embed']['configuration']
+                    self.assertEqual(config['ingestion'], {'default': 'text.embed'})
+                    hosted = pins['text-embed']['configuration']
                     self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
                     self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))
                     self.assertEqual(hosted['usd_per_million_tokens'], 0.12)
@@ -368,12 +368,12 @@ class CoreEntrypointTest(unittest.TestCase):
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
                 for role in ('api', 'worker'):
                     children = {name: (argv, child) for name, argv, _, child in core_entrypoint.sidecar_commands(env, role)}
-                    self.assertEqual('hosted-embed' in children, enabled)
+                    self.assertEqual('text-embed' in children, enabled)
                     for name, (argv, child) in children.items():
-                        if name == 'hosted-embed':
-                            self.assertEqual(argv, ['/usr/local/bin/quivr-hosted-embed'])
+                        if name == 'text-embed':
+                            self.assertEqual(argv, ['/usr/local/bin/quivr-text-embed'])
                             self.assertEqual(child['EMBED_API_KEY'], 'fixture-foundry-key')
-                            self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['hosted-embed']['manifest'])
+                            self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['text-embed']['manifest'])
                             self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9980')
                             self.assertNotIn('AZURE_FOUNDRY_ENDPOINT', child)
                         else:
@@ -395,8 +395,8 @@ class CoreEntrypointTest(unittest.TestCase):
                'EMBED_URL': 'https://example--embeddings.modal.run/', 'EMBED_API_KEY': 'fixture-modal-token',
                'AZURE_FOUNDRY_KEY': 'unused-placeholder-key'}
         config = core_entrypoint.build_config(env)
-        pin = next(p for p in config['plugins'] if p['manifest'] == '/tmp/hosted-embed/quivr-plugin.yaml')
-        self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
+        pin = next(p for p in config['plugins'] if p['manifest'] == '/tmp/text-embed/quivr-plugin.yaml')
+        self.assertEqual(config['ingestion'], {'default': 'text.embed'})
         self.assertEqual(pin['configuration'], {
             'format': 'openai', 'base_url': 'https://example--embeddings.modal.run/v1',
             'auth': 'bearer', 'model': 'google/embeddinggemma-2', 'dimensions': 768,
@@ -415,10 +415,10 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertNotIn('fixture-modal-token', json.dumps(config))
         for role in ('api', 'worker'):
             child = next(child for name, _, _, child in core_entrypoint.sidecar_commands(env, role)
-                         if name == 'hosted-embed')
+                         if name == 'text-embed')
             self.assertEqual(child['EMBED_API_KEY'], 'fixture-modal-token')
             self.assertNotIn('AZURE_FOUNDRY_KEY', child)
-            engine_ring = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])['hosted.embed']
+            engine_ring = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])['text.embed']
             self.assertEqual(json.loads(child['QUIVR_PLUGIN_SIGNING_KEYS']), engine_ring)
         for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),
                                     ('gemma', 'http://example--embeddings.modal.run'),

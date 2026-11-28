@@ -66,8 +66,8 @@ On their first release, make all six public before rerunning the failed
 operator-access gate; authenticating that smoke would conceal a private package. The image source label links them to this repository.
 
 The engine uses `quivr.Dockerfile`; plugin targets are `go-plugin`,
-`python-plugin`, `core-ingest` and `hosted-embed` in `plugin.Dockerfile`.
-`core-ingest` includes its pinned model tokenizer; `hosted-embed` includes the
+`python-plugin`, `core-ingest` and `text-embed` in `plugin.Dockerfile`.
+`core-ingest` includes its pinned model tokenizer; `text-embed` includes the
 hash-pinned Python tokenizer runtime and accepts a read-only model-file mount.
 Linux arm64 is not published: its tokenizer wheel
 lock is not defined yet. Runtime images contain no compiler or package installer.

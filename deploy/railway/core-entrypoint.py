@@ -57,8 +57,8 @@ CONNECTORS = [
 ]
 # The configure command emits a model-locked manifest without a provider call.
 # /app is read-only to the runtime user; both files belong in private /tmp.
-HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
-HOSTED_EMBED = {'id': 'hosted-embed', 'signing_id': 'hosted.embed', 'port': 9980, 'api': True,
+HOSTED_MANIFEST = '/tmp/text-embed/quivr-plugin.yaml'
+HOSTED_EMBED = {'id': 'text-embed', 'signing_id': 'text.embed', 'port': 9980, 'api': True,
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
 ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
 ENCODER_MODEL = '/opt/query-encoder/model'
@@ -233,7 +233,7 @@ def prepare_hosted_manifest(env):
     configuration.write_text(json.dumps(selected_hosted_configuration(env)))
     # Configure needs no credentials. Its errors name fields, never runtime values.
     with manifest.open('w') as output:
-        subprocess.run(['/usr/local/bin/quivr-hosted-embed', 'configure', str(configuration)],
+        subprocess.run(['/usr/local/bin/quivr-text-embed', 'configure', str(configuration)],
                        stdout=output, check=True,
                        env={'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin')})
 
@@ -474,7 +474,7 @@ def build_config(env):
     if embedding_selection(env):
         # The default covers every source format after normalization. Keeping
         # core.ingest pinned serves historical generations, not E5 evaluation.
-        config['ingestion'] = {'default': 'hosted.embed'}
+        config['ingestion'] = {'default': 'text.embed'}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     # Optional: the API's public address, from which push instances get their webhook
@@ -533,7 +533,7 @@ def sidecar_commands(env, role='worker', *, signing=None):
     deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
     that ranks its searches, and the subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts and Jev:
-    TYPESAFE_API_KEY, hosted.embed: EMBED_API_KEY), never the core's.
+    TYPESAFE_API_KEY, text.embed: EMBED_API_KEY), never the core's.
 
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
@@ -566,7 +566,7 @@ def sidecar_commands(env, role='worker', *, signing=None):
             child['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(rings[connector['signing_id']])
         child.update({connector.get('secret_names', {}).get(name, name): env[name]
                       for name in connector.get('secrets', []) if env.get(name, '').strip()})
-        if settings and role == 'api' and connector['id'] == 'hosted-embed':
+        if settings and role == 'api' and connector['id'] == 'text-embed':
             child['QUIVR_HOSTED_QUERY_URL'] = ENCODER_URL + '/v1'
         if 'module' in connector:
             child['PYTHONUNBUFFERED'] = '1'

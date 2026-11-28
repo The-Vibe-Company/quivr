@@ -8,7 +8,7 @@ L40S when Modal has no L4 capacity, pinned to
 README for Apache-2.0 before downloading weights. Runtime is offline, uses
 bfloat16, suppresses the library's default prompt and returns normalized
 768-dimensional float vectors. No Railway embedding image or new engine plugin
-is needed; the existing `hosted.embed` handles documents and search queries.
+is needed; the existing `text.embed` handles documents and search queries.
 
 Only the coordinator performs the commands and live changes below. In a local
 Python 3.12 environment, install `modal==1.6.1` and authenticate the Modal CLI.
@@ -59,12 +59,12 @@ strings, each at most 32 KiB of UTF-8 (8 MiB per request). It rejects invalid in
 1. Save the current plugin plan, registration/configuration and api/worker
    variables. Pause connector polling and ingestion, wait for old pinned work
    to drain, and schedule a search maintenance window. A model switch changes
-   the `hosted.embed` contract; the single sidecar cannot keep both model
+   the `text.embed` contract; the single sidecar cannot keep both model
    registrations reachable. Old served generations may need the old settings
    until rebuilt. Do not promise uninterrupted search across this switch.
 2. Set the Gemma variables identically on api and worker and redeploy both.
    Inspect `GET /v0/admin/plugins/plan` with the operator key: require
-   `ingestion-default` on `hosted.embed`, with the Gemma registration and no
+   `ingestion-default` on `text.embed`, with the Gemma registration and no
    E5 evaluation routes. Keep core.ingest and TEI for historical E5 work.
 3. List every Corpus using `GET /v0/corpora`, following pagination. For each,
    call `POST /v0/corpora/{corpus_id}/rebuilds` with the operator key and body

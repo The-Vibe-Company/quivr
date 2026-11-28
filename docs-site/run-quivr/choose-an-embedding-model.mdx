@@ -8,21 +8,21 @@ Choose an embedding model by measuring search quality on your documents, query l
 
 ## Choose where inference runs
 
-You need an ingestion plugin and a reachable model server. A matching tokenizer counts the model's input tokens so passages and queries fit its input window. `core.ingest` needs its tokenizer pin; `hosted.embed` can run without one using conservative UTF-8-byte counts, which underfill subword models. Configure a matching tokenizer for exact input budgets.
+You need an ingestion plugin and a reachable model server. A matching tokenizer counts the model's input tokens so passages and queries fit its input window. `core.ingest` needs its tokenizer pin; `text.embed` can run without one using conservative UTF-8-byte counts, which underfill subword models. Configure a matching tokenizer for exact input budgets.
 
 | Deployment | When it fits |
 | --- | --- |
 | Local E5 with `core.ingest` | You want the local stack's CPU example and keep text within your installation. |
-| Your own OpenAI-compatible server with `hosted.embed` | You want control over weights, hardware, privacy and inference capacity. |
-| A hosted API with `hosted.embed` | You want a provider to operate inference and accept its data handling and usage charges. |
+| Your own OpenAI-compatible server with `text.embed` | You want control over weights, hardware, privacy and inference capacity. |
+| A hosted API with `text.embed` | You want a provider to operate inference and accept its data handling and usage charges. |
 
 The local [Quickstart](/quickstart) runs `intfloat/multilingual-e5-small` through Text Embeddings Inference (TEI). The [core.ingest catalog entry](/run-quivr/catalog#core-ingest) describes its endpoint and tokenizer pin. This is a deployment example; the engine has no built-in model default.
 
-`hosted.embed` supports OpenAI-compatible `/embeddings` servers and Cohere v2 `/embed` servers. Its [example configurations](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/hosted-embed/examples) cover local TEI and hosted APIs. Match the model name, dimensions, authentication and input templates to your server. OpenAI-compatible servers with fixed dimensions can require `send_dimensions: false`; the plugin still checks the returned vector size.
+`text.embed` supports OpenAI-compatible `/embeddings` servers and Cohere v2 `/embed` servers. Its [example configurations](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/text-embed/examples) cover local TEI and hosted APIs. Match the model name, dimensions, authentication and input templates to your server. OpenAI-compatible servers with fixed dimensions can require `send_dimensions: false`; the plugin still checks the returned vector size.
 
-For self-hosted EmbeddingGemma 2, start from [embeddinggemma-2.json](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/examples/embeddinggemma-2.json). It declares 768 dimensions, a pinned model revision, document and query templates, a 512-token body budget and a 2,048-token full input window. Supply your endpoint and matching local tokenizer before generating the manifest. The [Modal recipe](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/modal/README.md) is one serving example; provision its account, model access and bearer secret separately. Its GPU capacity and cold starts still need measurement for your workload.
+For self-hosted EmbeddingGemma 2, start from [embeddinggemma-2.json](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/examples/embeddinggemma-2.json). It declares 768 dimensions, a pinned model revision, document and query templates, a 512-token body budget and a 2,048-token full input window. Supply your endpoint and matching local tokenizer before generating the manifest. The [Modal recipe](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/modal/README.md) is one serving example; provision its account, model access and bearer secret separately. Its GPU capacity and cold starts still need measurement for your workload.
 
-Authenticated `hosted.embed` deployments read `EMBED_API_KEY` from the plugin process environment. Keep it out of the configuration and generated manifest. Package generation is offline; certification, ingestion, rebuilds and search queries can call the configured server.
+Authenticated `text.embed` deployments read `EMBED_API_KEY` from the plugin process environment. Keep it out of the configuration and generated manifest. Package generation is offline; certification, ingestion, rebuilds and search queries can call the configured server.
 
 <Warning>
 Document text and search queries go to the configured embedding server. Check where it runs, its data policy and any charges before certification or import.
@@ -40,7 +40,7 @@ The repository's [public-sample comparison workflow](https://github.com/The-Vibe
 
 A vector space is the coordinate system for one model's vectors. A segmentation recipe defines how the plugin cuts and prepares text. Existing collections of documents (Corpora) keep their served search generation until a rebuild prepares and activates its replacement.
 
-When replacing the served `hosted.embed` configuration, changes fall into these groups:
+When replacing the served `text.embed` configuration, changes fall into these groups:
 
 | Change | Effect on existing Corpora |
 | --- | --- |
@@ -60,7 +60,7 @@ Use [Try and switch a vector model](/run-quivr/switch-a-vector-model) for instal
 
 ## Tune execution without changing the model
 
-The `hosted.embed` manifest declares these execution-only settings:
+The `text.embed` manifest declares these execution-only settings:
 
 - `max_concurrent_requests`, `batch_size` and `max_batch_tokens`;
 - `request_timeout_ms`, `call_budget_ms` and `batch_wait_ms`;
@@ -70,7 +70,7 @@ An added execution key such as `tokenizer_processes` preserves the ingestion rec
 
 Regenerate the manifest from the exact configuration, certify it and install a new immutable registration. Proven-equivalent execution updates can replace the process at the same endpoint: pinned ingestion, rebuilds and queries use the active build while retaining their original recipe and work identity. For a semantic change, keep the old process and exact manifest reachable until its registration is `inactive`, or cancel its pinned work before retiring it.
 
-Endpoint and authentication changes are not in this execution-only list: they change the recipe and need a rebuild for existing Corpora, even if the vector-space id stays the same. Follow the [plugin configuration and upgrade procedure](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
+Endpoint and authentication changes are not in this execution-only list: they change the recipe and need a rebuild for existing Corpora, even if the vector-space id stays the same. Follow the [plugin configuration and upgrade procedure](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/text-embed/README.md#tune-throughput-without-rebuilding).
 
 Worker replicas, engine worker slots and provider concurrency are separate controls. Plan them together with the server's throughput; [Run a large import](/run-quivr/run-a-large-import) explains their combined load. [Scale Quivr](/run-quivr/scale-quivr) explains the capacity model, tokenizer memory and overload checks.
 

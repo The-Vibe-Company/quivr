@@ -125,7 +125,7 @@ class Isolation(unittest.TestCase):
         self.assertEqual(json.loads(launch_env['QUIVR_PLUGIN_SIGNING_KEYS']), plugins.signing_ring(stack, archive))
 
     def test_plugin_go_builds_filter_engine_secrets(self):
-        import hosted_embed_plugin
+        import text_embed_plugin
         import plugin_environment
 
         stack = local.Stack(self.names[0])
@@ -146,9 +146,9 @@ class Isolation(unittest.TestCase):
             with mock.patch.object(local.connector_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure:
                 local.connector_plugin.binary(stack)
                 self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
-            with mock.patch.object(hosted_embed_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
-                    mock.patch.object(hosted_embed_plugin.go_bin_cache, 'materialize', return_value=stack.directory / 'hosted-embed'):
-                hosted_embed_plugin.build(stack.directory)
+            with mock.patch.object(text_embed_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
+                    mock.patch.object(text_embed_plugin.go_bin_cache, 'materialize', return_value=stack.directory / 'text-embed'):
+                text_embed_plugin.build(stack.directory)
                 self.assertEqual(ensure.call_args.kwargs['env'], {'PATH': '/fixture/bin'})
             with mock.patch.object(local.retrieval_plugin.go_bin_cache, 'ensure', return_value=pathlib.Path('/bin/true')) as ensure, \
                     mock.patch.object(local.retrieval_plugin.ports, 'allocate', side_effect=sentinel):
