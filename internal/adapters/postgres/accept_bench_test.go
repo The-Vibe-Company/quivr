@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -562,47 +563,53 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 	// Succeeds across 1..5 injected deadlocks without double-commit.
 	for injected := 1; injected <= 5; injected++ {
 		t.Run(fmt.Sprintf("recovers-after-%d-deadlocks", injected), func(t *testing.T) {
-			attempts := 0
-			commits := 0
-			err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
-				attempts++
-				if attempts <= injected {
-					return deadlockErr()
+			synctest.Test(t, func(t *testing.T) {
+				attempts := 0
+				commits := 0
+				err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
+					attempts++
+					if attempts <= injected {
+						return deadlockErr()
+					}
+					commits++
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("injected=%d: got err %v, want nil", injected, err)
 				}
-				commits++
-				return nil
+				if attempts != injected+1 || commits != 1 {
+					t.Fatalf("injected=%d: attempts=%d commits=%d, want %d/1", injected, attempts, commits, injected+1)
+				}
 			})
-			if err != nil {
-				t.Fatalf("injected=%d: got err %v, want nil", injected, err)
-			}
-			if attempts != injected+1 || commits != 1 {
-				t.Fatalf("injected=%d: attempts=%d commits=%d, want %d/1", injected, attempts, commits, injected+1)
-			}
 		})
 	}
 
 	t.Run("exhausts-at-explicit-max-attempts", func(t *testing.T) {
-		attempts := 0
-		err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
-			attempts++
-			return deadlockErr()
-		})
-		if !isDeadlock(err) || attempts != acceptJournalRetryMaxAttempts {
-			t.Fatalf("attempts=%d err=%v, want %d and 40P01", attempts, err, acceptJournalRetryMaxAttempts)
-		}
-	})
-
-	t.Run("default-retry-preserves-3-attempt-bound-regardless-of-label", func(t *testing.T) {
-		for _, op := range []string{"Audit.Record", "Renamed.Audit.Op"} {
+		synctest.Test(t, func(t *testing.T) {
 			attempts := 0
-			err := retryJournalWrite(t.Context(), op, func(ctx context.Context) error {
+			err := retryJournalWriteWithLimit(t.Context(), "Accept", acceptJournalRetryMaxAttempts, func(ctx context.Context) error {
 				attempts++
 				return deadlockErr()
 			})
-			if !isDeadlock(err) || attempts != defaultJournalRetryMaxAttempts {
-				t.Fatalf("op=%q attempts=%d err=%v, want %d and 40P01", op, attempts, err, defaultJournalRetryMaxAttempts)
+			if !isDeadlock(err) || attempts != acceptJournalRetryMaxAttempts {
+				t.Fatalf("attempts=%d err=%v, want %d and 40P01", attempts, err, acceptJournalRetryMaxAttempts)
 			}
-		}
+		})
+	})
+
+	t.Run("default-retry-preserves-3-attempt-bound-regardless-of-label", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			for _, op := range []string{"Audit.Record", "Renamed.Audit.Op"} {
+				attempts := 0
+				err := retryJournalWrite(t.Context(), op, func(ctx context.Context) error {
+					attempts++
+					return deadlockErr()
+				})
+				if !isDeadlock(err) || attempts != defaultJournalRetryMaxAttempts {
+					t.Fatalf("op=%q attempts=%d err=%v, want %d and 40P01", op, attempts, err, defaultJournalRetryMaxAttempts)
+				}
+			}
+		})
 	})
 
 	t.Run("non-deadlock-error-does-not-retry", func(t *testing.T) {
@@ -618,28 +625,40 @@ func TestJournalRetryDeadlockBackoffAndCancellation(t *testing.T) {
 	})
 
 	t.Run("context-cancel-during-backoff-returns-promptly-without-leaked-tx", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		openTxs := 0
-		attempts := 0
-		err := retryJournalWriteWithLimit(ctx, "Accept", acceptJournalRetryMaxAttempts, func(work context.Context) error {
-			attempts++
-			openTxs++
-			defer func() { openTxs-- }() // mirrors defer rollbackTx(ctx, tx)
-			if attempts == 2 {
-				go func() {
-					time.Sleep(500 * time.Microsecond)
-					cancel()
-				}()
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			inAttempt2 := make(chan struct{})
+			var openTxs atomic.Int32
+			var attempts atomic.Int32
+			done := make(chan error, 1)
+			go func() {
+				done <- retryJournalWriteWithLimit(ctx, "Accept", acceptJournalRetryMaxAttempts, func(work context.Context) error {
+					n := attempts.Add(1)
+					openTxs.Add(1)
+					defer openTxs.Add(-1) // mirrors defer rollbackTx(ctx, tx)
+					if n == 2 {
+						close(inAttempt2)
+					}
+					return deadlockErr()
+				})
+			}()
+			<-inAttempt2
+			// Wait until the retry goroutine is durably blocked on the backoff
+			// timer select so cancel() deterministically interrupts mid-backoff.
+			synctest.Wait()
+			cancel()
+			err := <-done
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err=%v, want context.Canceled", err)
 			}
-			return deadlockErr()
+			if got := attempts.Load(); got != 2 {
+				t.Fatalf("attempts=%d, want 2 (canceled mid-backoff)", got)
+			}
+			if got := openTxs.Load(); got != 0 {
+				t.Fatalf("openTxs=%d after canceled backoff, want 0", got)
+			}
 		})
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("err=%v, want context.Canceled", err)
-		}
-		if openTxs != 0 {
-			t.Fatalf("openTxs=%d after canceled backoff, want 0", openTxs)
-		}
 	})
 
 	t.Run("already-canceled-context-does-not-retry", func(t *testing.T) {

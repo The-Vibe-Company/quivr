@@ -128,7 +128,9 @@ func newQueryVectorCache(maxEntries, maxBytes int) *QueryVectorCache {
 func (c *QueryVectorCache) count(l *lookupCount) {
 	stripe := &l.stripes[rand.Uint32()%queryVectorCountStripes]
 	if stripe.n.Add(1) >= queryVectorCountBatch {
-		c.lookups.Add(stripe.n.Swap(0), l.result)
+		if n := stripe.n.Swap(0); n > 0 {
+			c.lookups.Add(n, l.result)
+		}
 	}
 }
 

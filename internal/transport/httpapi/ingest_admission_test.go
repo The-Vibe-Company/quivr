@@ -293,6 +293,48 @@ func TestIngestAdmissionPanicDuringBodyReadReleasesLease(t *testing.T) {
 	}
 }
 
+// Owns error precedence in readBoundedIngestBody: when the overflowing chunk
+// simultaneously exceeds http.MaxBytesReader and the remaining admission byte
+// budget, HTTP 413 RequestTooLarge takes precedence over HTTP 429 RateLimited
+// and releases all reserved tokens cleanly.
+func TestIngestAdmissionMaxBytesErrorTakesPrecedenceOver429(t *testing.T) {
+	const singleLimit = 1 << 20
+
+	// Leave 5 bytes of bucket headroom above the under-declared Content-Length
+	// so the final read spanning singleLimit returns both n=9 (> headroom) and
+	// *http.MaxBytesError in the same Read call.
+	limiter := httpapi.NewIngestAdmission(httpapi.IngestAdmissionConfig{
+		MaxConcurrent: 2,
+		MaxBytes:      singleLimit - 5,
+		MaxQueue:      -1,
+	})
+	handler := newAPI(t, &acceptancePort{}, httpapi.WithIngestAdmission(limiter))
+
+	body := bytes.Repeat([]byte("a"), singleLimit+10)
+	req := httptest.NewRequest(http.MethodPost, "/v0/records", bytes.NewReader(body))
+	req.ContentLength = singleLimit - 10
+	req.Header.Set("Authorization", "Bearer "+adminKey)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d, want 413 Request Entity Too Large (body=%s)", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode error body: %v (raw=%s)", err, rec.Body.String())
+	}
+	if resp["code"] != "request_too_large" {
+		t.Fatalf("code=%v, want request_too_large (body=%s)", resp["code"], rec.Body.String())
+	}
+
+	stats := limiter.Stats()
+	if stats.InFlight != 0 || stats.InFlightBytes != 0 || stats.Queued != 0 {
+		t.Fatalf("post-413 admission stats=%+v; want zero leaked tokens", stats)
+	}
+}
+
 // Owns generic concurrency/byte bounds, bounded FIFO queue cancellation,
 // chunked byte shedding, and single-record 429 + Retry-After under a virtual clock.
 func TestIngestAdmissionBoundsQueueChunkedAndSingleRecord(t *testing.T) {

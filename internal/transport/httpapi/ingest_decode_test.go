@@ -13,6 +13,139 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
+// unionKind reads a discriminated union's `kind` without assuming its variant.
+func unionKind(in any) string {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return ""
+	}
+	var discriminator struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(b, &discriminator) != nil {
+		return ""
+	}
+	return discriminator.Kind
+}
+
+func extensionsFromTransport(in transport.Extensions) content.Extensions {
+	out := make(content.Extensions, len(in))
+	for namespace, extension := range in {
+		out[namespace] = content.Extension{SchemaVersion: extension.SchemaVersion, Data: extension.Data}
+	}
+	return out
+}
+
+func relationFromTransport(in transport.RelationInput) content.Relation {
+	out := content.Relation{Type: in.Type, Target: content.Source{CorpusID: in.Target.CorpusId, Namespace: in.Target.Namespace, RecordKey: in.Target.RecordKey}}
+	if in.SourceTargetRevision != nil {
+		out.SourceTargetRevision = *in.SourceTargetRevision
+	}
+	return out
+}
+
+func partFromTransport(in transport.Part) (content.Part, error) {
+	out := content.Part{Key: in.Key, Role: in.Role}
+	if in.ParentKey != nil {
+		out.ParentKey = *in.ParentKey
+	}
+	switch unionKind(in.Content) {
+	case "text":
+		text, err := in.Content.AsTextContent()
+		if err != nil {
+			return out, err
+		}
+		out.Content = content.Text{Kind: "text", Text: text.Text}
+	case "blob":
+		blob, err := in.Content.AsBlobContent()
+		if err != nil {
+			return out, err
+		}
+		out.Content = content.Text{Kind: "blob", BlobID: blob.BlobId, MediaType: blob.MediaType}
+	default:
+		return out, content.ErrUnsupported
+	}
+	if in.Extensions != nil {
+		out.Extensions = extensionsFromTransport(*in.Extensions)
+	}
+	return out, nil
+}
+
+func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
+	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
+	if in.RecordAcl != nil {
+		c.ACL = *in.RecordAcl
+	}
+
+	switch unionKind(in.Content) {
+	case "text":
+		text, err := in.Content.AsTextContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		c.Content = content.Text{Kind: string(text.Kind), Text: text.Text}
+	case "blob":
+		blob, err := in.Content.AsBlobContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		c.Content = content.Text{Kind: "blob", BlobID: blob.BlobId, MediaType: blob.MediaType}
+	case "manifest":
+		manifest, err := in.Content.AsManifestContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		parts := make([]content.Part, 0, len(manifest.Parts))
+		for _, p := range manifest.Parts {
+			part, err := partFromTransport(p)
+			if err != nil {
+				return content.Command{}, err
+			}
+			parts = append(parts, part)
+		}
+		relations := []content.Relation{}
+		if manifest.Relations != nil {
+			for _, r := range *manifest.Relations {
+				relations = append(relations, relationFromTransport(r))
+			}
+		}
+		c.Content = content.Text{Kind: "manifest"}
+		c.Manifest = &content.Manifest{Kind: "manifest", Parts: parts, Relations: relations}
+	default:
+		return content.Command{}, content.ErrUnsupported
+	}
+	if in.SourceRevision != nil {
+		c.Revision = *in.SourceRevision
+	}
+	if in.SourcePosition != nil {
+		c.Position = *in.SourcePosition
+	}
+	if in.Extensions != nil {
+		c.Extensions = extensionsFromTransport(*in.Extensions)
+	}
+	if in.Provenance != nil {
+		if in.Provenance.Normalization != nil {
+			// Engine-owned: only an external normalization publishes it.
+			return content.Command{}, content.ErrInvalid
+		}
+		c.Provenance = map[string]any{}
+		if in.Provenance.Producer != nil {
+			c.Provenance["producer"] = *in.Provenance.Producer
+		}
+		if in.Provenance.ProducerVersion != nil {
+			c.Provenance["producer_version"] = *in.Provenance.ProducerVersion
+		}
+		if in.Provenance.SourceBlobIds != nil {
+			ids := make([]any, 0, len(*in.Provenance.SourceBlobIds))
+			for _, id := range *in.Provenance.SourceBlobIds {
+				ids = append(ids, id)
+			}
+			c.Provenance["source_blob_ids"] = ids
+		}
+	}
+	return c, nil
+}
+
 // referenceDecodeIngestCommand mirrors the legacy multi-pass decode + JSON Schema
 // validation + commandFromTransport pipeline so equivalence tests can verify
 // byte-identical contract verdicts without maintaining a second rule table.
