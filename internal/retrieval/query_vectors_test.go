@@ -265,6 +265,12 @@ func TestQueryVectorCachePanickingEncoderFailsWaiters(t *testing.T) {
 }
 
 func runQueryVectorPanicChild(t *testing.T) {
+	synctest.Test(t, runQueryVectorPanicBubble)
+}
+
+// runQueryVectorPanicBubble runs on the fake clock: waiters must return as soon
+// as the encoder panics, never by outlasting a timeout.
+func runQueryVectorPanicBubble(t *testing.T) {
 	const waiters = 64
 	release := make(chan struct{})
 	var calls atomic.Int32
@@ -291,19 +297,15 @@ func runQueryVectorPanicChild(t *testing.T) {
 			results <- result{err, time.Now()}
 		}()
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		cache.mu.Lock()
-		joined := 0
-		if f := cache.flights[key]; f != nil {
-			joined = f.waiters
-		}
-		cache.mu.Unlock()
-		if joined == waiters {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d of %d waiters joined the flight", joined, waiters)
-		}
+	synctest.Wait()
+	cache.mu.Lock()
+	joined := 0
+	if f := cache.flights[key]; f != nil {
+		joined = f.waiters
+	}
+	cache.mu.Unlock()
+	if joined != waiters {
+		t.Fatalf("%d of %d waiters joined the flight", joined, waiters)
 	}
 	panicked := time.Now()
 	close(release)
@@ -510,6 +512,10 @@ func TestQueryVectorCacheMemoryBound(t *testing.T) {
 }
 
 func TestQueryVectorCacheCancelledLookupsReleaseFlights(t *testing.T) {
+	synctest.Test(t, testQueryVectorCancelledLookupsReleaseFlights)
+}
+
+func testQueryVectorCancelledLookupsReleaseFlights(t *testing.T) {
 	const batches, batch = 10, 1000 // Stay under the race detector's goroutine limit.
 	cache := NewQueryVectorCache()
 	stall := func(ctx context.Context) ([]float32, error) {
@@ -527,26 +533,19 @@ func TestQueryVectorCacheCancelledLookupsReleaseFlights(t *testing.T) {
 				}
 			})
 		}
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
-			cache.mu.Lock()
-			flights := len(cache.flights)
-			cache.mu.Unlock()
-			if flights == batch {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%d of %d flights started", flights, batch)
-			}
+		synctest.Wait()
+		cache.mu.Lock()
+		flights := len(cache.flights)
+		cache.mu.Unlock()
+		if flights != batch {
+			t.Fatalf("%d of %d flights started", flights, batch)
 		}
 		cancel()
 		wg.Wait()
 	}
-	var delta int
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
-		if delta = runtime.NumGoroutine() - baseline; delta <= 2 || time.Now().After(deadline) {
-			break
-		}
-	}
+	// Every flight goroutine has exited once the bubble settles.
+	synctest.Wait()
+	delta := runtime.NumGoroutine() - baseline
 	cache.mu.Lock()
 	flights, failures := len(cache.flights), len(cache.failures)
 	cache.mu.Unlock()
