@@ -414,6 +414,13 @@ func readBoundedIngestBody(w http.ResponseWriter, r *http.Request, limit, reserv
 			avail = ingestChunkReadSize
 		}
 		n, err := r.Body.Read(buf[len(buf) : len(buf)+avail])
+		if err != nil {
+			var large *http.MaxBytesError
+			if errors.As(err, &large) {
+				writeError(w, publicerr.RequestTooLarge, nil)
+				return nil, false
+			}
+		}
 		if n > 0 {
 			newLen := int64(len(buf) + n)
 			if lease != nil && newLen > accounted {
@@ -431,11 +438,8 @@ func readBoundedIngestBody(w http.ResponseWriter, r *http.Request, limit, reserv
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			var large *http.MaxBytesError
 			deadline, hasDeadline := r.Context().Deadline()
-			if errors.As(err, &large) {
-				writeError(w, publicerr.RequestTooLarge, nil)
-			} else if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
+			if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
 				(r.Context().Err() != nil || hasDeadline && !time.Now().Before(deadline)) {
 				// The connection's read deadline may fire before the context timer.
 				writeError(w, publicerr.ContentUnavailable, nil)
