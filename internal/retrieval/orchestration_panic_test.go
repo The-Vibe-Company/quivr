@@ -44,6 +44,14 @@ func (panickingBaseline) Hydrate(context.Context, corpus.Scope, []content.Candid
 	return nil, nil
 }
 
+// panickingLeads hydrates rich candidates but panics looking up their leads.
+type panickingLeads struct{ *richBaseline }
+
+func (panickingLeads) LeadSegments(context.Context, string, []content.LeadSegmentRef) (map[string]string, error) {
+	leak("leads")
+	return nil, nil
+}
+
 type panickingEmbedder struct{ fakeEmbedder }
 
 func (panickingEmbedder) Embed(context.Context, string) ([]float32, error) {
@@ -91,6 +99,13 @@ func TestOrchestrationPanic(t *testing.T) {
 			}}
 		}},
 		{name: "content hydrate", setup: func(s *retrieval.Service) { s.Content.Baseline = panickingBaseline{} }},
+		{name: "content lead segments", mode: "lexical", setup: func(s *retrieval.Service) {
+			gen := content.Generation{ID: "gen-rich", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space"}
+			s.Routing = spaceRouting{"corpus": gen}
+			s.Projection = &spaceProjection{bySpace: map[string][]content.Candidate{"": {{SegmentID: "seg-deep", GenerationID: gen.ID, Score: 0.9}}}}
+			s.Ranker = &richRanker{id: "example.rich", apiRange: ">=0.21.0 <0.22.0", includeLead: true}
+			s.Content = content.Service{Baseline: panickingLeads{&richBaseline{}}, Blobs: richBlobs{}}
+		}},
 		{name: "query embedder", setup: func(s *retrieval.Service) {
 			// The shared query-vector cache encodes on its own goroutine.
 			s.Embedder, s.QueryVectors = panickingEmbedder{}, retrieval.NewQueryVectorCache()

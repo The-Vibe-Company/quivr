@@ -1503,7 +1503,11 @@ func (sv *server) attachLeadsBatch(ctx context.Context, q Request, outs [][]plug
 	}
 	var elapsed time.Duration
 	phase := time.Now()
-	leadIDs, err := sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+	var leadIDs map[string]string
+	err := guard(ctx, "content.lead_segments", func() (err error) {
+		leadIDs, err = sv.s.Content.LeadSegments(ctx, sv.scope, refs)
+		return err
+	})
 	elapsed += time.Since(phase)
 	if err != nil {
 		return elapsed, ErrUnavailable
