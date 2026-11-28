@@ -810,8 +810,9 @@ var errShardPanicked = errors.New("postgres: hydrate shard panicked")
 
 // runShards runs shards 0..n-1 concurrently and returns once every shard has
 // returned. The first failure cancels the others' context and is returned.
-// A panicking shard fails like an error: only the panic's type and stack are
-// logged, since its value may quote a query, an Organization or content.
+// A shard that panics or exits abnormally fails like an error: only the
+// panic's type and stack are logged, since its value may quote a query, an
+// Organization or content.
 func runShards(ctx context.Context, n int, run func(context.Context, int) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -830,8 +831,12 @@ func runShards(ctx context.Context, n int, run func(context.Context, int) error)
 	}
 	for i := range n {
 		wg.Go(func() {
+			// recover returns nil after runtime.Goexit: a shard that did
+			// not return normally fails even without a panic value.
+			panicking := true
 			defer func() {
-				if r := recover(); r != nil {
+				if panicking {
+					r := recover()
 					slog.ErrorContext(ctx, "hydrate shard panicked", "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
 					fail(errShardPanicked)
 				}
@@ -839,6 +844,7 @@ func runShards(ctx context.Context, n int, run func(context.Context, int) error)
 			if err := run(ctx, i); err != nil {
 				fail(err)
 			}
+			panicking = false
 		})
 	}
 	wg.Wait()

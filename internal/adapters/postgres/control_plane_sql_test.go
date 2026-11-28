@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -171,18 +172,32 @@ SELECT 'example',$1||'-version-'||n,'generation',$1||'-'||$2||'-'||n,$3 FROM gen
 	}
 	// Go decodes JSON keys case-insensitively and PostgreSQL does not. A
 	// generation stored with such keys is still described exactly as Go
-	// reads it, through the per-space fallback.
+	// reads it, through the per-space fallback: first with its served owner
+	// absent (eligibility decides emptiness), then with that owner live.
 	exec(`INSERT INTO projection_generations(id,collection,profile_version,space_id,spaces_projected,spaces)
-VALUES('mixed-case','mixed-case','fixture','engine',true,'[{"ID":"served","Role":"served","owner_plugin_id":"example.owner"}]');
+VALUES('mixed-case','mixed-case','fixture','engine',true,'[{"ID":"served","Role":"served","OWNER_PLUGIN_ID":"example.owner"}]');
 UPDATE corpus_projection_routes SET generation_id='mixed-case' WHERE corpus_id='corpus-15'`)
-	g, coverage, err := spaces.DescribeVectorSpaces(ctx, "example", "corpus-15")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := goldenCoverage(15, false)
-	if wantG := (content.Generation{ID: "mixed-case", Collection: "mixed-case", ProfileVersion: "fixture", SpaceID: "engine", SpacesProjected: true,
-		Spaces: []content.GenerationSpace{{ID: "served", Role: "served", OwnerPluginID: "example.owner"}}}); !reflect.DeepEqual(g, wantG) || !reflect.DeepEqual(coverage, want) {
-		t.Fatalf("mixed-case generation: %#v, %#v; want %#v, %#v", g, coverage, wantG, want)
+	wantG := content.Generation{ID: "mixed-case", Collection: "mixed-case", ProfileVersion: "fixture", SpaceID: "engine", SpacesProjected: true,
+		Spaces: []content.GenerationSpace{{ID: "served", Role: "served", OwnerPluginID: "example.owner"}}}
+	for _, live := range []bool{false, true} {
+		if live {
+			exec(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id,role)
+SELECT 'example','corpus-15-version-'||n,'mixed-case','corpus-15-example.owner-'||n,'served' FROM generate_series(1,3) n`)
+		}
+		g, coverage, err := spaces.DescribeVectorSpaces(ctx, "example", "corpus-15")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := goldenCoverage(15, false)
+		if live {
+			one := int64(1)
+			want[0].ServingSegments = &one
+		}
+		if !reflect.DeepEqual(g, wantG) || !reflect.DeepEqual(coverage, want) {
+			got, _ := json.Marshal(coverage)
+			wantJSON, _ := json.Marshal(want)
+			t.Fatalf("mixed-case generation, owner live %t: %#v\n got %s\nwant %s", live, g, got, wantJSON)
+		}
 	}
 }
 
@@ -399,36 +414,97 @@ func TestVisibilitySnapshotWaitersOutliveTheLoadingCaller(t *testing.T) {
 	})
 }
 
-// Owns Hydrate's fan-out failure contract: a panicking shard becomes an
-// error, cancels its siblings, and every shard returns before Hydrate does
-// (synctest fails a bubble that leaks a goroutine). The log names the panic
-// type and stack, never the panic value, which may quote private data.
+// Owns Hydrate's fan-out failure contract: a shard that panics or exits
+// without returning (runtime.Goexit, where recover yields nil) becomes an
+// error instead of an empty success, cancels its siblings, and every shard
+// returns before Hydrate does (synctest fails a bubble that leaks a
+// goroutine). The log names the panic type and stack, never the panic value,
+// which may quote private data.
 func TestHydrateShardPanicCancelsSiblings(t *testing.T) {
-	var logs strings.Builder
-	defer slog.SetDefault(slog.Default())
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	const private = "organization=private-org query=private-query"
-	synctest.Test(t, func(t *testing.T) {
-		const shards = 4
-		var cancelled atomic.Int64
-		err := runShards(t.Context(), shards, func(ctx context.Context, i int) error {
-			if i == 0 {
-				synctest.Wait() // Every sibling is in flight.
-				panic(fmt.Errorf("decode failed: %s", private))
+	for _, tc := range []struct {
+		name, panicType string
+		exit            func()
+	}{
+		{"panic", "*errors.errorString", func() { panic(fmt.Errorf("decode failed: %s", private)) }},
+		{"goexit", "<nil>", runtime.Goexit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLogs(t)
+			synctest.Test(t, func(t *testing.T) {
+				const shards = 4
+				var cancelled atomic.Int64
+				err := runShards(t.Context(), shards, func(ctx context.Context, i int) error {
+					if i == 0 {
+						synctest.Wait() // Every sibling is in flight.
+						tc.exit()
+					}
+					<-ctx.Done()
+					cancelled.Add(1)
+					return ctx.Err()
+				})
+				if !errors.Is(err, errShardPanicked) || strings.Contains(err.Error(), "private") {
+					t.Fatalf("runShards error %v, want errShardPanicked without the panic value", err)
+				}
+				if got := cancelled.Load(); got != shards-1 {
+					t.Fatalf("%d of %d siblings observed cancellation before runShards returned", got, shards-1)
+				}
+			})
+			out := logs.String()
+			if !strings.Contains(out, "panic_type="+tc.panicType) || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
+				t.Fatalf("panic log %q: want panic_type %s and stack only", out, tc.panicType)
 			}
-			<-ctx.Done()
-			cancelled.Add(1)
-			return ctx.Err()
 		})
-		if !errors.Is(err, errShardPanicked) || strings.Contains(err.Error(), "private") {
-			t.Fatalf("runShards error %v, want errShardPanicked without the panic value", err)
+	}
+}
+
+// Owns the shared-load panic contract: a load that panics fails its flight
+// with errSourceLoadInterrupted for the loading caller and every waiter,
+// caches nothing, and logs only the panic type and stack.
+func TestVisibilitySnapshotLoadPanicFailsTheFlight(t *testing.T) {
+	logs := captureLogs(t)
+	synctest.Test(t, func(t *testing.T) {
+		var s VisibilityStore
+		key := visibilityCorpus{"example", "corpus"}
+		release := make(chan struct{})
+		var calls atomic.Int64
+		panicking := func(ctx context.Context, _ visibilityCorpus) (sourceSnapshot, error) {
+			calls.Add(1)
+			<-release
+			panic("load failed for organization=private-org")
 		}
-		if got := cancelled.Load(); got != shards-1 {
-			t.Fatalf("%d of %d siblings observed cancellation before runShards returned", got, shards-1)
+		errs := make([]error, 2)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Go(func() { _, errs[i] = s.snapshotUsing(t.Context(), key, panicking) })
+			synctest.Wait()
+		}
+		close(release)
+		wg.Wait()
+		for i, err := range errs {
+			if !errors.Is(err, errSourceLoadInterrupted) {
+				t.Fatalf("caller %d: err %v, want errSourceLoadInterrupted", i, err)
+			}
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("%d loads, want one shared load", calls.Load())
+		}
+		load := &sourceLoad{}
+		if snapshot, err := s.snapshotUsing(t.Context(), key, load.load); err != nil || load.calls.Load() != 1 || snapshot.revision != 1 {
+			t.Fatalf("after a panicked load: snapshot %+v, err %v, %d loads; want a fresh load", snapshot, err, load.calls.Load())
 		}
 	})
-	out := logs.String()
-	if !strings.Contains(out, "panic_type=*errors.errorString") || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
+	if out := logs.String(); !strings.Contains(out, "panic_type=string") || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
 		t.Fatalf("panic log %q: want panic_type and stack only", out)
 	}
+}
+
+// captureLogs routes the default logger to a buffer for the test.
+func captureLogs(t *testing.T) *strings.Builder {
+	t.Helper()
+	logs := &strings.Builder{}
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	return logs
 }

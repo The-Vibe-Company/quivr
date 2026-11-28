@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -58,7 +59,7 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			// PostgreSQL lists the spaces from canonical JSON keys; a
 			// generation whose stored keys only Go's decoder matches is
 			// described space by space instead.
-			if d, err = s.describeSpace(ctx, org, corpusID, g.ID, id); err != nil {
+			if d, err = s.describeSpace(ctx, org, corpusID, g, id); err != nil {
 				return g, nil, err
 			}
 		}
@@ -110,8 +111,11 @@ type describedSpace struct {
 	present  *bool
 }
 
-// describeSpace reads one space's registry row and owner presence.
-func (s SpaceStore) describeSpace(ctx context.Context, org, corpusID, generationID, id string) (describedSpace, error) {
+// describeSpace reads one space's registry row and owner presence. Presence
+// selects the owner's served space from g as Go decoded it: its spaces and
+// ingestion routing are passed re-encoded with canonical keys, which the
+// stored generation's JSON selectors would otherwise miss.
+func (s SpaceStore) describeSpace(ctx context.Context, org, corpusID string, g content.Generation, id string) (describedSpace, error) {
 	var d describedSpace
 	d.coverage.ID = id
 	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT `+spaceMetadataSQL+` FROM vector_spaces vs WHERE vs.id=$1`, id).
@@ -122,9 +126,18 @@ func (s SpaceStore) describeSpace(ctx context.Context, org, corpusID, generation
 	if d.coverage.OwnerPluginID == "" {
 		return d, nil
 	}
+	spaces, err := json.Marshal(append([]content.GenerationSpace{}, g.Spaces...))
+	if err != nil {
+		return d, err
+	}
+	routing, err := json.Marshal(g.IngestionRouting)
+	if err != nil {
+		return d, err
+	}
 	present := false
-	args := []any{org, corpusID, generationID, d.coverage.OwnerPluginID, id}
-	sql := presenceVisibility(ctx, spaceOwnerPresenceSQL, &args)
+	args := []any{org, corpusID, g.ID, d.coverage.OwnerPluginID, id, spaces, routing}
+	decoded := `(SELECT eg.id,eg.space_id,eg.coverage_routed,$7::jsonb AS ingestion_routing,$6::jsonb AS spaces FROM ` + effectiveGenerationsSQL + ` eg)`
+	sql := presenceVisibility(ctx, spaceOwnerPresence(decoded, "$3", "$4", "$5"), &args)
 	err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
 	d.present = &present
 	return d, err
@@ -139,7 +152,7 @@ func (s SpaceStore) describeSpace(ctx context.Context, org, corpusID, generation
 func describeVectorSpacesSQL(ctx context.Context, args *[]any) string {
 	const spaces = `(CASE WHEN jsonb_typeof(routed.spaces)='array' THEN routed.spaces ELSE '[]' END)`
 	const projected = `(routed.spaces_projected AND jsonb_array_length(` + spaces + `)>0)`
-	presence := presenceVisibility(ctx, spaceOwnerPresence("routed.id", "vs.owner_plugin_id", "listed.id"), args)
+	presence := presenceVisibility(ctx, spaceOwnerPresence(effectiveGenerationsSQL, "routed.id", "vs.owner_plugin_id", "listed.id"), args)
 	eligibility := presenceVisibility(ctx, corpusEligibilityPresenceSQL, args)
 	return `WITH routed AS MATERIALIZED (` + routedGenerationQuerySQL + `
 ), listed AS MATERIALIZED (
@@ -177,10 +190,11 @@ func spaceMetadataTargets(c *content.SpaceCoverage) []any {
 }
 
 // spaceOwnerPresence reports whether the owner's served projection in the
-// generation selects the space for a current eligible Record of Corpus $2.
+// generation selects the space for a current eligible Record of Corpus $2;
+// generations is the relation the generation's routing settings come from.
 // Start at this Corpus's Records; correlated point reads keep an absent owner
 // from scanning another Corpus's coverage, even with stale statistics.
-func spaceOwnerPresence(generation, owner, space string) string {
+func spaceOwnerPresence(generations, generation, owner, space string) string {
 	return `SELECT EXISTS(
  SELECT 1 FROM records r
  JOIN LATERAL (
@@ -189,7 +203,7 @@ func spaceOwnerPresence(generation, owner, space string) string {
  ) v ON v.record_id=r.id
  JOIN LATERAL (
   SELECT 1 FROM projection_coverage pc
-  JOIN ` + effectiveGenerationsSQL + ` selected_g ON selected_g.id=pc.generation_id
+  JOIN ` + generations + ` selected_g ON selected_g.id=pc.generation_id
   WHERE (pc.organization,pc.version_id,pc.generation_id,pc.plugin_id)=(v.organization,v.id,` + generation + `,` + owner + `)
   AND ` + effectiveServingSQL("pc", "selected_g") + `
   AND ` + space + `=` + selectedVectorSpaceSQL("pc", "selected_g") + ` OFFSET 0
@@ -197,7 +211,7 @@ func spaceOwnerPresence(generation, owner, space string) string {
  WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
 }
 
-var spaceOwnerPresenceSQL = spaceOwnerPresence("$3", "$4", "$5")
+var spaceOwnerPresenceSQL = spaceOwnerPresence(effectiveGenerationsSQL, "$3", "$4", "$5")
 
 const corpusEligibilityPresenceSQL = `SELECT EXISTS(
  SELECT 1 FROM records r JOIN LATERAL (

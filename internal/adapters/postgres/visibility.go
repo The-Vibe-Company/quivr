@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -224,10 +226,18 @@ func (s *VisibilityStore) snapshotUsing(ctx context.Context, key visibilityCorpu
 	}
 }
 
-// fly runs flight f and publishes its result, even when load panics.
+// fly runs flight f and publishes its result. A load that panics or exits
+// abnormally fails the flight with errSourceLoadInterrupted for the loading
+// caller and every waiter; only the panic's type and stack are logged, since
+// its value may quote a query or an Organization.
 func (s *VisibilityStore) fly(ctx context.Context, key visibilityCorpus, f *sourceFlight, start time.Time, load func(context.Context, visibilityCorpus) (sourceSnapshot, error)) {
-	f.err = errSourceLoadInterrupted
+	panicking := true
 	defer func() {
+		if panicking {
+			r := recover()
+			slog.ErrorContext(ctx, "visibility source load panicked", "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
+			f.snapshot, f.err, f.abandoned = sourceSnapshot{}, errSourceLoadInterrupted, false
+		}
 		s.mu.Lock()
 		if s.flights[key] == f {
 			delete(s.flights, key)
@@ -242,6 +252,7 @@ func (s *VisibilityStore) fly(ctx context.Context, key visibilityCorpus, f *sour
 	}()
 	f.snapshot, f.err = load(ctx, key)
 	f.abandoned = f.err != nil && ctx.Err() != nil
+	panicking = false
 }
 
 // store caches a snapshot as the most recently used. It holds s.mu.
