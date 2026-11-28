@@ -618,8 +618,10 @@ func (s *Store) resolveAmbiguousPassages(ctx context.Context, collection string,
 	var idFilter filter
 	if tenantFrom(ctx) != "" {
 		segIDs := make([]string, 0, len(rows))
+		seen := make(map[string]struct{}, len(rows))
 		for _, row := range rows {
-			if len(segIDs) == 0 || segIDs[len(segIDs)-1] != row.SegmentID {
+			if _, ok := seen[row.SegmentID]; !ok {
+				seen[row.SegmentID] = struct{}{}
 				segIDs = append(segIDs, row.SegmentID)
 			}
 		}

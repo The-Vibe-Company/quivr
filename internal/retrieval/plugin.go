@@ -655,10 +655,25 @@ func (sv *server) serveRound(ctx context.Context, q Request, requests []plugins.
 		}
 	}()
 
+	profileIndices := make([]int, 0, n)
+	for i, c := range requests {
+		if c.Primitive == plugins.PrimitiveProfile {
+			profileIndices = append(profileIndices, i)
+		}
+	}
+	// When a round composes multiple profile requests, execute those profile
+	// calls sequentially in index order so each sees the exact remaining cost
+	// allowance after preceding paid work, while still running primitive legs
+	// concurrently alongside them.
+	serializeProfiles := len(profileIndices) > 1
+
 	fetchStart := time.Now()
 	var wg sync.WaitGroup
-	wg.Add(n)
 	for i, c := range requests {
+		if serializeProfiles && c.Primitive == plugins.PrimitiveProfile {
+			continue
+		}
+		wg.Add(1)
 		go func(i int, c plugins.CandidateRequest) {
 			defer wg.Done()
 			var err error
@@ -681,6 +696,27 @@ func (sv *server) serveRound(ctx context.Context, q Request, requests []plugins.
 				}
 			}
 		}(i, c)
+	}
+	if serializeProfiles {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, i := range profileIndices {
+				if ctxs[i].Err() != nil {
+					errs[i] = ctxs[i].Err()
+					return
+				}
+				var err error
+				served[i], fallbacks[i], legPhases[i], err = sv.serveProfile(ctxs[i], q, requests[i])
+				if err != nil {
+					errs[i] = err
+					for j := i + 1; j < n; j++ {
+						cancels[j]()
+					}
+					return
+				}
+			}
+		}()
 	}
 	wg.Wait()
 	sv.timing.add(mergeWavePhases(legPhases, time.Since(fetchStart)))

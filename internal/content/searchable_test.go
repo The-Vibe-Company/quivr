@@ -149,6 +149,11 @@ type fixtureHydrationRepo struct {
 	deniedOrg map[string]bool
 	lookups   atomic.Int64
 	rechecks  atomic.Int64
+	nonAtomic atomic.Bool
+}
+
+func (r *fixtureHydrationRepo) HydrateIsAtomic(_ context.Context, _ int) bool {
+	return !r.nonAtomic.Load()
 }
 
 func (r *fixtureHydrationRepo) Hydrate(_ context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
@@ -329,6 +334,17 @@ func TestHydrationBlobCacheReusesImmutableBlobsWithoutBypassingFences(t *testing
 	}
 	if blobs.reads.Load() != 6 || repo.rechecks.Load() != 4 {
 		t.Fatalf("mixed batch counts: reads=%d rechecks=%d; want 6, 4", blobs.reads.Load(), repo.rechecks.Load())
+	}
+
+	// Non-atomic (sharded) lookup must still run RecheckHydration even when BlobCache serves 100% of blobs.
+	repo.nonAtomic.Store(true)
+	got, err = svc.Hydrate(context.Background(), orgA, []content.Candidate{{SegmentID: "packed"}})
+	repo.nonAtomic.Store(false)
+	if err != nil || got[0].Segment.Text != joined {
+		t.Fatalf("sharded warm hydration = %+v, %v", got, err)
+	}
+	if blobs.reads.Load() != 6 || repo.rechecks.Load() != 5 {
+		t.Fatalf("sharded warm batch counts: reads=%d rechecks=%d; want 6, 5", blobs.reads.Load(), repo.rechecks.Load())
 	}
 
 	// Digest mismatch against blob.SHA256 must never populate the cache.

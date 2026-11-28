@@ -712,12 +712,22 @@ func (b blobSlicer) slice(start, end int) (string, bool) {
 // while letting a 50-hit page complete in a single round-trip wave.
 const blobReadParallelism = 64
 
+// HydrationAtomicityChecker reports whether Baseline.Hydrate executes under a
+// single consistent visibility fence for a batch of n candidates. Backends that
+// shard large batches across independent connections return false so Service.Hydrate
+// preserves the post-lookup RecheckHydration fence even when BlobCache serves
+// every excerpt locally.
+type HydrationAtomicityChecker interface {
+	HydrateIsAtomic(ctx context.Context, candidates int) bool
+}
+
 // Hydrate rechecks candidates and reads their excerpts from canonical storage
 // as one batch: one lookup, one read per distinct uncached blob, then one recheck
-// when any uncached blob was read from canonical storage, since access and
-// currentness may change while immutable bytes are fetched. When every blob is
-// served synchronously from BlobCache with zero external reads, the initial
-// Baseline.Hydrate lookup already enforces every visibility and currentness fence.
+// when any uncached blob was read from canonical storage or the initial lookup
+// spanned multiple independent shards, since access and currentness may change
+// while bytes are fetched or between shards. When every blob is served
+// synchronously from BlobCache under a single atomic lookup, the initial
+// Baseline.Hydrate already enforces every visibility and currentness fence.
 // The result holds, at each candidate's index, its hydration, or nothing when
 // the caller may not read it or it is no longer current.
 func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate) (map[int]Hydrated, error) {
@@ -746,7 +756,11 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 		out[i] = l.Hydrated
 		found = append(found, i)
 	}
-	if len(found) == 0 || !readBlobs {
+	atomicLookup := true
+	if checker, ok := s.Baseline.(HydrationAtomicityChecker); ok {
+		atomicLookup = checker.HydrateIsAtomic(ctx, len(cs))
+	}
+	if len(found) == 0 || (!readBlobs && atomicLookup) {
 		return out, nil
 	}
 	recheck := make([]Candidate, len(found))

@@ -315,6 +315,16 @@ func TestAStalledQueryModelKeepsItsUnavailableCodeAtTheDeadline(t *testing.T) {
 	})
 }
 
+type barrierSpaceEncoder struct {
+	space  string
+	encode func(context.Context) ([]float32, error)
+}
+
+func (b barrierSpaceEncoder) Owns(space string) bool { return space == b.space }
+func (b barrierSpaceEncoder) EncodeQuery(ctx context.Context, _, _, _ string) ([]float32, error) {
+	return b.encode(ctx)
+}
+
 type barrierProjection struct {
 	search func(context.Context, []retrieval.Route, corpus.Scope, retrieval.Request) ([]content.Candidate, error)
 }
@@ -442,27 +452,48 @@ func TestMultiRequestRoundExecutesConcurrentlyAndCoalescesHydration(t *testing.T
 				},
 			}
 		}
-		// Case A: index 0 fails with ErrSourceFilterUnavailable while index 1 fails in projection.
-		// Index 0 must win even if index 1 fails first.
+		// Case A: index 1 fails first in Projection.Search and signals leg1Failed;
+		// index 0 waits on leg1Failed before returning ErrQueryTooLong. Index 0 must win.
+		leg1Failed := make(chan struct{})
 		s := retrieval.Service{
-			Embedder:   fakeEmbedder{},
-			Routing:    fakeRouting{unprojected: true},
-			Projection: newFailingLeg1Projection(),
-			Registry:   spaceList{},
+			Spaces: barrierSpaceEncoder{
+				space: "space",
+				encode: func(ctx context.Context) ([]float32, error) {
+					select {
+					case <-leg1Failed:
+						return nil, retrieval.ErrQueryTooLong
+					case <-ctx.Done():
+						return nil, fmt.Errorf("leg 0 canceled before returning: %w", ctx.Err())
+					}
+				},
+			},
+			Routing: fakeRouting{},
+			Projection: barrierProjection{
+				search: func(_ context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+					if q.Mode == "lexical" {
+						close(leg1Failed)
+						return nil, errors.New("index leg 1 failed")
+					}
+					return nil, errors.New("unexpected semantic projection call")
+				},
+			},
+			Registry: spaceList{},
 			Ranker: &scriptedRanker{answer: func(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
 				return answer(map[string]any{"requests": []any{
-					map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": 2, "filter": map[string]any{"source_namespaces": []string{"feed"}}},
 					map[string]any{"primitive": "near_vector", "space": "space", "query_text": q.Query.Text, "k": 2},
+					map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": 2},
 				}})
 			}},
 			Content: content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}},
 		}
 		_, err := s.Search(t.Context(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "default"})
-		if !errors.Is(err, retrieval.ErrSourceFilterUnavailable) {
-			t.Fatalf("error = %v, want ErrSourceFilterUnavailable from index 0", err)
+		if !errors.Is(err, retrieval.ErrQueryTooLong) {
+			t.Fatalf("error = %v, want ErrQueryTooLong from index 0 after index 1 failed first", err)
 		}
 
 		// Case B: index 0 succeeds after leg 1 fails -> index 1's ErrUnavailable is returned.
+		s.Spaces = nil
+		s.Embedder = fakeEmbedder{}
 		s.Routing = fakeRouting{}
 		s.Projection = newFailingLeg1Projection()
 		s.Ranker = &scriptedRanker{answer: fusion}

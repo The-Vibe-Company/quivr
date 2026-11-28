@@ -356,6 +356,10 @@ func TestTailPreservationWhenCandidateCountBelowLimit(t *testing.T) {
 			}
 			// Head must be {s1, s2}, and the full tail must be strictly monotonic descending
 			// below the lowest reranked head hit with finite scores.
+			headIDs := []string{answer.Ranking[0].SegmentID, answer.Ranking[1].SegmentID}
+			if !((headIDs[0] == "s1" && headIDs[1] == "s2") || (headIDs[0] == "s2" && headIDs[1] == "s1")) {
+				t.Fatalf("head IDs = %v, want permutation of [s1 s2]", headIDs)
+			}
 			for i, hit := range answer.Ranking {
 				if math.IsNaN(hit.Score) || math.IsInf(hit.Score, 0) {
 					t.Fatalf("hit %d has non-finite score %v", i, hit.Score)
