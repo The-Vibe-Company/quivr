@@ -101,6 +101,7 @@ var eqVersion = content.Version{ID: "version", Manifest: content.Manifest{Kind: 
 	{Key: "bad", Role: "body", Content: content.Text{Kind: "text", Text: invalidText}},
 	{Key: "surr", Role: "body", Content: content.Text{Kind: "text", Text: surrogateText}},
 	{Key: "empty", Role: "body", Content: content.Text{Kind: "text", Text: ""}},
+	{Key: "long", Role: "body", Content: content.Text{Kind: "text", Text: multibyteText(300)}},
 	{Key: "img", Role: "figure", Content: content.Text{Kind: "blob", BlobID: "blob", MediaType: "image/png", BlobSHA256: blobSHA}},
 }}}
 
@@ -163,13 +164,14 @@ func TestSaveSegmentationVerdictsOverRuneAndByteCoordinates(t *testing.T) {
 	rng := func(key string, start, end int) content.SourceRange {
 		return content.SourceRange{PartKey: key, Start: start, End: end}
 	}
-	manyRanges := make([]content.SourceRange, 257)
-	for i := range manyRanges {
-		manyRanges[i] = rng("body", i%bodyRunes, i%bodyRunes+1)
+	// Ordered one-rune ranges, valid except for how many there are.
+	ordered := func(n int) []content.SourceRange {
+		ranges := make([]content.SourceRange, n)
+		for i := range ranges {
+			ranges[i] = rng("long", i, i+1)
+		}
+		return ranges
 	}
-	tooMany := seg("body", 0, 1)
-	tooMany.Derivation.SourceRanges = manyRanges
-	tooMany = reid(tooMany)
 
 	cases := []struct {
 		name     string
@@ -241,7 +243,8 @@ func TestSaveSegmentationVerdictsOverRuneAndByteCoordinates(t *testing.T) {
 		{"source separator with NUL", []content.Segment{packed("\x00", rng("body", 0, 3), rng("second", 0, 6))}, nil, false},
 		{"source separator with invalid UTF-8", []content.Segment{packed("\xff", rng("body", 0, 3), rng("second", 0, 6))}, nil, false},
 		{"source text joined without separator", []content.Segment{edit(packed("\n", rng("body", 0, 3), rng("second", 0, 6)), func(p *content.Segment) { p.Text = strings.ReplaceAll(p.Text, "\n", "") })}, nil, false},
-		{"257 source ranges", []content.Segment{tooMany}, nil, false},
+		{"256 source ranges", []content.Segment{packed(" ", ordered(256)...)}, nil, true},
+		{"257 source ranges", []content.Segment{packed(" ", ordered(257)...)}, nil, false},
 		{"many valid segments", []content.Segment{seg("body", 0, 5), seg("bad", 0, 3), seg("surr", 2, 5), blobSeg(), packed("\n", rng("body", 5, 9), rng("second", 0, 6))}, nil, true},
 		{"one invalid segment among many", []content.Segment{seg("body", 0, 5), seg("body", 5, 9), edit(seg("body", 9, 12), func(p *content.Segment) { p.Derivation.UTF8End++ })}, nil, false},
 		{"no segments", nil, nil, false},
