@@ -15,10 +15,16 @@ type recordBundle struct {
 	RecordID      string
 	BestSeg       quivrplugin.Candidate
 	HasBestSeg    bool
-	LeadSeg       *quivrplugin.Candidate
-	DeepBestSeg   *quivrplugin.Candidate
-	SecondSeg     *quivrplugin.Candidate
-	DenseScore    float64
+	LeadSeg         *quivrplugin.Candidate
+	DeepBestSeg     *quivrplugin.Candidate
+	SecondSeg       *quivrplugin.Candidate
+	BodyLeadSeg     *quivrplugin.Candidate
+	BodyBestSeg     *quivrplugin.Candidate
+	BodySecondSeg   *quivrplugin.Candidate
+	BodyDeepBestSeg *quivrplugin.Candidate
+	HasBodyDense    bool
+	CardSeg         *quivrplugin.Candidate
+	DenseScore      float64
 	HasDense      bool
 	DenseRank     int
 	LexicalScore  float64
@@ -758,12 +764,50 @@ func recordKey(c quivrplugin.Candidate) string {
 	return c.SegmentID
 }
 
+func isBodyPart(c quivrplugin.Candidate) bool {
+	return c.PartKey == "" || c.PartKey == "body" || c.PartKey == "title"
+}
+
 // buildSurrogate builds the document text passed to the deep reranker.
 // In "inverted_pyramid" mode, it explicitly pairs lead context with the best
 // matching passage (or annotates deep-only excerpts whose lead did not match).
+// In "inverted_pyramid_verbatim" mode, it decouples Stage-1 structured card
+// retrieval from Stage-2 reranking by always preferring verbatim body/title
+// segments for the Inverted-Pyramid surrogate (preventing synthetic cards from
+// overwriting [LEAD] or hiding verbatim dates/status/passing-mention cues).
 func buildSurrogate(b *recordBundle, mode string, maxChars int) string {
 	if !b.HasBestSeg {
 		return ""
+	}
+	if mode == "inverted_pyramid_verbatim" || mode == "inverted_pyramid_verbatim_plus_card" {
+		if b.BodyBestSeg != nil || b.BodyLeadSeg != nil {
+			best := b.BodyBestSeg
+			if best == nil {
+				best = b.BodyLeadSeg
+			}
+			vb := &recordBundle{
+				RecordID:    b.RecordID,
+				BestSeg:     *best,
+				HasBestSeg:  true,
+				LeadSeg:     b.BodyLeadSeg,
+				DeepBestSeg: b.BodyDeepBestSeg,
+				SecondSeg:   b.BodySecondSeg,
+			}
+			if mode == "inverted_pyramid_verbatim_plus_card" && b.CardSeg != nil {
+				cardText := strings.TrimSpace(candidateBodyText(*b.CardSeg))
+				if cardText != "" {
+					bodyBudget := max(1200, maxChars-480)
+					base := buildSurrogate(vb, "inverted_pyramid", bodyBudget)
+					rem := maxChars - utf8.RuneCountInString(base) - 24
+					if rem >= 120 {
+						return base + "\n\n[CARD]: " + truncateRunes(cardText, rem)
+					}
+					return truncateRunes(base, maxChars)
+				}
+			}
+			return buildSurrogate(vb, "inverted_pyramid", maxChars)
+		}
+		return buildSurrogate(b, "inverted_pyramid", maxChars)
 	}
 	bestText := strings.TrimSpace(candidateBodyText(b.BestSeg))
 	if mode == "raw" {

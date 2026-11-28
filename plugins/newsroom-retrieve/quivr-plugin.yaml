@@ -259,7 +259,7 @@ configuration:
         description: Gracefully return Stage-1 default ranking when the deep reranker times out or errors.
       surrogate_mode:
         type: string
-        enum: [raw, inverted_pyramid]
+        enum: [raw, inverted_pyramid, inverted_pyramid_verbatim, inverted_pyramid_verbatim_plus_card]
         default: inverted_pyramid
         description: Document surrogate representation sent to the deep reranker.
       adaptive_cascade:

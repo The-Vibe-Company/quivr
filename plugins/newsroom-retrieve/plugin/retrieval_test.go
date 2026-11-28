@@ -366,4 +366,35 @@ func TestFieldLexicalAndPartKeyBoosts(t *testing.T) {
 	}
 }
 
+func TestVerbatimSurrogateDecouplesCardFromReranker(t *testing.T) {
+	b := &recordBundle{
+		RecordID: "r1",
+		BestSeg: quivrplugin.Candidate{
+			SegmentID: "s_card", RecordID: "r1", PartKey: "entity_card", Start: 0,
+			Text: "Sujet central: synthetic summary card", Score: 12.0,
+		},
+		HasBestSeg: true,
+		LeadSeg: &quivrplugin.Candidate{
+			SegmentID: "s_card", RecordID: "r1", PartKey: "entity_card", Start: 0,
+			Text: "Sujet central: synthetic summary card", Score: 12.0,
+		},
+		CardSeg: &quivrplugin.Candidate{
+			SegmentID: "s_card", RecordID: "r1", PartKey: "entity_card", Start: 0,
+			Text: "Sujet central: synthetic summary card", Score: 12.0,
+		},
+		BodyBestSeg: &quivrplugin.Candidate{
+			SegmentID: "s_deep", RecordID: "r1", PartKey: "body", Start: 1200,
+			Text: "Verbatim deep passage with exact date and status.", Score: 0.72,
+		},
+	}
+	got := buildSurrogate(b, "inverted_pyramid_verbatim", 2000)
+	if !strings.Contains(got, "[DEEP BODY EXCERPT — NOT IN ARTICLE LEAD]: Verbatim deep passage") {
+		t.Fatalf("expected verbatim deep excerpt tag, got %q", got)
+	}
+	gotPlus := buildSurrogate(b, "inverted_pyramid_verbatim_plus_card", 2000)
+	if !strings.Contains(gotPlus, "[CARD]: Sujet central: synthetic summary card") {
+		t.Fatalf("expected appended card in verbatim_plus_card mode, got %q", gotPlus)
+	}
+}
+
 

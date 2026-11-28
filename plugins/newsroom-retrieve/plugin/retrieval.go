@@ -388,6 +388,48 @@ func fuseAndScoreWithQPP(
 	denseGrouped, lexicalFull, lexicalEntity, fieldLexical, denseUngrouped []quivrplugin.Candidate,
 ) ([]*recordBundle, []quivrplugin.Candidate) {
 	byRecord := map[string]*recordBundle{}
+	addBodySeg := func(b *recordBundle, c quivrplugin.Candidate, fromDense bool) {
+		if !isBodyPart(c) {
+			if b.CardSeg == nil || c.Score > b.CardSeg.Score {
+				cp := c
+				b.CardSeg = &cp
+			}
+			return
+		}
+		if isLeadSegment(c) {
+			if b.BodyLeadSeg == nil || c.Score > b.BodyLeadSeg.Score || (c.Score == b.BodyLeadSeg.Score && c.SegmentID < b.BodyLeadSeg.SegmentID) {
+				cp := c
+				b.BodyLeadSeg = &cp
+			}
+		} else {
+			if b.BodyDeepBestSeg == nil || c.Score > b.BodyDeepBestSeg.Score || (c.Score == b.BodyDeepBestSeg.Score && c.SegmentID < b.BodyDeepBestSeg.SegmentID) {
+				cp := c
+				b.BodyDeepBestSeg = &cp
+			}
+		}
+		if fromDense {
+			if b.BodyBestSeg == nil || !b.HasBodyDense || c.Score > b.BodyBestSeg.Score || (c.Score == b.BodyBestSeg.Score && c.SegmentID < b.BodyBestSeg.SegmentID) {
+				if b.BodyBestSeg != nil && b.HasBodyDense && b.BodyBestSeg.SegmentID != c.SegmentID {
+					if b.BodySecondSeg == nil || b.BodyBestSeg.Score > b.BodySecondSeg.Score {
+						prev := *b.BodyBestSeg
+						b.BodySecondSeg = &prev
+					}
+				}
+				cp := c
+				b.BodyBestSeg = &cp
+				b.HasBodyDense = true
+			} else if b.BodyBestSeg.SegmentID != c.SegmentID && (b.BodySecondSeg == nil || c.Score > b.BodySecondSeg.Score) {
+				cp := c
+				b.BodySecondSeg = &cp
+			}
+		} else if !b.HasBodyDense {
+			if b.BodyBestSeg == nil || c.Score > b.BodyBestSeg.Score {
+				cp := c
+				b.BodyBestSeg = &cp
+			}
+		}
+	}
+
 	getBundle := func(c quivrplugin.Candidate) *recordBundle {
 		key := recordKey(c)
 		b, ok := byRecord[key]
@@ -414,6 +456,7 @@ func fuseAndScoreWithQPP(
 		sc := partKeyBoostedScore(c, cfg.PartKeyBoosts)
 		c.Score = sc
 		b := getBundle(c)
+		addBodySeg(b, c, true)
 		if !b.HasDense || sc > b.DenseScore || (sc == b.DenseScore && c.SegmentID < b.BestSeg.SegmentID) {
 			b.DenseScore = sc
 			b.DenseRank = i + 1
@@ -437,6 +480,7 @@ func fuseAndScoreWithQPP(
 			sc := partKeyBoostedScore(c, cfg.PartKeyBoosts)
 			c.Score = sc
 			b := getBundle(c)
+			addBodySeg(b, c, true)
 			b.PassageCount++
 			if !b.HasUngrouped || sc > b.MaxP || (sc == b.MaxP && c.SegmentID < b.BestSeg.SegmentID) {
 				if b.HasUngrouped && b.HasBestSeg && b.BestSeg.SegmentID != c.SegmentID {
@@ -499,6 +543,7 @@ func fuseAndScoreWithQPP(
 	lexStats := computeLegStats(lexicalFull)
 	for i, c := range lexicalFull {
 		b := getBundle(c)
+		addBodySeg(b, c, false)
 		if !b.HasLexical || c.Score > b.LexicalScore {
 			b.LexicalScore = c.Score
 			b.LexicalRank = i + 1
@@ -529,6 +574,7 @@ func fuseAndScoreWithQPP(
 	fieldLexStats := computeLegStats(fieldLexical)
 	for i, c := range fieldLexical {
 		b := getBundle(c)
+		addBodySeg(b, c, false)
 		if !b.HasFieldLexical || c.Score > b.FieldLexicalScore {
 			b.FieldLexicalScore = c.Score
 			b.FieldLexicalRank = i + 1
