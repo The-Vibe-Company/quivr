@@ -532,6 +532,11 @@ func (s Service) rankProfile(ctx, parentCtx context.Context, scope corpus.Scope,
 // deadline turns a failure of the plugin's round caused by the profile's
 // hard bound into ErrDeadline: the plugin outran it.
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
+	// A recovered panic stays one even past the bound: it is a bug, not a
+	// plugin that outran its deadline.
+	if errors.Is(err, ErrPanicked) {
+		return fmt.Errorf("plugin %s: %w", plugin, err)
+	}
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.WarnContext(ctx, "retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return fmt.Errorf("plugin %s: %w", plugin, ErrDeadline)

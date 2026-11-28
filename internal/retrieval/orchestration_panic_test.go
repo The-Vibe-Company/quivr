@@ -160,6 +160,13 @@ func TestOrchestrationPanic(t *testing.T) {
 				return nil, nil
 			}}
 		}},
+		{name: "ranker round past the profile deadline", setup: func(s *retrieval.Service) {
+			s.Ranker = &scriptedRanker{answer: func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
+				<-ctx.Done()
+				leak("ranker")
+				return nil, nil
+			}}
+		}},
 		{name: "content hydrate", setup: func(s *retrieval.Service) { s.Content.Baseline = panickingBaseline{} }},
 		{name: "content lead segments", mode: "lexical", setup: func(s *retrieval.Service) {
 			gen := content.Generation{ID: "gen-rich", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space"}
