@@ -536,9 +536,9 @@ func TestCommonMetadataOverlapDateAlignmentAndPoolRecency(t *testing.T) {
 		}
 	}
 
-	// 1. Metadata facet overlap + date-mention alignment (EN/FR month+year & year) boost matching candidate.
+	// 1. Metadata facet overlap + date-mention alignment (EN/FR month+year & year, including lowercase RFC3339 t/z) boost matching candidate.
 	cMatch := mkCand("match", 0.78, &quivrplugin.CommonMetadata{
-		PublishedAt: "2025-03-12T09:00:00Z",
+		PublishedAt: "2025-03-12t09:00:00z",
 		Subjects:    []string{"finances publiques"},
 		Tags:        []string{"budget"},
 		Place:       []string{"Paris"},

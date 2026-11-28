@@ -74,7 +74,8 @@ func metadataTokenSet(m *quivrplugin.CommonMetadata) map[string]bool {
 	return set
 }
 
-// parsePublishedAt parses CommonMetadata.PublishedAt (RFC3339 / RFC3339Nano).
+// parsePublishedAt parses CommonMetadata.PublishedAt (RFC3339 / RFC3339Nano),
+// normalizing lowercase 't'/'z' separators permitted by common-metadata.schema.json.
 func parsePublishedAt(m *quivrplugin.CommonMetadata) (time.Time, bool) {
 	if m == nil {
 		return time.Time{}, false
@@ -83,7 +84,7 @@ func parsePublishedAt(m *quivrplugin.CommonMetadata) (time.Time, bool) {
 	if raw == "" {
 		return time.Time{}, false
 	}
-	t, err := time.Parse(time.RFC3339Nano, raw)
+	t, err := time.Parse(time.RFC3339Nano, strings.ToUpper(raw))
 	if err != nil {
 		return time.Time{}, false
 	}
