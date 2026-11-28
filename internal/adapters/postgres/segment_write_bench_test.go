@@ -59,6 +59,7 @@ func isLockOnlySQL(sql string) bool {
 	s := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	return strings.Contains(s, "pg_advisory_xact_lock") ||
 		strings.Contains(s, "insert into journal_request_claims") ||
+		(strings.Contains(s, "from journal_request_claims ") && strings.Contains(s, "for update")) ||
 		(strings.HasPrefix(s, "select id from record_versions ") && strings.HasSuffix(s, "for update")) ||
 		(strings.HasPrefix(s, "select r.id from records r ") && strings.HasSuffix(s, "for update of r"))
 }
@@ -356,14 +357,15 @@ func TestSegmentWriteTracerCountsStatementsAndRoundtrips(t *testing.T) {
 	tr.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{})
 	tr.TraceBatchQuery(ctx, nil, pgx.TraceBatchQueryData{SQL: "SELECT pg_advisory_xact_lock_shared($1)"})
 	tr.TraceBatchQuery(ctx, nil, pgx.TraceBatchQueryData{SQL: "SELECT id FROM record_versions WHERE organization=$1 AND id=$2 FOR UPDATE"})
+	tr.TraceBatchQuery(ctx, nil, pgx.TraceBatchQueryData{SQL: "SELECT c.request_key FROM journal_request_claims c JOIN record_versions v ON (v.organization,v.record_id)=(c.organization,c.request_key) WHERE v.organization=$1 AND v.id=$2 AND c.family='record' FOR UPDATE OF c"})
 	tr.TraceBatchEnd(ctx, nil, pgx.TraceBatchEndData{})
 	tr.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: saveSegmentationSQL})
 	tr.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "UPDATE record_versions SET segmented_at=clock_timestamp() WHERE organization=$1 AND id=$2"})
 	tr.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "commit"})
 
 	data, total, trips := tr.Snapshot()
-	if data != 2 || total != 4 || trips != 3 {
-		t.Fatalf("snapshot = (data=%d, total=%d, trips=%d), want (2, 4, 3)", data, total, trips)
+	if data != 2 || total != 5 || trips != 3 {
+		t.Fatalf("snapshot = (data=%d, total=%d, trips=%d), want (2, 5, 3)", data, total, trips)
 	}
 	tr.Reset()
 	data, total, trips = tr.Snapshot()
