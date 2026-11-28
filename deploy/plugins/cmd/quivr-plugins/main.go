@@ -7,6 +7,7 @@ import (
 	coreingest "github.com/The-Vibe-Company/quivr/plugins/core-ingest/plugin"
 	coreretrieve "github.com/The-Vibe-Company/quivr/plugins/core-retrieve/plugin"
 	m365mail "github.com/The-Vibe-Company/quivr/plugins/m365-mail/plugin"
+	newsroomretrieve "github.com/The-Vibe-Company/quivr/plugins/newsroom-retrieve/plugin"
 	archive "github.com/The-Vibe-Company/quivr/plugins/object-storage-archive/plugin"
 	rss "github.com/The-Vibe-Company/quivr/plugins/rss/plugin"
 	xlist "github.com/The-Vibe-Company/quivr/plugins/x-list/plugin"
@@ -17,6 +18,7 @@ func main() {
 		"core-ingest":            multicall.MainFunc(coreingest.Main),
 		"core-retrieve":          multicall.MainFunc(coreretrieve.Main),
 		"m365-mail":              multicall.MainFunc(m365mail.Main),
+		"newsroom-retrieve":      multicall.MainFunc(newsroomretrieve.Main),
 		"object-storage-archive": multicall.MainFunc(archive.Main),
 		"rss":                    multicall.MainFunc(rss.Main),
 		"text-embed":             multicall.TextEmbed,

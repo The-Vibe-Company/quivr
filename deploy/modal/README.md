@@ -1,4 +1,6 @@
-# Serve EmbeddingGemma 2 on Modal
+# Deploy inference on Modal
+
+## Serve EmbeddingGemma 2
 
 The coordinator deploys [`embeddinggemma.py`](embeddinggemma.py)
 and opts api and worker into `QUIVR_DEMO_EMBEDDING=gemma`. The service runs the
@@ -54,7 +56,7 @@ is the GPU readiness check. A public URL alone grants no access: both routes
 require the bearer token. The endpoint accepts strings or batches of 1–32
 strings, each at most 32 KiB of UTF-8 (8 MiB per request). It rejects invalid input before GPU work.
 
-## Switch, rebuild and check
+### Switch, rebuild and check
 
 1. Save the current plugin plan, registration/configuration and api/worker
    variables. Pause connector polling and ingestion, wait for old pinned work
@@ -78,7 +80,7 @@ strings, each at most 32 KiB of UTF-8 (8 MiB per request). It rejects invalid in
    semantic and hybrid searches with `profile: default`; hits must name the
    Gemma space. Resume ingestion and search after every Corpus passes.
 
-## Roll back to Cohere
+### Roll back to Cohere
 
 In another maintenance window, pause ingestion and drain Gemma pinned work.
 Set `QUIVR_DEMO_EMBEDDING=cohere` identically on api and worker, retain the
@@ -90,3 +92,57 @@ plan can refuse an unreachable old registration. Keep the Modal app available
 until no Gemma work depends on it. The previous `QUIVR_DEMO_HOSTED_EMBED=1`
 continues to select Cohere when the new model switch is omitted; an explicit
 `gemma` or `cohere` takes precedence. Unknown model-switch values abort startup.
+
+## Serve a TEI-compatible reranker on Modal
+
+Deploy [the reranker app](reranker.py) from the repository root with Python
+3.12 and `modal==1.6.1`. Create a Modal secret called `quivr-reranker` with
+`RERANKER_API_KEY`, a random printable ASCII bearer token without spaces.
+Use the Modal secret editor or a private dotenv file outside the repository.
+
+```sh
+modal secret create quivr-reranker --from-dotenv /private/path/reranker.env
+modal deploy deploy/modal/reranker.py
+```
+
+The app defaults to [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B/tree/22e683669bc0f0bd69640a1354a6d0aebcfeede5)
+(Apache-2.0, 4,096 tokens per pair). Set `RERANKER_MODEL=BAAI/bge-reranker-base`
+before deployment to select [the sequence classifier](https://huggingface.co/BAAI/bge-reranker-base/tree/2cfc18c9415c912f9d8155881c133215df768a70)
+(MIT, 512 tokens per pair). The image verifies the pinned model card license
+and bakes safetensors weights for offline inference. GPU capacity falls back
+from L4 to A10G to L40S. Set `RERANKER_MIN_CONTAINERS=1` to keep a GPU warm.
+The defaults are zero warm containers and a maximum of two, set by
+`RERANKER_MAX_CONTAINERS`. Only the CPU gateway receives the bearer secret.
+
+Replace the example origin with the HTTPS URL printed by Modal. Load
+`RERANKER_API_KEY` into the shell through your secret manager before testing.
+
+```sh
+origin=https://reranker.example.org
+printf 'Authorization: Bearer %s\n' "$RERANKER_API_KEY" |
+  curl --fail-with-body -sS -H @- "$origin/health"
+printf 'Authorization: Bearer %s\n' "$RERANKER_API_KEY" |
+  curl --fail-with-body -sS -H @- -H 'Content-Type: application/json' \
+    --data '{"query":"Which planet is called the Red Planet?","texts":["Venus has a thick atmosphere.","Mars appears red."],"truncate":true,"raw_score":true}' \
+    "$origin/rerank"
+```
+
+Both routes return HTTP 401 without a valid token. Health returns the selected
+model and revision without starting a GPU. Use the rerank request to verify
+inference. Each result includes the original zero-based `index`, `score`,
+and unsaturated `raw_score`, ordered by descending margin. The request flag
+`raw_score: true` (or TEI's `raw_scores`) puts the margin in `score` too.
+Omit it or set it to false for the sigmoid probability. Set `return_text: true`
+to include the original text. The gateway accepts 1–128 texts, up to 8 KiB of
+UTF-8 per query or text, 2 KiB per optional instruction, and 8 MiB of JSON.
+Overlong tokenized pairs return HTTP 400 unless `truncate: true` is set.
+Truncation defaults to the right. Qwen formats the instruction with the query
+and document, uses its standard web search instruction when omitted, and scores
+the yes minus no logits. For a sequence classifier, the instruction is prefixed
+to the query and the single relevance logit is used directly.
+
+Configure `newsroom.retrieve` with the full HTTPS `/rerank` URL as
+`rerank_endpoint`, `rerank_protocol: tei`, and the same `RERANKER_API_KEY`
+through the plugin's secret interface. Its default logit score space uses
+the returned margins directly. The combined and API images include
+`quivr-newsroom-retrieve` for opt-in registration.
