@@ -14,9 +14,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // Defaults and bounds for opt-in async Phase-2 lexical enrichment.
@@ -25,6 +27,8 @@ const (
 	DefaultMinCosineSalience        = 0.55
 	DefaultMaxSyntheticQueries      = 8
 	MaxSyntheticQueriesCap          = 64
+	maxLexicalCandidateRunes        = 512
+	maxLexicalCandidateMultiplier   = 4
 	DefaultLexicalEnrichmentTimeout = 15 * time.Second
 	MaxLexicalEnrichmentTimeout     = 60 * time.Second
 	maxLexicalHTTPResponseBytes     = 4 << 20
@@ -489,6 +493,7 @@ func (e *HTTPLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalEnri
 	}
 	out := make(map[string]SegmentLexicalExpansion, len(decoded.Segments))
 	seenBySeg := make(map[string]map[string]struct{}, len(decoded.Segments))
+	maxCandidates := min(e.maxQueries*maxLexicalCandidateMultiplier, MaxSyntheticQueriesCap*maxLexicalCandidateMultiplier)
 	for _, seg := range decoded.Segments {
 		if _, ok := known[seg.SegmentID]; !ok {
 			continue
@@ -500,8 +505,11 @@ func (e *HTTPLexicalEnricher) EnrichLexical(ctx context.Context, req LexicalEnri
 		}
 		exp := out[seg.SegmentID]
 		addCandidate := func(raw string) {
+			if len(exp.Queries) >= maxCandidates {
+				return
+			}
 			cleaned := strings.Join(strings.Fields(raw), " ")
-			if cleaned == "" {
+			if cleaned == "" || utf8.RuneCountInString(cleaned) > maxLexicalCandidateRunes {
 				return
 			}
 			key := strings.ToLower(cleaned)
@@ -599,7 +607,7 @@ func (s Service) applyLexicalEnrichment(
 				scored := make([]ScoredLexicalCandidate, 0, len(exp.Queries))
 				for _, q := range exp.Queries {
 					qText := strings.TrimSpace(q.Text)
-					if qText == "" {
+					if qText == "" || utf8.RuneCountInString(qText) > maxLexicalCandidateRunes {
 						continue
 					}
 					vec := q.Vector
@@ -609,7 +617,7 @@ func (s Service) applyLexicalEnrichment(
 						} else {
 							encoded, encErr := opts.QueryEncoder.EncodeQuery(ctx, org, servedSpace, qText)
 							if encErr != nil {
-								if errors.Is(encErr, content.ErrInvalid) {
+								if errors.Is(encErr, content.ErrInvalid) || errors.Is(encErr, publicerr.QueryTooLong) {
 									encodedQueries[qText] = nil
 									continue
 								}

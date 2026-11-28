@@ -15,6 +15,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 func TestGateByCosineSalienceFiltersHallucinationsAndOrdersDeterministically(t *testing.T) {
@@ -169,6 +170,25 @@ func TestHTTPLexicalEnricherParsesObjectAndStringQueriesAndHandlesErrors(t *test
 	if _, err := enricher.EnrichLexical(t.Context(), req); err == nil {
 		t.Fatal("503 response must return a retryable error")
 	}
+
+	// Oversized candidates and excessive candidate counts per segment are bounded before encoding.
+	status = http.StatusOK
+	manyTerms := make([]string, 0, 25)
+	manyTerms = append(manyTerms, strings.Repeat("x", 600))
+	for i := range 24 {
+		manyTerms = append(manyTerms, "candidate term "+string(rune('a'+i)))
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"segments": []map[string]any{{"segment_id": "s1", "terms": manyTerms}},
+	})
+	body = string(payload)
+	capped, err := enricher.EnrichLexical(t.Context(), req)
+	if err != nil {
+		t.Fatalf("capped EnrichLexical: %v", err)
+	}
+	if len(capped["s1"].Queries) != 16 {
+		t.Fatalf("bounded candidate count = %d, want 16 (4 * maxQueries)", len(capped["s1"].Queries))
+	}
 }
 
 type lexicalMemoryBaseline struct {
@@ -241,15 +261,19 @@ func (r *recordingLexicalIndexer) IndexEmbeddingsWithLexical(_ context.Context, 
 }
 
 type staticQueryEncoder struct {
-	vectors map[string][]float32
-	err     error
-	calls   int
+	vectors    map[string][]float32
+	errByQuery map[string]error
+	err        error
+	calls      int
 }
 
 func (e *staticQueryEncoder) EncodeQuery(_ context.Context, _, _, q string) ([]float32, error) {
 	e.calls++
 	if e.err != nil {
 		return nil, e.err
+	}
+	if err, ok := e.errByQuery[q]; ok {
+		return nil, err
 	}
 	if v, ok := e.vectors[q]; ok {
 		return v, nil
@@ -303,6 +327,7 @@ func TestEnrichPhase2LexicalEnrichmentGatesPersistsAndRetriesIdempotently(t *tes
 			id: {
 				Queries: []processing.ScoredLexicalCandidate{
 					{Text: "in-depth report"},         // encoded to {0.95, 0.31} -> passes cosine >= 0.6
+					{Text: "too long for encoder"},    // returns publicerr.QueryTooLong -> skipped cleanly
 					{Text: "unrelated pastry recipe"}, // encoded to {0, 1} -> rejected by cosine gate
 				},
 			},
@@ -311,6 +336,8 @@ func TestEnrichPhase2LexicalEnrichmentGatesPersistsAndRetriesIdempotently(t *tes
 	encoder := &staticQueryEncoder{vectors: map[string][]float32{
 		"in-depth report":         {0.95, 0.31},
 		"unrelated pastry recipe": {0, 1},
+	}, errByQuery: map[string]error{
+		"too long for encoder": publicerr.QueryTooLong,
 	}}
 	minCos := 0.6
 
