@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -114,10 +113,12 @@ func TestOrchestrationPanic(t *testing.T) {
 				if !errors.Is(err, retrieval.ErrUnavailable) {
 					t.Fatalf("search with a panicking dependency = %v, want ErrUnavailable", err)
 				}
-				time.Sleep(100 * time.Millisecond)
+				// Wait until every goroutine the search started, such as the
+				// query-vector cache's encoding goroutine, has exited or is
+				// durably blocked: none may remain.
 				synctest.Wait()
-				if n := runtime.NumGoroutine(); n > baseline+2 {
-					t.Fatalf("%d goroutines 100 ms after the search, want at most %d", n, baseline+2)
+				if n := runtime.NumGoroutine(); n != baseline {
+					t.Fatalf("%d goroutines after the search settled, want the %d before it", n, baseline)
 				}
 			})
 			out := logs.String()

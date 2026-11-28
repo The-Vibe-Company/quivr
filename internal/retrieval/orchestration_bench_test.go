@@ -118,7 +118,7 @@ func corpusIDs(n int) []string {
 // per Corpus), while issuing exactly as many reads, at
 // most four at once, and offering the ranker routes in request order however
 // the reads interleave. The fake clock makes the latency budget exact.
-func TestSerialControlPlane(t *testing.T) {
+func TestControlPlaneFanOut(t *testing.T) {
 	const latency = 2 * time.Millisecond
 	for _, tc := range []struct {
 		corpora int
