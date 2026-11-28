@@ -25,7 +25,7 @@ const (
 	// Account for the list node, entry, and its share of the map in addition
 	// to the variable-size key and vector payload. TestQueryVectorCacheMemoryBound
 	// checks the estimate against the live heap.
-	queryVectorEntryOverhead = 320
+	queryVectorEntryOverhead = 384
 	// The plugin protocol caps embed_query at 10 s. This also bounds shared
 	// work after every caller has left.
 	queryVectorTimeout = 10 * time.Second

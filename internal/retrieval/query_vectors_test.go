@@ -484,9 +484,6 @@ func TestQueryVectorCacheDoesNotRememberAbandonedFlights(t *testing.T) {
 
 func TestQueryVectorCacheMemoryBound(t *testing.T) {
 	cache := NewQueryVectorCache()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	for i := range 100_000 {
 		key := queryVectorKey("engine", "org", "test-space", "distinct query "+strconv.Itoa(i))
 		if _, err := cache.encode(t.Context(), key, func(context.Context) ([]float32, error) {
@@ -495,8 +492,6 @@ func TestQueryVectorCacheMemoryBound(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runtime.GC()
-	runtime.ReadMemStats(&after)
 	cache.mu.Lock()
 	entries, accounted := cache.lru.Len(), cache.bytes
 	cache.mu.Unlock()
@@ -505,10 +500,22 @@ func TestQueryVectorCacheMemoryBound(t *testing.T) {
 	if entries > queryVectorEntries || mapped != entries || accounted > queryVectorBytes {
 		t.Fatalf("cache holds %d listed and %d mapped entries in %d accounted bytes, want <= %d entries and %d bytes", entries, mapped, accounted, queryVectorEntries, queryVectorBytes)
 	}
-	if grown := int64(after.HeapAlloc) - int64(before.HeapAlloc); grown > queryVectorBytes {
-		t.Fatalf("heap grew %d bytes for %d entries, want <= %d", grown, entries, queryVectorBytes)
-	}
+	// Measure what the cache retains by releasing it, so heap drift from the
+	// rest of the process between snapshots does not count.
+	held := liveHeap()
 	runtime.KeepAlive(cache)
+	released := liveHeap()
+	if retained := int64(held) - int64(released); retained > queryVectorBytes {
+		t.Fatalf("cache retains %d heap bytes for %d entries (%d accounted), want <= %d", retained, entries, accounted, queryVectorBytes)
+	}
+}
+
+func liveHeap() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
 }
 
 func TestQueryVectorCacheCancelledLookupsReleaseFlights(t *testing.T) {
