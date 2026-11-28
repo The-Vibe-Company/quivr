@@ -145,6 +145,10 @@ func (s *VisibilityStore) Sources(ctx context.Context, org, id string, principal
 }
 
 func (s *VisibilityStore) snapshot(ctx context.Context, key visibilityCorpus) (sourceSnapshot, error) {
+	return s.snapshotUsing(ctx, key, s.loadSources)
+}
+
+func (s *VisibilityStore) snapshotUsing(ctx context.Context, key visibilityCorpus, load func(context.Context, visibilityCorpus) (sourceSnapshot, error)) (sourceSnapshot, error) {
 	for {
 		start := time.Now()
 		s.mu.Lock()
@@ -153,7 +157,7 @@ func (s *VisibilityStore) snapshot(ctx context.Context, key visibilityCorpus) (s
 		if start.Before(cached.expires) {
 			return cached, nil
 		}
-		fresh, err := s.loadSources(ctx, key)
+		fresh, err := load(ctx, key)
 		if err != nil {
 			return sourceSnapshot{}, err
 		}
