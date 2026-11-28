@@ -116,6 +116,13 @@ INSERT INTO tombstones(organization,record_id) VALUES('example','target-4')`)
 			t.Fatal(err)
 		}
 		assertSpaceDescriptionRowBound(t, raw, bound)
+		// The request runs both owner probes and the eligibility probe in one
+		// statement; together they keep the bound of three separate probes.
+		args := []any{"example", corpus}
+		if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+describeVectorSpacesSQL(ctx, &args), args...).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		assertSpaceDescriptionRowBound(t, raw, 3*bound)
 	}
 	for _, size := range []int{1000, 10000} {
 		if size == 10000 {

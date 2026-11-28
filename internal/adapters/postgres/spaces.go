@@ -154,7 +154,7 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
  ) cut ON true
  WHERE r.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`
 ), carried AS (
- SELECT sp.id,COALESCE(vs.owner_plugin_id,'') AS owner FROM unnest($4::text[]) sp(id) LEFT JOIN vector_spaces vs ON vs.id=sp.id
+ SELECT sp.id,`+spaceMetadataSQL+` FROM unnest($4::text[]) sp(id) LEFT JOIN vector_spaces vs ON vs.id=sp.id
 ), per_version AS (
  SELECT plugin_id,version_id,role,count(*) AS segments FROM current GROUP BY plugin_id,version_id,role
 ), owners AS (
@@ -175,19 +175,23 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
 )
 SELECT sp.id,COALESCE(vec.covered,0)::bigint,COALESCE(p.total,0)::bigint,
  COALESCE(p.serving,0)::bigint,COALESCE(vec.versions,0)::bigint,
- (SELECT COALESCE(sum(segments),0)::bigint FROM per_version WHERE role='served')
+ (SELECT COALESCE(sum(segments),0)::bigint FROM per_version WHERE role='served'),
+ `+spaceMetadataColumns("sp")+`
 FROM carried sp LEFT JOIN owners p ON p.plugin_id=sp.owner
  LEFT JOIN coverage vec ON vec.plugin_id=sp.owner AND vec.space_id=sp.id`, org, corpusID, g.ID, g.VectorSpaces())
 	if err != nil {
 		return g, nil, 0, err
 	}
-	type counts struct{ covered, total, serving, versions int64 }
+	type counts struct {
+		covered, total, serving, versions int64
+		space                             content.SpaceCoverage
+	}
 	bySpace := make(map[string]counts)
 	var total int64
 	for rows.Next() {
 		var id string
 		var c counts
-		if err = rows.Scan(&id, &c.covered, &c.total, &c.serving, &c.versions, &total); err != nil {
+		if err = rows.Scan(append([]any{&id, &c.covered, &c.total, &c.serving, &c.versions, &total}, spaceMetadataTargets(&c.space)...)...); err != nil {
 			rows.Close()
 			return g, nil, 0, err
 		}
@@ -199,18 +203,14 @@ FROM carried sp LEFT JOIN owners p ON p.plugin_id=sp.owner
 	}
 	out := []content.SpaceCoverage{}
 	for _, id := range g.VectorSpaces() {
-		var c content.SpaceCoverage
+		// The counting statement read each carried space's registry row.
+		counts := bySpace[id]
+		c := counts.space
 		c.ID = id
-		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces WHERE id=$1`, id).
-			Scan(&c.Manifest, &c.Name, &c.Version, &c.OwnerPluginID, &c.OwnerPluginVersion, &c.Model, &c.VectorSpace.Dimensions, &c.Metric, &c.Indexes, &c.QueryModalities, &c.Role)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return g, nil, 0, err
-		}
 		c.GenerationRole = content.SpaceEvaluation
 		if g.Serves(id) {
 			c.GenerationRole = content.SpaceServed
 		}
-		counts := bySpace[id]
 		c.Segments, c.VersionsCovered = counts.covered, counts.versions
 		c.TotalSegments = &counts.total
 		if c.OwnerPluginID == "" {

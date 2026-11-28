@@ -11,38 +11,68 @@ import (
 
 // DescribeVectorSpaces reads only registry metadata and projection presence.
 // Coverage counting belongs to a background refresh, never this request.
+// The routed generation, every space's registry row and owner presence, and
+// the Corpus eligibility probe come from one statement: one round trip and
+// one snapshot per Corpus.
 func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, error) {
-	g, err := (ProjectionStore{Pool: s.Pool}).Generation(ctx, org, corpusID)
+	args := []any{org, corpusID}
+	sql := describeVectorSpacesSQL(ctx, &args)
+	rows, err := database(ctx, s.Pool).Query(ctx, sql, args...)
+	if err != nil {
+		return content.Generation{}, nil, err
+	}
+	var row generationRow
+	var eligible *bool
+	routed := false
+	described := map[string]describedSpace{}
+	for rows.Next() {
+		var d describedSpace
+		var id *string
+		targets := append(row.targets(), &id)
+		targets = append(targets, spaceMetadataTargets(&d.coverage)...)
+		if err = rows.Scan(append(targets, &d.present, &eligible)...); err != nil {
+			rows.Close()
+			return content.Generation{}, nil, err
+		}
+		routed = true
+		if id != nil {
+			d.coverage.ID = *id
+			described[*id] = d
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return content.Generation{}, nil, err
+	}
+	if !routed {
+		return content.Generation{}, nil, notFound(pgx.ErrNoRows)
+	}
+	g, err := row.decode()
 	if err != nil {
 		return g, nil, notFound(err)
 	}
 	out := []content.SpaceCoverage{}
 	for _, id := range g.VectorSpaces() {
-		c := content.SpaceCoverage{CoverageUnknown: true}
-		c.ID = id
-		err = database(ctx, s.Pool).QueryRow(ctx, `SELECT manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces WHERE id=$1`, id).
-			Scan(&c.Manifest, &c.Name, &c.Version, &c.OwnerPluginID, &c.OwnerPluginVersion, &c.Model, &c.VectorSpace.Dimensions, &c.Metric, &c.Indexes, &c.QueryModalities, &c.Role)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return g, nil, err
+		d, ok := described[id]
+		if !ok {
+			// PostgreSQL lists the spaces from canonical JSON keys; a
+			// generation whose stored keys only Go's decoder matches is
+			// described space by space instead.
+			if d, err = s.describeSpace(ctx, org, corpusID, g.ID, id); err != nil {
+				return g, nil, err
+			}
 		}
+		c := d.coverage
+		c.CoverageUnknown = true
 		c.GenerationRole = content.SpaceEvaluation
 		if g.Serves(id) {
 			c.GenerationRole = content.SpaceServed
 		}
 		// Owner presence preserves independent evaluation routing without a
-		// segment count. Start at this Corpus's Records; correlated point reads
-		// keep an absent owner from scanning another Corpus's coverage, even
-		// with stale statistics. Legacy engine spaces keep generation routing.
+		// segment count. Legacy engine spaces keep generation routing.
 		if c.OwnerPluginID != "" {
-			var present bool
-			args := []any{org, corpusID, g.ID, c.OwnerPluginID, c.ID}
-			sql := presenceVisibility(ctx, spaceOwnerPresenceSQL, &args)
-			err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
-			if err != nil {
-				return g, nil, err
-			}
 			presence := int64(0)
-			if present {
+			if d.present != nil && *d.present {
 				c.GenerationRole = content.SpaceServed
 				presence = 1
 			}
@@ -56,22 +86,102 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 		if c.GenerationRole != content.SpaceServed || c.ServingSegments == nil || *c.ServingSegments != 0 {
 			continue
 		}
-		var present bool
-		args := []any{org, corpusID}
-		sql := presenceVisibility(ctx, corpusEligibilityPresenceSQL, &args)
-		err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
-		if err != nil {
-			return g, nil, err
+		if eligible == nil {
+			// The statement evaluated eligibility from PostgreSQL's reading
+			// of the generation roles; read it now if Go's reading differs.
+			present := false
+			args := []any{org, corpusID}
+			sql := presenceVisibility(ctx, corpusEligibilityPresenceSQL, &args)
+			if err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present); err != nil {
+				return g, nil, err
+			}
+			eligible = &present
 		}
 		for i := range out {
-			out[i].CorpusEmpty = !present
+			out[i].CorpusEmpty = !*eligible
 		}
 		break
 	}
 	return g, out, nil
 }
 
-var spaceOwnerPresenceSQL = `SELECT EXISTS(
+type describedSpace struct {
+	coverage content.SpaceCoverage
+	present  *bool
+}
+
+// describeSpace reads one space's registry row and owner presence.
+func (s SpaceStore) describeSpace(ctx context.Context, org, corpusID, generationID, id string) (describedSpace, error) {
+	var d describedSpace
+	d.coverage.ID = id
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT `+spaceMetadataSQL+` FROM vector_spaces vs WHERE vs.id=$1`, id).
+		Scan(spaceMetadataTargets(&d.coverage)...)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return d, err
+	}
+	if d.coverage.OwnerPluginID == "" {
+		return d, nil
+	}
+	present := false
+	args := []any{org, corpusID, generationID, d.coverage.OwnerPluginID, id}
+	sql := presenceVisibility(ctx, spaceOwnerPresenceSQL, &args)
+	err = database(ctx, s.Pool).QueryRow(ctx, sql, args...).Scan(&present)
+	d.present = &present
+	return d, err
+}
+
+// describeVectorSpacesSQL reads the generation routed for Corpus $2 of
+// Organization $1, then one row per space it carries (content.Generation's
+// VectorSpaces, from the same JSON): the registry row, whether
+// the generation serves the space (content.Generation's Serves), and owner
+// presence. Every row carries Corpus eligibility, evaluated once and only
+// when a served owner is absent. An unregistered space keeps zero metadata.
+func describeVectorSpacesSQL(ctx context.Context, args *[]any) string {
+	const spaces = `(CASE WHEN jsonb_typeof(routed.spaces)='array' THEN routed.spaces ELSE '[]' END)`
+	const projected = `(routed.spaces_projected AND jsonb_array_length(` + spaces + `)>0)`
+	presence := presenceVisibility(ctx, spaceOwnerPresence("routed.id", "vs.owner_plugin_id", "listed.id"), args)
+	eligibility := presenceVisibility(ctx, corpusEligibilityPresenceSQL, args)
+	return `WITH routed AS MATERIALIZED (` + routedGenerationQuerySQL + `
+), listed AS MATERIALIZED (
+ SELECT l.id FROM routed CROSS JOIN LATERAL (
+  SELECT COALESCE(e.sp->>'id','') AS id FROM jsonb_array_elements(` + spaces + `) e(sp) WHERE ` + projected + `
+  UNION ALL SELECT routed.space_id WHERE NOT ` + projected + `
+ ) l
+), described AS MATERIALIZED (
+ SELECT listed.id,` + spaceMetadataSQL + `,
+ COALESCE((SELECT e.sp->>'role'='served' FROM jsonb_array_elements(` + spaces + `) WITH ORDINALITY e(sp,ord)
+  WHERE COALESCE(e.sp->>'id','')=listed.id AND COALESCE(e.sp->>'role','')<>'' ORDER BY e.ord LIMIT 1),listed.id=routed.space_id) AS served,
+ CASE WHEN vs.owner_plugin_id<>'' THEN (` + presence + `) END AS present
+ FROM (SELECT DISTINCT id FROM listed) listed CROSS JOIN routed LEFT JOIN vector_spaces vs ON vs.id=listed.id
+)
+SELECT ` + routedColumnsSQL + `,d.id,` + spaceMetadataColumns("d") + `,d.present,
+ CASE WHEN EXISTS(SELECT 1 FROM described absent WHERE absent.served AND absent.present IS FALSE) THEN (` + eligibility + `) END
+FROM routed LEFT JOIN described d ON true`
+}
+
+// spaceMetadataSQL selects registry row vs, which a left join may leave
+// absent, as spaceMetadataTargets scans it: zero values for a missing row.
+const spaceMetadataSQL = `vs.manifest,COALESCE(vs.name,'') AS name,COALESCE(vs.version,'') AS version,COALESCE(vs.owner_plugin_id,'') AS owner,COALESCE(vs.owner_plugin_version,'') AS owner_version,COALESCE(vs.model,'') AS model,COALESCE(vs.dimensions,0) AS dimensions,COALESCE(vs.metric,'') AS metric,vs.indexes,vs.query_modalities,COALESCE(vs.role,'') AS role`
+
+// spaceMetadataColumns lists spaceMetadataSQL's columns from relation alias.
+func spaceMetadataColumns(alias string) string {
+	columns := []string{"manifest", "name", "version", "owner", "owner_version", "model", "dimensions", "metric", "indexes", "query_modalities", "role"}
+	for i, column := range columns {
+		columns[i] = alias + "." + column
+	}
+	return strings.Join(columns, ",")
+}
+
+func spaceMetadataTargets(c *content.SpaceCoverage) []any {
+	return []any{&c.Manifest, &c.Name, &c.Version, &c.OwnerPluginID, &c.OwnerPluginVersion, &c.Model, &c.VectorSpace.Dimensions, &c.Metric, &c.Indexes, &c.QueryModalities, &c.Role}
+}
+
+// spaceOwnerPresence reports whether the owner's served projection in the
+// generation selects the space for a current eligible Record of Corpus $2.
+// Start at this Corpus's Records; correlated point reads keep an absent owner
+// from scanning another Corpus's coverage, even with stale statistics.
+func spaceOwnerPresence(generation, owner, space string) string {
+	return `SELECT EXISTS(
  SELECT 1 FROM records r
  JOIN LATERAL (
   SELECT v.* FROM record_versions v
@@ -80,11 +190,14 @@ var spaceOwnerPresenceSQL = `SELECT EXISTS(
  JOIN LATERAL (
   SELECT 1 FROM projection_coverage pc
   JOIN ` + effectiveGenerationsSQL + ` selected_g ON selected_g.id=pc.generation_id
-  WHERE (pc.organization,pc.version_id,pc.generation_id,pc.plugin_id)=(v.organization,v.id,$3,$4)
+  WHERE (pc.organization,pc.version_id,pc.generation_id,pc.plugin_id)=(v.organization,v.id,` + generation + `,` + owner + `)
   AND ` + effectiveServingSQL("pc", "selected_g") + `
-  AND $5=` + selectedVectorSpaceSQL("pc", "selected_g") + ` OFFSET 0
+  AND ` + space + `=` + selectedVectorSpaceSQL("pc", "selected_g") + ` OFFSET 0
  ) pc ON true
  WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionPointSQL + `)`
+}
+
+var spaceOwnerPresenceSQL = spaceOwnerPresence("$3", "$4", "$5")
 
 const corpusEligibilityPresenceSQL = `SELECT EXISTS(
  SELECT 1 FROM records r JOIN LATERAL (

@@ -3,7 +3,9 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -166,6 +168,21 @@ SELECT 'example',$1||'-version-'||n,'generation',$1||'-'||$2||'-'||n,$3 FROM gen
 					len(statements), corpora, budget, summarizeStatements(statements))
 			}
 		})
+	}
+	// Go decodes JSON keys case-insensitively and PostgreSQL does not. A
+	// generation stored with such keys is still described exactly as Go
+	// reads it, through the per-space fallback.
+	exec(`INSERT INTO projection_generations(id,collection,profile_version,space_id,spaces_projected,spaces)
+VALUES('mixed-case','mixed-case','fixture','engine',true,'[{"ID":"served","Role":"served","owner_plugin_id":"example.owner"}]');
+UPDATE corpus_projection_routes SET generation_id='mixed-case' WHERE corpus_id='corpus-15'`)
+	g, coverage, err := spaces.DescribeVectorSpaces(ctx, "example", "corpus-15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := goldenCoverage(15, false)
+	if wantG := (content.Generation{ID: "mixed-case", Collection: "mixed-case", ProfileVersion: "fixture", SpaceID: "engine", SpacesProjected: true,
+		Spaces: []content.GenerationSpace{{ID: "served", Role: "served", OwnerPluginID: "example.owner"}}}); !reflect.DeepEqual(g, wantG) || !reflect.DeepEqual(coverage, want) {
+		t.Fatalf("mixed-case generation: %#v, %#v; want %#v, %#v", g, coverage, wantG, want)
 	}
 }
 
@@ -355,4 +372,63 @@ func TestVisibilitySnapshotEvictsLeastRecentlyUsed(t *testing.T) {
 			t.Fatalf("least recently used entry was not evicted: %d loads, want %d", got, sourceCacheEntries+2)
 		}
 	})
+}
+
+// Owns shared-load cancellation: the caller running a shared load may give
+// up, but callers waiting on it retry instead of inheriting its context error.
+func TestVisibilitySnapshotWaitersOutliveTheLoadingCaller(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var s VisibilityStore
+		key := visibilityCorpus{"example", "corpus"}
+		load := &sourceLoad{release: make(chan struct{})}
+		leader, cancel := context.WithCancel(t.Context())
+		var leaderErr, waiterErr error
+		var waiter sourceSnapshot
+		var wg sync.WaitGroup
+		wg.Go(func() { _, leaderErr = s.snapshotUsing(leader, key, load.load) })
+		synctest.Wait()
+		wg.Go(func() { waiter, waiterErr = s.snapshotUsing(t.Context(), key, load.load) })
+		synctest.Wait()
+		cancel()
+		synctest.Wait() // The waiter now leads load 2.
+		close(load.release)
+		wg.Wait()
+		if leaderErr != context.Canceled || waiterErr != nil || waiter.revision != 2 {
+			t.Fatalf("leader err %v; waiter got load %d, err %v; want the waiter to run its own load", leaderErr, waiter.revision, waiterErr)
+		}
+	})
+}
+
+// Owns Hydrate's fan-out failure contract: a panicking shard becomes an
+// error, cancels its siblings, and every shard returns before Hydrate does
+// (synctest fails a bubble that leaks a goroutine). The log names the panic
+// type and stack, never the panic value, which may quote private data.
+func TestHydrateShardPanicCancelsSiblings(t *testing.T) {
+	var logs strings.Builder
+	defer slog.SetDefault(slog.Default())
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	const private = "organization=private-org query=private-query"
+	synctest.Test(t, func(t *testing.T) {
+		const shards = 4
+		var cancelled atomic.Int64
+		err := runShards(t.Context(), shards, func(ctx context.Context, i int) error {
+			if i == 0 {
+				synctest.Wait() // Every sibling is in flight.
+				panic(fmt.Errorf("decode failed: %s", private))
+			}
+			<-ctx.Done()
+			cancelled.Add(1)
+			return ctx.Err()
+		})
+		if !errors.Is(err, errShardPanicked) || strings.Contains(err.Error(), "private") {
+			t.Fatalf("runShards error %v, want errShardPanicked without the panic value", err)
+		}
+		if got := cancelled.Load(); got != shards-1 {
+			t.Fatalf("%d of %d siblings observed cancellation before runShards returned", got, shards-1)
+		}
+	})
+	out := logs.String()
+	if !strings.Contains(out, "panic_type=*errors.errorString") || !strings.Contains(out, "stack=") || strings.Contains(out, "private") {
+		t.Fatalf("panic log %q: want panic_type and stack only", out)
+	}
 }

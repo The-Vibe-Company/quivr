@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -30,12 +31,16 @@ type SpaceSnapshots struct {
 	ttl      time.Duration
 	mu       sync.Mutex
 	busy     bool
-	entries  map[string]*spaceSnapshot
+	// entries index recent, most recently used first; a full cache evicts
+	// the least recently used snapshot rather than every observation.
+	entries map[string]*list.Element
+	recent  list.List
 }
 
 const maxCoverageFailureBackoff = 15 * time.Minute
 
 type spaceSnapshot struct {
+	key            string
 	spaces         map[string]content.SpaceCoverage
 	total          int64
 	observed, next time.Time
@@ -43,7 +48,7 @@ type spaceSnapshot struct {
 }
 
 func NewSpaceSnapshots(parent context.Context, registry SpaceDescriptions, ttl time.Duration) *SpaceSnapshots {
-	return &SpaceSnapshots{registry: registry, parent: parent, ttl: ttl, entries: map[string]*spaceSnapshot{}}
+	return &SpaceSnapshots{registry: registry, parent: parent, ttl: ttl, entries: map[string]*list.Element{}}
 }
 
 func (c *SpaceSnapshots) VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error) {
@@ -57,14 +62,7 @@ func (c *SpaceSnapshots) VectorSpaces(ctx context.Context, org, corpusID string)
 	key := snapshotKey(org, corpusID, g)
 	now := time.Now()
 	c.mu.Lock()
-	e := c.entries[key]
-	if e == nil {
-		if len(c.entries) >= coverageEntries {
-			c.entries = map[string]*spaceSnapshot{}
-		}
-		e = &spaceSnapshot{}
-		c.entries[key] = e
-	}
+	e := c.entry(key)
 	if !c.busy && !now.Before(e.next) && c.parent.Err() == nil {
 		c.busy = true
 		e.next = now.Add(c.ttl)
@@ -104,7 +102,7 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 	}
 	entry.failures = 0
 	entry.next = time.Now().Add(c.ttl)
-	if snapshotKey(org, corpusID, g) != key || c.entries[key] != entry {
+	if current, ok := c.entries[key]; snapshotKey(org, corpusID, g) != key || !ok || current.Value != entry {
 		return
 	}
 	entry.spaces = make(map[string]content.SpaceCoverage, len(spaces))
@@ -112,6 +110,24 @@ func (c *SpaceSnapshots) refresh(org, corpusID, key string, entry *spaceSnapshot
 		entry.spaces[sp.ID] = sp
 	}
 	entry.total, entry.observed = total, observed
+}
+
+// entry returns key's snapshot as the most recently used, creating it and
+// evicting the least recently used one when full. It holds c.mu.
+func (c *SpaceSnapshots) entry(key string) *spaceSnapshot {
+	if el, ok := c.entries[key]; ok {
+		c.recent.MoveToFront(el)
+		return el.Value.(*spaceSnapshot)
+	}
+	if len(c.entries) >= coverageEntries {
+		if cold := c.recent.Back(); cold != nil {
+			c.recent.Remove(cold)
+			delete(c.entries, cold.Value.(*spaceSnapshot).key)
+		}
+	}
+	e := &spaceSnapshot{key: key}
+	c.entries[key] = c.recent.PushFront(e)
+	return e
 }
 
 func coverageFailureBackoff(base time.Duration, failures int) time.Duration {
