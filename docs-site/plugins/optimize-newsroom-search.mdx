@@ -1,12 +1,12 @@
 ---
 title: "Optimize domain search with plugins"
-description: "Pair newsroom.retrieve and tuned hosted.embed packing with a disciplined, anti-overfit evaluation loop to optimize retrieval and storage without modifying Quivr's core engine."
+description: "Pair newsroom.retrieve and tuned text.embed packing with a disciplined, anti-overfit evaluation loop to optimize retrieval and storage without modifying Quivr's core engine."
 keywords: ["newsroom", "retrieval", "rerank", "chunking", "autoresearch", "weaviate", "evaluation"]
 ---
 
-Quivr ships a general-purpose retrieval plugin (`core.retrieve`) and a configurable hosted embedding plugin (`hosted.embed`). When a corpus has strong domain structure—such as inverted-pyramid news dispatches, press releases, or editorial archives—you can push precision, recall, and storage efficiency much further using dedicated plugins without touching the core engine.
+Quivr ships a general-purpose retrieval plugin (`core.retrieve`) and a configurable hosted embedding plugin (`text.embed`). When a corpus has strong domain structure—such as inverted-pyramid news dispatches, press releases, or editorial archives—you can push precision, recall, and storage efficiency much further using dedicated plugins without touching the core engine.
 
-This guide explains how to deploy **`newsroom.retrieve`** alongside tuned **`hosted.embed`** packing, and outlines the disciplined evaluation loop used to build and validate domain search plugins.
+This guide explains how to deploy **`newsroom.retrieve`** alongside tuned **`text.embed`** packing, and outlines the disciplined evaluation loop used to build and validate domain search plugins.
 
 ## Architecture: two tiers on one index
 
@@ -27,9 +27,9 @@ Every advanced lever in `newsroom.retrieve` is opt-in so the default configurati
 - **Interleaved sharding** (`rerank_parallel_requests: 2`): splits a single rerank batch across concurrent HTTP requests to saturate multi-container GPU endpoints within Quivr's search deadline.
 - **Adaptive QPP cascade** (`adaptive_cascade: true`): early-exits high-confidence queries at Stage 1 (`$0` rerank cost) when dense/lexical agreement and score margin exceed configured thresholds.
 
-## Storage representation: tuned `hosted.embed` packing
+## Storage representation: tuned `text.embed` packing
 
-Storage choices compound with retrieval. For inverted-pyramid articles embedded with long-context models such as `google/embeddinggemma-2`, use the reference configuration in `plugins/hosted-embed/examples/newsroom-embeddinggemma-2.json`:
+Storage choices compound with retrieval. For inverted-pyramid articles embedded with long-context models such as `google/embeddinggemma-2`, use the reference configuration in `plugins/text-embed/examples/newsroom-embeddinggemma-2.json`:
 
 ```json
 {

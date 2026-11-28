@@ -8,7 +8,7 @@ import (
 
 // This owns the transport/lifecycle proof unit provider tests cannot see:
 // configured manifests really pin a space used by ingestion and query encoding.
-func TestHostedEmbeddingPinFindsText(t *testing.T) {
+func TestTextEmbeddingPinFindsText(t *testing.T) {
 	space := os.Getenv("QUIVR_TEST_HOSTED_SPACE")
 	if space == "" {
 		t.Skip("hosted embedding stack step")

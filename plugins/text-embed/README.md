@@ -1,4 +1,4 @@
-# hosted.embed
+# text.embed
 
 Reference for operators choosing a text embedding model. This optional Go
 plugin cuts text and embeds it through OpenAI-compatible or Cohere v2 HTTP
@@ -96,11 +96,11 @@ its manifest; the manifest's `run.command` points to that executable. Choose
 an example and edit its JSON offline. Do not put a key in it.
 
 ```sh
-mkdir -p .scratch/hosted-embed/package
-(cd plugins/hosted-embed && go build -o ../../.scratch/hosted-embed/hosted-embed .)
-cp plugins/hosted-embed/examples/tei.json .scratch/hosted-embed/configuration.json
-.scratch/hosted-embed/hosted-embed configure .scratch/hosted-embed/configuration.json \
-  > .scratch/hosted-embed/package/quivr-plugin.yaml
+mkdir -p .scratch/text-embed/package
+(cd plugins/text-embed && go build -o ../../.scratch/text-embed/text-embed .)
+cp plugins/text-embed/examples/tei.json .scratch/text-embed/configuration.json
+.scratch/text-embed/text-embed configure .scratch/text-embed/configuration.json \
+  > .scratch/text-embed/package/quivr-plugin.yaml
 ```
 
 For authenticated providers, inject `EMBED_API_KEY` from your secret
@@ -114,9 +114,9 @@ manifest, and `QUIVR_PLUGIN_HOST` / `QUIVR_PLUGIN_PORT` for its HTTP address.
 Illustrative engine pin, in each API, worker and migrate configuration:
 
 ```json
-{"ingestion":{"default":"hosted.embed"},
- "plugins":[{"manifest":"/opt/hosted-embed/quivr-plugin.yaml",
-             "endpoint":"http://hosted-embed:8081",
+{"ingestion":{"default":"text.embed"},
+ "plugins":[{"manifest":"/opt/text-embed/quivr-plugin.yaml",
+             "endpoint":"http://text-embed:8081",
              "configuration":{"format":"openai","base_url":"http://tei:80/v1",
                               "auth":"none","model":"intfloat/multilingual-e5-small",
                               "dimensions":384,"send_dimensions":false,
@@ -128,11 +128,11 @@ Generate that pin's manifest from **its exact configuration**, including the
 endpoint. The generated schema binds settings to the manifest, so an invocation
 cannot select a different model behind the same space. For an evaluation
 installation beside your existing ingestion plugin, keep this owner's single
-space role `served` and list `hosted.embed` under `ingestion.evaluation` for the
+space role `served` and list `text.embed` under `ingestion.evaluation` for the
 source media types you want to measure. Leave your existing served routing in
 place. Evaluation is the additional owner's role; each owner still declares a
 primary served space. To run several configurations together, give each a distinct
-`plugin_id`, such as `hosted.embed.pro` and `hosted.embed.fast`, before generating
+`plugin_id`, such as `text.embed.pro` and `text.embed.fast`, before generating
 its manifest. Pin every package and list those IDs in `ingestion.evaluation`.
 The generated space belongs to that ID. See
 [ingestion routing](https://docs.quivr.thevibecompany.co/reference/configuration#ingestion-routing)
@@ -178,7 +178,7 @@ until its pinned work drains; Quivr cannot substitute a different output identit
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `plugin_id` | `hosted.embed` | Independent owner ID, lowercase plugin identifier, at most 40 characters |
+| `plugin_id` | `text.embed` | Independent owner ID, lowercase plugin identifier, at most 40 characters |
 | `metric` | `cosine` | `cosine`, `dot`, or `l2` |
 | `model_revision` | `"1"` | Space version, 1–32 letters, numbers, dots, underscores or hyphens |
 | `query_prefix`, `document_prefix` | empty | Text prepended before embedding |
@@ -294,12 +294,12 @@ checksum-valid files under `.scratch/tokenizer/`; no download occurs at startup.
 For the TEI E5 example:
 
 ```sh
-mkdir -p .scratch/hosted-embed
+mkdir -p .scratch/text-embed
 python3 scripts/prepare_tokenizer.py --hosted \
   --repository intfloat/multilingual-e5-small \
   --revision 614241f622f53c4eeff9890bdc4f31cfecc418b3 \
   --sha256 0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39 \
-  > .scratch/hosted-embed/tokenizer-settings.json
+  > .scratch/text-embed/tokenizer-settings.json
 ```
 
 The output is the `{python, model, sha256}` object to paste as the `tokenizer`
@@ -310,28 +310,28 @@ original core.ingest settings and prepares its pinned E5 tokenizer.
 
 ### Run the tokenizer in the published image
 
-The `quivr-plugin-hosted.embed` image includes Python and tokenizers 0.23.2.
+The `quivr-plugin-text.embed` image includes Python and tokenizers 0.23.2.
 Mount your prepared model file read-only, use `/opt/tokenizer/bin/python`,
 and set `tokenizer.model` to its path inside the container. The image contains
 no model tokenizer and does not install packages or download files at runtime.
 
 For example, after adding the prepared `tokenizer` object to
-`.scratch/hosted-embed/configuration.json`, set a `base_url` reachable from the
+`.scratch/text-embed/configuration.json`, set a `base_url` reachable from the
 container, then generate the exact container configuration and manifest:
 
 ```sh
-HOSTED_IMAGE='ghcr.io/the-vibe-company/quivr-plugin-hosted.embed:<release-tag>'
-HOSTED_TOKENIZER_FILE=$(jq -r .model .scratch/hosted-embed/tokenizer-settings.json)
+HOSTED_IMAGE='ghcr.io/the-vibe-company/quivr-plugin-text.embed:<release-tag>'
+HOSTED_TOKENIZER_FILE=$(jq -r .model .scratch/text-embed/tokenizer-settings.json)
 jq '.tokenizer.python = "/opt/tokenizer/bin/python" |
     .tokenizer.model = "/tokenizer/tokenizer.json"' \
-  .scratch/hosted-embed/configuration.json > .scratch/hosted-embed/image-configuration.json
+  .scratch/text-embed/configuration.json > .scratch/text-embed/image-configuration.json
 docker run --rm --network none --read-only \
-  --mount "type=bind,src=$PWD/.scratch/hosted-embed,dst=/config,readonly" \
+  --mount "type=bind,src=$PWD/.scratch/text-embed,dst=/config,readonly" \
   "$HOSTED_IMAGE" configure /config/image-configuration.json \
-  > .scratch/hosted-embed/quivr-plugin.yaml
+  > .scratch/text-embed/quivr-plugin.yaml
 docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m \
   --mount "type=bind,src=$HOSTED_TOKENIZER_FILE,dst=/tokenizer/tokenizer.json,readonly" \
-  --mount "type=bind,src=$PWD/.scratch/hosted-embed,dst=/config,readonly" \
+  --mount "type=bind,src=$PWD/.scratch/text-embed,dst=/config,readonly" \
   -e QUIVR_PLUGIN_MANIFEST=/config/quivr-plugin.yaml \
   -e QUIVR_PLUGIN_SIGNING_KEYS \
   -p 8081:8080 "$HOSTED_IMAGE"
@@ -420,7 +420,7 @@ usage field; this accounting interface is the plugin's structured log.
 
 `make check` verifies that the committed TEI manifest matches its generator,
 then certifies generated packages in both formats against the shared
-fake. Reports are `.scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json`
-and the CI artifact `hosted-embedding-contract-reports`.
+fake. Reports are `.scratch/plugin-sdk/text-embed/text-embed-*-contract-report.json`
+and the CI artifact `text-embedding-contract-reports`.
 `make verify part=plugins` pins both formats, ingests text and finds it by a
 sentence it contains. These checks make no live paid call.

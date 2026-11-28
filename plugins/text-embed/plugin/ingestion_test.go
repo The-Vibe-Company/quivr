@@ -241,7 +241,7 @@ func TestLocalQueryRouting(t *testing.T) {
 			defer local.Close()
 			c := testConfig("openai", remoteServer.URL)
 			c.Revision, c.QueryPrefix, c.DocumentPrefix = revision, "query: ", "passage: "
-			manifest, _ := c.manifest([]string{"hosted-embed"})
+			manifest, _ := c.manifest([]string{"text-embed"})
 			path := t.TempDir() + "/quivr-plugin.yaml"
 			if err := os.WriteFile(path, manifest, 0600); err != nil {
 				t.Fatal(err)
@@ -305,7 +305,7 @@ func TestLocalQueryRouting(t *testing.T) {
 					t.Fatal("local failure retried or fell back remotely")
 				}
 			}
-			if after, _ := i.config.manifest([]string{"hosted-embed"}); !bytes.Equal(manifest, after) {
+			if after, _ := i.config.manifest([]string{"text-embed"}); !bytes.Equal(manifest, after) {
 				t.Fatal("runtime routing changed the pinned manifest")
 			}
 		})
@@ -397,7 +397,7 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	}
 	// This released identity included title text in each passage. Full-text
 	// pages embed titles separately and must never share its vector namespace.
-	if example.spaceID() == "hosted.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b" {
+	if example.spaceID() == "text.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b" {
 		t.Fatal("new passage semantics reused the released space")
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
@@ -414,7 +414,7 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 			t.Fatal("changed semantics reused a space")
 		}
 	}
-	manifest, err := c.manifest([]string{"hosted-embed"})
+	manifest, err := c.manifest([]string{"text-embed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,13 +483,13 @@ func signTestRequest(t *testing.T, pluginID string, request *http.Request, body 
 
 // Independently configured owners must coexist in one ingestion routing plan.
 func TestConfiguredOwnersHaveIndependentManifestAndSpaceNamespaces(t *testing.T) {
-	for _, id := range []string{"hosted.embed.pro", "hosted.embed.fast"} {
+	for _, id := range []string{"text.embed.pro", "text.embed.fast"} {
 		raw := fmt.Sprintf(`{"plugin_id":%q,"format":"openai","base_url":"http://127.0.0.1:9","auth":"none","model":"example","dimensions":8}`, id)
 		c, err := parseConfiguration([]byte(raw))
 		if err != nil {
 			t.Fatal(err)
 		}
-		manifest, err := c.manifest([]string{"hosted-embed"})
+		manifest, err := c.manifest([]string{"text-embed"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -709,7 +709,7 @@ func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, err := c.manifest([]string{"hosted-embed"})
+			body, err := c.manifest([]string{"text-embed"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -733,7 +733,7 @@ func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, err := c.manifest([]string{"hosted-embed"})
+			body, err := c.manifest([]string{"text-embed"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -768,7 +768,7 @@ func TestManifestRequiresCredentialOnlyForAuthenticatedProviders(t *testing.T) {
 	for _, auth := range []string{"bearer", "api-key", "none"} {
 		c := testConfig("openai", "http://127.0.0.1:9")
 		c.Auth = auth
-		body, err := c.manifest([]string{"hosted-embed"})
+		body, err := c.manifest([]string{"text-embed"})
 		if err != nil {
 			t.Fatal(err)
 		}

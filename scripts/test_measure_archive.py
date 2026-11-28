@@ -155,7 +155,7 @@ class MeasureArchiveCLITest(unittest.TestCase):
         if hosted:
             self.fake = _Fake()
             self.proxy = mock.Mock(server_port=43211)
-            hosted_embed = types.SimpleNamespace(build=mock.Mock(return_value=self.root / "hosted-embed"))
+            hosted_embed = types.SimpleNamespace(build=mock.Mock(return_value=self.root / "text-embed"))
             plugin_environment = types.SimpleNamespace(inherited=mock.Mock(return_value={}))
             ports = types.SimpleNamespace(allocate=mock.Mock(return_value=43212))
             ingestion_plugin = types.SimpleNamespace(
@@ -171,12 +171,12 @@ class MeasureArchiveCLITest(unittest.TestCase):
 
             patches.extend([
                 mock.patch.object(measure_archive, "_running", return_value=True, create=True),
-                mock.patch.object(measure_archive, "hosted_embed_plugin", hosted_embed, create=True),
+                mock.patch.object(measure_archive, "text_embed_plugin", hosted_embed, create=True),
                 mock.patch.object(measure_archive, "Fake", return_value=self.fake, create=True),
                 mock.patch.object(measure_archive, "_start_proxy", side_effect=start_proxy, create=True),
                 mock.patch.object(measure_archive, "_stop_proxy", create=True),
                 mock.patch.object(measure_archive, "_package_with_optional_batch_wait",
-                                  return_value=(self.root / "quivr-plugin.yaml", {"provider": "fake"}, "hosted.embed/default"),
+                                  return_value=(self.root / "quivr-plugin.yaml", {"provider": "fake"}, "text.embed/default"),
                                   create=True),
                 mock.patch.object(measure_archive, "plugin_environment", plugin_environment, create=True),
                 mock.patch.object(measure_archive, "ports", ports, create=True),

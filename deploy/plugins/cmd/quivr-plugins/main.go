@@ -16,7 +16,7 @@ func main() {
 	multicall.Run(map[string]multicall.Entry{
 		"core-ingest":            multicall.MainFunc(coreingest.Main),
 		"core-retrieve":          multicall.MainFunc(coreretrieve.Main),
-		"hosted-embed":           multicall.HostedEmbed,
+		"text-embed":           multicall.TextEmbed,
 		"m365-mail":              multicall.MainFunc(m365mail.Main),
 		"object-storage-archive": multicall.MainFunc(archive.Main),
 		"rss":                    multicall.MainFunc(rss.Main),

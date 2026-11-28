@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	github.com/The-Vibe-Company/quivr/plugins/core-ingest v0.0.0
 	github.com/The-Vibe-Company/quivr/plugins/core-retrieve v0.0.0
-	github.com/The-Vibe-Company/quivr/plugins/hosted-embed v0.0.0
+	github.com/The-Vibe-Company/quivr/plugins/text-embed v0.0.0
 	github.com/The-Vibe-Company/quivr/plugins/m365-mail v0.0.0
 	github.com/The-Vibe-Company/quivr/plugins/object-storage-archive v0.0.0
 	github.com/The-Vibe-Company/quivr/plugins/rss v0.0.0
@@ -45,7 +45,7 @@ require (
 replace (
 	github.com/The-Vibe-Company/quivr/plugins/core-ingest => ../../plugins/core-ingest
 	github.com/The-Vibe-Company/quivr/plugins/core-retrieve => ../../plugins/core-retrieve
-	github.com/The-Vibe-Company/quivr/plugins/hosted-embed => ../../plugins/hosted-embed
+	github.com/The-Vibe-Company/quivr/plugins/text-embed => ../../plugins/text-embed
 	github.com/The-Vibe-Company/quivr/plugins/m365-mail => ../../plugins/m365-mail
 	github.com/The-Vibe-Company/quivr/plugins/object-storage-archive => ../../plugins/object-storage-archive
 	github.com/The-Vibe-Company/quivr/plugins/rss => ../../plugins/rss

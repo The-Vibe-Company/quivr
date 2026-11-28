@@ -64,7 +64,7 @@ def _health(url, token, timeout):
 
 
 def _passage(tokens):
-    # The shape mirrors hosted.embed's title/body input while keeping the
+    # The shape mirrors text.embed's title/body input while keeping the
     # benchmark data synthetic and free of corpus content.
     if tokens < 4:
         raise ValueError('tokens must be at least 4')

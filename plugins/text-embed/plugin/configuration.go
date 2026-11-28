@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const pluginID = "hosted.embed"
+const pluginID = "text.embed"
 
 type configuration struct {
 	PluginID           string                  `json:"plugin_id"`

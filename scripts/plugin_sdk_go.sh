@@ -86,8 +86,8 @@ for mod in "$root"/plugins/*/go.mod; do
   cd "$dir"
   "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD"
   "$GO" build -o /dev/null .
-  if [ "$id" = hosted-embed ]; then
-    python3 "$root/scripts/hosted_embed_plugin.py" --quivr "$quivr" --out "$work/hosted-embed"
+  if [ "$id" = text-embed ]; then
+    python3 "$root/scripts/text_embed_plugin.py" --quivr "$quivr" --out "$work/text-embed"
     continue
   fi
   "$quivr" plugin inspect . > "$work/$id-inspect.log"

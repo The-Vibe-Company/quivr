@@ -4,7 +4,7 @@ Run Cohere-Embed-V5-Pro at 1024 dimensions as the default ingestion for every so
 
 ## Prerequisites
 
-- The core image includes `quivr-hosted-embed`. The operator controls both Railway api and worker services.
+- The core image includes `quivr-text-embed`. The operator controls both Railway api and worker services.
 - For PDFs, enable the bundled `pdf-text` normalizer with `QUIVR_DEMO_PLUGINS=1` on both services before ingestion; the hosted plugin embeds normalized text only.
 - Set `AZURE_FOUNDRY_ENDPOINT` to the Foundry resource root URL, without `/providers/cohere/v2`, on both services. Store `AZURE_FOUNDRY_KEY` as a Railway secret on both; never put it in configuration or a command argument.
 - Set `QUIVR_OPERATOR_KEY` on api. Its generated grant includes `plugins:admin`, `corpora:read`, `projections:rebuild`, `operations:read`, `operations:write` and `observability:read`; search uses the separate `QUIVR_API_KEY` configured on api, with `search:query`.
@@ -14,13 +14,13 @@ These requests are operator examples, not run against a paid deployment. The coo
 
 ## Enable hosted ingestion
 
-If an earlier hosted promotion added E5 evaluation, restore its saved pre-promotion plan before deploying: startup preserves operator-created routes. After redeploy, inspect `GET /v0/admin/plugins/plan`: require `ingestion-default` on `hosted.embed`, no `ingestion-evaluation:*:core.ingest` roles and no source routes to E5. Use the [plan rollback procedure](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-a-plugin#roll-back) with the saved plan id; resolve coverage or reachability refusals before proceeding.
+If an earlier hosted promotion added E5 evaluation, restore its saved pre-promotion plan before deploying: startup preserves operator-created routes. After redeploy, inspect `GET /v0/admin/plugins/plan`: require `ingestion-default` on `text.embed`, no `ingestion-evaluation:*:core.ingest` roles and no source routes to E5. Use the [plan rollback procedure](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-a-plugin#roll-back) with the saved plan id; resolve coverage or reachability refusals before proceeding.
 
 Set `QUIVR_DEMO_HOSTED_EMBED=1` identically on api and worker, then redeploy both. Newly arriving documents then incur hosted embedding calls. Without exactly `1`, no hosted pin or sidecar is added. An enabled service refuses startup if its endpoint or key is empty.
 
-The entrypoint generates a model-locked manifest in `/tmp/hosted-embed/quivr-plugin.yaml` without calling Foundry. The endpoint becomes `base_url` with `/providers/cohere/v2` appended; the plugin appends `/embed`. Only the hosted sidecar receives the key. Both services run it on loopback port 9980.
+The entrypoint generates a model-locked manifest in `/tmp/text-embed/quivr-plugin.yaml` without calling Foundry. The endpoint becomes `base_url` with `/providers/cohere/v2` appended; the plugin appends `/embed`. Only the hosted sidecar receives the key. Both services run it on loopback port 9980.
 
-The generated config selects `hosted.embed` as the default for every source format, including NewsML-G2 XML, after normalization. It has no E5 evaluation routes, saving CPU for new hosted Versions. Existing Corpora keep their served generation until rebuilt, so they can still need E5 while transitioning. Keep core.ingest and TEI running.
+The generated config selects `text.embed` as the default for every source format, including NewsML-G2 XML, after normalization. It has no E5 evaluation routes, saving CPU for new hosted Versions. Existing Corpora keep their served generation until rebuilt, so they can still need E5 while transitioning. Keep core.ingest and TEI running.
 
 The plugin requests `search_document` for documents and `search_query` for queries, with `output_dimension: 1024`. Segments use a conservative 6144-byte token bound and 192-byte overlap, rather than an exact provider tokenizer. The manifest declares $0.12 per million input tokens for the cost estimate. Recheck the rate before a paid run.
 
@@ -32,9 +32,9 @@ its `plan_id` as `ROLLBACK_PLAN_ID`. Startup pins register the plugin automatica
 ```sh
 curl -fsS "$QUIVR_API_URL/v0/admin/plugins" \
   -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
-  | jq '.items[] | select(.plugin_id == "hosted.embed") | {registration_id, state, check}'
-export REGISTRATION_ID=<the active hosted.embed registration_id>
-export SPACE_ID=hosted.embed.cohere-embed-v5-pro-1024-c025d1f04d71722f@1
+  | jq '.items[] | select(.plugin_id == "text.embed") | {registration_id, state, check}'
+export REGISTRATION_ID=<the active text.embed registration_id>
+export SPACE_ID=text.embed.cohere-embed-v5-pro-1024-c025d1f04d71722f@1
 ```
 
 Confirm the space name in the generated manifest. Model or prefix changes require regenerating it and using its new identity.
@@ -71,7 +71,7 @@ Inspect each Corpus with `GET /v0/corpora/{corpus_id}/vector-spaces`. Compare ho
 Changing startup ingestion routing preserves each existing Corpus's search generation.
 Backfill does not change its serving owner. For each existing Corpus, rebuild under
 the hosted default: it re-runs segmentation
-and embedding of existing Versions with `hosted.embed`. A rebuild prepares a
+and embedding of existing Versions with `text.embed`. A rebuild prepares a
 new search generation and switches to it only after it is ready; it can call Foundry.
 These requests are operator examples, not run against a paid deployment.
 
@@ -103,4 +103,4 @@ rebuilds have succeeded and hosted `pinned_work` is zero, unset the hosted switc
 both services and redeploy. Keep api and worker configured with the same default.
 
 ## Next
-See [hosted.embed](../../plugins/hosted-embed/README.md) for provider configuration, and [switch plugins](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting) for activation and rollback contracts.
+See [text.embed](../../plugins/text-embed/README.md) for provider configuration, and [switch plugins](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting) for activation and rollback contracts.

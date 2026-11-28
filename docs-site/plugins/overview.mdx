@@ -81,7 +81,7 @@ In words:
 | Your webhook receiver | You. The identifiers of the alert, the match, the document and its version. |
 
 <Warning>
-Quivr sends document text to your plugins, which may send it on. Among the plugins that ship with Quivr, `core-ingest` sends passages and searches to the embedding server you configure: it runs locally in the default stack, but its address can be remote. `hosted-embed` sends them to the hosted model you configure, and `alerts` and `jev-rerank` can send text to TypeSafe's Jev model when they have a TypeSafe key. Check what a plugin calls before you give it confidential content. [First-party plugins](/run-quivr/catalog) describes what each one calls.
+Quivr sends document text to your plugins, which may send it on. Among the plugins that ship with Quivr, `core-ingest` sends passages and searches to the embedding server you configure: it runs locally in the default stack, but its address can be remote. `text-embed` sends them to the hosted model you configure, and `alerts` and `jev-rerank` can send text to TypeSafe's Jev model when they have a TypeSafe key. Check what a plugin calls before you give it confidential content. [First-party plugins](/run-quivr/catalog) describes what each one calls.
 </Warning>
 
 ## Add a plugin

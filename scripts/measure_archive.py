@@ -30,7 +30,7 @@ import uuid
 from local import Stack
 from archive_source import seed
 from fake_api import Fake
-import hosted_embed_plugin
+import text_embed_plugin
 import ingestion_plugin
 import plugin_environment
 import ports
@@ -84,7 +84,7 @@ def _package_with_optional_batch_wait(
     endpoint: str,
     batch_wait_ms: int | None,
 ):
-    manifest, configuration, space = hosted_embed_plugin.package(binary, directory, endpoint, "cohere")
+    manifest, configuration, space = text_embed_plugin.package(binary, directory, endpoint, "cohere")
     if batch_wait_ms is None:
         return manifest, configuration, space
     configuration["batch_wait_ms"] = batch_wait_ms
@@ -820,7 +820,7 @@ def _run_hosted_fake(args, stack: Stack, run: str) -> dict:
     try:
         # This helper is deliberately the repository's shared Go fake. No
         # provider address from outside loopback is accepted by _start_proxy.
-        binary = hosted_embed_plugin.build(directory)
+        binary = text_embed_plugin.build(directory)
         fake = Fake("embedding")
         proxy, proxy_thread = _start_proxy(fake, args.provider_latency_ms, provider_log)
         endpoint = f"http://127.0.0.1:{proxy.server_port}"
@@ -849,7 +849,7 @@ def _run_hosted_fake(args, stack: Stack, run: str) -> dict:
         configs_modified = True
         for name, saved in original.items():
             config = _json_config(saved["text"])
-            config["ingestion"] = {"default": "hosted.embed"}
+            config["ingestion"] = {"default": "text.embed"}
             config.setdefault("plugins", []).append({
                 "manifest": str(manifest),
                 "endpoint": f"http://127.0.0.1:{env['QUIVR_PLUGIN_PORT']}",
@@ -909,7 +909,7 @@ def _run_hosted_fake(args, stack: Stack, run: str) -> dict:
 def _arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack", required=True, help="Running local stack name under .scratch/")
-    parser.add_argument("--hosted-fake", action="store_true", help="Measure hosted.embed through the loopback fake")
+    parser.add_argument("--hosted-fake", action="store_true", help="Measure text.embed through the loopback fake")
     parser.add_argument("--items", type=int, default=None, help="Synthetic unique filler members, plus three revisions")
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=None,
@@ -923,7 +923,7 @@ def _arguments(argv=None):
         "--batch-wait-ms",
         type=int,
         default=None,
-        help="Optional hosted.embed document collection window (0..100 ms); omitted uses the plugin default",
+        help="Optional text.embed document collection window (0..100 ms); omitted uses the plugin default",
     )
     parser.add_argument(
         "--provider-log",

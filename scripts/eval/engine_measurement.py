@@ -146,7 +146,7 @@ def stack(mapping, budget, runtime, stacks):
     import sys
     sys.path.insert(0, str(ROOT / 'scripts'))
     import run
-    import hosted_embed_plugin
+    import text_embed_plugin
     import ingestion_plugin
     import plugin_environment
     import ports
@@ -161,7 +161,7 @@ def stack(mapping, budget, runtime, stacks):
             gate.__enter__()
             cfg.update(base_url=gate.url, auth='none')
             directory = owned.directory / 'hosted-confirmation'
-            binary = hosted_embed_plugin.build(directory)
+            binary = text_embed_plugin.build(directory)
             config = directory / 'configuration.json'
             config.write_text(results.encode(cfg))
             manifest = directory / 'quivr-plugin.yaml'
@@ -187,7 +187,7 @@ def stack(mapping, budget, runtime, stacks):
                     pin['configuration'] = mapping['retrieve']
             if configuration:
                 cfg['plugins'].append(configuration)
-                cfg['ingestion'] = {'default': 'hosted.embed'}
+                cfg['ingestion'] = {'default': 'text.embed'}
             path.write_text(results.encode(cfg))
         owned.start_processes()
         # Admin scope is intentionally separate from the search credential.
@@ -204,7 +204,7 @@ def stack(mapping, budget, runtime, stacks):
                 or retrieval[0]['version'] != '1.2.0' or pin['configuration'] != mapping['retrieve']):
             raise RuntimeError('active retrieval registration differs')
         if configuration:
-            hosted = [r for r in rows if r['plugin_id'] == 'hosted.embed' and r['state'] == 'active']
+            hosted = [r for r in rows if r['plugin_id'] == 'text.embed' and r['state'] == 'active']
             if len(hosted) != 1 or hosted[0]['endpoint'] != configuration['endpoint']:
                 raise RuntimeError('active ingestion registration differs')
         yield client

@@ -90,7 +90,7 @@
           "const": 0
         },
         "plugin_id": {
-          "const": "hosted.embed"
+          "const": "text.embed"
         },
         "plugin_version": {
           "const": "1.2.0"
@@ -150,7 +150,7 @@
       "paging": true,
       "query_timeout_ms": 10000,
       "spaces": {
-        "hosted.embed.intfloat-multilingual-e5-sma-384-32096b91c08ed286": {
+        "text.embed.intfloat-multilingual-e5-sma-384-32096b91c08ed286": {
           "dimensions": 384,
           "indexes": [
             "text"
@@ -167,7 +167,7 @@
     }
   },
   "description": "Text passages embedded with a configured hosted or OpenAI-compatible model.",
-  "id": "hosted.embed",
+  "id": "text.embed",
   "run": {
     "command": [
       "go",

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	hostedembed "github.com/The-Vibe-Company/quivr/plugins/hosted-embed/plugin"
+	textembed "github.com/The-Vibe-Company/quivr/plugins/text-embed/plugin"
 )
 
 // Entry runs one bundled plugin with its command arguments (excluding argv[0]
@@ -22,21 +22,21 @@ func MainFunc(fn func()) Entry {
 	return func(_ []string) { fn() }
 }
 
-// HostedEmbed runs the hosted-embed plugin, emitting [executable, "hosted-embed"]
+// TextEmbed runs the text-embed plugin, emitting [executable, "text-embed"]
 // as run.command when invoked with configure.
-func HostedEmbed(args []string) {
+func TextEmbed(args []string) {
 	var command []string
 	if exe, err := os.Executable(); err == nil {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = resolved
 		}
-		if normalize(filepath.Base(exe)) == "hosted-embed" {
+		if normalize(filepath.Base(exe)) == "text-embed" {
 			command = []string{exe}
 		} else {
-			command = []string{exe, "hosted-embed"}
+			command = []string{exe, "text-embed"}
 		}
 	}
-	if err := hostedembed.Run(args, command); err != nil {
+	if err := textembed.Run(args, command); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

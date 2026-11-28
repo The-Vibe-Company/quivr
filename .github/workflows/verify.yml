@@ -436,7 +436,7 @@ jobs:
         # PRs read the default branch's layers without exporting their own.
         cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,mode=max,scope=scan-{0}', matrix.component || matrix.plugin || 'engine') || '' }}
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
-      if: matrix.plugin == 'hosted-embed'
+      if: matrix.plugin == 'text-embed'
       with:
         python-version: 3.12.16
         cache: pip
@@ -444,13 +444,13 @@ jobs:
           scripts/ci-requirements-*.txt
           scripts/ci-constraints.txt
     - name: Prepare the pinned E5 tokenizer fixture
-      if: matrix.plugin == 'hosted-embed'
+      if: matrix.plugin == 'text-embed'
       run: python3 scripts/prepare_tokenizer.py
     - name: Check hosted image token packing offline
-      if: matrix.plugin == 'hosted-embed'
+      if: matrix.plugin == 'text-embed'
       env:
         REVISION: ${{ needs.paths-filter.outputs.ref || inputs.ref || github.sha }}
-      run: python3 scripts/image_smoke.py quivr-scan:local --plugin hosted-embed --plugin-id hosted.embed --version dev --revision "$REVISION"
+      run: python3 scripts/image_smoke.py quivr-scan:local --plugin text-embed --plugin-id text.embed --version dev --revision "$REVISION"
     - uses: ./.github/actions/grype-database-restore
       with:
         artifact-id: ${{ needs.image-inventory.outputs.artifact-id }}

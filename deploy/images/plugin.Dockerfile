@@ -87,7 +87,7 @@ COPY --from=go-build /out/quivr-plugin.yaml /app/quivr-plugin.yaml
 COPY --from=tokenizer /app/.scratch/tokenizer /app/.scratch/tokenizer
 ENTRYPOINT ["/usr/local/bin/plugin"]
 
-FROM python-runtime AS hosted-embed
+FROM python-runtime AS text-embed
 COPY --from=go-build /out/plugin /usr/local/bin/plugin
 COPY --from=go-build /out/quivr-plugin.yaml /app/quivr-plugin.yaml
 COPY --from=hosted-tokenizer /opt/tokenizer /opt/tokenizer
