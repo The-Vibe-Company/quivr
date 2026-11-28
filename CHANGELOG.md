@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.3.1](https://github.com/The-Vibe-Company/quivr/compare/v2.3.0...v2.3.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **core:** clean up dead ingest mapper, MaxBytesError precedence, racy retry sleep, and zero-delta flush ([#4068](https://github.com/The-Vibe-Company/quivr/issues/4068)) ([ebcb3d5](https://github.com/The-Vibe-Company/quivr/commit/ebcb3d5eac7b5b2579f06af5f3ad24c4ec1aeaed))
+* **orchestration:** detach retry context on attempt timeout and bound workqueue pool pressure ([#4067](https://github.com/The-Vibe-Company/quivr/issues/4067)) ([3ee5390](https://github.com/The-Vibe-Company/quivr/commit/3ee5390c56bdcb1b3e518bc6d00796ec973bf293))
+* **weaviate:** remove test hook, drop sleeps, and harden jsonStream RFC-8259 parity ([#4072](https://github.com/The-Vibe-Company/quivr/issues/4072)) ([72db75b](https://github.com/The-Vibe-Company/quivr/commit/72db75b34d5d23a1083fee4600e80baf375cbd77))
+
+
+### Performance Improvements
+
+* **httpapi:** eliminate double search decode, add 503 panic guard, and verify fault matrix ([#4064](https://github.com/The-Vibe-Company/quivr/issues/4064)) ([a9960b5](https://github.com/The-Vibe-Company/quivr/commit/a9960b532be98e669b7b94e1108389f544b37253))
+* **httpapi:** single-pass batch decode and bounded ingest admission ([#4056](https://github.com/The-Vibe-Company/quivr/issues/4056)) ([167b871](https://github.com/The-Vibe-Company/quivr/commit/167b871e59ede60379d807401c39f1fdfce54df3))
+* **ingestion:** decouple Stage-2 enrichment from Stage-1 receipt slots ([#4054](https://github.com/The-Vibe-Company/quivr/issues/4054)) ([b061669](https://github.com/The-Vibe-Company/quivr/commit/b061669f5b40e414046ec90adadf8153c95c75ad))
+* **pluginhttp:** cache incremental search transcripts, presize devhost reads, and add transport breaker ([#4066](https://github.com/The-Vibe-Company/quivr/issues/4066)) ([c6ada4a](https://github.com/The-Vibe-Company/quivr/commit/c6ada4a68cdd1a32e55c297c7e3b12b9fc76ae61))
+* **postgres:** batch segment and compact-embedding writes with sorted unnest ([#4063](https://github.com/The-Vibe-Company/quivr/issues/4063)) ([086339b](https://github.com/The-Vibe-Company/quivr/commit/086339b8fe209644df51d08716032138db9442a3))
+* **postgres:** collapse search control-plane queries, singleflight visibility snapshots, and harden hydrate shards ([#4070](https://github.com/The-Vibe-Company/quivr/issues/4070)) ([f0e1afa](https://github.com/The-Vibe-Company/quivr/commit/f0e1afa8e4ecc9c2d28b1c9b32cd5455d09439a8))
+* **postgres:** cut accept replay round trips and harden deadlock retry ([#4057](https://github.com/The-Vibe-Company/quivr/issues/4057)) ([165b7fb](https://github.com/The-Vibe-Company/quivr/commit/165b7fb615050295ec2f93ae3fd501c7e7fe89f6))
+* **retrieval:** parallelize route resolution, add panic recovery, and dedupe ACL fallbacks ([#4062](https://github.com/The-Vibe-Company/quivr/issues/4062)) ([4cd439e](https://github.com/The-Vibe-Company/quivr/commit/4cd439ea9ad1be87ca41d20494207e52e3754d9e))
+* **retrieval:** scale QueryVectorCache hit path and harden panic/outage resilience ([#4059](https://github.com/The-Vibe-Company/quivr/issues/4059)) ([008c572](https://github.com/The-Vibe-Company/quivr/commit/008c5728479bdfb46a0aeae814aeb777df4d60f5))
+* **s3:** skip redundant readback on verified put and use sized reads ([#4055](https://github.com/The-Vibe-Company/quivr/issues/4055)) ([10c491a](https://github.com/The-Vibe-Company/quivr/commit/10c491a1e91c7ff158b96abf99ef9a5210e6eef6))
+* **weaviate:** add gRPC connection pool, error classification, and circuit breaker ([#4058](https://github.com/The-Vibe-Company/quivr/issues/4058)) ([4b442f0](https://github.com/The-Vibe-Company/quivr/commit/4b442f00e0d38f9441bfed17d77fa319245971c3))
+* **weaviate:** optimize HTTP decode, filter rendering, parallel visibility, and panic safety ([#4065](https://github.com/The-Vibe-Company/quivr/issues/4065)) ([65bce5d](https://github.com/The-Vibe-Company/quivr/commit/65bce5d723ea51ed310740ec57214adcab5c9ed8))
+* **weaviate:** retry only failed batch objects and parallelize lost-response verification ([#4071](https://github.com/The-Vibe-Company/quivr/issues/4071)) ([c01b00a](https://github.com/The-Vibe-Company/quivr/commit/c01b00a282dd9b66a4bdfff8334237c055fd87cd))
+
 ## [2.3.0](https://github.com/The-Vibe-Company/quivr/compare/v2.2.0...v2.3.0) (2026-11-28)
 
 
