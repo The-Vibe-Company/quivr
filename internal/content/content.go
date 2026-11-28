@@ -2,12 +2,14 @@
 package content
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"strings"
 	"time"
@@ -823,21 +825,54 @@ func NormalizedText(m Manifest) string {
 
 func normalizedText(m Manifest, addPart func(Part, int64, int64)) string {
 	var b strings.Builder
+	b.Grow(normalizedLen(m))
+	writeNormalized(&b, m, addPart)
+	return b.String()
+}
+
+// normalizedBytes is []byte(normalizedText(m, addPart)) built in a single
+// exactly sized buffer.
+func normalizedBytes(m Manifest, addPart func(Part, int64, int64)) []byte {
+	b := bytes.NewBuffer(make([]byte, 0, normalizedLen(m)))
+	writeNormalized(b, m, addPart)
+	return b.Bytes()
+}
+
+// normalizedLen is the byte length of the normalized text of m.
+func normalizedLen(m Manifest) int {
+	n, written := 0, false
+	for _, p := range m.Parts {
+		if p.Content.Kind != "text" {
+			continue
+		}
+		if written {
+			n++
+		}
+		n += len(p.Content.Text)
+		written = true
+	}
+	return n
+}
+
+func writeNormalized(b interface {
+	io.ByteWriter
+	io.StringWriter
+	Len() int
+}, m Manifest, addPart func(Part, int64, int64)) {
 	written := false
 	for _, p := range m.Parts {
 		if p.Content.Kind != "text" {
 			continue
 		}
 		if written {
-			b.WriteByte('\n')
+			_ = b.WriteByte('\n')
 		}
 		if addPart != nil {
 			addPart(p, int64(b.Len()), int64(len(p.Content.Text)))
 		}
-		b.WriteString(p.Content.Text)
+		_, _ = b.WriteString(p.Content.Text)
 		written = true
 	}
-	return b.String()
 }
 
 // resolveBlob verifies and reads a same-Organization text Blob's immutable bytes.
@@ -946,12 +981,12 @@ func (s Service) objects(ctx context.Context, org string, manifest Manifest) (Pu
 		return Publication{}, err
 	}
 	var publication Publication
-	text := normalizedText(manifest, func(part Part, offset, length int64) {
+	text := normalizedBytes(manifest, func(part Part, offset, length int64) {
 		publication.Parts = append(publication.Parts, PartBlob{
 			Key: part.Key, Role: part.Role, Pack: PackRange{Offset: &offset, Length: &length},
 		})
 	})
-	normalized, err := s.Blobs.Put(ctx, org, []byte(text))
+	normalized, err := s.Blobs.Put(ctx, org, text)
 	if err != nil {
 		return Publication{}, errors.New("canonical text publication unavailable")
 	}

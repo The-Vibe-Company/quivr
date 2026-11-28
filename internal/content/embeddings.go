@@ -146,24 +146,45 @@ func VectorBytes(vector []float32) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	raw := make([]byte, 4*len(vector))
-	for i, x := range vector {
-		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
-			return nil, ErrInvalid
-		}
-		binary.LittleEndian.PutUint32(raw[4*i:], math.Float32bits(x))
+	if !putVector(raw, vector) {
+		return nil, ErrInvalid
 	}
 	return raw, nil
 }
+
+// putVector writes vector as little-endian float32 into dst, which holds
+// exactly 4*len(vector) bytes, and reports whether every value is finite.
+func putVector(dst []byte, vector []float32) bool {
+	for i, x := range vector {
+		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+			return false
+		}
+		binary.LittleEndian.PutUint32(dst[4*i:], math.Float32bits(x))
+	}
+	return true
+}
+
+// getVector decodes little-endian float32 values from src, which holds
+// exactly 4*len(dst) bytes, and reports whether every value is finite.
+func getVector(dst []float32, src []byte) bool {
+	finite := true
+	for i := range dst {
+		x := math.Float32frombits(binary.LittleEndian.Uint32(src[4*i:]))
+		finite = finite && !math.IsNaN(float64(x)) && !math.IsInf(float64(x), 0)
+		dst[i] = x
+	}
+	return finite
+}
+
 func ReadVector(raw []byte) ([]float32, error) {
 	if len(raw) == 0 || len(raw)%4 != 0 || len(raw) > 4*MaxDimensions {
 		return nil, ErrInvalid
 	}
 	v := make([]float32, len(raw)/4)
-	for i := range v {
-		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*i:]))
+	if !getVector(v, raw) {
+		return v, ErrInvalid
 	}
-	_, err := VectorBytes(v)
-	return v, err
+	return v, nil
 }
 func EmbeddingInput(org, corpusID string, v Version, seg Segmentation, p Segment, space VectorSpace, producer string) Embedding {
 	return Embedding{DerivationID: StableID("embedding-derivation", org, p.ID, space.ID, p.Derivation.ModelInputSHA256, producer), Organization: org, CorpusID: corpusID, VersionID: v.ID, SegmentID: p.ID, PartKey: p.PartKey, SegmentationID: seg.ID, Recipe: seg.Recipe, SourceSHA: p.Derivation.NormalizedSHA256, SliceSHA: Hash([]byte(p.Text)), InputSHA: p.Derivation.ModelInputSHA256, InputBytes: len(p.Derivation.ModelInput), SpaceID: space.ID, Producer: producer}
