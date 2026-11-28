@@ -40,10 +40,10 @@ func readFile(t *testing.T, path string) string {
 }
 
 // A profile's hard bound gives a search four times its latency objective,
-// never less than 2 s, and never 10 s or more, so the error that ends a search
-// always reaches the client before the api's 10 s write timeout (THE-813).
+// never less than 2 s, and capped at 25 s so the error that ends a search
+// always reaches the client before the api's 30 s write timeout (THE-813).
 func TestSearchHardBound(t *testing.T) {
-	for objective, want := range map[int]time.Duration{50: 2 * time.Second, 1000: 4 * time.Second, 2000: 8 * time.Second, 3000: 9 * time.Second, 10000: 9 * time.Second} {
+	for objective, want := range map[int]time.Duration{50: 2 * time.Second, 1000: 4 * time.Second, 2000: 8 * time.Second, 3000: 12 * time.Second, 6250: 25 * time.Second, 10000: 25 * time.Second} {
 		if got := (plugins.RetrievalProfile{MaxLatencyMS: objective}).Deadline(); got != want {
 			t.Errorf("objective %d ms: bound %s, want %s", objective, got, want)
 		}
@@ -64,7 +64,7 @@ func TestRetrievalProfileAliases(t *testing.T) {
 	}{
 		{name: "legacy", pins: []plugins.PinConfig{first}},
 		{name: "several", pins: []plugins.PinConfig{first, other}, aliases: map[string]string{"default": "example.fusion_retriever/default", "deep": "acme.other_retriever/deep", "careful": "acme.other_retriever/deep"}},
-		{name: "missing map", pins: []plugins.PinConfig{first, other}, wantError: "must map default"},
+		{name: "missing map", pins: []plugins.PinConfig{first, other}, wantError: "must map default to plugin/profile when several retrieval plugins are pinned (pinned: acme.other_retriever, example.fusion_retriever; available:"},
 		{name: "missing default", pins: []plugins.PinConfig{first}, aliases: map[string]string{}, wantError: "must contain default"},
 		{name: "deep-only needs default alias", pins: []plugins.PinConfig{{Manifest: filepath.Join(fixtures, "manifests/valid/retrieval-deep-only.yaml"), Endpoint: first.Endpoint}}, wantError: "must map default"},
 		{name: "unknown plugin", pins: []plugins.PinConfig{first}, aliases: map[string]string{"default": "missing/default"}, wantError: "unknown profile"},

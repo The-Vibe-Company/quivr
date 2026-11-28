@@ -75,7 +75,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.WithoutCancel(ctx))
 	if db != s.Pool {
 		if err = lockProjectionRouting(ctx, tx); err != nil {
 			return content.Receipt{}, err
@@ -226,7 +226,7 @@ func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.WithoutCancel(ctx))
 	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return content.Receipt{}, err
 	}

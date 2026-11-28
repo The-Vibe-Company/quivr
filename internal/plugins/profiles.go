@@ -43,7 +43,21 @@ func (s *PinSet) ResolveRetrievalProfile(profile string, aliases map[string]stri
 func (s *PinSet) RetrievalProfiles(aliases map[string]string) ([]PinnedProfile, error) {
 	pins := s.Retrievals()
 	if aliases == nil && len(pins) > 1 {
-		return nil, fmt.Errorf("retrieval.profiles must map default to plugin/profile when several retrieval plugins are pinned")
+		pluginIDs := make([]string, 0, len(pins))
+		available := make([]string, 0, len(pins)*2)
+		for _, pin := range pins {
+			pluginIDs = append(pluginIDs, pin.Manifest.ID)
+			for _, name := range pin.Manifest.Contributions.Retrieval.ProfileNames() {
+				available = append(available, pin.Manifest.ID+"/"+name)
+			}
+		}
+		sort.Strings(pluginIDs)
+		sort.Strings(available)
+		example := ""
+		if len(available) > 0 {
+			example = fmt.Sprintf(`; example: {"default": %q}`, available[0])
+		}
+		return nil, fmt.Errorf("retrieval.profiles must map default to plugin/profile when several retrieval plugins are pinned (pinned: %s; available: %s%s)", strings.Join(pluginIDs, ", "), strings.Join(available, ", "), example)
 	}
 	if aliases != nil && aliases["default"] == "" {
 		return nil, fmt.Errorf("retrieval.profiles must contain default")

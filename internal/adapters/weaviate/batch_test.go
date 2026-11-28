@@ -21,6 +21,7 @@ import (
 // batchProjectionHTTP supplies only the remote object API. Publication,
 // verification, retry selection and batch boundaries belong to the real adapter.
 type batchProjectionHTTP struct {
+	mu        sync.Mutex
 	objects   map[string]map[string]any
 	batches   []int
 	submitted []string
@@ -35,6 +36,8 @@ type batchProjectionHTTP struct {
 var batchInventory = regexp.MustCompile(`path:\["(id|segmentId)"\],operator:ContainsAny,valueText:(\[[^]]*\])`)
 
 func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	reply := func(status int, value any) (*http.Response, error) {
 		raw, _ := json.Marshal(value)
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil

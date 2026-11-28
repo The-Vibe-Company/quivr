@@ -96,17 +96,24 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	lease.ReleaseWithTarget(overload, skipObserve, targetLatency)
 	a.recordSearch(scope.Organization, q, result, started, err)
 	if err != nil {
+		if u := result.Usage; u != nil {
+			w.Header().Set("Server-Timing", serverTiming(u.Phases))
+		}
 		writeError(w, err, publicerr.SearchUnavailable)
 		return
 	}
 	response := transport.SearchResponse{ExcludedCorpora: exclusionsToTransport(result.ExcludedCorpora), Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
 	if len(result.Degraded) > 0 {
 		degraded := make([]transport.SearchDegradation, 0, len(result.Degraded))
+		reasons := make([]string, 0, len(result.Degraded))
 		for _, d := range result.Degraded {
 			a.loadMetrics.SearchDegraded(d.Reason)
 			degraded = append(degraded, transport.SearchDegradation{Reason: transport.SearchDegradationReason(d.Reason), CorpusIds: d.CorpusIDs})
+			reasons = append(reasons, d.Reason)
 		}
 		response.RetrievalProfile.Degraded = &degraded
+		w.Header().Set("X-Quivr-Degraded", "true")
+		w.Header().Set("X-Quivr-Degraded-Reason", strings.Join(reasons, ","))
 	}
 	for i, h := range result.Hits {
 		hit := transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.AnchorText(), Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)}

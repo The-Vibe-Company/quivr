@@ -13,13 +13,20 @@ import (
 
 const maxResponseBytes = 1 << 20
 
+const (
+	timeoutPhaseNone          = "none"
+	timeoutPhaseBudget        = "budget"
+	timeoutPhaseHTTPRoundTrip = "http_roundtrip"
+	timeoutPhaseResponseRead  = "response_read"
+)
+
 type result struct {
 	Index          *int     `json:"index"`
 	Score          *float64 `json:"score"`
 	RelevanceScore *float64 `json:"relevance_score"`
 }
 
-func (r retriever) rerank(ctx context.Context, cfg configuration, query string, docs []string) ([]float64, error) {
+func (r retriever) rerank(ctx context.Context, cfg configuration, query string, docs []string) ([]float64, string, error) {
 	var payload any
 	switch cfg.Protocol {
 	case "tei":
@@ -38,48 +45,51 @@ func (r retriever) rerank(ctx context.Context, cfg configuration, query string, 
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, errors.New("could not encode reranker request")
+		return nil, timeoutPhaseNone, errors.New("could not encode reranker request")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, errors.New("could not construct reranker request")
+		return nil, timeoutPhaseNone, errors.New("could not construct reranker request")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	if r.apiKey != "" {
 		if request.URL.Scheme != "https" {
-			return nil, errors.New("reranker authentication requires HTTPS")
+			return nil, timeoutPhaseNone, errors.New("reranker authentication requires HTTPS")
 		}
 		request.Header.Set("Authorization", "Bearer "+r.apiKey)
 	}
 	response, err := r.client.Do(request)
 	if err != nil {
-		return nil, requestFailure(ctx, err)
+		phase, failure := requestFailure(ctx, timeoutPhaseHTTPRoundTrip, err)
+		return nil, phase, failure
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("reranker returned HTTP %d", response.StatusCode)
+		return nil, timeoutPhaseNone, fmt.Errorf("reranker returned HTTP %d", response.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, requestFailure(ctx, err)
+		phase, failure := requestFailure(ctx, timeoutPhaseResponseRead, err)
+		return nil, phase, failure
 	}
 	if len(raw) > maxResponseBytes {
-		return nil, errors.New("reranker response exceeds the size limit")
+		return nil, timeoutPhaseNone, errors.New("reranker response exceeds the size limit")
 	}
-	return decodeScores(raw, cfg.Protocol, len(docs))
+	scores, err := decodeScores(raw, cfg.Protocol, len(docs))
+	return scores, timeoutPhaseNone, err
 }
 
 // Use fixed messages because transport errors can contain the configured URL
 // or request headers, and upstream responses can reflect arbitrary input.
-func requestFailure(ctx context.Context, err error) error {
+func requestFailure(ctx context.Context, phase string, err error) (string, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return errors.New("reranker request timed out")
+		return phase, fmt.Errorf("reranker request timed out (%s)", phase)
 	}
 	if errors.Is(err, context.Canceled) {
-		return errors.New("reranker request was canceled")
+		return timeoutPhaseNone, errors.New("reranker request was canceled")
 	}
-	return errors.New("reranker request failed")
+	return timeoutPhaseNone, errors.New("reranker request failed")
 }
 
 func decodeScores(raw []byte, protocol string, count int) ([]float64, error) {

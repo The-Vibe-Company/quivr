@@ -17,6 +17,10 @@ func TestVectorIndexConfiguration(t *testing.T) {
 	}{
 		{`{}`, content.VectorIndex{Quantization: "rq-8"}, true},
 		{`{"vector_index":{"rescore_limit":40}}`, content.VectorIndex{Quantization: "rq-8", RescoreLimit: 40}, true},
+		{`{"vector_index":{"rescore_limit":200,"ef":128}}`, content.VectorIndex{Quantization: "rq-8", RescoreLimit: 200, EF: 128}, true},
+		{`{"vector_index":{"ef":-1}}`, content.VectorIndex{Quantization: "rq-8", EF: -1}, true},
+		{`{"vector_index":{"ef":256,"spaces":{"quivr.e5_small":{"ef":0}}}}`, content.VectorIndex{Quantization: "rq-8"}, true},
+		{`{"vector_index":{"quantization":"none","ef":128}}`, content.VectorIndex{Quantization: "none", EF: 128}, true},
 		{`{"vector_index":{"quantization":"rq-1"}}`, content.VectorIndex{Quantization: "rq-1"}, true},
 		{`{"vector_index":{"quantization":"rq-1","rescore_limit":512,"spaces":{"quivr.e5_small":{"quantization":"rq-8"}}}}`, content.VectorIndex{Quantization: "rq-8", RescoreLimit: 512}, true},
 		{`{"vector_index":{"rescore_limit":64,"spaces":{"quivr.e5_small":{"quantization":"none"}}}}`, content.VectorIndex{Quantization: "none"}, true},
@@ -25,6 +29,9 @@ func TestVectorIndexConfiguration(t *testing.T) {
 		{`{"vector_index":{"quantization":"rq-4"}}`, content.VectorIndex{}, false},
 		{`{"vector_index":{"quantization":"none","rescore_limit":20}}`, content.VectorIndex{}, false},
 		{`{"vector_index":{"spaces":{"another.space":{"rescore_limit":-1}}}}`, content.VectorIndex{}, false},
+		{`{"vector_index":{"ef":-2}}`, content.VectorIndex{}, false},
+		{`{"vector_index":{"ef":4097}}`, content.VectorIndex{}, false},
+		{`{"vector_index":{"spaces":{"another.space":{"ef":5000}}}}`, content.VectorIndex{}, false},
 	} {
 		var cfg Config
 		if err := json.Unmarshal([]byte(tc.input), &cfg); err != nil {

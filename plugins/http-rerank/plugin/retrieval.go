@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -64,9 +66,64 @@ func readConfig(raw json.RawMessage) (configuration, error) {
 	return cfg, nil
 }
 
+// DiagnosticsSnapshot holds a point-in-time view of reranker counters.
+type DiagnosticsSnapshot struct {
+	Requests              int64
+	Succeeded             int64
+	TitleAnchorsFormatted int64
+	Fallbacks             int64
+	Errors                int64
+	BudgetTimeouts        int64
+	RequestTimeouts       int64
+	BodyReadTimeouts      int64
+}
+
+type diagnostics struct {
+	requests              atomic.Int64
+	succeeded             atomic.Int64
+	titleAnchorsFormatted atomic.Int64
+	fallbacks             atomic.Int64
+	errors                atomic.Int64
+	budgetTimeouts        atomic.Int64
+	requestTimeouts       atomic.Int64
+	bodyReadTimeouts      atomic.Int64
+}
+
+func (d *diagnostics) snapshot() DiagnosticsSnapshot {
+	if d == nil {
+		return DiagnosticsSnapshot{}
+	}
+	return DiagnosticsSnapshot{
+		Requests:              d.requests.Load(),
+		Succeeded:             d.succeeded.Load(),
+		TitleAnchorsFormatted: d.titleAnchorsFormatted.Load(),
+		Fallbacks:             d.fallbacks.Load(),
+		Errors:                d.errors.Load(),
+		BudgetTimeouts:        d.budgetTimeouts.Load(),
+		RequestTimeouts:       d.requestTimeouts.Load(),
+		BodyReadTimeouts:      d.bodyReadTimeouts.Load(),
+	}
+}
+
+func (d *diagnostics) recordTimeout(phase string) {
+	if d == nil {
+		return
+	}
+	switch phase {
+	case timeoutPhaseBudget:
+		d.budgetTimeouts.Add(1)
+	case timeoutPhaseHTTPRoundTrip:
+		d.requestTimeouts.Add(1)
+	case timeoutPhaseResponseRead:
+		d.bodyReadTimeouts.Add(1)
+	}
+}
+
 type retriever struct {
 	client *http.Client
 	apiKey string
+	stats  *diagnostics
+	log    *slog.Logger
 }
 
 // New creates a retriever for the plugin SDK. It reads its optional secret once at startup.
@@ -76,7 +133,20 @@ func New() quivrplugin.Retriever {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		apiKey: os.Getenv("RERANKER_API_KEY"),
+		stats:  &diagnostics{},
+		log:    slog.Default(),
 	}
+}
+
+func (r retriever) Diagnostics() DiagnosticsSnapshot {
+	return r.stats.snapshot()
+}
+
+func (r retriever) logger() *slog.Logger {
+	if r.log != nil {
+		return r.log
+	}
+	return slog.Default()
 }
 
 func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
@@ -103,6 +173,9 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 	if len(candidates) == 0 {
 		return quivrplugin.Rank(), nil
 	}
+	if r.stats != nil {
+		r.stats.requests.Add(1)
+	}
 
 	deadline := time.Now().Add(time.Duration(cfg.TimeoutMS) * time.Millisecond)
 	if req.Budget != nil {
@@ -115,48 +188,84 @@ func (r retriever) Search(ctx context.Context, req *quivrplugin.SearchRequest) (
 		deadline = parentDeadline.Add(-responseMargin)
 	}
 	var scores []float64
+	timeoutPhase := timeoutPhaseNone
+	var titleFormatted int
 	if time.Until(deadline) <= 0 {
+		timeoutPhase = timeoutPhaseBudget
 		err = errors.New("insufficient remaining search time for reranking")
 	} else {
 		callCtx, cancel := context.WithDeadline(ctx, deadline)
 		defer cancel()
 		docs := make([]string, len(candidates))
 		for i, candidate := range candidates {
-			docs[i] = document(candidate, cfg)
+			var formatted bool
+			docs[i], formatted = formatDocument(candidate, cfg)
+			if formatted {
+				titleFormatted++
+			}
 		}
-		scores, err = r.rerank(callCtx, cfg, req.Query.Text, docs)
+		if r.stats != nil && titleFormatted > 0 {
+			r.stats.titleAnchorsFormatted.Add(int64(titleFormatted))
+		}
+		scores, timeoutPhase, err = r.rerank(callCtx, cfg, req.Query.Text, docs)
 	}
 	if err != nil {
+		r.stats.recordTimeout(timeoutPhase)
 		if !cfg.FallbackOnError {
+			if r.stats != nil {
+				r.stats.errors.Add(1)
+			}
+			r.logger().WarnContext(ctx, "http reranker failed",
+				"component", "http.rerank", "protocol", cfg.Protocol, "candidates", len(candidates),
+				"title_anchors_formatted", titleFormatted, "timeout_phase", timeoutPhase,
+				"degraded", false, "elapsed_ms", time.Since(started).Milliseconds(), "error", err.Error())
 			return nil, &quivrplugin.SearchError{Code: "reranker_unavailable", Message: err.Error(), Retryable: true}
 		}
+		var fallbackCount int64
+		if r.stats != nil {
+			fallbackCount = r.stats.fallbacks.Add(1)
+		}
+		r.logger().WarnContext(ctx, "http reranker degraded to base profile",
+			"component", "http.rerank", "protocol", cfg.Protocol, "candidates", len(candidates),
+			"title_anchors_formatted", titleFormatted, "timeout_phase", timeoutPhase,
+			"degraded", true, "fallback_count", fallbackCount, "elapsed_ms", time.Since(started).Milliseconds(), "error", err.Error())
 		hits := make([]quivrplugin.RankedHit, min(len(candidates), req.Limit))
 		for i, c := range candidates[:len(hits)] {
 			hits[i] = quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: "base profile fallback: " + err.Error()}
 		}
 		return quivrplugin.Rank(hits...), nil
 	}
+	if r.stats != nil {
+		r.stats.succeeded.Add(1)
+	}
 	hits := rank(cfg, candidates, scores)
 	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
 }
 
 func document(c quivrplugin.Candidate, cfg configuration) string {
+	text, _ := formatDocument(c, cfg)
+	return text
+}
+
+func formatDocument(c quivrplugin.Candidate, cfg configuration) (string, bool) {
 	text := c.PassageText
+	titleFormatted := false
 	if text == "" {
 		text = c.Text
 	} else if cfg.IncludeTitle && c.PartKey == "title" && c.Text != "" && !strings.HasPrefix(text, c.Text) {
 		// A title anchor can add context. Preserve the canonical passage:
 		// the SDK does not label the role of Parts already in that passage.
 		text = c.Text + "\n\n" + text
+		titleFormatted = true
 	}
 	count := 0
 	for offset := range text {
 		if count == cfg.MaxDocChars {
-			return text[:offset]
+			return text[:offset], titleFormatted
 		}
 		count++
 	}
-	return text
+	return text, titleFormatted
 }
 
 func rank(cfg configuration, candidates []quivrplugin.Candidate, scores []float64) []quivrplugin.RankedHit {
