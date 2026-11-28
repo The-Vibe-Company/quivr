@@ -550,6 +550,16 @@ func Run(command string, args ...string) error {
 		return err
 	}
 	postgres.AttachDependencyMetrics(poolConfig, dependencyMetrics)
+	// Fit worker activity slots into this process's pool before workers start.
+	requestedSlots := workerSettings.Slots
+	if workerSettings, err = cfg.workerConfig(poolConfig); err != nil {
+		return invalidConfig("worker", "invalid worker queues or slots", err)
+	}
+	if command == "worker" && workerSettings.Slots != requestedSlots {
+		slog.Warn("worker slots reduced to fit the database pool", "event", "quivr.worker.slots_bounded",
+			"live", workerSettings.Slots.Live, "bulk", workerSettings.Slots.Bulk,
+			"requested_live", requestedSlots.Live, "requested_bulk", requestedSlots.Bulk, "max_connections", poolConfig.MaxConns)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return badConfig(configInvalid, "database_url", "invalid database configuration")

@@ -96,7 +96,7 @@ It accepts a positive integer up to `2147483647`; omitted or `0` preserves the
 process's CPU count. Negative values and limits below the URL's `pool_min_conns`
 or `pool_min_idle_conns` are refused. A positive JSON setting overrides
 `pool_max_conns`. It applies to API, worker, migrate and storage commands;
-restart processes after changing it. Worker activity slots are separate.
+restart processes after changing it. A worker fits its activity slots into this pool; see [Worker queues](#worker-queues).
 
 For example, a configuration fragment with a pool of 16 connections:
 
@@ -495,6 +495,8 @@ Backfill concurrency controls overlap; `rate` still paces each batch. These limi
 ## Worker queues
 
 `worker.queues` selects `live`, `bulk`, or both. Omit `worker` to serve both queues with four activity slots each. `worker.slots.live` and `worker.slots.bulk` each accept 1–1024; omitted or zero values use four. An explicit empty queue list, duplicates, unknown queue names, negative slots and slots above 1024 refuse startup.
+
+A worker keeps its served slots within its PostgreSQL pool, less a quarter of the pool (at least one connection) for dispatch and lease writes. Slots that do not fit are reduced in proportion, each served queue keeps at least one, and the worker logs `event: quivr.worker.slots_bounded` with the requested and applied values. With `postgres.max_connections` of 4, both queues get three slots in total: two live and one bulk. A pool no larger than the number of served queues keeps one slot per queue and reserves no headroom, so dispatch and lease writes wait for a free connection. Raise the pool size to run more slots.
 
 For example, not run; this fragment selects a bulk worker:
 
