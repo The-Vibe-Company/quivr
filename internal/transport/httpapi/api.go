@@ -54,6 +54,7 @@ type API struct {
 	surface           routeSurface
 	loadMetrics       *telemetry.LoadMetrics
 	searchAdmission   *SearchAdmission
+	ingestAdmission   *IngestAdmission
 	facets            chan struct{}
 	pushProxyCIDRs    []string
 	Content           content.Service
@@ -112,7 +113,7 @@ func buildAPI(store corpus.Store, contents content.Service, search retrieval.Ser
 	if err != nil {
 		return nil, err
 	}
-	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, surface: surface}
+	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searchAdmission: NewSearchAdmission(SearchAdmissionConfig{}), ingestAdmission: NewIngestAdmission(IngestAdmissionConfig{}), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, surface: surface}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
