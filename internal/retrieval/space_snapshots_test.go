@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -190,5 +191,41 @@ func TestSpaceSnapshotsBackOffAfterRepeatedFailures(t *testing.T) {
 		if got := coverageFailureBackoff(30*time.Minute, 1); got != maxCoverageFailureBackoff {
 			t.Fatalf("large ttl backoff = %s, want %s", got, maxCoverageFailureBackoff)
 		}
+	})
+}
+
+// A full snapshot cache evicts its least recently used Corpus. Hot Corpora
+// keep their coverage observation instead of all turning unknown at once.
+func TestSpaceSnapshotsEvictLeastRecentlyUsed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		registry := &snapshotRegistry{generation: "a", complete: make(chan struct{})}
+		close(registry.complete)
+		cache := NewSpaceSnapshots(ctx, registry, time.Hour)
+		read := func(i int) content.SpaceCoverage {
+			t.Helper()
+			_, spaces, _, err := cache.VectorSpaces(context.Background(), fmt.Sprintf("org-%d", i), "corpus")
+			if err != nil || len(spaces) != 1 {
+				t.Fatalf("spaces %+v, error %v", spaces, err)
+			}
+			synctest.Wait() // The refresh this read started has finished.
+			return spaces[0]
+		}
+		for i := range coverageEntries {
+			read(i)
+		}
+		if read(0).CoverageUnknown || read(1).CoverageUnknown {
+			t.Fatal("completed refreshes left coverage unknown")
+		}
+		read(coverageEntries) // Full: evicts org-2, the least recently used.
+		if read(0).CoverageUnknown || read(1).CoverageUnknown || read(coverageEntries-1).CoverageUnknown {
+			t.Fatal("eviction dropped a recently used observation")
+		}
+		if !read(2).CoverageUnknown {
+			t.Fatal("least recently used snapshot was not evicted")
+		}
+		cancel()
+		synctest.Wait()
 	})
 }

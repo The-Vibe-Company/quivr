@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -120,24 +123,51 @@ SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,d.space_id),true,COALESCE(`+dep
 	return move, tx.Commit(ctx)
 }
 
-// Generation returns the logical generation PostgreSQL routes the Corpus to.
+// Generation returns the logical generation PostgreSQL routes the Corpus to,
+// with its ingestion routing, from one statement and so one snapshot.
 func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
-	var g content.Generation
-	var cfg []byte
-	var spaces []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM `+effectiveGenerationsSQL+` g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
-	if err != nil {
+	var row generationRow
+	if err := database(ctx, s.Pool).QueryRow(ctx, routedGenerationQuerySQL, org, corpusID).Scan(row.targets()...); err != nil {
+		return row.g, err
+	}
+	return row.decode()
+}
+
+// generationColumnsSQL lists, for generation g of Corpus c, the columns
+// generationRow scans; routedColumnsSQL lists them from a CTE named routed.
+const generationColumnsSQL = `g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) AS retrieval,g.ingestion_routing`
+const routedColumnsSQL = `routed.id,routed.collection,routed.profile_version,routed.space_id,routed.source_namespace_projected,routed.spaces,routed.spaces_projected,routed.metadata_projected,routed.item_keywords_projected,routed.retrieval,routed.ingestion_routing`
+
+// routedGenerationQuerySQL reads the generation routed for Corpus $2 of
+// Organization $1.
+var routedGenerationQuerySQL = `SELECT ` + generationColumnsSQL + ` FROM ` + effectiveGenerationsSQL + ` g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=` + routedGenerationSQL("$1", "$2")
+
+// generationRow holds a routed generation as scanned, before JSON decoding.
+type generationRow struct {
+	g                    content.Generation
+	spaces, cfg, routing []byte
+}
+
+func (r *generationRow) targets() []any {
+	g := &r.g
+	return []any{&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &r.spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &r.cfg, &r.routing}
+}
+
+func (r *generationRow) decode() (content.Generation, error) {
+	g := r.g
+	var err error
+	if g.Spaces, err = scanSpaces(r.spaces); err != nil {
 		return g, err
 	}
-	if g.Spaces, err = scanSpaces(spaces); err != nil {
+	if g.Fields, err = retrievalFields(r.cfg); err != nil {
 		return g, err
 	}
-	g.Fields, err = retrievalFields(cfg)
-	if err == nil {
-		err = loadGenerationIngestion(ctx, database(ctx, s.Pool), &g)
+	if len(r.routing) > 0 {
+		err = json.Unmarshal(r.routing, &g.IngestionRouting)
 	}
 	return g, err
 }
+
 func (s ProjectionStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
 	var count, archived int
 	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE archived) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count, &archived)
@@ -747,19 +777,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 	if shards == 1 {
 		return s.hydrateBatch(ctx, scope, cs)
 	}
-	shardCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	type shardResult struct {
-		offset int
-		rows   map[int]content.Located
-	}
-	results := make([]shardResult, shards)
-	var (
-		mu       sync.Mutex
-		firstErr error
-		wg       sync.WaitGroup
-	)
+	subs, offsets := make([][]content.Candidate, shards), make([]int, shards)
 	base, rem := len(cs)/shards, len(cs)%shards
 	offset := 0
 	for i := range shards {
@@ -767,35 +785,70 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		if i < rem {
 			size++
 		}
-		start, sub := offset, cs[offset:offset+size]
+		subs[i], offsets[i] = cs[offset:offset+size], offset
 		offset += size
-		wg.Add(1)
-		go func(idx, start int, sub []content.Candidate) {
-			defer wg.Done()
-			rows, err := s.hydrateBatch(shardCtx, scope, sub)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-					cancel()
-				}
-				mu.Unlock()
-				return
-			}
-			results[idx] = shardResult{offset: start, rows: rows}
-		}(i, start, sub)
 	}
-	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
+	results := make([]map[int]content.Located, shards)
+	if err := runShards(ctx, shards, func(ctx context.Context, i int) error {
+		rows, err := s.hydrateBatch(ctx, scope, subs[i])
+		results[i] = rows
+		return err
+	}); err != nil {
+		return nil, err
 	}
 	out := make(map[int]content.Located, len(cs))
-	for _, res := range results {
-		for k, v := range res.rows {
-			out[res.offset+k] = v
+	for i, rows := range results {
+		for k, v := range rows {
+			out[offsets[i]+k] = v
 		}
 	}
 	return out, nil
+}
+
+// errShardPanicked reports a shard that panicked; the panic is logged.
+var errShardPanicked = errors.New("postgres: hydrate shard panicked")
+
+// runShards runs shards 0..n-1 concurrently and returns once every shard has
+// returned. The first failure cancels the others' context and is returned.
+// A shard that panics or exits abnormally fails like an error: only the
+// panic's type and stack are logged, since its value may quote a query, an
+// Organization or content.
+func runShards(ctx context.Context, n int, run func(context.Context, int) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	fail := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+	}
+	for i := range n {
+		wg.Go(func() {
+			// recover returns nil after runtime.Goexit: a shard that did
+			// not return normally fails even without a panic value.
+			panicking := true
+			defer func() {
+				if panicking {
+					r := recover()
+					slog.ErrorContext(ctx, "hydrate shard panicked", "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
+					fail(errShardPanicked)
+				}
+			}()
+			if err := run(ctx, i); err != nil {
+				fail(err)
+			}
+			panicking = false
+		})
+	}
+	wg.Wait()
+	return firstErr
 }
 
 func (s ProjectionStore) hydrateBatch(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {

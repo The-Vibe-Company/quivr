@@ -1,8 +1,12 @@
 package postgres
 
 import (
+	"container/list"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -70,12 +74,39 @@ type sourceSnapshot struct {
 	recordOverride bool
 }
 
+// sourceEntry is a cached source partition in the cache's recency list.
+type sourceEntry struct {
+	key      visibilityCorpus
+	snapshot sourceSnapshot
+}
+
+// sourceFlight is one in-progress load of a source partition. Callers that
+// find it under the current cache revision wait for it instead of loading.
+// Its fields are written before done closes.
+type sourceFlight struct {
+	revision uint64
+	done     chan struct{}
+	snapshot sourceSnapshot
+	err      error
+	// current means no invalidation happened during the load: callers may
+	// use the snapshot and it was cached.
+	current bool
+	// abandoned means the loading caller's context ended; waiters retry.
+	abandoned bool
+}
+
+var errSourceLoadInterrupted = errors.New("visibility source load did not complete")
+
 // VisibilityStore caches only the projection's source partition. Canonical
 // reads always authorize against committed rows in their own SQL snapshot.
+// Concurrent misses on one partition share one load; a full cache evicts its
+// least recently used partitions, expired ones first from the cold end.
 type VisibilityStore struct {
 	Pool     *pgxpool.Pool
 	mu       sync.Mutex
-	cache    map[visibilityCorpus]sourceSnapshot
+	cache    map[visibilityCorpus]*list.Element
+	lru      list.List // of *sourceEntry, most recently used first
+	flights  map[visibilityCorpus]*sourceFlight
 	revision uint64
 }
 
@@ -121,11 +152,16 @@ func (s *VisibilityStore) DeleteGrant(ctx context.Context, org, id, namespace st
 	return err
 }
 
+// invalidate advances the revision, so no load in flight is joined, cached
+// or returned, and drops the partition's cached snapshot.
 func (s *VisibilityStore) invalidate(key visibilityCorpus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.revision++
-	delete(s.cache, key)
+	if e, ok := s.cache[key]; ok {
+		s.lru.Remove(e)
+		delete(s.cache, key)
+	}
 }
 
 func (s *VisibilityStore) Sources(ctx context.Context, org, id string, principals []string) (visibility.Sources, error) {
@@ -145,36 +181,103 @@ func (s *VisibilityStore) Sources(ctx context.Context, org, id string, principal
 }
 
 func (s *VisibilityStore) snapshot(ctx context.Context, key visibilityCorpus) (sourceSnapshot, error) {
+	return s.snapshotUsing(ctx, key, s.loadSources)
+}
+
+func (s *VisibilityStore) snapshotUsing(ctx context.Context, key visibilityCorpus, load func(context.Context, visibilityCorpus) (sourceSnapshot, error)) (sourceSnapshot, error) {
 	for {
 		start := time.Now()
 		s.mu.Lock()
-		cached, revision := s.cache[key], s.revision
-		s.mu.Unlock()
-		if start.Before(cached.expires) {
-			return cached, nil
-		}
-		fresh, err := s.loadSources(ctx, key)
-		if err != nil {
-			return sourceSnapshot{}, err
-		}
-		fresh.expires = start.Add(sourceCacheTTL)
-		s.mu.Lock()
-		if s.revision == revision {
-			if len(s.cache) >= sourceCacheEntries {
-				clear(s.cache)
+		if e, ok := s.cache[key]; ok {
+			if entry := e.Value.(*sourceEntry); start.Before(entry.snapshot.expires) {
+				s.lru.MoveToFront(e)
+				s.mu.Unlock()
+				return entry.snapshot, nil
 			}
-			if s.cache == nil {
-				s.cache = make(map[visibilityCorpus]sourceSnapshot)
+		}
+		f := s.flights[key]
+		lead := f == nil || f.revision != s.revision
+		if lead {
+			f = &sourceFlight{revision: s.revision, done: make(chan struct{})}
+			if s.flights == nil {
+				s.flights = make(map[visibilityCorpus]*sourceFlight)
 			}
-			s.cache[key] = fresh
-			s.mu.Unlock()
-			return fresh, nil
+			s.flights[key] = f
 		}
 		s.mu.Unlock()
+		if lead {
+			// The load runs on its own goroutine so that even an exit recover
+			// cannot stop (runtime.Goexit) leaves the leader waiting below.
+			go s.fly(ctx, key, f, start, load)
+		}
+		select {
+		case <-f.done:
+		case <-ctx.Done():
+			return sourceSnapshot{}, ctx.Err()
+		}
+		if f.current {
+			return f.snapshot, nil
+		}
+		if f.err != nil && !f.abandoned {
+			return sourceSnapshot{}, f.err
+		}
+		// An invalidation raced the load, or its caller gave up: load again.
 		if err := ctx.Err(); err != nil {
 			return sourceSnapshot{}, err
 		}
 	}
+}
+
+// fly runs flight f on its own goroutine and publishes its result. A load
+// that panics or exits abnormally fails the flight with
+// errSourceLoadInterrupted for the leading caller and every waiter; only the
+// panic's type and stack are logged, since its value may quote a query or an
+// Organization.
+func (s *VisibilityStore) fly(ctx context.Context, key visibilityCorpus, f *sourceFlight, start time.Time, load func(context.Context, visibilityCorpus) (sourceSnapshot, error)) {
+	panicking := true
+	defer func() {
+		if panicking {
+			r := recover()
+			slog.ErrorContext(ctx, "visibility source load panicked", "panic_type", fmt.Sprintf("%T", r), "stack", string(debug.Stack()))
+			f.snapshot, f.err, f.abandoned = sourceSnapshot{}, errSourceLoadInterrupted, false
+		}
+		s.mu.Lock()
+		if s.flights[key] == f {
+			delete(s.flights, key)
+		}
+		if f.err == nil && s.revision == f.revision {
+			f.snapshot.expires = start.Add(sourceCacheTTL)
+			f.current = true
+			s.store(key, f.snapshot)
+		}
+		s.mu.Unlock()
+		close(f.done)
+	}()
+	f.snapshot, f.err = load(ctx, key)
+	f.abandoned = f.err != nil && ctx.Err() != nil
+	panicking = false
+}
+
+// store caches a snapshot as the most recently used. It holds s.mu.
+func (s *VisibilityStore) store(key visibilityCorpus, snapshot sourceSnapshot) {
+	if e, ok := s.cache[key]; ok {
+		e.Value.(*sourceEntry).snapshot = snapshot
+		s.lru.MoveToFront(e)
+		return
+	}
+	now := time.Now()
+	for e := s.lru.Back(); e != nil; e = s.lru.Back() {
+		cold := e.Value.(*sourceEntry)
+		if len(s.cache) < sourceCacheEntries && now.Before(cold.snapshot.expires) {
+			break
+		}
+		s.lru.Remove(e)
+		delete(s.cache, cold.key)
+	}
+	if s.cache == nil {
+		s.cache = make(map[visibilityCorpus]*list.Element)
+	}
+	s.cache[key] = s.lru.PushFront(&sourceEntry{key: key, snapshot: snapshot})
 }
 
 func (s *VisibilityStore) loadSources(ctx context.Context, key visibilityCorpus) (sourceSnapshot, error) {
