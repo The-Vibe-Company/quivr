@@ -246,6 +246,7 @@
           "candidates": {
             "type": "array",
             "maxItems": 400,
+            "description": "Served candidates for this request (at most limits.max_candidates; values above 100 require Plugin API 0.21).",
             "items": {
               "$ref": "#/$defs/Candidate"
             }

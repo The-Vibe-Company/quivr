@@ -24,6 +24,7 @@ func TestHydrateSQLMergesPackedSourcesAndScopeFence(t *testing.T) {
 		"WHERE (sr.part_key=c.part_key AND b.blob_id IS NOT NULL) OR sb.blob_id IS NOT NULL",
 		"'ordinal',coalesce((c.derivation->>'ordinal')::integer,0)",
 		"v.extensions->'quivr.metadata'->'data' AS common_metadata",
+		"coalesce(ar.title,'')",
 		"FROM accepted_revisions ar",
 		"FROM segmentations s",
 		"coalesce(s.segment_count,0)",

@@ -378,10 +378,9 @@ func requestIssues(requests []CandidateRequest, request SearchRequest, m *Manife
 			issues = append(issues, Issue{Code: CodeCandidateLimit, Path: path + "/k",
 				Message: fmt.Sprintf("limit is %d; the manifest declares at most %d candidates per request (limits.max_candidates)", c.Limit(), maxK)})
 		} else if c.K > LegacyMaxRetrievalCandidates {
-			r, _ := ParseRange(m.Compatibility.PluginAPI)
-			if _, admitted := admitsFeature(r, FeatureDeepCandidatePools); !admitted {
+			if !m.SupportsDeepCandidatePools() {
 				issues = append(issues, Issue{Code: CodeCandidateLimit, Path: path + "/k",
-					Message: fmt.Sprintf("k above %d requires Plugin API %s or later", LegacyMaxRetrievalCandidates, FeatureSince(FeatureDeepCandidatePools))})
+					Message: fmt.Sprintf("k above %d requires a plugin_api range admitting only Plugin API %s or later", LegacyMaxRetrievalCandidates, FeatureSince(FeatureDeepCandidatePools))})
 			}
 		}
 		if c.IncludeLead && !m.SupportsRichRetrievalCandidates() {

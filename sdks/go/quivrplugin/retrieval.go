@@ -289,11 +289,11 @@ func (p *Plugin) encodeSearch(req *SearchRequest, a *SearchAnswer) ([]byte, stri
 			if limit < 1 || limit > rc.Limits.MaxCandidates {
 				return nil, fmt.Sprintf("request %d: k %d is outside 1..max_candidates %d", i, c.K, rc.Limits.MaxCandidates)
 			}
-			if c.K > 100 && !resolveAPIFeatures(p.m.pluginAPI).speaks("deep_candidate_pools") {
-				return nil, fmt.Sprintf("request %d: k above 100 requires Plugin API %s", i, FeatureSince["deep_candidate_pools"])
+			if c.K > 100 && !strictlySpeaksRange(p.m.Compatibility.PluginAPI, "deep_candidate_pools") {
+				return nil, fmt.Sprintf("request %d: k above 100 requires a plugin_api range admitting only Plugin API %s or later", i, FeatureSince["deep_candidate_pools"])
 			}
-			if c.IncludeLead && !resolveAPIFeatures(p.m.pluginAPI).speaks("rich_retrieval_candidates") {
-				return nil, fmt.Sprintf("request %d: include_lead requires Plugin API %s", i, FeatureSince["rich_retrieval_candidates"])
+			if c.IncludeLead && !strictlySpeaksRange(p.m.Compatibility.PluginAPI, "rich_retrieval_candidates") {
+				return nil, fmt.Sprintf("request %d: include_lead requires a plugin_api range admitting only Plugin API %s or later", i, FeatureSince["rich_retrieval_candidates"])
 			}
 		}
 		doc["requests"] = a.Requests

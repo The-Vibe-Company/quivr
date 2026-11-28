@@ -125,7 +125,22 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 16384,
-                "description": "Optional explicit lead passage text served when include_lead is true."
+                "description": "Optional explicit lead passage text served when include_lead is true (only for passage_ordinal >= 1)."
+              }
+            },
+            "if": {
+              "required": [
+                "lead_passage"
+              ]
+            },
+            "then": {
+              "required": [
+                "passage_ordinal"
+              ],
+              "properties": {
+                "passage_ordinal": {
+                  "minimum": 1
+                }
               }
             }
           },

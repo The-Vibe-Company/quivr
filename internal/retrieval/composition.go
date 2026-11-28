@@ -176,7 +176,9 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 		outHydrated = append(outHydrated, h.Hydrated)
 	}
 	if c.IncludeLead && sv.s.Ranker.Manifest().SupportsRichRetrievalCandidates() {
-		if err := sv.attachLeads(ctx, q, out, outHydrated); err != nil {
+		// Use innerCtx so lead lookup/hydration stays inside the inner budget
+		// and preserves profileReturnMargin for the outer ranker to finish its round.
+		if err := sv.attachLeads(innerCtx, q, out, outHydrated); err != nil {
 			return nil, err
 		}
 	}

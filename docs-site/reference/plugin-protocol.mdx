@@ -598,7 +598,7 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].request.profile.query` | string | no | Optional replacement query text; otherwise inherits the outer query. 1 to 8192 characters. |
 | `served[].request.profile.mode` | `lexical`, `semantic`, `hybrid` | no | Optional search mode override, since the profile-candidate-mode feature; otherwise inherits the outer mode. |
 | `served[].request.profile.limit` | integer | yes | At most limits.max_candidates ranked hits. 1 to 50. |
-| `served[].candidates` | array of object | yes | At most 400 items. |
+| `served[].candidates` | array of object | yes | Served candidates for this request (at most limits.max_candidates; values above 100 require Plugin API 0.21). At most 400 items. |
 | `served[].candidates[].segment_id` | string | yes | 1 to 200 characters. |
 | `served[].candidates[].record_id` | string | yes | 1 to 200 characters. |
 | `served[].candidates[].version_id` | string | yes | 1 to 200 characters. |

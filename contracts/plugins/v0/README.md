@@ -849,8 +849,8 @@ Each has a `max_latency_ms` (50 to 10000), the latency objective of a whole
 search under it (see **Time** below), and a `max_cost_cents`, the most one search may report spending in
 `usage`. `limits` bound a search: `max_rounds` (1 to 3, default 3),
 `max_requests` per round (1 to 8, default 4), `max_candidates`, the largest
-`k` (1 to 100, default 50), and `max_response_bytes` (default 1 MiB, cap
-4 MiB).
+`k` (1 to 400, values above 100 require Plugin API 0.21, default 50), and
+`max_response_bytes` (default 1 MiB, cap 4 MiB).
 
 **`search`** (`retrieval-search-request.schema.json`) carries the envelope,
 the `profile`, the `round` (1 first), the `query` (`text` and the client's

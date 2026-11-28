@@ -1,6 +1,6 @@
 """Generate the SDK's typed models and schema copies from the Plugin Protocol contracts.
 
-Sources: contracts/shared/v0/manifest.schema.json and contracts/plugins/v0/*.schema.json.
+Sources: contracts/shared/v0/manifest.schema.json, contracts/shared/v0/common-metadata.schema.json, and contracts/plugins/v0/*.schema.json.
 Outputs:
   src/quivr_plugin/models.py     dataclasses with from_dict/to_dict
   src/quivr_plugin/schemas/...   byte-identical copies used for runtime validation
