@@ -118,13 +118,16 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 			if done[i] {
 				continue
 			}
-			if ctx.Err() != nil {
-				break
-			}
 			select {
 			case stage1 <- struct{}{}:
 			case <-ctx.Done():
 				break admit
+			}
+			// select picks at random when cancellation and a free slot are
+			// both ready; a cancelled batch admits no further receipt.
+			if ctx.Err() != nil {
+				<-stage1
+				break
 			}
 			wg.Go(func() {
 				lanes := receiptLanes{retrievalReady: sync.OnceFunc(func() { <-stage1 }), enrich: enrich}
